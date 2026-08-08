@@ -58,13 +58,17 @@ jobs:
   android-api29-instrumentation:
     runs-on: ubuntu-latest
     timeout-minutes: 35
+    env:
+      ANDROID_AVD_HOME: ${{ runner.temp }}/tsuyomi-avd
     steps:
       - name: Checkout
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
       - name: Install API 29 emulator image
         run: |
+          mkdir -p "$ANDROID_AVD_HOME"
           "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "platform-tools" "emulator" "system-images;android-29;default;x86_64"
           echo no | "$ANDROID_HOME/cmdline-tools/latest/bin/avdmanager" create avd --force --name tsuyomi-ci-api29 --package "system-images;android-29;default;x86_64" --device pixel_2
+          "$ANDROID_HOME/emulator/emulator" -list-avds
       - name: Enable KVM
         run: |
           echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
@@ -72,12 +76,30 @@ jobs:
           sudo udevadm trigger --name-match=kvm
       - name: Start emulator
         run: |
-          "$ANDROID_HOME/emulator/emulator" -avd tsuyomi-ci-api29 -no-window -no-audio -no-boot-anim -no-snapshot -gpu swiftshader_indirect &
-          "$ANDROID_HOME/platform-tools/adb" wait-for-device
-          until [ "$("$ANDROID_HOME/platform-tools/adb" shell getprop sys.boot_completed | tr -d '\r')" = "1" ]; do sleep 2; done
-          "$ANDROID_HOME/platform-tools/adb" shell settings put global window_animation_scale 0
-          "$ANDROID_HOME/platform-tools/adb" shell settings put global transition_animation_scale 0
-          "$ANDROID_HOME/platform-tools/adb" shell settings put global animator_duration_scale 0
+          ADB="$ANDROID_HOME/platform-tools/adb"
+          "$ANDROID_HOME/emulator/emulator" -avd tsuyomi-ci-api29 -no-window -no-audio -no-boot-anim -no-snapshot -gpu swiftshader_indirect > "$RUNNER_TEMP/emulator.log" 2>&1 &
+          emulator_pid=$!
+          "$ADB" start-server
+          booted=false
+          for attempt in {1..120}; do
+            if "$ADB" get-state >/dev/null 2>&1 && [ "$("$ADB" shell getprop sys.boot_completed 2>/dev/null | tr -d '\r')" = "1" ]; then
+              booted=true
+              break
+            fi
+            if ! kill -0 "$emulator_pid" 2>/dev/null; then
+              break
+            fi
+            sleep 2
+          done
+          if [ "$booted" != true ]; then
+            cat "$RUNNER_TEMP/emulator.log"
+            "$ADB" devices -l
+            kill "$emulator_pid" 2>/dev/null || true
+            exit 1
+          fi
+          "$ADB" shell settings put global window_animation_scale 0
+          "$ADB" shell settings put global transition_animation_scale 0
+          "$ADB" shell settings put global animator_duration_scale 0
       - name: Run API 29 instrumentation
         run: >-
           ./gradlew --no-daemon --console=plain --dependency-verification strict
