@@ -1,0 +1,16 @@
+<!-- SPDX-FileCopyrightText: 2026 Tsuyomi Contributors -->
+<!-- SPDX-License-Identifier: Apache-2.0 -->
+<data-extraction-rules>
+    <cloud-backup disableIfNoEncryptionCapabilities="true">
+        <exclude domain="root" path="no_backup/source-credentials/" />
+        <exclude domain="file" path="source-credentials/" />
+        <exclude domain="database" path="source_credentials.db" />
+        <exclude domain="sharedpref" path="source_credentials.xml" />
+    </cloud-backup>
+    <device-transfer>
+        <exclude domain="root" path="no_backup/source-credentials/" />
+        <exclude domain="file" path="source-credentials/" />
+        <exclude domain="database" path="source_credentials.db" />
+        <exclude domain="sharedpref" path="source_credentials.xml" />
+    </device-transfer>
+</data-extraction-rules>

@@ -1,0 +1,32 @@
+# SPDX-FileCopyrightText: 2026 Tsuyomi Contributors
+# SPDX-License-Identifier: Apache-2.0
+
+name: extensions-quality
+
+on:
+  pull_request:
+    paths:
+      - 'tsuyomi-extensions/**'
+      - '.github/workflows/extensions-quality.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'tsuyomi-extensions/**'
+      - '.github/workflows/extensions-quality.yml'
+
+permissions:
+  contents: read
+
+defaults:
+  run:
+    working-directory: tsuyomi-extensions
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+      - name: Documentation baseline
+        run: test -f docs/DEVELOPMENT.md && test -f docs/WENKU8_ACCEPTANCE.md

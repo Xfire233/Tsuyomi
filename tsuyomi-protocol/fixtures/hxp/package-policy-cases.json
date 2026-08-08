@@ -1,0 +1,52 @@
+{
+  "cases": [
+    {
+      "name": "same trusted key with no capability increase activates",
+      "active": { "version": "1.0.0", "keyId": "key-a", "capabilities": { "origins": ["https://a.example"], "webLogin": false, "writes": [], "storageQuota": 1024 } },
+      "candidate": { "version": "1.1.0", "keyId": "key-a", "capabilities": { "origins": ["https://a.example"], "webLogin": false, "writes": [], "storageQuota": 1024 } },
+      "revokedKeyIds": [],
+      "rotationVerified": false,
+      "expected": "accepted"
+    },
+    {
+      "name": "new Web login permission requires a grant",
+      "active": { "version": "1.0.0", "keyId": "key-a", "capabilities": { "origins": ["https://a.example"], "webLogin": false, "writes": [], "storageQuota": 1024 } },
+      "candidate": { "version": "1.1.0", "keyId": "key-a", "capabilities": { "origins": ["https://a.example"], "webLogin": true, "writes": [], "storageQuota": 1024 } },
+      "revokedKeyIds": [],
+      "rotationVerified": false,
+      "expected": "requires-grant"
+    },
+    {
+      "name": "revoked key is rejected before version checks",
+      "active": { "version": "1.0.0", "keyId": "key-a", "capabilities": { "origins": ["https://a.example"], "webLogin": false, "writes": [], "storageQuota": 1024 } },
+      "candidate": { "version": "1.1.0", "keyId": "key-a", "capabilities": { "origins": ["https://a.example"], "webLogin": false, "writes": [], "storageQuota": 1024 } },
+      "revokedKeyIds": ["key-a"],
+      "rotationVerified": false,
+      "expected": "rejected-revoked"
+    },
+    {
+      "name": "cross-signed rotation is permitted",
+      "active": { "version": "1.0.0", "keyId": "key-a", "capabilities": { "origins": ["https://a.example"], "webLogin": false, "writes": [], "storageQuota": 1024 } },
+      "candidate": { "version": "1.1.0", "keyId": "key-b", "capabilities": { "origins": ["https://a.example"], "webLogin": false, "writes": [], "storageQuota": 1024 } },
+      "revokedKeyIds": [],
+      "rotationVerified": true,
+      "expected": "accepted"
+    },
+    {
+      "name": "unproven key change is rejected",
+      "active": { "version": "1.0.0", "keyId": "key-a", "capabilities": { "origins": ["https://a.example"], "webLogin": false, "writes": [], "storageQuota": 1024 } },
+      "candidate": { "version": "1.1.0", "keyId": "key-b", "capabilities": { "origins": ["https://a.example"], "webLogin": false, "writes": [], "storageQuota": 1024 } },
+      "revokedKeyIds": [],
+      "rotationVerified": false,
+      "expected": "rejected-key-rotation"
+    },
+    {
+      "name": "repository rollback is rejected",
+      "active": { "version": "1.1.0", "keyId": "key-a", "capabilities": { "origins": ["https://a.example"], "webLogin": false, "writes": [], "storageQuota": 1024 } },
+      "candidate": { "version": "1.0.0", "keyId": "key-a", "capabilities": { "origins": ["https://a.example"], "webLogin": false, "writes": [], "storageQuota": 1024 } },
+      "revokedKeyIds": [],
+      "rotationVerified": false,
+      "expected": "rejected-downgrade"
+    }
+  ]
+}

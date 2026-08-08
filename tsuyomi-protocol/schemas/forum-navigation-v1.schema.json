@@ -1,0 +1,66 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://protocol.tsuyomi.dev/schema/forum-navigation-v1.schema.json",
+  "title": "Tsuyomi Forum Navigation v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["kind", "identity", "revision", "catalogueEntries"],
+  "properties": {
+    "kind": { "const": "forumThreadNavigation" },
+    "identity": { "$ref": "#/$defs/threadIdentity" },
+    "revision": { "type": "string", "minLength": 1, "maxLength": 256 },
+    "catalogueEntries": { "type": "array", "minItems": 1, "maxItems": 100000, "items": { "$ref": "#/$defs/catalogueEntry" } },
+    "ownerCatalogue": { "$ref": "#/$defs/ownerCatalogue" }
+  },
+  "$defs": {
+    "sourceId": { "type": "string", "pattern": "^[a-z0-9](?:[a-z0-9.-]{0,126}[a-z0-9])?$" },
+    "remoteId": { "type": "string", "minLength": 1, "maxLength": 1024 },
+    "sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "threadIdentity": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["sourceId", "remoteBookId", "threadId"],
+      "properties": {
+        "sourceId": { "$ref": "#/$defs/sourceId" },
+        "remoteBookId": { "$ref": "#/$defs/remoteId" },
+        "threadId": { "$ref": "#/$defs/remoteId" }
+      }
+    },
+    "catalogueEntry": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["entryId", "label", "contentId", "physicalPage", "order", "selectionRole"],
+      "properties": {
+        "entryId": { "$ref": "#/$defs/remoteId" },
+        "label": { "type": "string", "minLength": 1, "maxLength": 4096 },
+        "contentId": { "$ref": "#/$defs/remoteId" },
+        "physicalPage": { "type": "integer", "minimum": 1, "maximum": 1000000000 },
+        "order": { "type": "integer", "minimum": 0, "maximum": 1000000000 },
+        "selectionRole": { "enum": ["canonical", "alias"] },
+        "postId": { "$ref": "#/$defs/remoteId" }
+      }
+    },
+    "ownerCatalogue": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["sourceFingerprint", "verifiedAt", "entries"],
+      "properties": {
+        "sourceFingerprint": { "$ref": "#/$defs/sha256" },
+        "verifiedAt": { "type": "string", "format": "date-time" },
+        "entries": { "type": "array", "minItems": 2, "maxItems": 10000, "items": { "$ref": "#/$defs/ownerEntry" } }
+      }
+    },
+    "ownerEntry": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["entryId", "label", "postId", "contentId", "physicalPage"],
+      "properties": {
+        "entryId": { "$ref": "#/$defs/remoteId" },
+        "label": { "type": "string", "minLength": 1, "maxLength": 4096 },
+        "postId": { "$ref": "#/$defs/remoteId" },
+        "contentId": { "$ref": "#/$defs/remoteId" },
+        "physicalPage": { "type": "integer", "minimum": 1, "maximum": 1000000000 }
+      }
+    }
+  }
+}

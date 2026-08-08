@@ -1,0 +1,16 @@
+<!-- SPDX-FileCopyrightText: 2026 Tsuyomi Contributors -->
+<!-- SPDX-License-Identifier: Apache-2.0 -->
+<resources>
+    <string name="coreui_navigate_up">返回</string>
+    <string name="coreui_close">关闭</string>
+    <string name="coreui_retry">重试</string>
+    <string name="coreui_loading">正在加载…</string>
+    <string name="coreui_state_selected">已选择</string>
+    <string name="coreui_state_not_selected">未选择</string>
+    <string name="coreui_state_disabled">不可用</string>
+    <string name="coreui_switch_on">已开启</string>
+    <string name="coreui_switch_off">已关闭</string>
+    <string name="coreui_pagination_previous">上一页</string>
+    <string name="coreui_pagination_next">下一页</string>
+    <string name="coreui_pagination_page_status">第 %1$d 页，共 %2$d 页</string>
+</resources>

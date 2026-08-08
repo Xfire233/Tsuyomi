@@ -1,0 +1,37 @@
+# SPDX-FileCopyrightText: 2026 Tsuyomi Contributors
+# SPDX-License-Identifier: Apache-2.0
+
+node_modules/
+dist/
+coverage/
+*.tsbuildinfo
+.DS_Store
+.vscode/
+.fleet/
+.run/
+Thumbs.db
+*.swp
+*.private.key
+.env
+.env.*
+!.env.example
+
+# Local-only verification outputs
+/.local/
+/test-results/
+/reports/
+/artifacts/
+*.log
+*.trace
+
+# Local AI-assistant configuration and transcripts
+.claude/
+.mcp.json
+.ai/
+.agents/
+.cursor/
+.windsurf/
+AGENTS.md
+AGENTS.local.md
+*.prompt.md
+*.transcript.*

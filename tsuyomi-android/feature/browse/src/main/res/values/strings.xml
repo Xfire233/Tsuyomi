@@ -1,0 +1,6 @@
+<!-- SPDX-FileCopyrightText: 2026 Tsuyomi Contributors -->
+<!-- SPDX-License-Identifier: Apache-2.0 -->
+<resources>
+    <string name="browse_empty_title">尚无可用内容源</string>
+    <string name="browse_empty_message">Tsuyomi 不内置任何内容源。安装内容源后，即可在这里浏览在线书库。</string>
+</resources>

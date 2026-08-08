@@ -1,0 +1,10 @@
+{
+  "format": "tsuyomi-transfer",
+  "version": 1,
+  "createdAt": "2026-08-08T00:00:00Z",
+  "library": [
+    { "identity": { "sourceId": "org.tsuyomi.zeta", "remoteBookId": "1" }, "title": "Zeta", "updatedAt": "2026-08-08T00:00:00Z" },
+    { "identity": { "sourceId": "org.tsuyomi.alpha", "remoteBookId": "2" }, "title": "Alpha", "updatedAt": "2026-08-08T00:00:00Z" }
+  ],
+  "shelves": []
+}

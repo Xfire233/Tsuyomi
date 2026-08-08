@@ -1,0 +1,11 @@
+# SPDX-FileCopyrightText: 2026 Tsuyomi Contributors
+# SPDX-License-Identifier: Apache-2.0
+
+* text=auto eol=lf
+*.bat text eol=crlf
+*.png binary
+*.jar binary
+*.keystore binary
+*.jks binary
+*.apk binary
+*.aab binary

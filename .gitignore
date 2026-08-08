@@ -1,0 +1,66 @@
+# SPDX-FileCopyrightText: 2026 Tsuyomi Contributors
+# SPDX-License-Identifier: Apache-2.0
+
+# Build and dependency outputs
+**/.gradle/
+**/.kotlin/
+**/build/
+**/node_modules/
+**/dist/
+**/coverage/
+**/*.tsbuildinfo
+
+# Android and IDE local state
+**/local.properties
+**/.idea/
+**/*.iml
+**/.externalNativeBuild/
+**/.cxx/
+**/.vscode/
+**/.fleet/
+**/.run/
+*.swp
+.DS_Store
+Thumbs.db
+
+# Local verification outputs
+.local/
+tsuyomi-android/.local/
+tsuyomi-android/local.properties
+tsuyomi-android/build-logic/.gradle/
+tsuyomi-android/build-logic/.kotlin/
+**/test-results/
+**/reports/
+**/artifacts/
+*.log
+*.trace
+*.profraw
+*.hprof
+*.apk
+*.aab
+*.hxp
+
+# Credentials and signing material
+.env
+.env.*
+!.env.example
+**/keystore.properties
+*.jks
+*.keystore
+*.p12
+*.pem
+*.private.key
+id_rsa
+id_ed25519
+
+# Local automation and assistant state
+**/.claude/
+**/.mcp.json
+**/.ai/
+**/.agents/
+**/.cursor/
+**/.windsurf/
+**/AGENTS.md
+**/AGENTS.local.md
+**/*.prompt.md
+**/*.transcript.*

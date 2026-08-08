@@ -1,0 +1,8 @@
+{
+  "url": "https://www.wenku8.net/novel/1/123/456.htm",
+  "method": "GET",
+  "headers": { "Accept": "text/html" },
+  "decode": "gb18030",
+  "cache": "validate",
+  "semanticCacheKey": "wenku8:chapter:123:456:gb18030"
+}

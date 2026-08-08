@@ -1,0 +1,23 @@
+{
+  "format": "tsuyomi-transfer",
+  "version": 1,
+  "createdAt": "2026-08-08T00:00:00Z",
+  "library": [
+    {
+      "identity": {
+        "sourceId": "org.tsuyomi.wenku8",
+        "remoteBookId": "12345"
+      },
+      "title": "Fixture novel",
+      "updatedAt": "2026-08-08T00:00:00Z",
+      "progress": {
+        "chapterId": "67890",
+        "characterOffset": 128,
+        "chapterProgress": 0.2,
+        "bookProgress": 0.1,
+        "updatedAt": "2026-08-08T00:00:00Z"
+      }
+    }
+  ],
+  "shelves": []
+}

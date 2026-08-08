@@ -1,0 +1,91 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://protocol.tsuyomi.dev/schema/hxp-host-api-v1.schema.json",
+  "title": "Tsuyomi HXP Host API v1 network values",
+  "oneOf": [
+    { "$ref": "#/$defs/networkRequest" },
+    { "$ref": "#/$defs/networkResponse" },
+    { "$ref": "#/$defs/hostApiError" }
+  ],
+  "$defs": {
+    "httpsUrl": { "type": "string", "format": "uri", "pattern": "^https://" },
+    "networkRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["url", "method", "decode", "cache"],
+      "properties": {
+        "url": { "$ref": "#/$defs/httpsUrl" },
+        "method": { "enum": ["GET", "HEAD", "POST"] },
+        "headers": {
+          "type": "object",
+          "maxProperties": 32,
+          "propertyNames": { "type": "string", "minLength": 1, "maxLength": 128 },
+          "additionalProperties": { "type": "string", "maxLength": 8192 }
+        },
+        "form": {
+          "type": "object",
+          "maxProperties": 64,
+          "propertyNames": { "type": "string", "minLength": 1, "maxLength": 1024 },
+          "additionalProperties": { "type": "string", "maxLength": 8192 }
+        },
+        "utf8Body": { "type": "string", "maxLength": 65536 },
+        "referrerUrl": { "$ref": "#/$defs/httpsUrl" },
+        "decode": { "enum": ["auto", "utf-8", "gb18030", "big5-hkscs"] },
+        "cache": { "enum": ["default", "network-only", "validate", "offline-only"] },
+        "semanticCacheKey": { "type": "string", "pattern": "^[A-Za-z0-9._:-]{1,160}$" }
+      },
+      "allOf": [
+        {
+          "if": { "properties": { "method": { "const": "POST" } }, "required": ["method"] },
+          "then": { "not": { "properties": { "semanticCacheKey": {} }, "required": ["semanticCacheKey"] } },
+          "else": {
+            "not": {
+              "anyOf": [
+                { "properties": { "form": {} }, "required": ["form"] },
+                { "properties": { "utf8Body": {} }, "required": ["utf8Body"] }
+              ]
+            }
+          }
+        },
+        { "properties": { "form": {}, "utf8Body": {} }, "not": { "required": ["form", "utf8Body"] } }
+      ]
+    },
+    "networkResponse": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["status", "finalUrl", "headers", "text", "decodeUsed", "cache", "diagnosticId"],
+      "properties": {
+        "status": { "type": "integer", "minimum": 100, "maximum": 599 },
+        "finalUrl": { "$ref": "#/$defs/httpsUrl" },
+        "headers": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "contentType": { "type": "string", "maxLength": 512 },
+            "etag": { "type": "string", "maxLength": 1024 },
+            "lastModified": { "type": "string", "maxLength": 128 }
+          }
+        },
+        "text": { "type": "string" },
+        "decodeUsed": { "enum": ["utf-8", "gb18030", "big5-hkscs"] },
+        "cache": { "enum": ["fresh", "validated", "stale-offline", "miss", "bypassed"] },
+        "diagnosticId": { "type": "string", "pattern": "^[A-Za-z0-9_-]{8,128}$" }
+      }
+    },
+    "hostApiError": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["code", "diagnosticId", "remediation"],
+      "properties": {
+        "code": {
+          "enum": [
+            "NETWORK_INVALID_REQUEST", "NETWORK_DISALLOWED_ORIGIN", "NETWORK_HEADER_DISALLOWED", "NETWORK_BODY_LIMIT", "NETWORK_RESPONSE_LIMIT", "NETWORK_TIMEOUT", "NETWORK_CANCELLED", "NETWORK_DNS", "NETWORK_CONNECT", "NETWORK_TLS", "NETWORK_REDIRECT_LIMIT", "NETWORK_REDIRECT_DISALLOWED", "NETWORK_OFFLINE_MISS", "NETWORK_DECODE", "NETWORK_RATE_LIMITED", "SESSION_REQUIRED", "VERIFICATION_REQUIRED"
+          ]
+        },
+        "diagnosticId": { "type": "string", "pattern": "^[A-Za-z0-9_-]{8,128}$" },
+        "retryAfterMs": { "type": "integer", "minimum": 0, "maximum": 120000 },
+        "remediation": { "enum": ["retry", "open-login", "open-verification", "check-network", "none"] }
+      }
+    }
+  }
+}

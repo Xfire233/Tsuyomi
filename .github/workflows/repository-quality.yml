@@ -1,0 +1,26 @@
+# SPDX-FileCopyrightText: 2026 Tsuyomi Contributors
+# SPDX-License-Identifier: Apache-2.0
+
+name: repository-quality
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+      - name: Install REUSE
+        run: python -m pip install --disable-pip-version-check reuse==6.2.0
+      - name: License compliance
+        run: python -m reuse lint
+      - name: Reject repository artifacts
+        run: python tools/check_repository.py

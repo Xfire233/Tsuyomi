@@ -1,0 +1,32 @@
+# SPDX-FileCopyrightText: 2026 Tsuyomi Contributors
+# SPDX-License-Identifier: Apache-2.0
+
+version = 1
+
+[[annotations]]
+path = [
+  "Tsuyomi.code-workspace",
+  "tsuyomi-protocol/package.json",
+  "tsuyomi-protocol/package-lock.json",
+  "tsuyomi-protocol/schemas/*.json",
+  "tsuyomi-protocol/fixtures/**/*.json",
+  "tsuyomi-android/**/*gradle.lockfile",
+  "tsuyomi-android/core/database/schemas/**",
+  "tsuyomi-android/core/ui/src/screenshotTestDebug/reference/**",
+  "tsuyomi-android/feature/*/src/screenshotTestDebug/reference/**",
+  "tsuyomi-android/docs/gates/GATE_1/assets/**",
+  "tsuyomi-android/docs/design/GATE_1_UI.md",
+  "tsuyomi-android/docs/design/OPTION_APPLICABILITY.md",
+  "tsuyomi-android/docs/process/QUALITY_GATES.md",
+  "tsuyomi-android/docs/verification/AVD_MATRIX.md",
+  "tsuyomi-android/docs/process/REPOSITORY_GOVERNANCE.md",
+]
+precedence = "aggregate"
+SPDX-FileCopyrightText = "2026 Tsuyomi Contributors"
+SPDX-License-Identifier = "Apache-2.0"
+
+[[annotations]]
+path = ["tsuyomi-android/gradle/wrapper/gradle-wrapper.jar"]
+precedence = "aggregate"
+SPDX-FileCopyrightText = "2007-2025 Gradle, Inc."
+SPDX-License-Identifier = "Apache-2.0"

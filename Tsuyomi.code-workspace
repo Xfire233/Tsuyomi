@@ -1,0 +1,8 @@
+{
+  "folders": [
+    { "name": "Tsuyomi Monorepo", "path": "." },
+    { "path": "tsuyomi-android" },
+    { "path": "tsuyomi-protocol" },
+    { "path": "tsuyomi-extensions" }
+  ]
+}

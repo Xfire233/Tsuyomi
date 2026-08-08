@@ -1,0 +1,17 @@
+<!-- SPDX-FileCopyrightText: 2026 Tsuyomi Contributors -->
+<!-- SPDX-License-Identifier: Apache-2.0 -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <path
+        android:fillColor="#181A1D"
+        android:pathData="M0,0h108v108h-108z" />
+    <path
+        android:fillColor="#F8F6F0"
+        android:pathData="M24,18h60c3.3,0 6,2.7 6,6v60c0,3.3 -2.7,6 -6,6H24c-3.3,0 -6,-2.7 -6,-6V24c0,-3.3 2.7,-6 6,-6zM29,28v52h24V28zM55,28v52h24V28z" />
+    <path
+        android:fillColor="#181A1D"
+        android:pathData="M51,25h6v58h-6z" />
+</vector>

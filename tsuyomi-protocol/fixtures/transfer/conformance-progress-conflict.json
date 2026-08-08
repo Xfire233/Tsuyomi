@@ -1,0 +1,32 @@
+{
+  "cases": [
+    {
+      "name": "newer valid incoming progress wins",
+      "stored": { "chapterId": "chapter-1", "characterOffset": 900, "updatedAt": "2026-08-08T10:00:00Z" },
+      "incoming": { "chapterId": "chapter-1", "characterOffset": 100, "updatedAt": "2026-08-08T11:00:00Z" },
+      "incomingValid": true,
+      "expectedWinner": "incoming"
+    },
+    {
+      "name": "older farther incoming progress loses",
+      "stored": { "chapterId": "chapter-2", "characterOffset": 100, "updatedAt": "2026-08-08T11:00:00Z" },
+      "incoming": { "chapterId": "chapter-2", "characterOffset": 900, "updatedAt": "2026-08-08T10:00:00Z" },
+      "incomingValid": true,
+      "expectedWinner": "stored"
+    },
+    {
+      "name": "invalid incoming progress never replaces valid state",
+      "stored": { "chapterId": "chapter-3", "characterOffset": 100, "updatedAt": "2026-08-08T11:00:00Z" },
+      "incoming": { "updatedAt": "2026-08-08T12:00:00Z" },
+      "incomingValid": false,
+      "expectedWinner": "stored"
+    },
+    {
+      "name": "equal timestamps retain existing valid progress",
+      "stored": { "chapterId": "chapter-4", "characterOffset": 100, "updatedAt": "2026-08-08T11:00:00Z" },
+      "incoming": { "chapterId": "chapter-4", "characterOffset": 900, "updatedAt": "2026-08-08T11:00:00Z" },
+      "incomingValid": true,
+      "expectedWinner": "stored"
+    }
+  ]
+}

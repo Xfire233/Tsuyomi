@@ -1,0 +1,7 @@
+<!-- SPDX-FileCopyrightText: 2026 Tsuyomi Contributors -->
+<!-- SPDX-License-Identifier: Apache-2.0 -->
+<resources>
+    <string name="library_empty_title">书架是空的</string>
+    <string name="library_empty_message">收藏的书籍会显示在这里。当前还没有可添加书籍的内容源。</string>
+    <string name="library_action_go_to_browse">前往浏览</string>
+</resources>

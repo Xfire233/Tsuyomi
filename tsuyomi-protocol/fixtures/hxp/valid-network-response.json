@@ -1,0 +1,9 @@
+{
+  "status": 200,
+  "finalUrl": "https://www.wenku8.net/novel/1/123/456.htm",
+  "headers": { "contentType": "text/html; charset=gb18030", "etag": "abc" },
+  "text": "fixture response",
+  "decodeUsed": "gb18030",
+  "cache": "validated",
+  "diagnosticId": "diag_12345678"
+}

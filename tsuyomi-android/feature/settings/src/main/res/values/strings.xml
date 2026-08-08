@@ -1,0 +1,41 @@
+<!-- SPDX-FileCopyrightText: 2026 Tsuyomi Contributors -->
+<!-- SPDX-License-Identifier: Apache-2.0 -->
+<resources>
+    <string name="settings_more_entry_title">设置</string>
+    <string name="settings_more_entry_summary">显示模式与主题</string>
+    <string name="settings_more_about_title">关于</string>
+
+    <string name="settings_display_section_profile">显示模式</string>
+    <string name="settings_display_profile_auto">自动</string>
+    <string name="settings_display_profile_standard">标准</string>
+    <string name="settings_display_profile_eink">墨水屏</string>
+    <string name="settings_display_status_manual_standard">当前为标准模式（手动设置）。</string>
+    <string name="settings_display_status_manual_eink">当前为墨水屏模式（手动设置）。</string>
+    <string name="settings_display_status_auto_recognized">已识别墨水屏设备：%1$s。已自动启用墨水屏模式。</string>
+    <string name="settings_display_status_auto_recognized_unknown_label">已识别墨水屏设备，已自动启用墨水屏模式。</string>
+    <string name="settings_display_status_auto_unknown">未识别为墨水屏设备，使用标准模式。</string>
+
+    <string name="settings_display_section_appearance">外观</string>
+    <string name="settings_display_theme_system">跟随系统</string>
+    <string name="settings_display_theme_light">浅色</string>
+    <string name="settings_display_theme_dark">深色</string>
+    <string name="settings_display_theme_disabled_eink">墨水屏模式固定使用高对比浅色</string>
+    <string name="settings_display_dynamic_title">动态颜色</string>
+    <string name="settings_display_dynamic_summary">基于系统壁纸生成界面配色</string>
+    <string name="settings_display_dynamic_disabled_eink">墨水屏模式不使用系统颜色；返回标准后恢复此偏好</string>
+    <string name="settings_display_dynamic_disabled_api">Android 12 及以上可用；当前偏好会保留</string>
+
+    <string name="settings_display_section_refresh">墨水屏刷新</string>
+    <string name="settings_display_refresh_note">此操作只请求应用界面重绘，不控制厂商硬件刷新模式。</string>
+    <string name="settings_display_refresh_now_title">立即重绘界面</string>
+    <string name="settings_display_refresh_now_summary">已请求重绘 %1$d 次</string>
+
+    <string name="settings_write_failure_title">设置保存失败</string>
+    <string name="settings_write_failure_message">更改未能写入存储。可以重试，或忽略此次更改。</string>
+    <string name="settings_write_failure_acknowledge">知道了</string>
+
+    <string name="about_app_name_label">应用名称</string>
+    <string name="about_version_label">版本</string>
+    <string name="about_license_title">开源许可证</string>
+    <string name="about_license_summary">Apache License 2.0</string>
+</resources>

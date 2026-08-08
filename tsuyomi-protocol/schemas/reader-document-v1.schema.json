@@ -1,0 +1,104 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://protocol.tsuyomi.dev/schema/reader-document-v1.schema.json",
+  "title": "Tsuyomi Reader Document v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["kind", "identity", "title", "revision", "contentDigest", "blocks"],
+  "properties": {
+    "kind": { "enum": ["chapter", "threadPage"] },
+    "identity": { "$ref": "#/$defs/documentIdentity" },
+    "title": { "type": "string", "minLength": 1, "maxLength": 4096 },
+    "revision": { "type": "string", "minLength": 1, "maxLength": 256 },
+    "contentDigest": { "$ref": "#/$defs/sha256" },
+    "blocks": { "type": "array", "minItems": 1, "maxItems": 50000, "items": { "$ref": "#/$defs/block" } }
+  },
+  "$defs": {
+    "sourceId": { "type": "string", "pattern": "^[a-z0-9](?:[a-z0-9.-]{0,126}[a-z0-9])?$" },
+    "remoteId": { "type": "string", "minLength": 1, "maxLength": 1024 },
+    "sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "httpsUrl": { "type": "string", "format": "uri", "pattern": "^https://" },
+    "documentIdentity": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["sourceId", "remoteBookId", "contentId"],
+      "properties": {
+        "sourceId": { "$ref": "#/$defs/sourceId" },
+        "remoteBookId": { "$ref": "#/$defs/remoteId" },
+        "contentId": { "$ref": "#/$defs/remoteId" }
+      }
+    },
+    "blockId": { "type": "string", "minLength": 1, "maxLength": 1024 },
+    "blockBase": {
+      "type": "object",
+      "required": ["id", "kind"],
+      "properties": { "id": { "$ref": "#/$defs/blockId" }, "kind": { "type": "string" } }
+    },
+    "heading": {
+      "allOf": [
+        { "$ref": "#/$defs/blockBase" },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["id", "kind", "level", "text"],
+          "properties": { "id": { "$ref": "#/$defs/blockId" }, "kind": { "const": "heading" }, "level": { "type": "integer", "minimum": 1, "maximum": 6 }, "text": { "type": "string", "minLength": 1, "maxLength": 16384 } }
+        }
+      ]
+    },
+    "paragraph": {
+      "allOf": [
+        { "$ref": "#/$defs/blockBase" },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["id", "kind", "text"],
+          "properties": { "id": { "$ref": "#/$defs/blockId" }, "kind": { "const": "paragraph" }, "text": { "type": "string", "minLength": 1, "maxLength": 65536 } }
+        }
+      ]
+    },
+    "image": {
+      "allOf": [
+        { "$ref": "#/$defs/blockBase" },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["id", "kind", "url"],
+          "properties": { "id": { "$ref": "#/$defs/blockId" }, "kind": { "const": "image" }, "url": { "$ref": "#/$defs/httpsUrl" }, "alt": { "type": "string", "maxLength": 4096 }, "aspectRatio": { "type": "number", "exclusiveMinimum": 0, "maximum": 100 } }
+        }
+      ]
+    },
+    "divider": {
+      "allOf": [
+        { "$ref": "#/$defs/blockBase" },
+        { "type": "object", "additionalProperties": false, "required": ["id", "kind"], "properties": { "id": { "$ref": "#/$defs/blockId" }, "kind": { "const": "divider" } } }
+      ]
+    },
+    "quote": {
+      "allOf": [
+        { "$ref": "#/$defs/blockBase" },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["id", "kind", "text"],
+          "properties": { "id": { "$ref": "#/$defs/blockId" }, "kind": { "const": "quote" }, "text": { "type": "string", "minLength": 1, "maxLength": 65536 }, "attribution": { "type": "string", "maxLength": 4096 } }
+        }
+      ]
+    },
+    "post": {
+      "allOf": [
+        { "$ref": "#/$defs/blockBase" },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["id", "kind", "postId", "authorId", "authorName", "blocks"],
+          "properties": {
+            "id": { "$ref": "#/$defs/blockId" }, "kind": { "const": "post" }, "postId": { "$ref": "#/$defs/remoteId" }, "authorId": { "$ref": "#/$defs/remoteId" }, "authorName": { "type": "string", "minLength": 1, "maxLength": 1024 }, "floor": { "type": "integer", "minimum": 1 }, "createdAt": { "type": "string", "format": "date-time" }, "replyToPostId": { "$ref": "#/$defs/remoteId" },
+            "blocks": { "type": "array", "minItems": 1, "maxItems": 5000, "items": { "$ref": "#/$defs/bodyBlock" } }
+          }
+        }
+      ]
+    },
+    "bodyBlock": { "oneOf": [ { "$ref": "#/$defs/heading" }, { "$ref": "#/$defs/paragraph" }, { "$ref": "#/$defs/image" }, { "$ref": "#/$defs/divider" }, { "$ref": "#/$defs/quote" } ] },
+    "block": { "oneOf": [ { "$ref": "#/$defs/heading" }, { "$ref": "#/$defs/paragraph" }, { "$ref": "#/$defs/image" }, { "$ref": "#/$defs/divider" }, { "$ref": "#/$defs/quote" }, { "$ref": "#/$defs/post" } ] }
+  }
+}

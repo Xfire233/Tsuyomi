@@ -1,0 +1,10 @@
+{
+  "format": "tsuyomi-transfer",
+  "version": 1,
+  "createdAt": "2026-08-08T00:00:00Z",
+  "library": [
+    { "identity": { "sourceId": "org.tsuyomi.wenku8", "remoteBookId": "123" }, "title": "First", "updatedAt": "2026-08-08T00:00:00Z" },
+    { "identity": { "sourceId": "org.tsuyomi.wenku8", "remoteBookId": "123" }, "title": "Second", "updatedAt": "2026-08-08T00:00:01Z" }
+  ],
+  "shelves": []
+}

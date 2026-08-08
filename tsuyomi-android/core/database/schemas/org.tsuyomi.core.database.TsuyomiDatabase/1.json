@@ -1,0 +1,291 @@
+{
+  "formatVersion": 1,
+  "database": {
+    "version": 1,
+    "identityHash": "5d351c021d4efdb06ade8efdef172f6a",
+    "entities": [
+      {
+        "tableName": "books",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`source_id` TEXT NOT NULL, `remote_book_id` TEXT NOT NULL, `title` TEXT NOT NULL, `added_at_epoch_second` INTEGER NOT NULL, `added_at_nano` INTEGER NOT NULL, `metadata_updated_at_epoch_second` INTEGER NOT NULL, `metadata_updated_at_nano` INTEGER NOT NULL, PRIMARY KEY(`source_id`, `remote_book_id`))",
+        "fields": [
+          {
+            "fieldPath": "sourceId",
+            "columnName": "source_id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "remoteBookId",
+            "columnName": "remote_book_id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "title",
+            "columnName": "title",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "addedAtEpochSecond",
+            "columnName": "added_at_epoch_second",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "addedAtNano",
+            "columnName": "added_at_nano",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "metadataUpdatedAtEpochSecond",
+            "columnName": "metadata_updated_at_epoch_second",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "metadataUpdatedAtNano",
+            "columnName": "metadata_updated_at_nano",
+            "affinity": "INTEGER",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "source_id",
+            "remote_book_id"
+          ]
+        }
+      },
+      {
+        "tableName": "collections",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`collection_id` TEXT NOT NULL, `kind` TEXT NOT NULL, `title` TEXT NOT NULL, `parent_collection_id` TEXT, `display_order` INTEGER NOT NULL, PRIMARY KEY(`collection_id`), FOREIGN KEY(`parent_collection_id`) REFERENCES `collections`(`collection_id`) ON UPDATE NO ACTION ON DELETE SET NULL )",
+        "fields": [
+          {
+            "fieldPath": "collectionId",
+            "columnName": "collection_id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "kind",
+            "columnName": "kind",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "title",
+            "columnName": "title",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "parentCollectionId",
+            "columnName": "parent_collection_id",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "displayOrder",
+            "columnName": "display_order",
+            "affinity": "INTEGER",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "collection_id"
+          ]
+        },
+        "indices": [
+          {
+            "name": "index_collections_parent_collection_id",
+            "unique": false,
+            "columnNames": [
+              "parent_collection_id"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_collections_parent_collection_id` ON `${TABLE_NAME}` (`parent_collection_id`)"
+          }
+        ],
+        "foreignKeys": [
+          {
+            "table": "collections",
+            "onDelete": "SET NULL",
+            "onUpdate": "NO ACTION",
+            "columns": [
+              "parent_collection_id"
+            ],
+            "referencedColumns": [
+              "collection_id"
+            ]
+          }
+        ]
+      },
+      {
+        "tableName": "manual_collection_memberships",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`collection_id` TEXT NOT NULL, `source_id` TEXT NOT NULL, `remote_book_id` TEXT NOT NULL, PRIMARY KEY(`collection_id`, `source_id`, `remote_book_id`), FOREIGN KEY(`collection_id`) REFERENCES `collections`(`collection_id`) ON UPDATE NO ACTION ON DELETE CASCADE , FOREIGN KEY(`source_id`, `remote_book_id`) REFERENCES `books`(`source_id`, `remote_book_id`) ON UPDATE NO ACTION ON DELETE CASCADE )",
+        "fields": [
+          {
+            "fieldPath": "collectionId",
+            "columnName": "collection_id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "sourceId",
+            "columnName": "source_id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "remoteBookId",
+            "columnName": "remote_book_id",
+            "affinity": "TEXT",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "collection_id",
+            "source_id",
+            "remote_book_id"
+          ]
+        },
+        "indices": [
+          {
+            "name": "index_manual_collection_memberships_source_id_remote_book_id",
+            "unique": false,
+            "columnNames": [
+              "source_id",
+              "remote_book_id"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_manual_collection_memberships_source_id_remote_book_id` ON `${TABLE_NAME}` (`source_id`, `remote_book_id`)"
+          }
+        ],
+        "foreignKeys": [
+          {
+            "table": "collections",
+            "onDelete": "CASCADE",
+            "onUpdate": "NO ACTION",
+            "columns": [
+              "collection_id"
+            ],
+            "referencedColumns": [
+              "collection_id"
+            ]
+          },
+          {
+            "table": "books",
+            "onDelete": "CASCADE",
+            "onUpdate": "NO ACTION",
+            "columns": [
+              "source_id",
+              "remote_book_id"
+            ],
+            "referencedColumns": [
+              "source_id",
+              "remote_book_id"
+            ]
+          }
+        ]
+      },
+      {
+        "tableName": "reading_progress",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`source_id` TEXT NOT NULL, `remote_book_id` TEXT NOT NULL, `content_id` TEXT NOT NULL, `revision` TEXT, `block_id` TEXT, `text_anchor_digest` TEXT, `character_offset` INTEGER, `chapter_progress` REAL, `book_progress` REAL, `updated_at_epoch_second` INTEGER NOT NULL, `updated_at_nano` INTEGER NOT NULL, PRIMARY KEY(`source_id`, `remote_book_id`), FOREIGN KEY(`source_id`, `remote_book_id`) REFERENCES `books`(`source_id`, `remote_book_id`) ON UPDATE NO ACTION ON DELETE CASCADE )",
+        "fields": [
+          {
+            "fieldPath": "sourceId",
+            "columnName": "source_id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "remoteBookId",
+            "columnName": "remote_book_id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "contentId",
+            "columnName": "content_id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "revision",
+            "columnName": "revision",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "blockId",
+            "columnName": "block_id",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "textAnchorDigest",
+            "columnName": "text_anchor_digest",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "characterOffset",
+            "columnName": "character_offset",
+            "affinity": "INTEGER"
+          },
+          {
+            "fieldPath": "chapterProgress",
+            "columnName": "chapter_progress",
+            "affinity": "REAL"
+          },
+          {
+            "fieldPath": "bookProgress",
+            "columnName": "book_progress",
+            "affinity": "REAL"
+          },
+          {
+            "fieldPath": "updatedAtEpochSecond",
+            "columnName": "updated_at_epoch_second",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "updatedAtNano",
+            "columnName": "updated_at_nano",
+            "affinity": "INTEGER",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "source_id",
+            "remote_book_id"
+          ]
+        },
+        "foreignKeys": [
+          {
+            "table": "books",
+            "onDelete": "CASCADE",
+            "onUpdate": "NO ACTION",
+            "columns": [
+              "source_id",
+              "remote_book_id"
+            ],
+            "referencedColumns": [
+              "source_id",
+              "remote_book_id"
+            ]
+          }
+        ]
+      }
+    ],
+    "setupQueries": [
+      "CREATE TABLE IF NOT EXISTS room_master_table (id INTEGER PRIMARY KEY,identity_hash TEXT)",
+      "INSERT OR REPLACE INTO room_master_table (id,identity_hash) VALUES(42, '5d351c021d4efdb06ade8efdef172f6a')"
+    ]
+  }
+}

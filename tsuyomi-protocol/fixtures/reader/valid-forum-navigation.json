@@ -1,0 +1,18 @@
+{
+  "kind": "forumThreadNavigation",
+  "identity": { "sourceId": "org.tsuyomi.yamibo", "remoteBookId": "42", "threadId": "42" },
+  "revision": "catalogue-2026-08-08T00:00:00Z",
+  "catalogueEntries": [
+    { "entryId": "raw-owner-post-9001", "label": "Chapter one", "contentId": "thread-42-page-3", "physicalPage": 3, "order": 0, "selectionRole": "alias", "postId": "9001" },
+    { "entryId": "page-3", "label": "Page 3", "contentId": "thread-42-page-3", "physicalPage": 3, "order": 1, "selectionRole": "canonical" },
+    { "entryId": "page-4", "label": "Page 4", "contentId": "thread-42-page-4", "physicalPage": 4, "order": 2, "selectionRole": "canonical" }
+  ],
+  "ownerCatalogue": {
+    "sourceFingerprint": "0000000000000000000000000000000000000000000000000000000000000000",
+    "verifiedAt": "2026-08-08T00:00:00Z",
+    "entries": [
+      { "entryId": "owner-9001", "label": "Chapter one", "postId": "9001", "contentId": "thread-42-page-3", "physicalPage": 3 },
+      { "entryId": "owner-9019", "label": "Chapter two", "postId": "9019", "contentId": "thread-42-page-4", "physicalPage": 4 }
+    ]
+  }
+}

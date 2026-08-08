@@ -1,0 +1,11 @@
+<!-- SPDX-FileCopyrightText: 2026 Tsuyomi Contributors -->
+<!-- SPDX-License-Identifier: Apache-2.0 -->
+<resources>
+    <string name="app_name">月读</string>
+    <string name="nav_library">书架</string>
+    <string name="nav_browse">浏览</string>
+    <string name="nav_more">更多</string>
+    <string name="title_display_settings">显示</string>
+    <string name="title_about">关于</string>
+    <string name="boot_loading">正在准备本地阅读环境…</string>
+</resources>

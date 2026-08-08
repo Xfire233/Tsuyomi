@@ -1,0 +1,9 @@
+<!-- SPDX-FileCopyrightText: 2026 Tsuyomi Contributors -->
+<!-- SPDX-License-Identifier: Apache-2.0 -->
+<full-backup-content>
+    <!-- Keystore material is platform-managed; credential ciphertext is always no-backup. -->
+    <exclude domain="root" path="no_backup/source-credentials/" />
+    <exclude domain="file" path="source-credentials/" />
+    <exclude domain="database" path="source_credentials.db" />
+    <exclude domain="sharedpref" path="source_credentials.xml" />
+</full-backup-content>

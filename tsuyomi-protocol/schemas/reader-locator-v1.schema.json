@@ -1,0 +1,33 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://protocol.tsuyomi.dev/schema/reader-locator-v1.schema.json",
+  "title": "Tsuyomi Reader Locator v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["document", "capturedAt"],
+  "properties": {
+    "document": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["sourceId", "remoteBookId", "contentId"],
+      "properties": {
+        "sourceId": { "type": "string", "pattern": "^[a-z0-9](?:[a-z0-9.-]{0,126}[a-z0-9])?$" },
+        "remoteBookId": { "type": "string", "minLength": 1, "maxLength": 1024 },
+        "contentId": { "type": "string", "minLength": 1, "maxLength": 1024 },
+        "revision": { "type": "string", "minLength": 1, "maxLength": 256 }
+      }
+    },
+    "blockId": { "type": "string", "minLength": 1, "maxLength": 1024 },
+    "textAnchorDigest": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "characterOffset": { "type": "integer", "minimum": 0 },
+    "chapterProgress": { "type": "number", "minimum": 0, "maximum": 1 },
+    "bookProgress": { "type": "number", "minimum": 0, "maximum": 1 },
+    "capturedAt": { "type": "string", "format": "date-time" }
+  },
+  "anyOf": [
+    { "properties": { "blockId": {}, "characterOffset": {} }, "required": ["blockId", "characterOffset"] },
+    { "properties": { "blockId": {}, "textAnchorDigest": {} }, "required": ["blockId", "textAnchorDigest"] },
+    { "properties": { "chapterProgress": {} }, "required": ["chapterProgress"] },
+    { "properties": { "bookProgress": {} }, "required": ["bookProgress"] }
+  ]
+}

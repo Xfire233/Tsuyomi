@@ -1,0 +1,20 @@
+{
+  "kind": "threadPage",
+  "identity": { "sourceId": "org.tsuyomi.yamibo", "remoteBookId": "42", "contentId": "thread-42-page-3" },
+  "title": "Fixture thread",
+  "revision": "2026-08-08T00:00:00Z",
+  "contentDigest": "0000000000000000000000000000000000000000000000000000000000000000",
+  "blocks": [
+    {
+      "id": "post-9001",
+      "kind": "post",
+      "postId": "9001",
+      "authorId": "100",
+      "authorName": "Fixture author",
+      "floor": 21,
+      "blocks": [
+        { "id": "post-9001-p-1", "kind": "paragraph", "text": "Fixture post text." }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,26 @@
+# SPDX-FileCopyrightText: 2026 Tsuyomi Contributors
+# SPDX-License-Identifier: Apache-2.0
+
+version = 1
+
+[[annotations]]
+path = [
+  "core/database/schemas/**",
+  "**/*gradle.lockfile",
+  "core/ui/src/screenshotTestDebug/reference/**",
+  "feature/*/src/screenshotTestDebug/reference/**",
+  "docs/gates/GATE_1/assets/**",
+  "docs/design/GATE_1_UI.md",
+  "docs/design/OPTION_APPLICABILITY.md",
+  "docs/process/QUALITY_GATES.md",
+  "docs/verification/AVD_MATRIX.md",
+]
+precedence = "aggregate"
+SPDX-FileCopyrightText = "2026 Tsuyomi Contributors"
+SPDX-License-Identifier = "Apache-2.0"
+
+[[annotations]]
+path = ["gradle/wrapper/gradle-wrapper.jar"]
+precedence = "aggregate"
+SPDX-FileCopyrightText = "2007-2025 Gradle, Inc."
+SPDX-License-Identifier = "Apache-2.0"

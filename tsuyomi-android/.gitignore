@@ -1,0 +1,50 @@
+# SPDX-FileCopyrightText: 2026 Tsuyomi Contributors
+# SPDX-License-Identifier: Apache-2.0
+
+.gradle/
+.kotlin/
+*.hprof
+/build/
+**/build/
+local.properties
+.idea/
+*.iml
+.externalNativeBuild/
+.cxx/
+.DS_Store
+.vscode/
+.fleet/
+.run/
+Thumbs.db
+*.swp
+keystore.properties
+*.jks
+*.keystore
+*.p12
+*.pem
+*.private.key
+.env
+.env.*
+!.env.example
+
+# Local-only verification outputs
+/.local/
+/test-results/
+/reports/
+/artifacts/
+/screenshots/
+*.log
+*.trace
+*.profraw
+
+# Local AI-assistant configuration and transcripts
+.claude/
+.mcp.json
+.ai/
+.agents/
+.cursor/
+.windsurf/
+AGENTS.md
+AGENTS.local.md
+*.prompt.md
+*.transcript.*

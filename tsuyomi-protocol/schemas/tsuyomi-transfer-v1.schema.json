@@ -1,0 +1,103 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://protocol.tsuyomi.dev/schema/tsuyomi-transfer-v1.schema.json",
+  "title": "Tsuyomi Transfer v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["format", "version", "createdAt", "library", "shelves"],
+  "properties": {
+    "format": { "const": "tsuyomi-transfer" },
+    "version": { "const": 1 },
+    "createdAt": { "$ref": "#/$defs/timestamp" },
+    "library": {
+      "type": "array",
+      "maxItems": 100000,
+      "items": { "$ref": "#/$defs/book" }
+    },
+    "shelves": {
+      "type": "array",
+      "maxItems": 5000,
+      "items": { "$ref": "#/$defs/shelf" }
+    },
+    "preferences": { "$ref": "#/$defs/preferences" }
+  },
+  "$defs": {
+    "timestamp": { "type": "string", "format": "date-time" },
+    "sourceId": { "type": "string", "pattern": "^[a-z0-9](?:[a-z0-9.-]{0,126}[a-z0-9])?$" },
+    "remoteId": { "type": "string", "minLength": 1, "maxLength": 1024 },
+    "identity": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["sourceId", "remoteBookId"],
+      "properties": {
+        "sourceId": { "$ref": "#/$defs/sourceId" },
+        "remoteBookId": { "$ref": "#/$defs/remoteId" }
+      }
+    },
+    "book": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["identity", "title", "updatedAt"],
+      "properties": {
+        "identity": { "$ref": "#/$defs/identity" },
+        "title": { "type": "string", "minLength": 1, "maxLength": 4096 },
+        "authors": { "type": "array", "maxItems": 32, "uniqueItems": true, "items": { "type": "string", "minLength": 1, "maxLength": 1024 } },
+        "canonicalUrl": { "type": "string", "format": "uri" },
+        "coverUrl": { "type": "string", "format": "uri" },
+        "status": { "enum": ["unknown", "ongoing", "completed", "hiatus", "cancelled"] },
+        "remoteTags": { "type": "array", "maxItems": 128, "uniqueItems": true, "items": { "type": "string", "minLength": 1, "maxLength": 256 } },
+        "localTags": { "type": "array", "maxItems": 128, "uniqueItems": true, "items": { "type": "string", "minLength": 1, "maxLength": 256 } },
+        "shelfIds": { "type": "array", "maxItems": 512, "uniqueItems": true, "items": { "type": "string", "minLength": 1, "maxLength": 128 } },
+        "rating": { "type": "number", "minimum": 0, "maximum": 5 },
+        "addedAt": { "$ref": "#/$defs/timestamp" },
+        "updatedAt": { "$ref": "#/$defs/timestamp" },
+        "progress": { "$ref": "#/$defs/progress" }
+      }
+    },
+    "progress": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["updatedAt"],
+      "properties": {
+        "chapterId": { "$ref": "#/$defs/remoteId" },
+        "textAnchor": { "type": "string", "minLength": 1, "maxLength": 4096 },
+        "characterOffset": { "type": "integer", "minimum": 0 },
+        "chapterProgress": { "type": "number", "minimum": 0, "maximum": 1 },
+        "bookProgress": { "type": "number", "minimum": 0, "maximum": 1 },
+        "updatedAt": { "$ref": "#/$defs/timestamp" }
+      },
+      "anyOf": [
+        { "properties": { "chapterId": true }, "required": ["chapterId"] },
+        { "properties": { "textAnchor": true }, "required": ["textAnchor"] },
+        { "properties": { "bookProgress": true }, "required": ["bookProgress"] }
+      ]
+    },
+    "shelf": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "name"],
+      "properties": {
+        "id": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "name": { "type": "string", "minLength": 1, "maxLength": 256 },
+        "parentId": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "position": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "preferences": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "reader": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "flow": { "enum": ["scroll", "paged"] },
+            "fontScale": { "type": "number", "minimum": 0.5, "maximum": 3 },
+            "lineHeight": { "type": "number", "minimum": 0.8, "maximum": 3 },
+            "theme": { "enum": ["paper", "warmGray", "nightInk", "black", "inkGreen"] }
+          }
+        }
+      }
+    }
+  }
+}

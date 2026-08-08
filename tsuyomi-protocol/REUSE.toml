@@ -1,0 +1,10 @@
+# SPDX-FileCopyrightText: 2026 Tsuyomi Contributors
+# SPDX-License-Identifier: Apache-2.0
+
+version = 1
+
+[[annotations]]
+path = ["package.json", "package-lock.json", "schemas/*.json", "fixtures/**/*.json"]
+precedence = "aggregate"
+SPDX-FileCopyrightText = "2026 Tsuyomi Contributors"
+SPDX-License-Identifier = "Apache-2.0"
