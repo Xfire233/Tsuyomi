@@ -73,11 +73,11 @@ jobs:
       - name: Start emulator
         run: |
           "$ANDROID_HOME/emulator/emulator" -avd tsuyomi-ci-api29 -no-window -no-audio -no-boot-anim -no-snapshot -gpu swiftshader_indirect &
-          adb wait-for-device
-          until [ "$(adb shell getprop sys.boot_completed | tr -d '\r')" = "1" ]; do sleep 2; done
-          adb shell settings put global window_animation_scale 0
-          adb shell settings put global transition_animation_scale 0
-          adb shell settings put global animator_duration_scale 0
+          "$ANDROID_HOME/platform-tools/adb" wait-for-device
+          until [ "$("$ANDROID_HOME/platform-tools/adb" shell getprop sys.boot_completed | tr -d '\r')" = "1" ]; do sleep 2; done
+          "$ANDROID_HOME/platform-tools/adb" shell settings put global window_animation_scale 0
+          "$ANDROID_HOME/platform-tools/adb" shell settings put global transition_animation_scale 0
+          "$ANDROID_HOME/platform-tools/adb" shell settings put global animator_duration_scale 0
       - name: Run API 29 instrumentation
         run: >-
           ./gradlew --no-daemon --console=plain --dependency-verification strict
