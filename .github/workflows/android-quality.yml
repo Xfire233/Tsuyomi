@@ -5,14 +5,8 @@ name: android-quality
 
 on:
   pull_request:
-    paths:
-      - 'tsuyomi-android/**'
-      - '.github/workflows/android-quality.yml'
   push:
     branches: [main]
-    paths:
-      - 'tsuyomi-android/**'
-      - '.github/workflows/android-quality.yml'
 
 permissions:
   contents: read
@@ -28,11 +22,28 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          fetch-depth: 0
+      - name: Detect Android changes
+        id: changes
+        shell: bash
+        run: |
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            base="${{ github.event.pull_request.base.sha }}"
+          else
+            base="${{ github.event.before }}"
+          fi
+          if [ -z "$base" ] || ! git cat-file -e "$base^{commit}" 2>/dev/null || ! git diff --quiet "$base" "$GITHUB_SHA" -- tsuyomi-android .github/workflows/android-quality.yml; then
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+          fi
       - name: Tool versions
         run: |
           java -version
           python --version
       - name: Build, test, lint, and validate goldens
+        if: steps.changes.outputs.changed == 'true'
         run: >-
           ./gradlew --no-daemon --console=plain --dependency-verification strict
           :app:assembleDebug
@@ -51,6 +62,7 @@ jobs:
           :feature:browse:validateDebugScreenshotTest
           :feature:settings:validateDebugScreenshotTest
       - name: Lock state is stable
+        if: steps.changes.outputs.changed == 'true'
         run: |
           ./gradlew --no-daemon --console=plain --write-locks :app:assembleDebug
           git diff --exit-code -- '**/*gradle.lockfile'
@@ -61,7 +73,24 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          fetch-depth: 0
+      - name: Detect Android changes
+        id: changes
+        shell: bash
+        run: |
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            base="${{ github.event.pull_request.base.sha }}"
+          else
+            base="${{ github.event.before }}"
+          fi
+          if [ -z "$base" ] || ! git cat-file -e "$base^{commit}" 2>/dev/null || ! git diff --quiet "$base" "$GITHUB_SHA" -- tsuyomi-android .github/workflows/android-quality.yml; then
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+          fi
       - name: Install API 29 emulator image
+        if: steps.changes.outputs.changed == 'true'
         run: |
           export ANDROID_AVD_HOME="$RUNNER_TEMP/tsuyomi-avd"
           mkdir -p "$ANDROID_AVD_HOME"
@@ -69,11 +98,13 @@ jobs:
           echo no | "$ANDROID_HOME/cmdline-tools/latest/bin/avdmanager" create avd --force --name tsuyomi-ci-api29 --package "system-images;android-29;default;x86_64" --device pixel_2
           "$ANDROID_HOME/emulator/emulator" -list-avds
       - name: Enable KVM
+        if: steps.changes.outputs.changed == 'true'
         run: |
           echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
           sudo udevadm control --reload-rules
           sudo udevadm trigger --name-match=kvm
       - name: Start emulator
+        if: steps.changes.outputs.changed == 'true'
         run: |
           export ANDROID_AVD_HOME="$RUNNER_TEMP/tsuyomi-avd"
           ADB="$ANDROID_HOME/platform-tools/adb"
@@ -101,6 +132,7 @@ jobs:
           "$ADB" shell settings put global transition_animation_scale 0
           "$ADB" shell settings put global animator_duration_scale 0
       - name: Run API 29 instrumentation
+        if: steps.changes.outputs.changed == 'true'
         run: >-
           ./gradlew --no-daemon --console=plain --dependency-verification strict
           :feature:settings:connectedDebugAndroidTest

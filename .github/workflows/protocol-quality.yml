@@ -5,14 +5,8 @@ name: protocol-quality
 
 on:
   pull_request:
-    paths:
-      - 'tsuyomi-protocol/**'
-      - '.github/workflows/protocol-quality.yml'
   push:
     branches: [main]
-    paths:
-      - 'tsuyomi-protocol/**'
-      - '.github/workflows/protocol-quality.yml'
 
 permissions:
   contents: read
@@ -28,9 +22,28 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          fetch-depth: 0
+      - name: Detect protocol changes
+        id: changes
+        shell: bash
+        run: |
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            base="${{ github.event.pull_request.base.sha }}"
+          else
+            base="${{ github.event.before }}"
+          fi
+          if [ -z "$base" ] || ! git cat-file -e "$base^{commit}" 2>/dev/null || ! git diff --quiet "$base" "$GITHUB_SHA" -- tsuyomi-protocol .github/workflows/protocol-quality.yml; then
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+          fi
       - name: Install dependencies
+        if: steps.changes.outputs.changed == 'true'
         run: npm ci
       - name: Conformance tests
+        if: steps.changes.outputs.changed == 'true'
         run: npm test
       - name: Lockfile is stable
+        if: steps.changes.outputs.changed == 'true'
         run: git diff --exit-code -- package-lock.json

@@ -5,14 +5,8 @@ name: extensions-quality
 
 on:
   pull_request:
-    paths:
-      - 'tsuyomi-extensions/**'
-      - '.github/workflows/extensions-quality.yml'
   push:
     branches: [main]
-    paths:
-      - 'tsuyomi-extensions/**'
-      - '.github/workflows/extensions-quality.yml'
 
 permissions:
   contents: read
@@ -28,5 +22,22 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          fetch-depth: 0
+      - name: Detect extension changes
+        id: changes
+        shell: bash
+        run: |
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            base="${{ github.event.pull_request.base.sha }}"
+          else
+            base="${{ github.event.before }}"
+          fi
+          if [ -z "$base" ] || ! git cat-file -e "$base^{commit}" 2>/dev/null || ! git diff --quiet "$base" "$GITHUB_SHA" -- tsuyomi-extensions .github/workflows/extensions-quality.yml; then
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+          fi
       - name: Documentation baseline
+        if: steps.changes.outputs.changed == 'true'
         run: test -f docs/DEVELOPMENT.md && test -f docs/WENKU8_ACCEPTANCE.md
