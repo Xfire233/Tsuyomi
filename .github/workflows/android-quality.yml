@@ -58,13 +58,12 @@ jobs:
   android-api29-instrumentation:
     runs-on: ubuntu-latest
     timeout-minutes: 35
-    env:
-      ANDROID_AVD_HOME: ${{ runner.temp }}/tsuyomi-avd
     steps:
       - name: Checkout
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
       - name: Install API 29 emulator image
         run: |
+          export ANDROID_AVD_HOME="$RUNNER_TEMP/tsuyomi-avd"
           mkdir -p "$ANDROID_AVD_HOME"
           "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "platform-tools" "emulator" "system-images;android-29;default;x86_64"
           echo no | "$ANDROID_HOME/cmdline-tools/latest/bin/avdmanager" create avd --force --name tsuyomi-ci-api29 --package "system-images;android-29;default;x86_64" --device pixel_2
@@ -76,6 +75,7 @@ jobs:
           sudo udevadm trigger --name-match=kvm
       - name: Start emulator
         run: |
+          export ANDROID_AVD_HOME="$RUNNER_TEMP/tsuyomi-avd"
           ADB="$ANDROID_HOME/platform-tools/adb"
           "$ANDROID_HOME/emulator/emulator" -avd tsuyomi-ci-api29 -no-window -no-audio -no-boot-anim -no-snapshot -gpu swiftshader_indirect > "$RUNNER_TEMP/emulator.log" 2>&1 &
           emulator_pid=$!
