@@ -22,7 +22,7 @@ defaults:
     working-directory: tsuyomi-protocol
 
 jobs:
-  verify:
+  protocol-conformance:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:

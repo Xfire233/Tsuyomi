@@ -22,7 +22,7 @@ defaults:
     working-directory: tsuyomi-android
 
 jobs:
-  verify:
+  android-build-test-lint-goldens:
     runs-on: ubuntu-latest
     timeout-minutes: 45
     steps:
@@ -55,7 +55,7 @@ jobs:
           ./gradlew --no-daemon --console=plain --write-locks :app:assembleDebug
           git diff --exit-code -- '**/*gradle.lockfile'
 
-  api29-instrumentation:
+  android-api29-instrumentation:
     runs-on: ubuntu-latest
     timeout-minutes: 35
     steps:
