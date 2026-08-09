@@ -5,7 +5,7 @@
 
 ## 交付结论
 
-Gate 2 交付了签名 Wenku8 只读垂直切片，并在最终 PR head `8af6d44839be57080f9fc5c59c088da73e09436d` 通过全部 required checks。后续 Gate 不得把“功能实现完成”视为交付；只有计划、独立审阅、可回退实现、分层验收证据和受保护合并门禁都闭合，才算完成。
+Gate 2 交付了签名 Wenku8 只读垂直切片；真正执行 required jobs 的 hosted-admission head `6544cf49ea340eed8940d12f1a3a14ba47c8d9d5` 通过全部检查。后续 Gate 不得把“功能实现完成”或只显示绿色的 check 视为交付；只有计划、独立审阅、实质步骤证据、可回退实现、分层验收和受保护合并门禁都闭合，才算完成。
 
 ## Gate 2 复盘
 
@@ -15,6 +15,7 @@ Gate 2 交付了签名 Wenku8 只读垂直切片，并在最终 PR head `8af6d44
 | Cookie capability 只表达声明，未覆盖三条数据路径 | WebView handoff、请求发送和响应存储的策略没有同源建模 | cookie mode 与 origin 同时在 import、request、`Set-Cookie` store 强制 | capability 审查必须列举 create/import、read/send、write/store、delete 四条路径 |
 | QuickJS timeout/cancel/OOM 后，以及 Activity recreate 后可能留存可用 runtime | cancellation 指向可变 handle；来源 client 没有 Compose-owner disposal | per-operation cancellation target；terminal context discard；`SourceFlowController.close()` 与 generation-safe late-open cleanup | 每个 executor/native resource 都必须声明 owner、close 时机、late completion 和下一 operation 隔离测试 |
 | 资源限制扩大没有成为用户可见权限变化；extensions CI 未运行真实 fixture proof | 审批只比较 capability 名称；CI 只检查静态存在 | 六项上限进入审批/fingerprint；CI 执行 locked install、tests、双重打包、checksum、clean diff | 任意安全、成本、配额或网络放宽都视为 capability escalation；required CI 必须执行产物而不是检查文档 |
+| Android/protocol required checks 显示 success，但实质 build/test/instrumentation/conformance 全部 skipped | workflow 的默认 `working-directory` 改变了 `git diff -- pathspec` 的相对根；审阅只看 check conclusion，没有查看 job steps | 所有 change detection 使用 `git -C "$GITHUB_WORKSPACE"`；重跑后修复真实暴露的 verification metadata、lock state 和 lint finding | required check 准入必须同时验证 conclusion、目标 head、关键 step 非 skipped 和实际运行时长/日志；组件 pathspec 永远从仓库根解析 |
 | AVD 的 `challenge` WebView 显示 `ERR_CACHE_MISS` | debug source transport 只 mock HXP host HTTP；受控 WebView 按签名 manifest 直接加载真实 `https://www.wenku8.net`，不复用 fixture/cache | 明确它是网络不可达/缓存未命中的 WebView 页面，不是 source cache 或 Cookie handoff 成功；没有真实 Cookie 时必须取消，不得点“已完成” | 验收矩阵必须分开记录 fixture-host 请求、真实 WebView 网络和手动验证 cookie handoff；错误页不构成 verification 成功证据 |
 
 `ERR_CACHE_MISS` 在本次离线或受限 AVD 的 debug fixture 场景中符合实现边界：`Gate2SourceGateway` 不接管 `WebView.loadUrl()`，因此它无法渲染 `challenge.html` fixture。它不是安全绕过，也不表示 Host network cache 有缺陷；但它只证明受控 WebView 的失败路径，不能证明真实 Wenku8 验证可完成。真实账号、验证码和 Cookie 均不得输入该 debug AVD。

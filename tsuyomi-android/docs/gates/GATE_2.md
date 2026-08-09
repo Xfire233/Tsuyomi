@@ -9,8 +9,8 @@
 - Implementation: **COMPLETE**
 - Local verification: **PASS**
 - Adviser remediation: **PASS** — final independent review approved all seven remediations; no blocking findings.
-- Hosted implementation verification: **PASS** — [PR #1](https://github.com/Xfire233/Tsuyomi/pull/1) required checks succeeded for remediation head `b9f526ef7c6752023b7e1bb6976f851594c6cb36`.
-- Hosted required checks: `protocol-conformance`, `extensions-baseline`, `android-build-test-lint-goldens`, `android-api29-instrumentation`, and `repository-policy` were all successful for that remediation head; protected-branch approval remains a separate GitHub requirement.
+- Hosted implementation verification: **PASS** — [PR #1](https://github.com/Xfire233/Tsuyomi/pull/1) 实际执行 required jobs 的 hosted-admission head 为 `6544cf49ea340eed8940d12f1a3a14ba47c8d9d5`。
+- Hosted required checks: `protocol-conformance`、`extensions-baseline`、`android-build-test-lint-goldens`、`android-api29-instrumentation`、`repository-policy` 均在该 head 成功；Android build/lint/tests/goldens、lock rewrite 和 API 29 instrumentation steps 均实际执行而非 path-filter skip。
 - Branch: `feature/gate-2-wenku8-read-slice`
 - Outcome: a locally imported, test-publisher-signed Wenku8 `.hxp` completes the read-only path through semantic progress restoration.
 
@@ -64,6 +64,7 @@ Gate 2 stops at progress. Library organization, rating/tags, transfer export/imp
 9. Root REUSE 3.3 compliance passed for 395 files. Root and Android artifact policies passed for 405 and 324 candidate files respectively.
 10. Anonymous live Wenku8 homepage and search probes returned HTTP 403/login gating on 2026-08-09. This is recorded as best-effort live-site behavior; sanitized fixtures remain the acceptance authority and no automated verification bypass was attempted.
 11. Adviser remediation preserves the signed-central-directory executable entry, enforces signed Cookie mode/origins for WebView and transport, discards terminally failed QuickJS contexts, binds cancellation to one operation, closes source clients on Compose-owner disposal, and makes resource-limit increases approval-bound. The focused Android/API 29 run passed QuickJS runtime (5), app (3), and WebView (3) instrumentation tests plus debug assembly; the extension fixture run passed 6/6 tests, two deterministic rebuilds, and the committed checksum.
+12. 最终 Adviser 发现 Android/protocol change detection 在组件 `working-directory` 下使用了错误的相对 pathspec，导致早期 hosted success 实为实质步骤 skip。检测改为 `git -C "$GITHUB_WORKSPACE"` 后，真实 CI 又暴露并修复 JUnit/Compose module verification metadata、缺失的 `androidApis` lock state，以及未 `remember` 的 Navigation back-stack entry。`6544cf49ea340eed8940d12f1a3a14ba47c8d9d5` 随后完成五项 required checks，API job step 证明确实安装/启动 API 29 emulator 并运行 instrumentation。
 
 Gate 2 的交付复盘、challenge WebView 的证据边界和未来 Gate 的 Planner/Designer/Adviser/人工合并流程见 [GATE_2_RETROSPECTIVE.md](../process/GATE_2_RETROSPECTIVE.md)。
 
