@@ -169,7 +169,9 @@ private fun TsuyomiApp(
         -> true
         else -> false
     }
-    val sourceFlowOwner = if (ownsSourceFlow) navController.getBackStackEntry(Routes.Browse) else null
+    val sourceFlowOwner = remember(currentEntry) {
+        if (ownsSourceFlow) navController.getBackStackEntry(Routes.Browse) else null
+    }
     val sourceFlow = remember(sourceFlowOwner) {
         SourceFlowController(
             context.applicationContext,
