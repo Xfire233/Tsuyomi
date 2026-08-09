@@ -8,9 +8,9 @@
 - Scope: **FROZEN**
 - Implementation: **COMPLETE**
 - Local verification: **PASS**
-- Adviser remediation: **PASS — final independent review pending**
-- Hosted pull request: **PENDING RE-RUN** — [PR #1](https://github.com/Xfire233/Tsuyomi/pull/1); the recorded pass applies only to pre-remediation head `44b59a7be68da84bfd03dd28427592b5aad494c4`.
-- Hosted required checks: **PENDING RE-RUN** after the remediation commit is pushed. The prior head passed `protocol-conformance`, `extensions-baseline`, `android-build-test-lint-goldens`, `android-api29-instrumentation`, and `repository-policy`.
+- Adviser remediation: **PASS** — final independent review approved all seven remediations; no blocking findings.
+- Hosted implementation verification: **PASS** — [PR #1](https://github.com/Xfire233/Tsuyomi/pull/1) required checks succeeded for remediation head `b9f526ef7c6752023b7e1bb6976f851594c6cb36`.
+- Hosted required checks: `protocol-conformance`, `extensions-baseline`, `android-build-test-lint-goldens`, `android-api29-instrumentation`, and `repository-policy` were all successful for that remediation head; protected-branch approval remains a separate GitHub requirement.
 - Branch: `feature/gate-2-wenku8-read-slice`
 - Outcome: a locally imported, test-publisher-signed Wenku8 `.hxp` completes the read-only path through semantic progress restoration.
 
