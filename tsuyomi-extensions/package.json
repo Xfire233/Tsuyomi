@@ -1,0 +1,14 @@
+{
+  "name": "@tsuyomi/extensions",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "package:fixture": "npm run build && node tools/build-fixture.mjs",
+    "test": "npm run build && node --test test/*.test.mjs"
+  },
+  "devDependencies": {
+    "typescript": "7.0.2"
+  }
+}

@@ -39,7 +39,7 @@
         "contentDigest": { "$ref": "#/$defs/sha256" },
         "files": {
           "type": "object",
-          "minProperties": 2,
+          "minProperties": 1,
           "additionalProperties": { "$ref": "#/$defs/sha256" }
         }
       }

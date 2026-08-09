@@ -171,6 +171,12 @@ test('HXP package policy conformance covers grants, revocation, rotation, and ro
   }
 });
 
+test('HXP integrity excludes the signed manifest to avoid a self-referential digest', async () => {
+  const manifest = await loadJson('../fixtures/hxp/valid-minimal-manifest.json');
+  assert.equal(Object.hasOwn(manifest.integrity.files, 'manifest.json'), false);
+  assert.ok(Object.hasOwn(manifest.integrity.files, manifest.entry));
+});
+
 test('reader document and semantic locator schemas accept their fixtures', async () => {
   const ajv = createAjv();
   for (const [schemaPath, fixturePath] of [
