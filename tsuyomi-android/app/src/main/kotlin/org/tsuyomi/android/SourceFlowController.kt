@@ -8,6 +8,7 @@ import android.content.Context
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
+import java.io.Closeable
 import java.time.Instant
 import org.tsuyomi.core.database.LibraryBook
 import org.tsuyomi.core.database.ReadingProgress
@@ -30,9 +31,12 @@ class SourceFlowController(
     private val context: Context,
     private val library: RoomLibraryRepository,
     private val snapshotStore: SourceFlowSnapshotStore,
-) {
+) : Closeable {
+    private val clientLock = Any()
     private var client: SourceExtensionClient? = null
     private var activePackage: VerifiedHxpPackage? = null
+    private var openGeneration = 0L
+    private var closed = false
 
     var query: String by mutableStateOf("")
     var searchState: SearchResultState by mutableStateOf(SearchResultState.Idle)
@@ -58,11 +62,31 @@ class SourceFlowController(
         private set
 
     suspend fun open(packageInfo: VerifiedHxpPackage) {
-        if (activePackage?.packageSha256 == packageInfo.packageSha256 && client != null) return
-        client?.close()
-        val gateway = Gate2SourceGateway.create(context, packageInfo)
-        client = SourceExtensionClient.open(packageInfo, gateway)
-        activePackage = packageInfo
+        val (previousClient, operationGeneration) = synchronized(clientLock) {
+            checkOpen()
+            if (activePackage?.packageSha256 == packageInfo.packageSha256 && client != null) return
+            openGeneration += 1
+            val previous = client
+            client = null
+            activePackage = null
+            previous to openGeneration
+        }
+        previousClient?.close()
+
+        val openedClient = SourceExtensionClient.open(packageInfo, Gate2SourceGateway.create(context, packageInfo))
+        val retained = synchronized(clientLock) {
+            if (closed || openGeneration != operationGeneration) {
+                false
+            } else {
+                client = openedClient
+                activePackage = packageInfo
+                true
+            }
+        }
+        if (!retained) {
+            openedClient.close()
+            synchronized(clientLock) { checkOpen() }
+        }
         searchState = SearchResultState.Idle
     }
 
@@ -71,10 +95,11 @@ class SourceFlowController(
     }
 
     suspend fun reopenWithStoredCredentials() {
-        val packageInfo = activePackage ?: return
-        client?.close()
-        client = null
-        activePackage = null
+        val packageInfo = synchronized(clientLock) {
+            checkOpen()
+            activePackage
+        } ?: return
+        closeActiveClient()
         open(packageInfo)
     }
 
@@ -97,7 +122,7 @@ class SourceFlowController(
     }
 
     suspend fun search(offlineOnly: Boolean = false) {
-        val source = client ?: return setSearchFailure(SourceErrorCode.EXTENSION_RUNTIME_FAILURE, "source-not-open")
+        val source = requireClientOrNull() ?: return setSearchFailure(SourceErrorCode.EXTENSION_RUNTIME_FAILURE, "source-not-open")
         if (query.isBlank()) return
         searchState = SearchResultState.Loading
         searchState = try {
@@ -176,7 +201,44 @@ class SourceFlowController(
         restorationPrecision = precision
     }
 
-    private fun requireClient(): SourceExtensionClient = checkNotNull(client) { "Source is not open" }
+    private fun requireClient(): SourceExtensionClient = synchronized(clientLock) {
+        checkOpen()
+        checkNotNull(client) { "Source is not open" }
+    }
+
+    private fun requireClientOrNull(): SourceExtensionClient? = synchronized(clientLock) {
+        checkOpen()
+        client
+    }
+
+    private fun closeActiveClient() {
+        val activeClient = synchronized(clientLock) {
+            checkOpen()
+            openGeneration += 1
+            val previous = client
+            client = null
+            activePackage = null
+            previous
+        }
+        activeClient?.close()
+    }
+
+    override fun close() {
+        val activeClient = synchronized(clientLock) {
+            if (closed) return
+            closed = true
+            openGeneration += 1
+            val previous = client
+            client = null
+            activePackage = null
+            previous
+        }
+        activeClient?.close()
+    }
+
+    private fun checkOpen() {
+        check(!closed) { "Source flow is closed" }
+    }
 
     private fun setSearchFailure(code: SourceErrorCode, safeId: String) {
         searchState = SearchResultState.Failure(

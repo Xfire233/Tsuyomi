@@ -18,6 +18,8 @@ import org.tsuyomi.core.files.StorageQuota
 import org.tsuyomi.core.files.StorageRoot
 import org.tsuyomi.core.files.StorageRoots
 import org.tsuyomi.feature.browse.BrowseInstallFailure
+import org.tsuyomi.feature.browse.BrowseResourceLimit
+import org.tsuyomi.feature.browse.BrowseResourceLimitIncrease
 import org.tsuyomi.feature.browse.BrowseUiState
 import org.tsuyomi.source.extensionmanager.ExtensionInstallApproval
 import org.tsuyomi.source.extensionmanager.ExtensionInstallException
@@ -27,6 +29,7 @@ import org.tsuyomi.source.extensionmanager.HxpVerificationException
 import org.tsuyomi.source.extensionmanager.InstalledExtensionStore
 import org.tsuyomi.source.extensionmanager.PreparedExtensionInstall
 import org.tsuyomi.source.extensionmanager.VerifiedHxpPackage
+import org.tsuyomi.source.extensionmanager.ResourceLimit
 
 /** App-owned coordinator: the picker grants transient read access; only verified archives become durable. */
 class SourceInstallController(context: Context) {
@@ -81,6 +84,13 @@ class SourceInstallController(context: Context) {
                 version = result.candidate.manifest.version.original,
                 publisherFingerprint = result.candidate.publisherFingerprint,
                 capabilities = result.addedCapabilities,
+                resourceLimitIncreases = result.resourceLimitIncreases.map { increase ->
+                    BrowseResourceLimitIncrease(
+                        limit = increase.limit.toBrowseResourceLimit(),
+                        activeValue = increase.activeValue,
+                        candidateValue = increase.candidateValue,
+                    )
+                },
                 isDowngrade = result.isDowngrade,
             )
         } catch (_: HxpVerificationException) {
@@ -151,4 +161,13 @@ class SourceInstallController(context: Context) {
     private companion object {
         const val MAX_ARCHIVE_BYTES = 16L * 1024 * 1024
     }
+}
+
+private fun ResourceLimit.toBrowseResourceLimit(): BrowseResourceLimit = when (this) {
+    ResourceLimit.MAX_EXECUTION_WALL_TIME_MS -> BrowseResourceLimit.MAX_EXECUTION_WALL_TIME_MS
+    ResourceLimit.MAX_MEMORY_BYTES -> BrowseResourceLimit.MAX_MEMORY_BYTES
+    ResourceLimit.STORAGE_QUOTA_BYTES -> BrowseResourceLimit.STORAGE_QUOTA_BYTES
+    ResourceLimit.NETWORK_CONCURRENT_REQUESTS -> BrowseResourceLimit.NETWORK_CONCURRENT_REQUESTS
+    ResourceLimit.NETWORK_REQUEST_TIMEOUT_MS -> BrowseResourceLimit.NETWORK_REQUEST_TIMEOUT_MS
+    ResourceLimit.NETWORK_RESPONSE_BYTES -> BrowseResourceLimit.NETWORK_RESPONSE_BYTES
 }

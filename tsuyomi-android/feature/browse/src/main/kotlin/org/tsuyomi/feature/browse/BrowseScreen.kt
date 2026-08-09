@@ -39,6 +39,7 @@ sealed interface BrowseUiState {
         val version: String,
         val publisherFingerprint: String,
         val capabilities: List<String>,
+        val resourceLimitIncreases: List<BrowseResourceLimitIncrease>,
         val isDowngrade: Boolean,
     ) : BrowseUiState
     data class Installed(val sourceName: String, val version: String) : BrowseUiState
@@ -185,11 +186,18 @@ private fun SourceApprovalScreen(
         Text(text = stringResource(R.string.browse_approval_identity, state.sourceId, state.version))
         Text(text = stringResource(R.string.browse_approval_publisher, state.publisherFingerprint))
         HorizontalDivider()
-        Text(text = stringResource(R.string.browse_approval_capabilities))
-        if (state.capabilities.isEmpty()) {
-            Text(text = stringResource(R.string.browse_approval_no_new_capabilities))
-        } else {
+        if (state.capabilities.isNotEmpty()) {
+            Text(text = stringResource(R.string.browse_approval_capabilities))
             state.capabilities.forEach { capability -> Text(text = "• $capability") }
+        }
+        if (state.resourceLimitIncreases.isNotEmpty()) {
+            Text(text = stringResource(R.string.browse_approval_resource_limits))
+            state.resourceLimitIncreases.forEach { increase ->
+                Text(text = "• ${resourceLimitIncreaseLabel(increase)}")
+            }
+        }
+        if (state.capabilities.isEmpty() && state.resourceLimitIncreases.isEmpty()) {
+            Text(text = stringResource(R.string.browse_approval_no_new_grants))
         }
         if (state.isDowngrade) {
             CheckboxRow(
@@ -213,6 +221,35 @@ private fun SourceApprovalScreen(
         )
     }
 }
+
+enum class BrowseResourceLimit {
+    MAX_EXECUTION_WALL_TIME_MS,
+    MAX_MEMORY_BYTES,
+    STORAGE_QUOTA_BYTES,
+    NETWORK_CONCURRENT_REQUESTS,
+    NETWORK_REQUEST_TIMEOUT_MS,
+    NETWORK_RESPONSE_BYTES,
+}
+
+data class BrowseResourceLimitIncrease(
+    val limit: BrowseResourceLimit,
+    val activeValue: Long,
+    val candidateValue: Long,
+)
+
+@Composable
+private fun resourceLimitIncreaseLabel(increase: BrowseResourceLimitIncrease): String = stringResource(
+    when (increase.limit) {
+        BrowseResourceLimit.MAX_EXECUTION_WALL_TIME_MS -> R.string.browse_approval_limit_execution_wall_time
+        BrowseResourceLimit.MAX_MEMORY_BYTES -> R.string.browse_approval_limit_memory
+        BrowseResourceLimit.STORAGE_QUOTA_BYTES -> R.string.browse_approval_limit_storage
+        BrowseResourceLimit.NETWORK_CONCURRENT_REQUESTS -> R.string.browse_approval_limit_concurrent_requests
+        BrowseResourceLimit.NETWORK_REQUEST_TIMEOUT_MS -> R.string.browse_approval_limit_request_timeout
+        BrowseResourceLimit.NETWORK_RESPONSE_BYTES -> R.string.browse_approval_limit_response_bytes
+    },
+    increase.activeValue,
+    increase.candidateValue,
+)
 
 @Composable
 private fun CheckboxRow(checked: Boolean, onCheckedChange: (Boolean) -> Unit, label: String) {

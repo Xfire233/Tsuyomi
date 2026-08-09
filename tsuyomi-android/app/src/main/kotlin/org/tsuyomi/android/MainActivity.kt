@@ -19,6 +19,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.getValue
@@ -146,13 +147,6 @@ private fun TsuyomiApp(
     val scope = rememberCoroutineScope()
     val sourceInstaller = remember { SourceInstallController(context.applicationContext) }
     val application = context.applicationContext as TsuyomiApplication
-    val sourceFlow = remember {
-        SourceFlowController(
-            context.applicationContext,
-            application.libraryRepository,
-            SourceFlowSnapshotStore(application.preferencesDataStore),
-        )
-    }
     val extensionPicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         uri?.let { document -> scope.launch { sourceInstaller.prepare(document, context.contentResolver) } }
     }
@@ -164,6 +158,27 @@ private fun TsuyomiApp(
         Routes.Display, Routes.About -> Routes.More
         Routes.Search, Routes.Detail, Routes.Directory, Routes.Reader, Routes.Verification -> Routes.Browse
         else -> currentRoute
+    }
+    val ownsSourceFlow = when (currentRoute) {
+        Routes.Browse,
+        Routes.Search,
+        Routes.Detail,
+        Routes.Directory,
+        Routes.Reader,
+        Routes.Verification,
+        -> true
+        else -> false
+    }
+    val sourceFlowOwner = if (ownsSourceFlow) navController.getBackStackEntry(Routes.Browse) else null
+    val sourceFlow = remember(sourceFlowOwner) {
+        SourceFlowController(
+            context.applicationContext,
+            application.libraryRepository,
+            SourceFlowSnapshotStore(application.preferencesDataStore),
+        )
+    }
+    DisposableEffect(sourceFlow) {
+        onDispose(sourceFlow::close)
     }
     LaunchedEffect(sourceInstaller.activePackage, currentRoute) {
         val packageInfo = sourceInstaller.activePackage ?: return@LaunchedEffect

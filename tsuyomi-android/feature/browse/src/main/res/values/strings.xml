@@ -11,8 +11,15 @@
     <string name="browse_approval_title">安装“%1$s”</string>
     <string name="browse_approval_identity">来源：%1$s · 版本：%2$s</string>
     <string name="browse_approval_publisher">签名发布者指纹：%1$s</string>
-    <string name="browse_approval_capabilities">此版本新增权限</string>
-    <string name="browse_approval_no_new_capabilities">没有新增权限。</string>
+    <string name="browse_approval_capabilities">新增权限</string>
+    <string name="browse_approval_resource_limits">资源上限放宽</string>
+    <string name="browse_approval_no_new_grants">没有新增权限或资源上限。</string>
+    <string name="browse_approval_limit_execution_wall_time">最大执行时间：%1$d 毫秒 → %2$d 毫秒</string>
+    <string name="browse_approval_limit_memory">最大内存：%1$d 字节 → %2$d 字节</string>
+    <string name="browse_approval_limit_storage">存储配额：%1$d 字节 → %2$d 字节</string>
+    <string name="browse_approval_limit_concurrent_requests">最大并发请求数：%1$d → %2$d</string>
+    <string name="browse_approval_limit_request_timeout">请求超时：%1$d 毫秒 → %2$d 毫秒</string>
+    <string name="browse_approval_limit_response_bytes">最大响应大小：%1$d 字节 → %2$d 字节</string>
     <string name="browse_approval_downgrade">我确认安装较低版本，并接受其可能不兼容现有数据。</string>
     <string name="browse_approval_install_action">确认安装</string>
     <string name="browse_cancel_action">取消</string>
