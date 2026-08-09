@@ -303,10 +303,10 @@ Every transition and cleanup action is conditional on the same session ID and pl
 
 ### `feature:browse` remote-library controls
 
-- Add `browse/source/{sourceId}/remote-library`, entered from an eligible installed source and as the controlled-login return target. Route arguments contain only stable source ID.
+- Add `browse/source/{sourceId}/remote-library`, entered through `远程收藏与同步` on the Browse-root verified installed-source card and as the controlled-login return target. The entry is hidden unless `remoteLibrary.read` is currently granted. Route arguments contain only stable source ID.
 - Show signed capability/grant status, credential-ready state, one explicit `导入远程收藏` action, and the default-off `新加入书架时同步到网站` switch only when `add` is granted. Enabling requires a confirmation naming the source, website effect and local-only removal behavior.
 - The post-login prompt text is `已完成来源登录。是否导入该来源的远程收藏？`, with `导入收藏` and `暂不导入` actions; it has no preselected writeback state. Add writeback confirmation states `新加入书架时将同步到网站；移出书架不会删除网站收藏。` with explicit enable/cancel actions. Dialog/action containers honor safe-drawing insets; TalkBack focus enters the prompt/status text and each state change announces through a live region.
-- The first credential transition from absent to user-confirmed present offers the import question once. Dismiss/failure never starts a hidden retry and the manual action remains available.
+- Credential-absent, `SESSION_REQUIRED` and `VERIFICATION_REQUIRED` states provide explicit `前往登录验证`. Its handler opens the existing declared-origin controlled WebView with this route as return target; cancellation returns here unchanged and starts neither pull nor writeback. The first credential transition from absent to user-confirmed present then offers the import question once; dismiss/failure never starts a hidden retry and the manual action remains available.
 - Pull states are idle, confirmation, loading with page/count text, success summary, empty, cancellation, login required, verification required, incomplete/limit/source-changed failure and retry. E-ink uses immediate textual state replacement and no indeterminate animated spinner.
 - Reconciliation state appears on source and local book details as `已同步`, `网站未确认`, `同步失败` or `等待确认同步`, with explicit `重试同步` only for a still-valid add capability. No color-only status is used.
 
@@ -373,15 +373,14 @@ Every transition and cleanup action is conditional on the same session ID and pl
 
 | Entry/action | Visibility and effect |
 |---|---|
-| 加入书架 | Visible on a valid source detail when not locally added. Normally writes only host library state; if the user separately enabled a current signed `add` grant, the explicit label becomes `加入书架并同步到网站` and shows persistent reconciliation state. |
-| 移出书架 | Visible for a library entry; confirmation explains preserved progress/history. |
+| 移出书架 | Visible for a library entry; confirmation explains preserved progress/history and `不会删除网站收藏`. |
 | 打开来源/目录 | Visible when a verified source is available. Dormant state shows `此书的来源未安装。在「浏览」中安装对应签名来源后，书籍与进度自动恢复，无需重新添加。` plus a real `前往浏览` handler; the library does not offer source installation. |
 | 评分/本地标签 | Visible for a library entry; durable local-only write with failure recovery. |
 | 手动集合编辑 | Visible for manual collections only. System collections cannot be renamed/reordered/deleted; smart collections reject direct membership writes. |
 | 智能规则编辑 | Visible for supported rule version; unknown versions are read-only disabled with explanation. |
+| 远程收藏与同步 | Visible on the Browse-root installed-source card only when that source is verified and has granted `remoteLibrary.read`; otherwise hidden. If `read` remains valid but previously enabled `add` becomes invalid, the writeback switch remains disabled with `来源更新后需要重新授权`; it may recover only after renewed capability approval and credential readiness. |
 | 来源订阅刷新 | Hidden in Gate 3 because no discovery consumer exists. Imported drafts are visible read-only only to explain retained blocked data. |
-| 导入远程收藏 | Visible only for an installed, verified source with a granted `remoteLibrary.read` capability. After a user-mediated credential handoff, the first result is an explicit import question; later pulls remain explicit and merge-only. |
-| 新加入书架时同步到网站 | Visible only in that source’s remote-library controls when separately granted `add` and credential-ready. Default off; confirmation names the source and website effect. Local removal remains local-only. |
+| 新加入书架时同步到网站 | Visible only in that source’s remote-library controls when separately granted `add` and credential-ready. Default off; confirmation names the source and website effect. When a prior add grant becomes invalid while read remains valid, retain the switch disabled with `来源更新后需要重新授权`, rather than silently hiding the user’s prior choice. Local removal remains local-only. |
 | 导出 Tsuyomi 数据 | Visible because a real bounded preflight, SAF writer and result/error state exist. If canonical bytes exceed 32 MiB, `transfer-too-large` is shown before any destination is opened. |
 | 导入 Tsuyomi/Hikari | Visible because bounded parser, dry-run, confirmation, durable cross-store journal, recovery gate and report exist. |
 | 导入 legacy credential | Never offered. A warning states that sign-in data was deliberately skipped. |
@@ -530,8 +529,7 @@ Rollback is forward-only whenever an import journal or remote reconciliation may
 | Owner | Required states | Windows | Profiles / font scale | Fixture rationale |
 |---|---|---|---|---|
 | `feature:library` | empty, populated system/manual/smart, dormant, search/no-result, multi-select, collection manager, smart editor, local book active/dormant/rating-tags/multi-membership/progress and reconciliation state | full shell set: 360×800, 800×360, 360×320, 599×800, 600×800, 840×900; state-heavy variants at 360×800, 600×800 and 840×900 | standard-light, standard-dark, E-ink at 1.0; populated/local-book/manager at 1.3 and 2.0 on 360×800 and 600×800 | All breakpoints prove pane cutover; representative windows carry the combinatorial business states. |
-| `feature:book` | source detail not-in-library, added-local-only, added-with-pending/confirmed/unresolved/failed add, remove-confirmation and write failure | 360×800, 600×800, 840×900 | standard-light and E-ink at 1.0; reconciliation states at 2.0 on 360×800 | This module owns book-level direct local/add reconciliation actions. |
-| `feature:browse` | remote capability/grant absent, credential absent, first-login import question, pull confirmation/loading/empty/success/cancel/failure, writeback confirmation, add reconciliation/retry | 360×800, 600×800, 840×900 | standard-light, standard-dark, E-ink at 1.0; question/failure/retry at 2.0 on 360×800 | Source capability is explicit, no state is color-only, and compact text must not clip. |
+| `feature:browse` | remote capability/grant absent, credential absent, first-login import question, pull confirmation/loading/empty/success/cancel/failure, writeback confirmation, grant-invalid disabled explanation, add reconciliation/retry | 360×800, 600×800, 840×900 | standard-light, standard-dark, E-ink at 1.0; question/loading/writeback confirmation/failure/retry at 2.0 on 360×800 | Source capability is explicit, no state is color-only, and compact text must not clip. |
 | `feature:backup` import | parsing, fatal, dry-run warnings/conflicts, confirmation, applying, startup recovery resume, pre-`ROOM_APPLIED` retry/abort failure, post-`ROOM_APPLIED` retry-only failure, aborted-cleanup retry, success and persisted report | 360×800, 600×800, 840×900 | standard-light, standard-dark, E-ink at 1.0; dry-run/report/recovery/cleanup failures at 2.0 on 360×800 | Compact, pane boundary and expanded report density are the material layouts; pre-navigation recovery remains feature-owned content while aborted cleanup remains non-blocking under `more/data`. |
 | `feature:backup` export | empty/nonempty snapshot, `transfer-too-large`, writing, success with digest/summary, provider failure | 360×800, 600×800, 840×900 | standard-light and E-ink at 1.0; `transfer-too-large` and provider failure at 2.0 on 360×800 | Export has distinct progress/success/failure semantics and cannot borrow import references. |
 | `feature:settings` | portable reader settings under Standard; values retained but effectively overridden under E-ink; write failure | 360×800, 600×800, 840×900 | standard-light, standard-dark, E-ink at 1.0, 1.3 and 2.0 | Reuses the established settings and retained-value pattern at compact/pane/expanded widths. |
@@ -595,6 +593,7 @@ The following decisions are user-confirmed. D1 and D11–D14 expand the previous
 - Adviser-amendment UX review input: `a96c5b6e2a52836e94cb74cd8ea0a90f50a49b0b`; findings B1 pre-navigation recovery states/actions/accessibility and B2 `transfer-too-large` golden ownership.
 - Closure review input: `0ad64ce75a755444743282dacafe4eed2fb7255d`; final verdict **APPROVE**; B1–B2 **CLOSED**; Blocking findings: none.
 - Recovery-lifecycle UX review input: `a919bc54a73f830fc8ffbae137f7c90ab116ea9e`; final verdict **APPROVE**; Blocking findings: none.
+- D1 remote-favourites Designer review input: `d8415a29ddf3745d5a2b8fda9e0be9461d8bd015`; verdict **APPROVE_WITH_CHANGES**. R1 remote-library entry, grant-invalid explanation and manual login/verification action binding is pending closure.
 - The D1/D11–D14 remote-favourites scope amendment invalidates the preceding Designer approval; renewed review is pending.
 
 ### Adviser
