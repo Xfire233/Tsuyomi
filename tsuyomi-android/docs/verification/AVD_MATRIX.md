@@ -38,6 +38,8 @@ E-ink AVD 只证明 Android/Compose profile 行为，不证明实体面板 ghost
 6. route、滚动、焦点和可恢复失败状态；
 7. 无裁切、重叠、不可达操作、残留焦点或无效选项。
 
+8. 受控 WebView：分别记录 fixture host transport、真实 declared-origin 页面、blocked navigation、完成/取消 cookie handoff。WebView 的 `ERR_CACHE_MISS`、offline、403 或错误页只证明失败恢复，不得当作手动验证成功。
+
 执行前记录：
 
 ```text

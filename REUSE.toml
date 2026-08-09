@@ -20,6 +20,7 @@ path = [
   "tsuyomi-android/docs/process/QUALITY_GATES.md",
   "tsuyomi-android/docs/verification/AVD_MATRIX.md",
   "tsuyomi-android/docs/process/REPOSITORY_GOVERNANCE.md",
+  "tsuyomi-android/docs/process/GATE_2_RETROSPECTIVE.md",
   "tsuyomi-extensions/package.json",
   "tsuyomi-extensions/package-lock.json",
   "tsuyomi-extensions/tsconfig.json",

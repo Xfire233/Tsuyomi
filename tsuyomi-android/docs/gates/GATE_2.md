@@ -65,6 +65,8 @@ Gate 2 stops at progress. Library organization, rating/tags, transfer export/imp
 10. Anonymous live Wenku8 homepage and search probes returned HTTP 403/login gating on 2026-08-09. This is recorded as best-effort live-site behavior; sanitized fixtures remain the acceptance authority and no automated verification bypass was attempted.
 11. Adviser remediation preserves the signed-central-directory executable entry, enforces signed Cookie mode/origins for WebView and transport, discards terminally failed QuickJS contexts, binds cancellation to one operation, closes source clients on Compose-owner disposal, and makes resource-limit increases approval-bound. The focused Android/API 29 run passed QuickJS runtime (5), app (3), and WebView (3) instrumentation tests plus debug assembly; the extension fixture run passed 6/6 tests, two deterministic rebuilds, and the committed checksum.
 
+Gate 2 的交付复盘、challenge WebView 的证据边界和未来 Gate 的 Planner/Designer/Adviser/人工合并流程见 [GATE_2_RETROSPECTIVE.md](../process/GATE_2_RETROSPECTIVE.md)。
+
 ## Evidence boundary
 
 A physical E-ink device is required before making a release-readiness claim about ghosting, vendor refresh behavior, image quality or hardware key interaction. Emulator evidence may prove Android/Compose profile behavior but cannot substitute for panel evidence.
