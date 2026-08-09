@@ -165,12 +165,21 @@ enum class HxpVerificationError {
 
 class HxpVerificationException(val error: HxpVerificationError) : Exception(error.name)
 
-data class VerifiedHxpPackage(
+class VerifiedHxpPackage(
     val manifest: HxpManifest,
     val packageSha256: String,
     val publisherFingerprint: String,
-    val archiveBytes: ByteArray,
-)
+    archiveBytes: ByteArray,
+    entryModuleBytes: ByteArray,
+) {
+    private val storedArchiveBytes = archiveBytes.copyOf()
+    private val storedEntryModuleBytes = entryModuleBytes.copyOf()
+
+    val archiveBytes: ByteArray
+        get() = storedArchiveBytes.copyOf()
+
+    fun readVerifiedEntryModule(): ByteArray = storedEntryModuleBytes.copyOf()
+}
 
 internal fun sha256(bytes: ByteArray): String = MessageDigest.getInstance("SHA-256")
     .digest(bytes)

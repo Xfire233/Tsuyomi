@@ -57,6 +57,12 @@ enum class NetworkCacheMode(val wireValue: String) {
     OFFLINE_ONLY("offline-only"),
 }
 
+/** Cookie capability modes declared by a verified source manifest. */
+enum class SourceCookieMode {
+    NONE,
+    SOURCE_SCOPED,
+}
+
 data class SourceNetworkRequest(
     val url: String,
     val method: NetworkMethod,

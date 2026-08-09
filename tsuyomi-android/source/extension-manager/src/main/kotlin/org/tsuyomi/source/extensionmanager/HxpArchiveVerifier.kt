@@ -11,6 +11,7 @@ import java.util.zip.ZipEntry
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import org.apache.commons.compress.archivers.zip.ZipFile
+import org.apache.commons.compress.utils.SeekableInMemoryByteChannel
 import org.bouncycastle.crypto.params.Ed25519PublicKeyParameters
 import org.bouncycastle.crypto.signers.Ed25519Signer
 import org.erdtman.jcs.JsonCanonicalizer
@@ -26,15 +27,16 @@ class HxpArchiveVerifier(
         }
         val archiveBytes = runCatching { file.readBytes() }
             .getOrElse { fail(HxpVerificationError.INVALID_ARCHIVE_ENTRY) }
-        return runCatching { verifyArchive(file, archiveBytes) }
+        if (archiveBytes.size.toLong() !in 1..limits.maxArchiveBytes) fail(HxpVerificationError.ARCHIVE_TOO_LARGE)
+        return runCatching { verifyArchive(archiveBytes) }
             .getOrElse { error ->
                 if (error is HxpVerificationException) throw error
                 fail(HxpVerificationError.INVALID_ARCHIVE_ENTRY)
             }
     }
 
-    private fun verifyArchive(file: File, archiveBytes: ByteArray): VerifiedHxpPackage {
-        ZipFile.builder().setFile(file).get().use { zip ->
+    private fun verifyArchive(archiveBytes: ByteArray): VerifiedHxpPackage {
+        ZipFile.builder().setSeekableByteChannel(SeekableInMemoryByteChannel(archiveBytes)).get().use { zip ->
             val entries = mutableMapOf<String, ByteArray>()
             var totalUncompressed = 0L
             val enumeration = zip.entries
@@ -112,6 +114,7 @@ class HxpArchiveVerifier(
                 packageSha256 = sha256(archiveBytes),
                 publisherFingerprint = publisher.fingerprint,
                 archiveBytes = archiveBytes,
+                entryModuleBytes = entries.getValue(manifest.entry),
             )
         }
     }

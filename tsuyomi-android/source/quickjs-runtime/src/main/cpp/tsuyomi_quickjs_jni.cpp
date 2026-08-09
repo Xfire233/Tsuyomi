@@ -11,6 +11,8 @@
 #include <memory>
 #include <string>
 #include <vector>
+#include <mutex>
+#include <unordered_map>
 
 extern "C" {
 #include "quickjs.h"
@@ -24,6 +26,10 @@ struct RuntimeHandle {
     std::atomic<bool> cancelled{false};
     std::atomic<int64_t> deadlineNanos{0};
 };
+
+std::mutex handlesMutex;
+std::unordered_map<jlong, std::shared_ptr<RuntimeHandle>> handles;
+std::atomic<jlong> nextHandle{1};
 
 int64_t monotonicNanos() {
     return std::chrono::duration_cast<std::chrono::nanoseconds>(
@@ -93,8 +99,26 @@ bool runPendingJobs(JNIEnv* env, RuntimeHandle* handle) {
     return true;
 }
 
-RuntimeHandle* fromHandle(jlong value) {
-    return reinterpret_cast<RuntimeHandle*>(static_cast<intptr_t>(value));
+std::shared_ptr<RuntimeHandle> fromHandle(jlong value) {
+    std::lock_guard<std::mutex> lock(handlesMutex);
+    const auto handle = handles.find(value);
+    return handle == handles.end() ? nullptr : handle->second;
+}
+
+jlong registerHandle(std::shared_ptr<RuntimeHandle> handle) {
+    const jlong identifier = nextHandle.fetch_add(1, std::memory_order_relaxed);
+    std::lock_guard<std::mutex> lock(handlesMutex);
+    handles.emplace(identifier, std::move(handle));
+    return identifier;
+}
+
+std::shared_ptr<RuntimeHandle> takeHandle(jlong value) {
+    std::lock_guard<std::mutex> lock(handlesMutex);
+    const auto handle = handles.find(value);
+    if (handle == handles.end()) return nullptr;
+    auto result = std::move(handle->second);
+    handles.erase(handle);
+    return result;
 }
 
 }  // namespace
@@ -105,7 +129,7 @@ Java_org_tsuyomi_source_quickjsruntime_QuickJsNative_create(
     jclass,
     jlong memoryLimitBytes
 ) {
-    auto handle = std::make_unique<RuntimeHandle>();
+    auto handle = std::make_shared<RuntimeHandle>();
     handle->runtime = JS_NewRuntime();
     if (handle->runtime == nullptr) {
         throwStable(env, "NATIVE_UNAVAILABLE");
@@ -119,7 +143,7 @@ Java_org_tsuyomi_source_quickjsruntime_QuickJsNative_create(
         throwStable(env, "MEMORY_LIMIT");
         return 0;
     }
-    return static_cast<jlong>(reinterpret_cast<intptr_t>(handle.release()));
+    return registerHandle(std::move(handle));
 }
 
 extern "C" JNIEXPORT void JNICALL
@@ -131,7 +155,7 @@ Java_org_tsuyomi_source_quickjsruntime_QuickJsNative_evaluateModule(
     jbyteArray filenameValue,
     jint wallTimeMillis
 ) {
-    auto* handle = fromHandle(nativeHandle);
+    auto handle = fromHandle(nativeHandle);
     if (handle == nullptr || handle->context == nullptr) {
         throwStable(env, "CLOSED");
         return;
@@ -140,7 +164,7 @@ Java_org_tsuyomi_source_quickjsruntime_QuickJsNative_evaluateModule(
     auto filename = byteArray(env, filenameValue);
     source.push_back(0);
     filename.push_back(0);
-    beginOperation(handle, wallTimeMillis);
+    beginOperation(handle.get(), wallTimeMillis);
     JSValue result = JS_Eval(
         handle->context,
         reinterpret_cast<const char*>(source.data()),
@@ -150,11 +174,11 @@ Java_org_tsuyomi_source_quickjsruntime_QuickJsNative_evaluateModule(
     );
     if (JS_IsException(result)) {
         JS_FreeValue(handle->context, result);
-        throwJsFailure(env, handle);
+        throwJsFailure(env, handle.get());
         return;
     }
     JS_FreeValue(handle->context, result);
-    runPendingJobs(env, handle);
+    runPendingJobs(env, handle.get());
 }
 
 extern "C" JNIEXPORT jbyteArray JNICALL
@@ -166,7 +190,7 @@ Java_org_tsuyomi_source_quickjsruntime_QuickJsNative_callJson(
     jbyteArray argumentsJsonValue,
     jint wallTimeMillis
 ) {
-    auto* handle = fromHandle(nativeHandle);
+    auto handle = fromHandle(nativeHandle);
     if (handle == nullptr || handle->context == nullptr) {
         throwStable(env, "CLOSED");
         return nullptr;
@@ -175,7 +199,7 @@ Java_org_tsuyomi_source_quickjsruntime_QuickJsNative_callJson(
     auto argumentsJson = byteArray(env, argumentsJsonValue);
     functionName.push_back(0);
     argumentsJson.push_back(0);
-    beginOperation(handle, wallTimeMillis);
+    beginOperation(handle.get(), wallTimeMillis);
 
     JSValue global = JS_GetGlobalObject(handle->context);
     JSValue extension = JS_GetPropertyStr(handle->context, global, "tsuyomiExtension");
@@ -239,10 +263,10 @@ Java_org_tsuyomi_source_quickjsruntime_QuickJsNative_callJson(
     JS_FreeValue(handle->context, global);
     if (JS_IsException(result)) {
         JS_FreeValue(handle->context, result);
-        throwJsFailure(env, handle);
+        throwJsFailure(env, handle.get());
         return nullptr;
     }
-    if (!runPendingJobs(env, handle)) {
+    if (!runPendingJobs(env, handle.get())) {
         JS_FreeValue(handle->context, result);
         return nullptr;
     }
@@ -251,7 +275,7 @@ Java_org_tsuyomi_source_quickjsruntime_QuickJsNative_callJson(
     JS_FreeValue(handle->context, result);
     if (JS_IsException(json) || JS_IsUndefined(json)) {
         JS_FreeValue(handle->context, json);
-        if (JS_HasException(handle->context)) throwJsFailure(env, handle);
+        if (JS_HasException(handle->context)) throwJsFailure(env, handle.get());
         else throwStable(env, "NON_JSON_RESULT");
         return nullptr;
     }
@@ -259,7 +283,7 @@ Java_org_tsuyomi_source_quickjsruntime_QuickJsNative_callJson(
     const char* output = JS_ToCStringLen(handle->context, &outputSize, json);
     JS_FreeValue(handle->context, json);
     if (output == nullptr) {
-        throwJsFailure(env, handle);
+        throwJsFailure(env, handle.get());
         return nullptr;
     }
     jbyteArray response = toByteArray(env, output, outputSize);
@@ -273,7 +297,7 @@ Java_org_tsuyomi_source_quickjsruntime_QuickJsNative_cancel(
     jclass,
     jlong nativeHandle
 ) {
-    auto* handle = fromHandle(nativeHandle);
+    auto handle = fromHandle(nativeHandle);
     if (handle != nullptr) handle->cancelled.store(true, std::memory_order_relaxed);
 }
 
@@ -283,10 +307,15 @@ Java_org_tsuyomi_source_quickjsruntime_QuickJsNative_close(
     jclass,
     jlong nativeHandle
 ) {
-    auto* handle = fromHandle(nativeHandle);
+    auto handle = takeHandle(nativeHandle);
     if (handle == nullptr) return;
     handle->cancelled.store(true, std::memory_order_relaxed);
-    if (handle->context != nullptr) JS_FreeContext(handle->context);
-    if (handle->runtime != nullptr) JS_FreeRuntime(handle->runtime);
-    delete handle;
+    if (handle->context != nullptr) {
+        JS_FreeContext(handle->context);
+        handle->context = nullptr;
+    }
+    if (handle->runtime != nullptr) {
+        JS_FreeRuntime(handle->runtime);
+        handle->runtime = nullptr;
+    }
 }

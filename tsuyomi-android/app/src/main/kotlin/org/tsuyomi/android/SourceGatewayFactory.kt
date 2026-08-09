@@ -14,6 +14,7 @@ import org.tsuyomi.core.files.StorageRoots
 import org.tsuyomi.core.network.HostNetworkGateway
 import org.tsuyomi.core.network.FileHostNetworkCache
 import org.tsuyomi.core.network.SourceNetworkGrant
+import org.tsuyomi.shared.sourcecontract.SourceCookieMode
 import org.tsuyomi.core.security.SourceCredentialPartition
 import org.tsuyomi.core.security.SourceCredentialStore
 import org.tsuyomi.source.extensionmanager.VerifiedHxpPackage
@@ -29,6 +30,12 @@ internal object SourceGatewayFactory {
             sourceId = manifest.sourceId.value,
             extensionVersion = manifest.version.original,
             origins = manifest.capabilities.network.origins,
+            cookieMode = if (manifest.capabilities.cookies.sourceScoped) {
+                SourceCookieMode.SOURCE_SCOPED
+            } else {
+                SourceCookieMode.NONE
+            },
+            cookieOrigins = manifest.capabilities.cookies.origins,
             maxConcurrentRequests = manifest.capabilities.network.maxConcurrentRequests,
             requestTimeoutMs = manifest.capabilities.network.requestTimeoutMs,
             maxResponseBytes = manifest.capabilities.network.maxResponseBytes,
