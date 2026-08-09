@@ -71,6 +71,7 @@ install app
 - Import `tsuyomi-transfer` v1 through `ActivityResultContracts.OpenDocument`.
 - Read at most 32 MiB of UTF-8 JSON before parsing.
 - Produce a deterministic export for the same database snapshot and injected `createdAt`: stable library ordering, stable shelf ordering, stable set ordering and stable JSON serialization.
+- Before launching `CreateDocument`, canonical serialization writes to a bounded app-cache preflight file capped at exactly 32 MiB plus one sentinel byte. At 32 MiB the export may proceed; at 32 MiB + 1 the app deletes the preflight file, does not launch or mutate a SAF destination, and shows the accessible safe failure `transfer-too-large` with the 32 MiB limit. It never truncates, silently omits records or splits one v1 document. The remediation text tells the user that this format cannot represent the current snapshot within its bound and that they may reduce library/shelf/local-tag data before retrying.
 - Exclude credentials, publisher trust, capability grants, HXP files, WebView state, Cookie state, cache, local search/browsing history, E-ink/device classification and arbitrary extension state.
 - Preserve stable identity, metadata, rating/tags, manual shelves, semantic progress and the portable reader preference subset defined by transfer v1.
 - Keep smart rules and subscription drafts Android-local because transfer v1 explicitly excludes them.
@@ -166,7 +167,8 @@ source_availability(sourceId, verifiedVersion, available)
 book_search_projection / FTS(sourceId, remoteBookId, normalized title/authors/tags)
 search_history(sourceId, normalizedQuery, lastUsedAt)
 browsing_history(sourceId, remoteBookId, lastViewedAt)
-import_session(id, kind, sourceCreatedAt, status, startedAt, completedAt?, summaryJson)
+import_session(id, kind, planDigest, normalizedPlanPath, status,
+               sourceCreatedAt, startedAt, completedAt?, preferencePatchJson, summaryJson)
 import_warning(sessionId, ordinal, safeCode, safeRecordRef?, fieldName?)
 ```
 
@@ -183,8 +185,49 @@ Invariants:
 - Remote and local tags remain separate; only local tags are editable.
 - Dormancy is derived from the verified `source_availability` projection, not cached in each book.
 - Search SQL uses only enumerated fragments plus bound parameters through a reviewed query compiler; user text is never concatenated.
-- Transfer/Hikari apply occurs off-main in one Room transaction after a complete dry-run plan. Cancellation is accepted before confirmation; process death or database failure rolls the transaction back.
+- Confirmed Transfer/Hikari import uses the durable cross-store journal defined below. Room mutations remain one off-main transaction, but Gate 3 does not claim that Room and DataStore share a physical transaction.
 - Import warning/audit records are redacted and contain no credential values or raw invalid payload fragments.
+
+#### Room 1 → 2 backfill
+
+- Before adding the `collection_book → library_entry` invariant, migrate every distinct schema-1 `manual_collection_memberships` book into `library_entry`.
+- The backfilled `library_entry.addedAt` is the existing schema-1 `book.addedAt`; no migration-time clock is used.
+- Existing collection IDs, parent links and collection `displayOrder` are preserved exactly.
+- Schema 1 has no per-membership order. Version 2 derives deterministic `collection_book.displayOrder` within each collection by `book.addedAt`, then `sourceId`, then `remoteBookId`; `collection_book.addedAt` also uses `book.addedAt`.
+- A schema-1 book that has progress or browse metadata but no manual membership remains a non-library book row. This preserves D1: historical browsing/reading alone does not silently become library membership.
+- The migration fixture contains nested collections, multiple memberships, books with and without progress and one nonmember progress row; all keys, hierarchy, collection order, backfilled membership and semantic progress are asserted after migration.
+
+#### Normative system collection and progress queries
+
+`valid progress` means a `ReadingProgress` row accepted by the existing semantic-locator validator: timestamp valid, numeric fallbacks within range and at least one semantic/fallback location. Invalid rows are treated as absent and are replaced only by a later valid write/import.
+
+| Definition | Exact membership | Default order |
+|---|---|---|
+| 全部书籍 | Every `library_entry`. | `addedAt DESC`, then `(sourceId, remoteBookId) ASC`. |
+| 继续阅读 | `library_entry` with valid progress and `bookProgress IS NULL OR bookProgress < 1.0`. Locator-only progress is reading, not unstarted. | progress `updatedAt DESC`, then stable identity. |
+| 最近阅读 | `library_entry` with any valid progress, including finished. No hidden time cutoff; explicit pagination bounds the view. | progress `updatedAt DESC`, then stable identity. |
+| 有未读更新 | `library_entry` whose canonical book has `hasUnreadUpdate = true`. | `metadataUpdatedAt DESC`, then stable identity. |
+| 来源未安装 | `library_entry` with no currently available verified `source_availability` row. | `addedAt DESC`, then stable identity. |
+| `ProgressIn(unstarted)` | No valid progress row. | Query predicate only. |
+| `ProgressIn(reading)` | Valid progress and `bookProgress IS NULL OR bookProgress < 1.0`. A valid `bookProgress = 0` is reading because a semantic capture exists. | Query predicate only. |
+| `ProgressIn(finished)` | Valid progress and `bookProgress = 1.0`. | Query predicate only. |
+
+All user-selected sorts use stable identity as the final ascending tie-breaker. Title/author/source sorts use normalized ascending text with null/blank last. Added, last-read and metadata-update sorts are descending with null last. Rating is descending with unrated last. Progress uses `bookProgress` descending; locator-only valid progress sorts after numeric progress and before unstarted, then `updatedAt DESC`. Time-window smart predicates are inclusive at `>= injectedClock.now - duration`; missing timestamps do not match. Rating ranges are inclusive. Unknown status matches only an explicit `unknown` predicate.
+
+Equal timestamps never use percentage, display order or import order as a conflict tie-breaker.
+
+#### Durable cross-store import journal
+
+Room and DataStore cannot share one physical transaction. Gate 3 therefore guarantees crash-atomic **user exposure** with an application-owned recovery gate and an idempotent journal:
+
+1. After confirmation, serialize the already redacted/normalized `ImportPlan` to a bounded `NO_BACKUP` journal file, compute SHA-256, then insert an `import_session(PREPARED)` row containing that digest, path and the non-secret preference patch. A file without a session is an orphan and is deleted; a session never references a file whose digest was not verified.
+2. While a session is `PREPARED`, the import route remains in applying/recovery state. One Room transaction rechecks the digest, applies all canonical database records idempotently and changes the session to `ROOM_APPLIED`.
+3. DataStore then applies portable reader preferences and the Hikari global display preference in one `updateData`, together with `lastAppliedImportDigest`.
+4. Room changes the session to `PREFERENCES_APPLIED`; journal cleanup and the final `COMPLETED` transition are idempotent. If final Room bookkeeping fails after DataStore succeeds, `lastAppliedImportDigest` proves that preference replay is unnecessary and recovery completes the remaining Room transition.
+5. Application startup runs `ImportRecoveryCoordinator` before exposing the normal navigation graph. `PREPARED` resumes Room apply; `ROOM_APPLIED` replays the DataStore patch; `PREFERENCES_APPLIED` finalizes cleanup. Normal library/reader/settings content is never exposed while a confirmed session is incomplete.
+6. Before Room reaches `ROOM_APPLIED`, a persistent apply failure may abort: Room canonical mutation has rolled back, the journal is deleted and no preference patch was applied. After `ROOM_APPLIED`, the operation is non-cancellable and only idempotent retry is offered until preferences/finalization complete.
+
+Every transition is conditional on the same session ID and plan digest. Selecting another file cannot retarget a confirmed session. The normalized journal contains no credentials, raw rejected fields, Cookie values, cache or WebView state and is deleted after completion/abort.
 
 ### Source availability
 
@@ -230,9 +273,9 @@ Invariants:
   - `从 Hikari Novel 导入`;
   - `查看最近导入报告` when a redacted report exists.
 - Use Android SAF only. No broad storage permission.
-- Import flow: select → bounded read → parse/plan → redacted warnings/conflicts → explicit confirm → non-cancellable atomic apply → persistent result.
-- Cancel before confirm performs no mutation. File-picker cancel returns unchanged state without an error.
-- Export flow computes a stable snapshot and digest before opening/writing the destination result. Provider/write failure is reported; no success is claimed before close succeeds.
+- Import flow: select → bounded read → parse/plan → redacted warnings/conflicts → explicit confirm → durable journal/recovery gate → persistent result.
+- Cancel before confirm performs no mutation. After Room reaches `ROOM_APPLIED`, the confirmed import is non-cancellable and offers idempotent retry until DataStore/finalization completes. File-picker cancel returns unchanged state without an error.
+- Export flow computes a stable snapshot, canonical preflight bytes and digest before launching the destination picker. `transfer-too-large` never launches `CreateDocument`; provider/write failure is reported; no success is claimed before close succeeds.
 
 ### `app`
 
@@ -287,8 +330,8 @@ Invariants:
 | 手动集合编辑 | Visible for manual collections only. System collections cannot be renamed/reordered/deleted; smart collections reject direct membership writes. |
 | 智能规则编辑 | Visible for supported rule version; unknown versions are read-only disabled with explanation. |
 | 来源订阅刷新 | Hidden in Gate 3 because no discovery consumer exists. Imported drafts are visible read-only only to explain retained blocked data. |
-| 导出 Tsuyomi 数据 | Visible because a real SAF writer and result/error state exist. |
-| 导入 Tsuyomi/Hikari | Visible because bounded parser, dry-run, confirmation, atomic apply and report exist. |
+| 导出 Tsuyomi 数据 | Visible because a real bounded preflight, SAF writer and result/error state exist. If canonical bytes exceed 32 MiB, `transfer-too-large` is shown before any destination is opened. |
+| 导入 Tsuyomi/Hikari | Visible because bounded parser, dry-run, confirmation, durable cross-store journal, recovery gate and report exist. |
 | 导入 legacy credential | Never offered. A warning states that sign-in data was deliberately skipped. |
 | E-ink list pagination | Visible only when `effectiveProfile == EINK`; Standard uses its normal list behavior. |
 | Reader theme incompatible with E-ink | Retained and shown disabled with the existing Standard-restoration explanation pattern. |
@@ -335,7 +378,7 @@ Required states:
 - Collections: system/manual/smart/disabled subscription draft, create/edit validation, cycle/depth rejection, delete/reparent confirmation.
 - Local book: active source, dormant source, rating/tags, multiple collection membership, progress summary.
 - Import: picker cancelled, parsing, fatal document error, dry-run with warnings/conflicts, confirmation, applying, success, storage/database failure, persisted report.
-- Export: empty/nonempty snapshot, destination cancelled, writing, success with digest, provider failure.
+- Export: empty/nonempty snapshot, canonical preflight, `transfer-too-large`, destination cancelled, writing, success with digest, provider failure.
 - Reader preferences: Standard effective values and E-ink retained-but-overridden explanation.
 - Smart rule editor: empty group, valid nested groups, per-predicate parameter validation, AST-bound rejection (depth, nodes, term length and terms per predicate) with the offending node identified in text, unsupported rule version as read-only disabled state, save failure with the draft retained, and back navigation with unsaved-changes confirmation.
 
@@ -355,9 +398,9 @@ Window/profile matrix:
 - SAF read/write runs on IO dispatchers. Picker launch/result remains Activity-owned; pure parser and import planner remain lifecycle-independent.
 - A stale parse result is generation-bound to the selected URI/document digest. Selecting another file, cancelling or destroying the owner invalidates the earlier plan.
 - Only the currently confirmed plan digest may apply. Apply cannot accidentally target a later selection.
-- Import transaction, export snapshot and smart query work have explicit owners and cancellation boundaries. Late results cannot replace a newer query/selection.
+- Import journal/recovery, export snapshot and smart query work have explicit owners and cancellation boundaries. Late results cannot replace a newer query/selection; confirmed incomplete import sessions are recovered before the normal navigation graph is exposed.
 - Database migration 1→2 has no destructive fallback. Migration failure aborts app database open and is covered by schema migration instrumentation.
-- Export holds at most the protocol size bound plus bounded serializer overhead. No unbounded warning list, AST, search term or UI result list.
+- Export preflight uses a capped temporary cache file and retains at most 32 MiB plus one sentinel byte. Exact-bound output may proceed; over-bound output is deleted before SAF launch. No unbounded warning list, AST, search term or UI result list is retained.
 - Import/export never touches source credential storage, HXP trust/grants or cache roots.
 
 ## Implementation sequence and revert boundaries
@@ -397,13 +440,13 @@ Rollback order is the reverse. Reverting UI/feature commits first leaves schema 
 
 ### Room / Android unit and instrumentation
 
-- Schema 1→2 migration preserves every Gate 2 book and semantic progress row.
-- Explicit library membership does not appear from browse metadata alone.
-- Manual membership uniqueness, order repair, delete/reparent and concurrent cycle assignment.
-- System collection query semantics and source dormancy transitions.
+- Schema 1→2 migration preserves every Gate 2 book and semantic progress row; nested collection rows/order remain exact, schema-1 manual members receive deterministic `library_entry`/membership backfill, and nonmember progress rows remain non-library.
+- Explicit library membership does not appear from browse metadata or progress alone.
+- Manual membership uniqueness, deterministic backfill/order repair, delete/reparent and concurrent cycle assignment.
+- Normative system/progress query fixtures cover absent/invalid/locator-only/0/fractional/1 progress, equal timestamps, null metadata, dormant transitions, time boundaries and stable sort ties.
 - FTS/local search escaping and parameter binding; malicious terms cannot alter query shape.
 - Smart query invalidation after rating/tag/progress/source-availability changes.
-- Atomic import: cancel/fatal/DB failure produce no partial user mutation.
+- Cross-store import journal fault injection at `PREPARED`, Room commit, DataStore apply, Room finalization and cleanup. Process death/retry never exposes normal app content with an incomplete confirmed session; pre-Room failure can abort with no canonical/preference mutation.
 - Process death/recreate restores selected stable collection/page/report state without serializing whole payloads.
 
 ### Product end-to-end on API 29
@@ -420,11 +463,13 @@ Rollback order is the reverse. Reverting UI/feature commits first leaves schema 
 
 - Picker cancel.
 - Unsupported format/version.
-- 32 MiB + 1 byte input.
+- 32 MiB + 1 byte import.
+- Exact 32 MiB export succeeds preflight; 32 MiB + 1 export reports `transfer-too-large`, does not launch `CreateDocument`, leaves no destination/temp artifact and never claims success.
 - Invalid UTF-8/JSON.
 - Duplicate identity, dangling shelf and parent cycle.
 - Malformed one-record Hikari input with unrelated valid records retained in the dry-run.
 - Stale plan digest after selecting a second file.
+- Process death and injected failure at every import journal transition; startup recovery runs before normal navigation exposure.
 - Destination provider/write failure.
 - Database apply failure/transaction rollback.
 - Dormant source action and later source availability transition.
@@ -457,14 +502,14 @@ No app-module copied UI golden is permitted; production feature composables own 
 |---|---|
 | Browsed books silently become library books | Separate `book` from `library_entry`; regression test browse/read without add. |
 | Legacy secret exposure in reports/logs | Structured warning codes/field names only; fixtures contain sentinel secrets and tests assert absence from output/log-safe models. |
-| Partial import after crash/failure | Complete dry-run then one off-main Room transaction; cancellation before confirmation; failure rollback instrumentation. |
+| Partial import across Room/DataStore or process death | Durable redacted plan journal, digest-bound state machine, Room atomic mutation, DataStore applied-digest marker, startup recovery gate and idempotent transition fault tests. |
 | Stale file plan applied after another selection | URI/document digest + generation bound confirmation token. |
 | Dynamic smart SQL injection | Typed AST, bounded validator, enum-owned SQL fragments and bound args; malicious-term tests. |
 | FTS/projection drift | Same Room transaction updates canonical row and projection; migration/rebuild test. |
 | Source uninstall deletes user state | Availability projection only; uninstall transition tests preserve library/progress/organization. |
 | Imported source causes network/write side effects | Pure planner and database apply have no extension/network dependency; instrumentation asserts zero source transport calls. |
-| Room migration blocks existing Gate 2 users | Exported schema 1 fixture, explicit 1→2 migration, API 29 migration test and no destructive fallback. |
-| Large import causes allocation/ANR | 32 MiB byte bound, item/string/AST/report limits, IO dispatcher, bounded UI summaries. |
+| Room migration blocks or hides existing Gate 2 users | Exported schema-1 fixture; deterministic membership backfill before new FK/query invariants; exact hierarchy/order/book/progress assertions; explicit nonmember-progress behavior; no destructive fallback. |
+| Large import/export causes allocation, unusable self-export or partial SAF output | 32 MiB input bound; item/string/AST/report limits; capped 32 MiB+1 export preflight file; `transfer-too-large` before picker; exact-bound tests and cleanup assertions. |
 | E-ink receives a second business path | Shared ViewModel/query state; only list presentation/paging policy differs. |
 | Portable preference has no consumer | Implement DataStore + reader/settings consumer in the same commit; otherwise omit/hide and fail plan acceptance. |
 | Transfer v1 cannot carry smart rules | Explicitly retain smart rules Android-local; document/report this boundary; no opaque extension field. |
@@ -497,9 +542,10 @@ The plan uses the recommended defaults below. Adviser may require a narrower or 
 
 ### Adviser
 
-- Target plan input: pending plan commit SHA after Designer closure.
-- Verdict: pending.
-- Blocking findings: pending.
+- Initial target plan input: `76ea19042e413f0173f0fb0cd4b8e077d04bf7c2`.
+- Initial verdict: **REQUEST_CHANGES**.
+- Findings: A1 cross-store Room/DataStore crash atomicity; A2 schema-1 manual-membership backfill; A3 normative system/progress query semantics; A4 over-limit export outcome.
+- Closure: changes are incorporated in this amended plan; independent follow-up review is pending.
 
 ## Authorization boundary
 
