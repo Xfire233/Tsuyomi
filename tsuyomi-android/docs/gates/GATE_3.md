@@ -540,6 +540,8 @@ The plan uses the recommended defaults below. Adviser may require a narrower or 
 - Initial verdict: **APPROVE_WITH_CHANGES**.
 - Findings: F1 route/IA binding; F2 reorder, breakpoint and paged-selection behavior; F3 option applicability gaps; F4 dormant prerequisite path; F5 golden fixture ownership; F6 smart-editor state contract.
 - Closure review input: `70da4faa562f7fc0650685b4e3316de7a7f85255`; final verdict **APPROVE**; F1–F6 **CLOSED**; Blocking findings: none.
+- Adviser-amendment UX review input: `a96c5b6e2a52836e94cb74cd8ea0a90f50a49b0b`; findings B1 pre-navigation recovery states/actions/accessibility and B2 `transfer-too-large` golden ownership.
+- Closure review input: `0ad64ce75a755444743282dacafe4eed2fb7255d`; final verdict **APPROVE**; B1–B2 **CLOSED**; Blocking findings: none.
 
 ### Adviser
 
