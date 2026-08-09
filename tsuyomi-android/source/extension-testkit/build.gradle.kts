@@ -11,4 +11,6 @@ android {
 
 dependencies {
     implementation(project(":shared:source-contract"))
+    api(project(":source:extension-manager"))
+    testImplementation(libs.junit)
 }

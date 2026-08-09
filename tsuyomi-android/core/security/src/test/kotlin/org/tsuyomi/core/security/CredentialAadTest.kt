@@ -8,6 +8,7 @@ import java.security.SecureRandom
 import javax.crypto.Cipher
 import javax.crypto.spec.GCMParameterSpec
 import javax.crypto.spec.SecretKeySpec
+import org.tsuyomi.shared.sourcecontract.HttpsOrigin
 import org.junit.Assert.assertArrayEquals
 import org.junit.Test
 
@@ -16,8 +17,8 @@ class CredentialAadTest {
 
     @Test
     fun sourceSwapIsRejectedByAdditionalAuthenticatedData() {
-        val first = SourceCredentialPartition("source.one", HttpsOrigin.parse("https://one.example"))
-        val swapped = SourceCredentialPartition("source.two", HttpsOrigin.parse("https://one.example"))
+        val first = SourceCredentialPartition("source.one", HttpsOrigin("https://one.example"))
+        val swapped = SourceCredentialPartition("source.two", HttpsOrigin("https://one.example"))
         val encrypted = aead.encrypt("token=private".encodeToByteArray(), first.aad())
 
         assertArrayEquals("token=private".encodeToByteArray(), aead.decrypt(encrypted, first.aad()))
@@ -26,8 +27,8 @@ class CredentialAadTest {
 
     @Test
     fun originSwapIsRejectedByAdditionalAuthenticatedData() {
-        val first = SourceCredentialPartition("source.one", HttpsOrigin.parse("https://one.example"))
-        val swapped = SourceCredentialPartition("source.one", HttpsOrigin.parse("https://two.example"))
+        val first = SourceCredentialPartition("source.one", HttpsOrigin("https://one.example"))
+        val swapped = SourceCredentialPartition("source.one", HttpsOrigin("https://two.example"))
         val encrypted = aead.encrypt("token=private".encodeToByteArray(), first.aad())
 
         assertAuthenticationFailure { aead.decrypt(encrypted, swapped.aad()) }

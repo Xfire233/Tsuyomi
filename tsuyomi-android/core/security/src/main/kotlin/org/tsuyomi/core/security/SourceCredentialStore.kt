@@ -48,9 +48,9 @@ class SourceCredentialStore(
         }
     }
 
-    /** Returns null only for a missing partition. Confirmed corrupt records are cleared in-place. */
+    /** Returns the decrypted value together with an opaque revision for credential-bound caches. */
     @Synchronized
-    fun get(partition: SourceCredentialPartition): ByteArray? {
+    fun getSnapshot(partition: SourceCredentialPartition): SourceCredentialSnapshot? {
         val source = fileFor(partition)
         if (!source.exists()) return null
         val encoded = try {
@@ -64,7 +64,7 @@ class SourceCredentialStore(
             invalidate(source)
             throw CredentialStorageException(CredentialStorageError.CORRUPT_OR_UNAUTHENTICATED)
         }
-        return try {
+        val plaintext = try {
             aead.decrypt(AeadCiphertext(record.iv, record.ciphertext), partition.aad())
         } catch (failure: CredentialStorageException) {
             if (failure.error == CredentialStorageError.CORRUPT_OR_UNAUTHENTICATED) {
@@ -72,7 +72,14 @@ class SourceCredentialStore(
             }
             throw failure
         }
+        return SourceCredentialSnapshot(
+            plaintext = plaintext,
+            cachePartitionId = sha256(encoded),
+        )
     }
+
+    /** Returns null only for a missing partition. Confirmed corrupt records are cleared in-place. */
+    fun get(partition: SourceCredentialPartition): ByteArray? = getSnapshot(partition)?.plaintext
 
     /** Deletes exactly one source/origin partition and leaves every other record untouched. */
     @Synchronized
@@ -164,6 +171,15 @@ class SourceCredentialStore(
         const val MAX_RECORD_BYTES = RECORD_HEADER_BYTES + GCM_IV_BYTES + MAX_CIPHERTEXT_BYTES
     }
 }
+
+/**
+ * Decrypted source credentials plus a non-secret revision derived from the randomized encrypted
+ * record. The revision changes on every explicit credential write without revealing cookie bytes.
+ */
+class SourceCredentialSnapshot internal constructor(
+    val plaintext: ByteArray,
+    val cachePartitionId: String,
+)
 
 internal fun SourceCredentialPartition.aad(): ByteArray = ByteArrayOutputStream().use { bytes ->
     DataOutputStream(bytes).use { output ->

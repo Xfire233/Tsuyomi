@@ -47,6 +47,9 @@ FORBIDDEN_SUFFIXES = {
     ".trace",
 }
 
+def is_public_hxp_fixture(path: Path) -> bool:
+    return path.suffix.lower() == ".hxp" and path.parts[:3] == ("tsuyomi-extensions", "fixtures", "wenku8")
+
 result = subprocess.run(
     ["git", "ls-files", "--cached", "--others", "--exclude-standard", "-z"],
     check=True,
@@ -58,7 +61,7 @@ violations = [
     for path in paths
     if any(part in FORBIDDEN_PARTS for part in path.parts)
     or path.name in FORBIDDEN_NAMES
-    or path.suffix.lower() in FORBIDDEN_SUFFIXES
+    or (path.suffix.lower() in FORBIDDEN_SUFFIXES and not is_public_hxp_fixture(path))
     or path.name.endswith(".prompt.md")
     or ".transcript." in path.name
     or (path.name.startswith(".env") and path.name != ".env.example")

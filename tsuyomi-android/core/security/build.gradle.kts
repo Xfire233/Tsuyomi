@@ -8,3 +8,8 @@ plugins {
 android {
     namespace = "org.tsuyomi.core.security"
 }
+
+
+dependencies {
+    implementation(project(":shared:source-contract"))
+}

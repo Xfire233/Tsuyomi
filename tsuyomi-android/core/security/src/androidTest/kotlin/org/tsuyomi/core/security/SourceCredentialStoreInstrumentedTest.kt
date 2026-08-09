@@ -8,11 +8,13 @@ import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import java.nio.charset.StandardCharsets
 import java.security.KeyStore
+import org.tsuyomi.shared.sourcecontract.HttpsOrigin
 import org.junit.After
 import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -20,8 +22,8 @@ import org.junit.runner.RunWith
 @RunWith(AndroidJUnit4::class)
 class SourceCredentialStoreInstrumentedTest {
     private val context = InstrumentationRegistry.getInstrumentation().targetContext
-    private val first = SourceCredentialPartition("fixture.source", HttpsOrigin.parse("https://one.example"))
-    private val second = SourceCredentialPartition("fixture.source", HttpsOrigin.parse("https://two.example"))
+    private val first = SourceCredentialPartition("fixture.source", HttpsOrigin("https://one.example"))
+    private val second = SourceCredentialPartition("fixture.source", HttpsOrigin("https://two.example"))
     private val store = SourceCredentialStore(context)
 
     @After
@@ -97,6 +99,22 @@ class SourceCredentialStoreInstrumentedTest {
             ?: byteArrayOf()
         assertFalse(String(ciphertext, StandardCharsets.ISO_8859_1).contains("session=second-secret"))
     }
+    @Test
+    fun snapshot_cache_partition_is_stable_per_record_and_changes_on_write() {
+        val secret = "session=opaque-secret".toByteArray(StandardCharsets.UTF_8)
+        store.put(first, secret)
+
+        val initial = requireNotNull(store.getSnapshot(first))
+        assertArrayEquals(secret, initial.plaintext)
+        assertEquals(64, initial.cachePartitionId.length)
+        assertFalse(initial.cachePartitionId.contains("opaque-secret"))
+        assertEquals(initial.cachePartitionId, requireNotNull(store.getSnapshot(first)).cachePartitionId)
+
+        store.put(first, secret)
+
+        assertNotEquals(initial.cachePartitionId, requireNotNull(store.getSnapshot(first)).cachePartitionId)
+    }
+
 }
 
     private fun assertStorageFailure(action: () -> Unit): CredentialStorageException = try {
