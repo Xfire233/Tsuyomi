@@ -1,0 +1,174 @@
+/*
+ * SPDX-FileCopyrightText: 2026 Tsuyomi Contributors
+ * SPDX-License-Identifier: Apache-2.0
+ */
+package org.tsuyomi.core.network
+
+import java.net.URI
+import java.nio.charset.Charset
+import kotlinx.coroutines.runBlocking
+import org.junit.Assert.assertEquals
+import org.junit.Test
+import org.tsuyomi.shared.sourcecontract.DecodeMode
+import org.tsuyomi.shared.sourcecontract.HttpsOrigin
+import org.tsuyomi.shared.sourcecontract.NetworkCacheMode
+import org.tsuyomi.shared.sourcecontract.NetworkCacheState
+import org.tsuyomi.shared.sourcecontract.NetworkMethod
+import org.tsuyomi.shared.sourcecontract.SourceNetworkRequest
+
+class HostNetworkGatewayTest {
+    private val grant = SourceNetworkGrant(
+        sourceId = "org.tsuyomi.wenku8",
+        extensionVersion = "0.1.0",
+        origins = setOf(HttpsOrigin("https://www.wenku8.net")),
+        maxConcurrentRequests = 2,
+        requestTimeoutMs = 15_000,
+        maxResponseBytes = 1_024,
+    )
+
+    @Test
+    fun disallowed_origin_and_protected_headers_never_reach_transport() = runBlocking {
+        val transport = RecordingTransport()
+        val gateway = HostNetworkGateway(transport)
+
+        val originFailure = assertHostFailure {
+            gateway.request(grant, request(url = "https://outside.example/chapter"))
+        }
+        assertEquals(HostNetworkError.DISALLOWED_ORIGIN, originFailure.error)
+        val headerFailure = assertHostFailure {
+            gateway.request(grant, request(headers = mapOf("Cookie" to "secret=session")))
+        }
+        assertEquals(HostNetworkError.HEADER_DISALLOWED, headerFailure.error)
+        assertEquals(0, transport.requests.size)
+    }
+
+    @Test
+    fun cache_is_namespaced_by_extension_version_and_offline_returns_stale_marker() = runBlocking {
+        val transport = RecordingTransport()
+        val gateway = HostNetworkGateway(transport)
+        val request = request(cache = NetworkCacheMode.DEFAULT, semanticCacheKey = "detail:1234")
+
+        assertEquals(NetworkCacheState.MISS, gateway.request(grant, request).cacheState)
+        assertEquals(NetworkCacheState.FRESH, gateway.request(grant, request).cacheState)
+        assertEquals(1, transport.requests.size)
+
+        val offline = gateway.request(grant, request.copy(cache = NetworkCacheMode.OFFLINE_ONLY))
+        assertEquals(NetworkCacheState.STALE_OFFLINE, offline.cacheState)
+        assertEquals(1, transport.requests.size)
+
+        val updatedGrant = grant.copy(extensionVersion = "0.1.1")
+        assertEquals(NetworkCacheState.MISS, gateway.request(updatedGrant, request).cacheState)
+        assertEquals(2, transport.requests.size)
+    }
+
+    @Test
+    fun redirect_to_an_undeclared_origin_is_rejected_before_following_it() = runBlocking {
+        val transport = HostHttpTransport { request ->
+            HostHttpResponse(
+                status = 302,
+                finalUrl = request.url,
+                headers = mapOf("location" to "https://outside.example/redirected"),
+                bytes = byteArrayOf(),
+            )
+        }
+
+        val failure = assertHostFailure { HostNetworkGateway(transport).request(grant, request()) }
+
+        assertEquals(HostNetworkError.REDIRECT_DISALLOWED, failure.error)
+    }
+
+    @Test
+    fun host_managed_cookies_are_hidden_and_isolated_by_source_version() = runBlocking {
+        val requests = mutableListOf<HostHttpRequest>()
+        val gateway = HostNetworkGateway(HostHttpTransport { received ->
+            requests += received
+            HostHttpResponse(
+                status = 200,
+                finalUrl = received.url,
+                headers = mapOf("set-cookie" to "session=opaque; Path=/; Secure"),
+                bytes = "fixture".encodeToByteArray(),
+            )
+        })
+
+        val first = gateway.request(grant, request())
+        gateway.request(grant, request())
+        gateway.request(grant.copy(extensionVersion = "0.1.1"), request())
+
+        assertEquals(null, first.headers["set-cookie"])
+        assertEquals("session=opaque", requests[1].headers["cookie"])
+        assertEquals(null, requests[2].headers["cookie"])
+    }
+
+    @Test
+    fun response_limit_and_legacy_decoder_are_host_enforced() = runBlocking {
+        val oversized = HostNetworkGateway(
+            HostHttpTransport {
+                HostHttpResponse(200, URI("https://www.wenku8.net/book/1234.htm"), emptyMap(), ByteArray(1_025))
+            },
+        )
+        val limitFailure = assertHostFailure { oversized.request(grant, request()) }
+        assertEquals(HostNetworkError.RESPONSE_LIMIT, limitFailure.error)
+
+        val gb18030 = "雾港".toByteArray(Charset.forName("GB18030"))
+        val legacy = HostNetworkGateway(
+            HostHttpTransport {
+                HostHttpResponse(200, URI("https://www.wenku8.net/book/1234.htm"), emptyMap(), gb18030)
+            },
+        )
+        assertEquals("雾港", legacy.request(grant, request(decode = DecodeMode.GB18030)).text)
+    }
+
+    @Test
+    fun post_is_never_cached_and_body_is_hard_bounded() = runBlocking {
+        val transport = RecordingTransport()
+        val gateway = HostNetworkGateway(transport)
+        val post = SourceNetworkRequest(
+            url = "https://www.wenku8.net/login",
+            method = NetworkMethod.POST,
+            utf8Body = "a=1",
+            decode = DecodeMode.UTF8,
+            cache = NetworkCacheMode.NETWORK_ONLY,
+        )
+        gateway.request(grant, post)
+        gateway.request(grant, post)
+        assertEquals(2, transport.requests.size)
+        val bodyFailure = assertHostFailure { gateway.request(grant, post.copy(utf8Body = "x".repeat(65 * 1024))) }
+        assertEquals(HostNetworkError.BODY_LIMIT, bodyFailure.error)
+    }
+
+    private fun request(
+        url: String = "https://www.wenku8.net/book/1234.htm",
+        headers: Map<String, String> = emptyMap(),
+        decode: DecodeMode = DecodeMode.UTF8,
+        cache: NetworkCacheMode = NetworkCacheMode.NETWORK_ONLY,
+        semanticCacheKey: String? = null,
+    ) = SourceNetworkRequest(
+        url = url,
+        method = NetworkMethod.GET,
+        headers = headers,
+        decode = decode,
+        cache = cache,
+        semanticCacheKey = semanticCacheKey,
+    )
+
+    private suspend fun assertHostFailure(action: suspend () -> Unit): HostNetworkException = try {
+        action()
+        throw AssertionError("Expected HostNetworkException")
+    } catch (error: HostNetworkException) {
+        error
+    }
+
+    private class RecordingTransport : HostHttpTransport {
+        val requests = mutableListOf<HostHttpRequest>()
+
+        override suspend fun execute(request: HostHttpRequest): HostHttpResponse {
+            requests += request
+            return HostHttpResponse(
+                status = 200,
+                finalUrl = request.url,
+                headers = mapOf("content-type" to "text/html; charset=utf-8", "set-cookie" to "hidden"),
+                bytes = "fixture".encodeToByteArray(),
+            )
+        }
+    }
+}

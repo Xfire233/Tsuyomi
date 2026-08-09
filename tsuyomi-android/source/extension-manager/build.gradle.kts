@@ -14,6 +14,12 @@ dependencies {
     implementation(project(":core:files"))
     implementation(project(":core:network"))
     implementation(project(":core:security"))
-    implementation(project(":shared:source-contract"))
+    api(project(":shared:source-contract"))
+    implementation(project(":shared:model"))
     implementation(project(":source:quickjs-runtime"))
+    implementation(libs.kotlinx.serialization.json)
+    implementation(libs.bouncycastle.provider)
+    implementation(libs.json.canonicalization)
+    implementation(libs.commons.compress)
+    testImplementation(libs.junit)
 }

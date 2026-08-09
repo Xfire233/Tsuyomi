@@ -20,10 +20,21 @@ path = [
   "tsuyomi-android/docs/process/QUALITY_GATES.md",
   "tsuyomi-android/docs/verification/AVD_MATRIX.md",
   "tsuyomi-android/docs/process/REPOSITORY_GOVERNANCE.md",
+  "tsuyomi-extensions/package.json",
+  "tsuyomi-extensions/package-lock.json",
+  "tsuyomi-extensions/tsconfig.json",
+  "tsuyomi-extensions/fixtures/**",
 ]
+
 precedence = "aggregate"
 SPDX-FileCopyrightText = "2026 Tsuyomi Contributors"
 SPDX-License-Identifier = "Apache-2.0"
+
+[[annotations]]
+path = ["tsuyomi-android/source/quickjs-runtime/src/main/cpp/quickjs-ng/**"]
+precedence = "aggregate"
+SPDX-FileCopyrightText = "2017-2026 Fabrice Bellard; 2017-2024 Charlie Gordon; 2023-2026 Ben Noordhuis; 2023-2026 Saúl Ibarra Corretgé"
+SPDX-License-Identifier = "MIT"
 
 [[annotations]]
 path = ["tsuyomi-android/gradle/wrapper/gradle-wrapper.jar"]

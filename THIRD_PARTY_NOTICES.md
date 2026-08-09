@@ -25,6 +25,12 @@ This file records direct runtime/build/test dependencies and the public projects
 | ajv-formats | 3.0.1 | MIT | Protocol format validation |
 | actions/checkout | 4.2.2 (`11bd71901bbe5b1630ceea73d27597364c9af683`) | MIT | GitHub Actions checkout |
 | REUSE Tool | 6.2.0 | GPL-3.0-or-later | Local/CI license validation; not distributed |
+| Kotlinx Serialization JSON | 1.11.0 | Apache-2.0 | HXP manifest parsing |
+| Bouncy Castle Provider | 1.85.2 | MIT | Ed25519 package-signature verification on API 29+ |
+| java-json-canonicalization | 1.1 | Apache-2.0 | RFC 8785 HXP signing canonicalization |
+| Apache Commons Compress | 1.28.0 | Apache-2.0 | Bounded HXP ZIP archive inspection |
+| TypeScript | 7.0.2 | Apache-2.0 | Wenku8 fixture extension build tooling; not shipped |
+| [QuickJS-ng](https://github.com/quickjs-ng/quickjs) | v0.16.1 | MIT | Vendored native JavaScript runtime; source archive SHA-256 `4b3c11f37dab2c58bdeccbaeb23b923fa4a9798a45e50be6af55f3e75b616ea0` |
 
 ## Research and migration references
 
@@ -44,4 +50,4 @@ The projects below informed migration requirements, architecture, or product des
 
 MIT notices must accompany any future copy or substantial portion. Apache-2.0 adoption must retain applicable copyright, patent, trademark, attribution and NOTICE obligations and identify modified files. Direct copying, translation, linking, modification, or derivative use of GPL/AGPL code is prohibited by the current Apache-2.0 project policy unless a prior licensing decision satisfies the applicable copyleft license for the affected work as a whole.
 
-No upstream source file, font, image, site logo, layout, component implementation, or other asset is copied or adapted into the Gate 1 application.
+No upstream site font, image, logo, layout, component implementation, or other site asset is copied or adapted into Tsuyomi. The only vendored upstream source is the MIT-licensed QuickJS-ng runtime identified above; its retained license and provenance are in `tsuyomi-android/source/quickjs-runtime/src/main/cpp/quickjs-ng/`.

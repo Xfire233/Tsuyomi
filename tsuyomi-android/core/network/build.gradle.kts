@@ -11,4 +11,7 @@ android {
 
 dependencies {
     implementation(libs.kotlinx.coroutines.android)
+    implementation(project(":core:files"))
+    implementation(project(":shared:source-contract"))
+    testImplementation(libs.junit)
 }
