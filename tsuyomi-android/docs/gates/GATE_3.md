@@ -601,6 +601,7 @@ The following decisions are user-confirmed. D1 and D11–D14 expand the previous
 - R1 closure input: `8f4929c0e03d801a10ef56e16e0a80b12c5d65f1`; verdict **APPROVE_WITH_CHANGES** because R2 detected accidental deletion of three prior action/golden bindings.
 - R2 closure input: `40ca84f90b9519e9a788021f880a23ef65ec70bd`; final verdict **APPROVE**; R1–R2 **CLOSED**; Blocking findings: none. The renewed Designer review supersedes the invalidated prior approval.
 - P-UX-1/P-UX-2 closure input: `62a33eefb7d46a020fd99b473ecedda5b607ce06`; final verdict **APPROVE**; cancelled golden ownership and rollback disabled-UI wording **CLOSED**. A later protocol-only amendment below supersedes this binding and requires the renewed Designer review.
+- Final renewed review input: `a1624ad7a143ce801298961a548ac4cc562b1274`; final verdict **APPROVE**. Cancelled-state golden ownership and signed pagination cursor presence are **CLOSED**; Blocking findings: none.
 
 ### Adviser
 
@@ -610,7 +611,8 @@ The following decisions are user-confirmed. D1 and D11–D14 expand the previous
 - Final review input: `d8d34ae0ee3f0f1935101308ffef8cba1dcfabac`; final verdict **APPROVE**. All A1–A4 and follow-up findings **CLOSED**; Blocking findings: none.
 - D1/D11–D14 review input: `71e7452ba467175ad5311a2cbbca96159d0f58f5`; verdict **REQUEST_CHANGES**. P1: generic network transport could bypass add capability/token routing, and final remote pull apply was not linearly ordered against source lifecycle. P2: package/delta-based capability fingerprint contradicted preserving-update retention, and `CANCELLED` versus `UNRESOLVED` lacked a transport-accept/UI boundary. No implementation authorization.
 - D1/D11–D14 remediation review input: `62a33eefb7d46a020fd99b473ecedda5b607ce06`; verdict **REQUEST_CHANGES**. Lifecycle/pull linearization, stable capability fingerprint/update retention and cancellation/UI mapping **CLOSED**. P1 remained: request policies constrained names but not values. P2 remained: `FAILED_SAFE` asserted a non-application fact without typed protocol proof. No implementation authorization.
-- The final remediation awaiting renewed independent review constrains every policy parameter to a canonical fixed literal or typed host binding, rejects all extension-chosen/extra/duplicate values natively before transport, and removes `FAILED_SAFE`: every non-confirmed post-accept result is `UNRESOLVED`.
+- Final protocol review input: `77eed05383e6775ad073193e33ea7868e82d0d20`; verdict **REQUEST_CHANGES**. Native fixed-literal/host-binding enforcement and `FAILED_SAFE` removal were accepted; pagination lacked the signed cursor conditional-presence rule and the book golden retained an obsolete failed state. No implementation authorization at this revision.
+- Final closure review input: `a1624ad7a143ce801298961a548ac4cc562b1274`; final verdict **APPROVE**. A1–A4, direct-upgrade/rollback, native effect enforcement, lifecycle/pull linearization, stable grant retention, transport acceptance/UI, result certainty, pagination grammar/fixtures and golden ownership are **CLOSED**. P0/P1/P2: none; Blocking findings: none.
 
 ## Authorization boundary
 
