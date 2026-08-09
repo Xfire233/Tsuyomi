@@ -199,6 +199,30 @@ class HostNetworkGatewayTest {
         assertEquals(HostNetworkError.BODY_LIMIT, bodyFailure.error)
     }
 
+    @Test
+    fun remote_operation_context_rejects_altered_literals_before_transport() = runBlocking {
+        val transport = RecordingTransport()
+        val context = remoteLibraryReadContext(
+            RemoteOperationRequestPolicy(
+                origin = HttpsOrigin("https://www.wenku8.net"),
+                method = NetworkMethod.GET,
+                path = "/remote/shelf",
+                fixedParameters = mapOf("mode" to "list"),
+                cursorParameter = "cursor",
+            ),
+            cursor = null,
+        )
+        val gateway = HostNetworkGateway(transport)
+        val failure = assertHostFailure {
+            gateway.request(grant, request(url = "https://www.wenku8.net/remote/shelf?mode=add"), context)
+        }
+
+        assertEquals(HostNetworkError.INVALID_REQUEST, failure.error)
+        assertEquals(0, transport.requests.size)
+        gateway.request(grant, request(url = "https://www.wenku8.net/remote/shelf?mode=list"), context)
+        assertEquals(1, transport.requests.size)
+    }
+
     private fun request(
         url: String = "https://www.wenku8.net/book/1234.htm",
         headers: Map<String, String> = emptyMap(),
