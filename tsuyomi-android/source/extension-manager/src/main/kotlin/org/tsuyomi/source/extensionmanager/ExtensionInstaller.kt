@@ -37,6 +37,7 @@ class ExtensionInstaller(
             addedCapabilities = addedCapabilities.sorted(),
             resourceLimitIncreases = resourceLimitIncreases,
             capabilityGrantFingerprint = capabilityGrantFingerprint(candidate, addedCapabilities, resourceLimitIncreases),
+            remoteCapabilitySetFingerprint = remoteCapabilitySetFingerprint(candidate.manifest, candidate.publisherFingerprint),
             isDowngrade = active != null && candidate.manifest.version < active.manifest.version,
         )
     }
@@ -130,6 +131,26 @@ class ExtensionInstaller(
         ).filter { it.candidateValue > it.activeValue }
     }
 
+    private fun remoteCapabilitySetFingerprint(manifest: HxpManifest, publisherFingerprint: String): String = sha256(
+        buildString {
+            append("publisher:").append(publisherFingerprint).append('\n')
+            append("source:").append(manifest.sourceId.value).append('\n')
+            manifest.capabilities.network.origins.sortedBy { it.canonical }.forEach { append("network:").append(it.canonical).append('\n') }
+            append("cookies:").append(manifest.capabilities.cookies.sourceScoped).append('\n')
+            manifest.capabilities.cookies.origins.sortedBy { it.canonical }.forEach { append("cookie-origin:").append(it.canonical).append('\n') }
+            append("web-login:").append(manifest.capabilities.webLogin.enabled).append('\n')
+            manifest.capabilities.webLogin.origins.sortedBy { it.canonical }.forEach { append("web-login-origin:").append(it.canonical).append('\n') }
+            append("remote-read:").append(manifest.capabilities.remoteLibrary.read).append('\n')
+            manifest.capabilities.remoteLibrary.writeOperations.sorted().forEach { append("remote-write:").append(it).append('\n') }
+            manifest.capabilities.remoteLibrary.policies.toSortedMap(compareBy { it.name }).values.forEach { policy ->
+                append("remote-policy:").append(policy.operation.name).append(':').append(policy.origin.canonical).append(':').append(policy.method.name).append(':').append(policy.path).append(':').append(policy.referrerPath.orEmpty()).append('\n')
+                policy.parameters.forEach { parameter -> append("remote-parameter:").append(parameter).append('\n') }
+            }
+            append("storage:").append(manifest.capabilities.storageQuotaBytes).append('\n')
+            append("wall:").append(manifest.resourceLimits.maxExecutionWallTimeMs).append('\n')
+            append("memory:").append(manifest.resourceLimits.maxMemoryBytes).append('\n')
+        }.toByteArray(StandardCharsets.UTF_8),
+    )
     private fun capabilityGrantFingerprint(
         candidate: VerifiedHxpPackage,
         addedCapabilities: Set<String>,
@@ -138,19 +159,9 @@ class ExtensionInstaller(
         buildString {
             append(candidate.packageSha256)
             append('\u0000')
-            addedCapabilities.sorted().forEach { capability ->
-                append("capability:")
-                append(capability)
-                append('\n')
-            }
+            addedCapabilities.sorted().forEach { append("capability:").append(it).append('\n') }
             resourceLimitIncreases.forEach { increase ->
-                append("resource:")
-                append(increase.limit.name)
-                append(':')
-                append(increase.activeValue)
-                append(':')
-                append(increase.candidateValue)
-                append('\n')
+                append("resource:").append(increase.limit.name).append(':').append(increase.activeValue).append(':').append(increase.candidateValue).append('\n')
             }
         }.toByteArray(StandardCharsets.UTF_8),
     )
@@ -162,6 +173,7 @@ data class PreparedExtensionInstall(
     val addedCapabilities: List<String>,
     val resourceLimitIncreases: List<ResourceLimitIncrease>,
     val capabilityGrantFingerprint: String,
+    val remoteCapabilitySetFingerprint: String,
     val isDowngrade: Boolean,
 )
 

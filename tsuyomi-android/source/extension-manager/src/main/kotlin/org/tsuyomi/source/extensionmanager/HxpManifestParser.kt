@@ -14,6 +14,7 @@ import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import org.erdtman.jcs.JsonCanonicalizer
 import org.tsuyomi.shared.sourcecontract.HttpsOrigin
+import org.tsuyomi.shared.sourcecontract.NetworkMethod
 import org.tsuyomi.shared.sourcecontract.SourceId
 
 internal data class ParsedHxpManifest(
@@ -159,21 +160,92 @@ internal object HxpManifestParser {
         if (!networkOrigins.containsAll(webLoginOrigins)) fail(HxpVerificationError.CAPABILITY_POLICY_VIOLATION)
 
         val remoteLibrary = value.obj("remoteLibrary").also {
-            it.requireKeys(setOf("read", "writeOperations"))
+            it.requireKeys(setOf("read", "writeOperations"), setOf("policies"))
         }
+        val read = remoteLibrary.bool("read")
         val writes = remoteLibrary.array("writeOperations").map { it.asPrimitive().stringValue() }.toSet()
         if (writes.size != remoteLibrary.array("writeOperations").size || writes.any { it !in setOf("add", "remove", "move") }) {
             fail(HxpVerificationError.INVALID_MANIFEST)
         }
-
+        val policies = parseRemotePolicies(remoteLibrary, networkOrigins, read, writes)
         val storage = value.obj("storage").also { it.requireKeys(setOf("quotaBytes")) }
         return HxpCapabilities(
             network = networkCapability,
             cookies = HxpCookieCapability(sourceScoped = cookieMode == "sourceScoped", origins = cookieOrigins),
             webLogin = HxpWebLoginCapability(enabled = webLoginEnabled, origins = webLoginOrigins),
-            remoteLibrary = HxpRemoteLibraryCapability(read = remoteLibrary.bool("read"), writeOperations = writes),
+            remoteLibrary = HxpRemoteLibraryCapability(read = read, writeOperations = writes, policies = policies),
             storageQuotaBytes = storage.int("quotaBytes").inRange(0, 10_485_760),
         )
+    }
+
+    private fun parseRemotePolicies(
+        remoteLibrary: JsonObject,
+        networkOrigins: Set<HttpsOrigin>,
+        read: Boolean,
+        writes: Set<String>,
+    ): Map<RemoteOperation, HxpRemoteOperationPolicy> {
+        val required = buildSet {
+            if (read) add("read")
+            if ("add" in writes) add("add")
+        }
+        val raw = remoteLibrary["policies"] ?: return if (required.isEmpty()) emptyMap() else fail(HxpVerificationError.CAPABILITY_POLICY_VIOLATION)
+        val objectValue = raw.asObject()
+        if (objectValue.keys != required) fail(HxpVerificationError.CAPABILITY_POLICY_VIOLATION)
+        return objectValue.entries.associate { (name, value) ->
+            val operation = when (name) {
+                "read" -> RemoteOperation.READ
+                "add" -> RemoteOperation.ADD
+                else -> fail(HxpVerificationError.CAPABILITY_POLICY_VIOLATION)
+            }
+            operation to parseRemotePolicy(operation, value.asObject(), networkOrigins)
+        }
+    }
+
+    private fun parseRemotePolicy(
+        operation: RemoteOperation,
+        value: JsonObject,
+        networkOrigins: Set<HttpsOrigin>,
+    ): HxpRemoteOperationPolicy {
+        value.requireKeys(setOf("origin", "method", "path", "parameters"), setOf("referrerPath"))
+        val origin = runCatching { HttpsOrigin(value.string("origin")) }
+            .getOrElse { fail(HxpVerificationError.INVALID_MANIFEST) }
+        if (origin !in networkOrigins) fail(HxpVerificationError.CAPABILITY_POLICY_VIOLATION)
+        val method = runCatching { NetworkMethod.valueOf(value.string("method")) }
+            .getOrElse { fail(HxpVerificationError.INVALID_MANIFEST) }
+        if ((operation == RemoteOperation.READ && method != NetworkMethod.GET) ||
+            (operation == RemoteOperation.ADD && method != NetworkMethod.POST)
+        ) fail(HxpVerificationError.CAPABILITY_POLICY_VIOLATION)
+        val path = value.string("path")
+        if (!path.startsWith('/') || '?' in path || '#' in path || path.length > 1024) fail(HxpVerificationError.INVALID_MANIFEST)
+        val referrerPath = value.optionalString("referrerPath")
+        if (referrerPath != null && (!referrerPath.startsWith('/') || '?' in referrerPath || '#' in referrerPath || referrerPath.length > 1024)) {
+            fail(HxpVerificationError.INVALID_MANIFEST)
+        }
+        val parameters = value.obj("parameters").entries.sortedBy { it.key }.map { (name, rule) ->
+            if (name.isBlank() || name.length > 256) fail(HxpVerificationError.INVALID_MANIFEST)
+            val ruleObject = rule.asObject()
+            when (ruleObject.string("kind")) {
+                "fixed" -> {
+                    ruleObject.requireKeys(setOf("kind", "value"))
+                    HxpRemoteParameter.Fixed(name, ruleObject.string("value").bounded(0, 8192))
+                }
+                "remoteBookId" -> {
+                    ruleObject.requireKeys(setOf("kind"))
+                    if (operation != RemoteOperation.ADD) fail(HxpVerificationError.CAPABILITY_POLICY_VIOLATION)
+                    HxpRemoteParameter.RemoteBookId(name)
+                }
+                "cursor" -> {
+                    ruleObject.requireKeys(setOf("kind"))
+                    if (operation != RemoteOperation.READ || name != "cursor") fail(HxpVerificationError.CAPABILITY_POLICY_VIOLATION)
+                    HxpRemoteParameter.Cursor(name)
+                }
+                else -> fail(HxpVerificationError.INVALID_MANIFEST)
+            }
+        }
+        if (parameters.count { it is HxpRemoteParameter.RemoteBookId } != (if (operation == RemoteOperation.ADD) 1 else 0) ||
+            parameters.count { it is HxpRemoteParameter.Cursor } > 1
+        ) fail(HxpVerificationError.CAPABILITY_POLICY_VIOLATION)
+        return HxpRemoteOperationPolicy(operation, origin, method, path, referrerPath, parameters)
     }
 
     private fun JsonObject.originSet(name: String, requireNonEmpty: Boolean = false): Set<HttpsOrigin> {
