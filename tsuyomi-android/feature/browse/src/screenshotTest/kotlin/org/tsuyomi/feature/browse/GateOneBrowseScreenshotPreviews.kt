@@ -58,7 +58,16 @@ private fun BrowsePreview(profile: DisplayProfile) {
     )
     DisplayEnvironmentProvider(environment) {
         TsuyomiTheme(environment) {
-            Surface(Modifier.fillMaxSize()) { BrowseScreen() }
+            Surface(Modifier.fillMaxSize()) {
+                BrowseScreen(
+                    state = BrowseUiState.Empty,
+                    onRequestImport = {},
+                    onOpenInstalledSource = {},
+                    onApproveInstall = {},
+                    onDismissApproval = {},
+                    onDismissFailure = {},
+                )
+            }
         }
     }
 }

@@ -14,6 +14,8 @@ dependencies {
     implementation(project(":core:display"))
     implementation(project(":core:ui"))
     implementation(project(":reader:engine"))
+    implementation(project(":shared:locator"))
+    implementation(project(":shared:source-contract"))
     implementation(libs.androidx.compose.foundation)
     implementation(libs.androidx.compose.material3)
     implementation(libs.androidx.compose.ui)

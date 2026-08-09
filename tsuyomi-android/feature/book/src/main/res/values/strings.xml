@@ -1,0 +1,16 @@
+<!-- SPDX-FileCopyrightText: 2026 Tsuyomi Contributors -->
+<!-- SPDX-License-Identifier: Apache-2.0 -->
+<resources>
+    <string name="book_loading_detail">正在加载书籍详情</string>
+    <string name="book_loading_directory">正在加载章节目录</string>
+    <string name="book_author">作者：%1$s</string>
+    <string name="book_status">状态：%1$s</string>
+    <string name="book_open_directory">查看目录</string>
+    <string name="book_source_failure">来源内容未能加载</string>
+    <string name="book_error_code">错误：%1$s</string>
+    <string name="book_diagnostic_id">诊断编号：%1$s</string>
+    <string name="book_diagnostic_stage">阶段：%1$s · 安全代码：%2$s</string>
+    <string name="book_retry">重试网络请求</string>
+    <string name="book_offline">使用已有离线缓存</string>
+    <string name="book_open_verification">打开手动登录或验证</string>
+</resources>

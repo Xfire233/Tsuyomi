@@ -1,0 +1,13 @@
+<!-- SPDX-FileCopyrightText: 2026 Tsuyomi Contributors -->
+<!-- SPDX-License-Identifier: Apache-2.0 -->
+<resources>
+    <string name="reader_loading_chapter">正在加载章节</string>
+    <string name="reader_chapter_failure">章节未能加载</string>
+    <string name="reader_error_code">错误：%1$s</string>
+    <string name="reader_diagnostic_id">诊断编号：%1$s</string>
+    <string name="reader_diagnostic_stage">阶段：%1$s · 安全代码：%2$s</string>
+    <string name="reader_retry">重试网络请求</string>
+    <string name="reader_offline">使用已有离线缓存</string>
+    <string name="reader_no_document">没有可阅读的章节</string>
+    <string name="reader_open_verification">打开手动登录或验证</string>
+</resources>

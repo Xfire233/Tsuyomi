@@ -6,6 +6,8 @@
 package org.tsuyomi.android
 
 import android.graphics.Color as AndroidColor
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
@@ -56,7 +58,11 @@ import org.tsuyomi.core.ui.layout.TsuyomiWindowSize
 import org.tsuyomi.core.ui.theme.TsuyomiBootScreen
 import org.tsuyomi.core.ui.theme.TsuyomiTheme
 import org.tsuyomi.feature.browse.BrowseScreen
+import org.tsuyomi.feature.book.BookDetailScreen
+import org.tsuyomi.feature.book.BookDirectoryScreen
 import org.tsuyomi.feature.library.LibraryScreen
+import org.tsuyomi.feature.reader.ReaderScreen
+import org.tsuyomi.feature.search.SearchScreen
 import org.tsuyomi.feature.settings.AboutScreen
 import org.tsuyomi.feature.settings.DisplaySettingsActions
 import org.tsuyomi.feature.settings.DisplaySettingsScreen
@@ -83,6 +89,11 @@ private object Routes {
     const val More = "more"
     const val Display = "settings/display"
     const val About = "about"
+    const val Search = "source/search"
+    const val Detail = "source/detail"
+    const val Directory = "source/directory"
+    const val Reader = "source/reader"
+    const val Verification = "source/verification"
 }
 
 @Composable
@@ -131,12 +142,39 @@ private fun TsuyomiApp(
     environment: DisplayEnvironment,
     controller: DisplayController,
 ) {
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    val sourceInstaller = remember { SourceInstallController(context.applicationContext) }
+    val application = context.applicationContext as TsuyomiApplication
+    val sourceFlow = remember {
+        SourceFlowController(
+            context.applicationContext,
+            application.libraryRepository,
+            SourceFlowSnapshotStore(application.preferencesDataStore),
+        )
+    }
+    val extensionPicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        uri?.let { document -> scope.launch { sourceInstaller.prepare(document, context.contentResolver) } }
+    }
+    LaunchedEffect(sourceInstaller) { sourceInstaller.restoreInstalled() }
     val navController = rememberNavController()
     val currentEntry by navController.currentBackStackEntryAsState()
     val currentRoute = currentEntry?.destination?.route ?: Routes.Library
     val selectedRoot = when (currentRoute) {
         Routes.Display, Routes.About -> Routes.More
+        Routes.Search, Routes.Detail, Routes.Directory, Routes.Reader, Routes.Verification -> Routes.Browse
         else -> currentRoute
+    }
+    LaunchedEffect(sourceInstaller.activePackage, currentRoute) {
+        val packageInfo = sourceInstaller.activePackage ?: return@LaunchedEffect
+        val target = when (currentRoute) {
+            Routes.Search -> SourceRestorationTarget.SEARCH
+            Routes.Detail -> SourceRestorationTarget.DETAIL
+            Routes.Directory -> SourceRestorationTarget.DIRECTORY
+            Routes.Reader -> SourceRestorationTarget.READER
+            else -> null
+        }
+        target?.let { sourceFlow.restoreFor(it, packageInfo) }
     }
     val navigationItems = listOf(
         TsuyomiNavigationItem(
@@ -161,6 +199,11 @@ private fun TsuyomiApp(
         Routes.More -> stringResource(R.string.nav_more)
         Routes.Display -> stringResource(R.string.title_display_settings)
         Routes.About -> stringResource(R.string.title_about)
+        Routes.Search -> stringResource(R.string.title_source_search)
+        Routes.Detail -> stringResource(R.string.title_book_detail)
+        Routes.Directory -> stringResource(R.string.title_book_directory)
+        Routes.Reader -> stringResource(R.string.title_reader)
+        Routes.Verification -> stringResource(R.string.title_verification)
         else -> stringResource(R.string.app_name)
     }
     val isRoot = currentRoute in setOf(Routes.Library, Routes.Browse, Routes.More)
@@ -212,7 +255,92 @@ private fun TsuyomiApp(
                         LibraryScreen(onNavigateToBrowse = { selectRoot(Routes.Browse) })
                     }
                     composable(Routes.Browse) {
-                        BrowseScreen()
+                        BrowseScreen(
+                            state = sourceInstaller.state,
+                            onRequestImport = { extensionPicker.launch(arrayOf("application/zip", "application/octet-stream")) },
+                            onOpenInstalledSource = {
+                                sourceInstaller.activePackage?.let { packageInfo ->
+                                    scope.launch {
+                                        sourceFlow.open(packageInfo)
+                                        navController.navigate(Routes.Search)
+                                    }
+                                }
+                            },
+                            onApproveInstall = { allowDowngrade -> scope.launch { sourceInstaller.approve(allowDowngrade) } },
+                            onDismissApproval = sourceInstaller::dismissApproval,
+                            onDismissFailure = sourceInstaller::dismissFailure,
+                        )
+                    }
+                    composable(Routes.Search) {
+                        SearchScreen(
+                            query = sourceFlow.query,
+                            state = sourceFlow.searchState,
+                            onQueryChange = sourceFlow::updateQuery,
+                            onSearch = { scope.launch { sourceFlow.search() } },
+                            onSelectBook = { book ->
+                                scope.launch {
+                                    sourceFlow.selectBook(book)
+                                    navController.navigate(Routes.Detail)
+                                }
+                            },
+                            onRetry = { scope.launch { sourceFlow.search() } },
+                            onUseOfflineCache = { scope.launch { sourceFlow.search(offlineOnly = true) } },
+                            onOpenVerification = { navController.navigate(Routes.Verification) },
+                        )
+                    }
+                    composable(Routes.Detail) {
+                        BookDetailScreen(
+                            state = sourceFlow.detailState,
+                            onOpenDirectory = {
+                                scope.launch {
+                                    sourceFlow.loadDirectory()
+                                    navController.navigate(Routes.Directory)
+                                }
+                            },
+                            onRetry = { scope.launch { sourceFlow.reloadDetail(offlineOnly = false) } },
+                            onUseOfflineCache = { scope.launch { sourceFlow.reloadDetail(offlineOnly = true) } },
+                            onOpenVerification = { navController.navigate(Routes.Verification) },
+                        )
+                    }
+                    composable(Routes.Directory) {
+                        BookDirectoryScreen(
+                            state = sourceFlow.directoryState,
+                            onSelectChapter = { chapter ->
+                                scope.launch {
+                                    sourceFlow.selectChapter(chapter)
+                                    navController.navigate(Routes.Reader)
+                                }
+                            },
+                            onRetry = { scope.launch { sourceFlow.loadDirectory() } },
+                            onUseOfflineCache = { scope.launch { sourceFlow.loadDirectory(offlineOnly = true) } },
+                            onOpenVerification = { navController.navigate(Routes.Verification) },
+                        )
+                    }
+                    composable(Routes.Reader) {
+                        ReaderScreen(
+                            document = sourceFlow.readerDocument,
+                            loading = sourceFlow.readerLoading,
+                            failure = sourceFlow.readerFailure,
+                            restoredLocator = sourceFlow.restoredLocator,
+                            onLocatorChanged = { locator, precision -> scope.launch { sourceFlow.saveProgress(locator, precision) } },
+                            onRetry = { scope.launch { sourceFlow.reloadChapter(offlineOnly = false) } },
+                            onUseOfflineCache = { scope.launch { sourceFlow.reloadChapter(offlineOnly = true) } },
+                            onOpenVerification = { navController.navigate(Routes.Verification) },
+                        )
+                    }
+                    composable(Routes.Verification) {
+                        sourceInstaller.activePackage?.let { packageInfo ->
+                            ManualVerificationRoute(
+                                packageInfo = packageInfo,
+                                onCompleted = {
+                                    scope.launch {
+                                        sourceFlow.reopenWithStoredCredentials()
+                                        navController.navigateUp()
+                                    }
+                                },
+                                onCancel = { navController.navigateUp() },
+                            )
+                        }
                     }
                     composable(Routes.More) {
                         MoreScreen(
