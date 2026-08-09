@@ -33,7 +33,7 @@ jobs:
           else
             base="${{ github.event.before }}"
           fi
-          if [ -z "$base" ] || ! git cat-file -e "$base^{commit}" 2>/dev/null || ! git diff --quiet "$base" "$GITHUB_SHA" -- tsuyomi-protocol .github/workflows/protocol-quality.yml; then
+          if [ -z "$base" ] || ! git -C "$GITHUB_WORKSPACE" cat-file -e "$base^{commit}" 2>/dev/null || ! git -C "$GITHUB_WORKSPACE" diff --quiet "$base" "$GITHUB_SHA" -- tsuyomi-protocol .github/workflows/protocol-quality.yml; then
             echo "changed=true" >> "$GITHUB_OUTPUT"
           else
             echo "changed=false" >> "$GITHUB_OUTPUT"
