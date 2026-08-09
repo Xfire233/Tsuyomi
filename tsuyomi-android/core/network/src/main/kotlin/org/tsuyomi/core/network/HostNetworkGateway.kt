@@ -110,7 +110,12 @@ class HostNetworkGateway(
     }
     private val locks = ConcurrentHashMap<String, Mutex>()
 
-    suspend fun request(grant: SourceNetworkGrant, request: SourceNetworkRequest): SourceNetworkResponse {
+    suspend fun request(
+        grant: SourceNetworkGrant,
+        request: SourceNetworkRequest,
+        operationContext: SourceOperationContext? = null,
+    ): SourceNetworkResponse {
+        operationContext?.validate(request)
         val uri = parseAllowedUri(request.url, grant)
         val referrer = request.referrerUrl?.let { parseAllowedUri(it, grant) }
         val body = requestBody(request)
@@ -136,6 +141,7 @@ class HostNetworkGateway(
                 headers = allowedHeaders(request.headers),
                 body = body,
                 referrer = referrer,
+                operationContext = operationContext,
             )
             if (response.status !in 100..599) throw HostNetworkException(HostNetworkError.TRANSPORT)
             if (response.bytes.size > grant.maxResponseBytes) throw HostNetworkException(HostNetworkError.RESPONSE_LIMIT)
@@ -180,10 +186,12 @@ class HostNetworkGateway(
         headers: Map<String, String>,
         body: ByteArray?,
         referrer: URI?,
+        operationContext: SourceOperationContext?,
     ): HostHttpResponse {
         var url = initialUrl
         var redirects = 0
         while (true) {
+            operationContext?.validate(request.copy(url = url.toString()))
             val response = try {
                 transport.execute(
                     HostHttpRequest(
