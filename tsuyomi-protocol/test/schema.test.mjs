@@ -56,3 +56,22 @@ test('hxp manifest v1 rejects undeclared remote-library operations', async () =>
   manifest.capabilities.remoteLibrary.writeOperations.push('replace');
   assert.equal(validate(manifest), false);
 });
+
+test('hxp manifest v1 requires signed policies for remote read and add', async () => {
+  const ajv = createAjv();
+  const validate = ajv.compile(await loadJson('../schemas/hxp-manifest-v1.schema.json'));
+  const manifest = await loadJson('../fixtures/hxp/valid-minimal-manifest.json');
+  delete manifest.capabilities.remoteLibrary.policies.read;
+  assert.equal(validate(manifest), false);
+  manifest.capabilities.remoteLibrary.policies.read = manifest.capabilities.remoteLibrary.policies.add;
+  delete manifest.capabilities.remoteLibrary.policies.add;
+  assert.equal(validate(manifest), false);
+});
+
+test('hxp remote fixed parameter rule requires its exact literal', async () => {
+  const ajv = createAjv();
+  const validate = ajv.compile(await loadJson('../schemas/hxp-manifest-v1.schema.json'));
+  const manifest = await loadJson('../fixtures/hxp/valid-minimal-manifest.json');
+  delete manifest.capabilities.remoteLibrary.policies.add.parameters.action.value;
+  assert.equal(validate(manifest), false);
+});

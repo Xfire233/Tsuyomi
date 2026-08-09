@@ -107,7 +107,17 @@
                 "add": { "$ref": "#/$defs/remoteOperationPolicy" }
               }
             }
-          }
+          },
+          "allOf": [
+            {
+              "if": { "properties": { "read": { "const": true } }, "required": ["read"] },
+              "then": { "required": ["policies"], "properties": { "policies": { "type": "object", "required": ["read"], "properties": { "read": { "$ref": "#/$defs/remoteOperationPolicy" } } } } }
+            },
+            {
+              "if": { "properties": { "writeOperations": { "type": "array", "contains": { "const": "add" } } }, "required": ["writeOperations"] },
+              "then": { "required": ["policies"], "properties": { "policies": { "type": "object", "required": ["add"], "properties": { "add": { "$ref": "#/$defs/remoteOperationPolicy" } } } } }
+            }
+          ]
         },
         "storage": {
           "type": "object",
@@ -150,13 +160,20 @@
           "type": "object",
           "maxProperties": 64,
           "additionalProperties": {
-            "type": "object",
-            "additionalProperties": false,
-            "required": ["kind"],
-            "properties": {
-              "kind": { "enum": ["fixed", "remoteBookId", "cursor"] },
-              "value": { "type": "string", "maxLength": 8192 }
-            }
+            "oneOf": [
+              {
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["kind", "value"],
+                "properties": { "kind": { "const": "fixed" }, "value": { "type": "string", "maxLength": 8192 } }
+              },
+              {
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["kind"],
+                "properties": { "kind": { "enum": ["remoteBookId", "cursor"] } }
+              }
+            ]
           }
         }
       }

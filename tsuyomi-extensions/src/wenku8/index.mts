@@ -6,11 +6,12 @@ const ORIGIN = 'https://www.wenku8.net';
 
 type NetworkRequest = {
   url: string;
-  method: 'GET';
+  method: 'GET' | 'POST';
   headers: Record<string, string>;
   decode: 'auto' | 'gb18030';
-  cache: 'default' | 'validate';
-  semanticCacheKey: string;
+  cache: 'default' | 'validate' | 'network-only';
+  semanticCacheKey?: string;
+  form?: Record<string, string>;
   referrerUrl?: string;
 };
 
@@ -247,6 +248,45 @@ export const parseChapter = (html: string, remoteBookId: string, chapterId: stri
   };
 };
 
+export const buildRemoteLibraryRequest = (cursor: string | null): NetworkRequest => {
+  if (cursor !== null && !/^page-[2-9][0-9]{0,2}$/.test(cursor)) throw new Error('INVALID_REMOTE_CURSOR');
+  const suffix = cursor === null ? '' : `&cursor=${encodeURIComponent(cursor)}`;
+  return {
+    url: `${ORIGIN}/modules/article/bookcase.php?action=list${suffix}`,
+    method: 'GET',
+    headers: { Accept: 'text/html,application/xhtml+xml' },
+    decode: 'gb18030',
+    cache: 'network-only',
+  };
+};
+
+export const parseRemoteLibrary = (html: string): { items: BookSummary[]; nextCursor: string | null; complete: boolean } => {
+  const parsed = parseSearch(html);
+  const cursor = /data-next-cursor=["']([^"']+)["']/i.exec(html)?.[1] ?? null;
+  if (cursor !== null && !/^page-[2-9][0-9]{0,2}$/.test(cursor)) throw new Error('INVALID_REMOTE_CURSOR');
+  const complete = /data-complete=["']true["']/i.test(html);
+  if (!complete && cursor === null) throw new Error('INCOMPLETE_REMOTE_LIBRARY');
+  return { items: parsed.items, nextCursor: cursor, complete };
+};
+
+export const buildRemoteLibraryAddRequest = (remoteBookId: string): NetworkRequest => {
+  if (!/^\d{1,12}$/.test(remoteBookId)) throw new Error('INVALID_BOOK_ID');
+  return {
+    url: `${ORIGIN}/modules/article/bookcase.php`,
+    method: 'POST',
+    headers: { Accept: 'text/html,application/xhtml+xml' },
+    form: { action: 'add', aid: remoteBookId },
+    decode: 'gb18030',
+    cache: 'network-only',
+  };
+};
+
+export const parseRemoteLibraryAdd = (html: string, remoteBookId: string) => {
+  const outcome = /data-outcome=["'](applied|already-present)["']/i.exec(html)?.[1];
+  if (outcome !== 'applied' && outcome !== 'already-present') throw new Error('AMBIGUOUS_REMOTE_ADD');
+  return { sourceId: SOURCE_ID, remoteBookId, outcome };
+};
+
 const api = {
   sourceId: SOURCE_ID,
   classifyPage,
@@ -258,6 +298,10 @@ const api = {
   parseDirectory,
   buildChapterRequest,
   parseChapter,
+  buildRemoteLibraryRequest,
+  parseRemoteLibrary,
+  buildRemoteLibraryAddRequest,
+  parseRemoteLibraryAdd,
 };
 
 declare global {

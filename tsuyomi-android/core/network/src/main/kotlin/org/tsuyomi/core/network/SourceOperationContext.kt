@@ -17,12 +17,14 @@ data class RemoteOperationRequestPolicy(
     val method: NetworkMethod,
     val path: String,
     val fixedParameters: Map<String, String>,
+    val remoteBookIdParameter: String? = null,
     val cursorParameter: String? = null,
     val referrerPath: String? = null,
 ) {
     init {
         require(path.startsWith('/') && '?' !in path && '#' !in path)
-        require(cursorParameter == null || cursorParameter !in fixedParameters)
+        require(remoteBookIdParameter == null || remoteBookIdParameter !in fixedParameters)
+        require(cursorParameter == null || (cursorParameter !in fixedParameters && cursorParameter != remoteBookIdParameter))
         require(fixedParameters.keys.all { it.isNotBlank() })
         require(referrerPath == null || (referrerPath.startsWith('/') && '?' !in referrerPath && '#' !in referrerPath))
     }
@@ -36,11 +38,14 @@ class SourceOperationContext internal constructor(
     val kind: SourceOperationKind,
     val policy: RemoteOperationRequestPolicy,
     val cursor: String? = null,
+    val remoteBookId: String? = null,
     val addToken: String? = null,
 ) {
     init {
         require(kind != SourceOperationKind.REMOTE_LIBRARY_ADD || !addToken.isNullOrBlank())
+        require(kind != SourceOperationKind.REMOTE_LIBRARY_ADD || !remoteBookId.isNullOrBlank())
         require(kind != SourceOperationKind.REMOTE_LIBRARY_ADD || cursor == null)
+        require(kind != SourceOperationKind.REMOTE_LIBRARY_READ || remoteBookId == null)
         require(cursor == null || cursor.isNotBlank())
     }
 
@@ -55,6 +60,7 @@ class SourceOperationContext internal constructor(
         val expected = buildMap {
             putAll(policy.fixedParameters)
             policy.cursorParameter?.let { name -> cursor?.let { put(name, it) } }
+            policy.remoteBookIdParameter?.let { name -> remoteBookId?.let { put(name, it) } }
         }
         val actual = when (request.method) {
             NetworkMethod.GET, NetworkMethod.HEAD -> decodeQuery(uri.rawQuery)
@@ -82,5 +88,13 @@ class SourceOperationContext internal constructor(
 fun remoteLibraryReadContext(policy: RemoteOperationRequestPolicy, cursor: String?): SourceOperationContext =
     SourceOperationContext(SourceOperationKind.REMOTE_LIBRARY_READ, policy, cursor = cursor)
 
-fun remoteLibraryAddContext(policy: RemoteOperationRequestPolicy, addToken: String): SourceOperationContext =
-    SourceOperationContext(SourceOperationKind.REMOTE_LIBRARY_ADD, policy, addToken = addToken)
+fun remoteLibraryAddContext(
+    policy: RemoteOperationRequestPolicy,
+    remoteBookId: String,
+    addToken: String,
+): SourceOperationContext = SourceOperationContext(
+    SourceOperationKind.REMOTE_LIBRARY_ADD,
+    policy,
+    remoteBookId = remoteBookId,
+    addToken = addToken,
+)

@@ -18,7 +18,7 @@ import org.erdtman.jcs.JsonCanonicalizer
 
 class HxpArchiveVerifier(
     private val publisherKeys: PublisherKeyResolver,
-    private val hostApiVersion: SemanticVersion = SemanticVersion.parse("1.0.0"),
+    private val hostApiVersion: SemanticVersion = SemanticVersion.parse("1.1.0"),
     private val limits: HxpArchiveLimits = HxpArchiveLimits(),
 ) {
     fun verify(file: File): VerifiedHxpPackage {

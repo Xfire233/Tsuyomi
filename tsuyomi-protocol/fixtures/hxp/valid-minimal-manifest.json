@@ -41,7 +41,27 @@
     },
     "remoteLibrary": {
       "read": true,
-      "writeOperations": ["add", "remove", "move"]
+      "writeOperations": ["add", "remove", "move"],
+      "policies": {
+        "read": {
+          "origin": "https://www.wenku8.net",
+          "method": "GET",
+          "path": "/modules/article/bookcase.php",
+          "parameters": {
+            "action": { "kind": "fixed", "value": "list" },
+            "cursor": { "kind": "cursor" }
+          }
+        },
+        "add": {
+          "origin": "https://www.wenku8.net",
+          "method": "POST",
+          "path": "/modules/article/bookcase.php",
+          "parameters": {
+            "action": { "kind": "fixed", "value": "add" },
+            "aid": { "kind": "remoteBookId" }
+          }
+        }
+      }
     },
     "storage": {
       "quotaBytes": 1048576

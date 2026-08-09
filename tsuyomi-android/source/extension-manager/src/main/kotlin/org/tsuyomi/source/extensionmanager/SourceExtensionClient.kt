@@ -155,7 +155,7 @@ class SourceExtensionClient private constructor(
             arrayOf<Any?>(remoteBookId),
             "remote-library-add-network",
             offlineOnly = false,
-            operationContext = remoteLibraryAddContext(policy.toNetworkPolicy(), directActionToken),
+            operationContext = remoteLibraryAddContext(policy.toNetworkPolicy(), remoteBookId, directActionToken),
         )
         classify(response, "remote-library-add-classify")
         val root = call("parseRemoteLibraryAdd", arrayOf<Any?>(response.text.orEmpty(), remoteBookId), "remote-library-add-parse").jsonObject
@@ -307,6 +307,7 @@ private fun HxpRemoteOperationPolicy.toNetworkPolicy(): RemoteOperationRequestPo
     method = method,
     path = path,
     fixedParameters = parameters.filterIsInstance<HxpRemoteParameter.Fixed>().associate { it.name to it.value },
+    remoteBookIdParameter = parameters.filterIsInstance<HxpRemoteParameter.RemoteBookId>().singleOrNull()?.name,
     cursorParameter = parameters.filterIsInstance<HxpRemoteParameter.Cursor>().singleOrNull()?.name,
     referrerPath = referrerPath,
 )
