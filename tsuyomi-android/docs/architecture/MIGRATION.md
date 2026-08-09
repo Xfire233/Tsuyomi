@@ -54,7 +54,7 @@ Migration preserves supported user contracts, not Flutter/GetX/Hive/Drift struct
 - add many-to-many manual collections, system collections, validated local smart-rule collections, rating/tags, and dormant-source behavior;
 - do not execute source subscription collections until a compatible explicit discovery contract exists; imports create disabled drafts only;
 - implement `tsuyomi-transfer` export/import and clean-profile restoration through Android's system file picker;
-- port a public typed remote-library contract and Wenku8 fixture `0.2.0` only: after a manual controlled-login handoff, explicitly pull remote favourites; keep add-only writeback default-off and invoke it only from a direct local-add action with a host reconciliation record.
+- port a public typed remote-library contract and Wenku8 fixture `0.2.0` only: after a manual controlled-login handoff, explicitly pull remote favourites; keep add-only writeback default-off and invoke it only from a direct local-add action with a host reconciliation record. Each signed read/add operation declares an exact request policy; the host mints its immutable operation context, enforces it natively for every initial/redirect hop, and uses the lifecycle lease/mutex to make full pull apply atomic against source change.
 
 ### Gate 4: remaining authorized writeback
 
