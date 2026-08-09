@@ -88,6 +88,8 @@ python -m reuse lint
 
 跨组件 Gate 同时要求 protocol `npm ci && npm test`、extensions 的 build/fixture/package determinism 检查（实现后启用）、Android 相关检查，以及根 Monorepo REUSE/制品策略。
 
+Required workflow 的 path detection 必须使用仓库根锚点（例如 `git -C "$GITHUB_WORKSPACE"`），不得依赖 job 默认 `working-directory`。Hosted 准入不仅检查 check conclusion；还必须确认目标 head、关键 build/test/instrumentation/package steps 非 `skipped`，并抽查 job step/log 证明命令真实执行。绿色空任务不是证据。
+
 ### 6. Evidence
 
 `docs/gates/GATE_N.md` 必须记录：
