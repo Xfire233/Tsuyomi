@@ -1,0 +1,12 @@
+<!-- SPDX-FileCopyrightText: 2026 Tsuyomi Contributors -->
+<!-- SPDX-License-Identifier: Apache-2.0 -->
+<resources>
+    <string name="reader_mode_scroll">滚动</string>
+    <string name="reader_mode_paged">分页</string>
+    <string name="reader_mode_dual">双页</string>
+    <string name="reader_previous">上一段</string>
+    <string name="reader_next">下一段</string>
+    <string name="reader_position">%1$d / %2$d</string>
+    <string name="reader_image">图片</string>
+    <string name="reader_degraded_restore">原文本锚点已变化，已按最近语义位置恢复。</string>
+</resources>

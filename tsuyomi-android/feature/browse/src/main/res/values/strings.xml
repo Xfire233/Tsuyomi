@@ -2,5 +2,27 @@
 <!-- SPDX-License-Identifier: Apache-2.0 -->
 <resources>
     <string name="browse_empty_title">尚无可用内容源</string>
-    <string name="browse_empty_message">Tsuyomi 不内置任何内容源。安装内容源后，即可在这里浏览在线书库。</string>
+    <string name="browse_empty_message">Tsuyomi 不内置任何内容源。导入已签名的内容源包后，即可在这里浏览在线书库。</string>
+    <string name="browse_import_action">导入内容源包</string>
+    <string name="browse_import_another_action">导入其他内容源包</string>
+    <string name="browse_open_source_action">进入内容源</string>
+    <string name="browse_preparing_title">正在验证内容源包</string>
+    <string name="browse_preparing_message">正在检查 %1$s 的签名、完整性与权限。</string>
+    <string name="browse_approval_title">安装“%1$s”</string>
+    <string name="browse_approval_identity">来源：%1$s · 版本：%2$s</string>
+    <string name="browse_approval_publisher">签名发布者指纹：%1$s</string>
+    <string name="browse_approval_capabilities">此版本新增权限</string>
+    <string name="browse_approval_no_new_capabilities">没有新增权限。</string>
+    <string name="browse_approval_downgrade">我确认安装较低版本，并接受其可能不兼容现有数据。</string>
+    <string name="browse_approval_install_action">确认安装</string>
+    <string name="browse_cancel_action">取消</string>
+    <string name="browse_installed_title">“%1$s”已安装</string>
+    <string name="browse_installed_message">当前活动版本：%1$s</string>
+    <string name="browse_install_failed_title">无法安装内容源包</string>
+    <string name="browse_try_again_action">重新选择文件</string>
+    <string name="browse_dismiss_action">返回</string>
+    <string name="browse_failure_file_access">无法读取所选文件。</string>
+    <string name="browse_failure_verification">包未通过完整性、签名或兼容性验证。</string>
+    <string name="browse_failure_install">安装未完成；已保留当前内容源版本。</string>
+    <string name="browse_failure_expired_approval">待授权的内容源包已失效，请重新选择文件。</string>
 </resources>

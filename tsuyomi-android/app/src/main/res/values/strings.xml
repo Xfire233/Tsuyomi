@@ -8,4 +8,16 @@
     <string name="title_display_settings">显示</string>
     <string name="title_about">关于</string>
     <string name="boot_loading">正在准备本地阅读环境…</string>
+    <string name="title_source_search">搜索</string>
+    <string name="title_book_detail">书籍详情</string>
+    <string name="title_book_directory">章节目录</string>
+    <string name="title_reader">阅读</string>
+    <string name="title_verification">手动登录或验证</string>
+    <string name="verification_loading">正在打开受控验证页面</string>
+    <string name="verification_notice">仅允许已声明的 HTTPS 站点。请手动完成登录或验证；Tsuyomi 不会自动填写、绕过或导出凭证。</string>
+    <string name="verification_navigation_blocked">已阻止跳转到未授权站点。仅允许此内容源声明的 HTTPS 站点。</string>
+    <string name="verification_cancel">取消</string>
+    <string name="verification_done">已完成</string>
+    <string name="verification_unavailable">此内容源未授权受控网页验证。</string>
+    <string name="verification_back">返回</string>
 </resources>

@@ -1,0 +1,25 @@
+<!-- SPDX-FileCopyrightText: 2026 Tsuyomi Contributors -->
+<!-- SPDX-License-Identifier: Apache-2.0 -->
+<resources>
+    <string name="search_query_label">搜索书名</string>
+    <string name="search_action">搜索</string>
+    <string name="search_idle_title">搜索已安装内容源</string>
+    <string name="search_idle_message">输入书名后开始搜索。网络、Cookie 与缓存均由 Tsuyomi 管理。</string>
+    <string name="search_loading_title">正在搜索</string>
+    <string name="search_empty_title">没有找到结果</string>
+    <string name="search_empty_message">可检查关键词后重试。</string>
+    <string name="search_author">作者：%1$s</string>
+    <string name="search_failure_title">来源请求未完成</string>
+    <string name="search_diagnostic_id">诊断编号：%1$s</string>
+    <string name="search_diagnostic_stage">阶段：%1$s · 安全代码：%2$s</string>
+    <string name="search_open_verification">手动登录或验证</string>
+    <string name="search_retry_action">重试网络请求</string>
+    <string name="search_offline_action">使用已有离线缓存</string>
+    <string name="search_error_timeout">请求超时，未修改现有内容。</string>
+    <string name="search_error_offline">网络不可用，或没有对应的离线缓存。</string>
+    <string name="search_error_session">此来源需要用户手动登录。</string>
+    <string name="search_error_verification">此来源要求用户手动完成安全验证。</string>
+    <string name="search_error_empty_response">来源返回了空内容。</string>
+    <string name="search_error_malformed">来源页面结构无法识别。</string>
+    <string name="search_error_generic">扩展或来源返回了无法安全处理的结果。</string>
+</resources>
