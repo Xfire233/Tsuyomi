@@ -597,7 +597,8 @@ The following decisions are user-confirmed. D1 and D11–D14 expand the previous
 - Closure review input: `0ad64ce75a755444743282dacafe4eed2fb7255d`; final verdict **APPROVE**; B1–B2 **CLOSED**; Blocking findings: none.
 - Recovery-lifecycle UX review input: `a919bc54a73f830fc8ffbae137f7c90ab116ea9e`; final verdict **APPROVE**; Blocking findings: none.
 - D1 remote-favourites Designer review input: `d8415a29ddf3745d5a2b8fda9e0be9461d8bd015`; verdict **APPROVE_WITH_CHANGES**. R1 remote-library entry, grant-invalid explanation and manual login/verification action binding is pending closure.
-- The D1/D11–D14 remote-favourites scope amendment invalidates the preceding Designer approval; renewed review is pending.
+- R1 closure input: `8f4929c0e03d801a10ef56e16e0a80b12c5d65f1`; verdict **APPROVE_WITH_CHANGES** because R2 detected accidental deletion of three prior action/golden bindings.
+- R2 closure input: `40ca84f90b9519e9a788021f880a23ef65ec70bd`; final verdict **APPROVE**; R1–R2 **CLOSED**; Blocking findings: none. The renewed Designer review supersedes the invalidated prior approval.
 
 ### Adviser
 
