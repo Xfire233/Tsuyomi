@@ -57,6 +57,9 @@ jobs:
           :core:display:testDebugUnitTest
           :core:files:testDebugUnitTest
           :core:security:testDebugUnitTest
+          :core:network:testDebugUnitTest
+          :source:extension-manager:testDebugUnitTest
+          :source:extension-testkit:testDebugUnitTest
           :core:ui:validateDebugScreenshotTest
           :feature:library:validateDebugScreenshotTest
           :feature:browse:validateDebugScreenshotTest
@@ -135,7 +138,10 @@ jobs:
         if: steps.changes.outputs.changed == 'true'
         run: >-
           ./gradlew --no-daemon --console=plain --dependency-verification strict
+          :app:connectedDebugAndroidTest
           :feature:settings:connectedDebugAndroidTest
           :core:ui:connectedDebugAndroidTest
           :core:security:connectedDebugAndroidTest
           :core:database:connectedDebugAndroidTest
+          :core:webview:connectedDebugAndroidTest
+          :source:quickjs-runtime:connectedDebugAndroidTest
