@@ -545,24 +545,20 @@ The plan uses the recommended defaults below. Adviser may require a narrower or 
 
 ### Designer
 
-- Recovery-lifecycle UX review input: `a919bc54a73f830fc8ffbae137f7c90ab116ea9e`; final verdict **APPROVE**; Blocking findings: none.
 - Initial target plan input: `63ab05e7b486275502d1111f7932c7a018eab829`.
 - Initial verdict: **APPROVE_WITH_CHANGES**.
 - Findings: F1 route/IA binding; F2 reorder, breakpoint and paged-selection behavior; F3 option applicability gaps; F4 dormant prerequisite path; F5 golden fixture ownership; F6 smart-editor state contract.
 - Closure review input: `70da4faa562f7fc0650685b4e3316de7a7f85255`; final verdict **APPROVE**; F1–F6 **CLOSED**; Blocking findings: none.
 - Adviser-amendment UX review input: `a96c5b6e2a52836e94cb74cd8ea0a90f50a49b0b`; findings B1 pre-navigation recovery states/actions/accessibility and B2 `transfer-too-large` golden ownership.
 - Closure review input: `0ad64ce75a755444743282dacafe4eed2fb7255d`; final verdict **APPROVE**; B1–B2 **CLOSED**; Blocking findings: none.
+- Recovery-lifecycle UX review input: `a919bc54a73f830fc8ffbae137f7c90ab116ea9e`; final verdict **APPROVE**; Blocking findings: none.
 
 ### Adviser
 
-- Initial target plan input: `76ea19042e413f0173f0fb0cd4b8e077d04bf7c2`.
-- Initial verdict: **REQUEST_CHANGES**.
-- Findings: A1 cross-store Room/DataStore crash atomicity; A2 schema-1 manual-membership backfill; A3 normative system/progress query semantics; A4 over-limit export outcome.
-- Closure: changes are incorporated in this amended plan; independent follow-up review is pending.
-- Second follow-up review input: `79981b8543f8088aaae2e7c49820bfe59e39dd58`; verdict **REQUEST_CHANGES**. A1–A4 and the four lifecycle closures were accepted; rollback compatibility remained open because a later build cannot prove every device has passed through an intermediate recovery build.
-- Third closure: every Gate 3/schema-2-compatible direct upgrade retains recovery unless an on-device pre-navigation migration consumes every prior journal state/file form; independent follow-up review is pending.
-- Follow-up review input: `947503f490808ea4299ddfeb0879b3d978715d14`; verdict **REQUEST_CHANGES**. A2 **CLOSED**; A1 partial due abort-cleanup crash window and rollback recovery removal, A3 partial due plural-author key ambiguity, A4 partial due export preflight lifecycle gaps.
-- Second closure: changes are incorporated in this amended plan; independent follow-up review is pending.
+- Initial target plan input: `76ea19042e413f0173f0fb0cd4b8e077d04bf7c2`; verdict **REQUEST_CHANGES**. Findings: A1 cross-store Room/DataStore crash atomicity; A2 schema-1 manual-membership backfill; A3 normative system/progress query semantics; A4 over-limit export outcome.
+- First remediation review input: `947503f490808ea4299ddfeb0879b3d978715d14`; verdict **REQUEST_CHANGES**. A2 **CLOSED**; A1 partial due abort-cleanup crash window and rollback recovery removal, A3 partial due plural-author key ambiguity, A4 partial due export preflight lifecycle gaps.
+- Second remediation review input: `79981b8543f8088aaae2e7c49820bfe59e39dd58`; verdict **REQUEST_CHANGES**. A1–A4 and the four lifecycle closures were accepted; direct-upgrade rollback compatibility remained open because a later build cannot prove every device has passed through an intermediate recovery build.
+- Final review input: `d8d34ae0ee3f0f1935101308ffef8cba1dcfabac`; final verdict **APPROVE**. All A1–A4 and follow-up findings **CLOSED**; Blocking findings: none.
 
 ## Authorization boundary
 
