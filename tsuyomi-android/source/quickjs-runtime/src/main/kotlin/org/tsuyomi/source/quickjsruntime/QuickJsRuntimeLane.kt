@@ -43,7 +43,8 @@ class QuickJsNativeException(message: String) : RuntimeException(message)
 
 /**
  * Owns one QuickJS-ng runtime for one installed extension version. Every evaluation and call is
- * serialized on the same dedicated thread; cancellation is observed by QuickJS's interrupt hook.
+ * serialized on the same dedicated thread; terminal execution failures discard the context and
+ * the next operation recreates it from the saved verified module before serving the caller.
  */
 class QuickJsRuntimeLane(
     label: String,
@@ -53,7 +54,128 @@ class QuickJsRuntimeLane(
     private val executor = Executors.newSingleThreadExecutor { runnable ->
         Thread(runnable, "tsuyomi-quickjs-$label").apply { isDaemon = true }
     }
-    private val nativeHandle: Long = try {
+    @Volatile
+    private var nativeHandle: Long = createInitialHandle()
+    private var verifiedModule: VerifiedModule? = null
+    private var resetRequired = false
+
+    suspend fun evaluateModule(source: ByteArray, filename: String) {
+        require(source.isNotEmpty() && source.size <= 8 * 1024 * 1024) { "Invalid module source" }
+        require(filename.matches(Regex("^[A-Za-z0-9._/-]+\\.mjs$"))) { "Invalid module filename" }
+        val module = VerifiedModule(source.copyOf(), filename.encodeToByteArray())
+        submit { handle ->
+            QuickJsNative.evaluateModule(
+                handle,
+                module.source,
+                module.filename,
+                limits.maxExecutionWallTimeMs,
+            )
+            verifiedModule = module
+        }
+    }
+
+    suspend fun callJson(functionName: String, argumentsJson: String): String {
+        require(functionName.matches(Regex("^[A-Za-z_$][A-Za-z0-9_$]{0,127}$"))) { "Invalid function name" }
+        require(argumentsJson.encodeToByteArray().size <= 8 * 1024 * 1024) { "Arguments exceed host limit" }
+        val output = submit { handle ->
+            QuickJsNative.callJson(
+                handle,
+                functionName.encodeToByteArray(),
+                argumentsJson.encodeToByteArray(),
+                limits.maxExecutionWallTimeMs,
+            )
+        }
+        return output.decodeToString(throwOnInvalidSequence = true)
+    }
+
+    private suspend fun <T> submit(operation: (Long) -> T): T = suspendCancellableCoroutine { continuation ->
+        if (closed.get()) {
+            continuation.resumeWith(Result.failure(QuickJsRuntimeException(QuickJsRuntimeError.CLOSED)))
+            return@suspendCancellableCoroutine
+        }
+        val cancellationTarget = OperationCancellationTarget()
+        val future = executor.submit {
+            if (!continuation.isActive) return@submit
+            if (closed.get()) {
+                continuation.resumeWith(Result.failure(QuickJsRuntimeException(QuickJsRuntimeError.CLOSED)))
+                return@submit
+            }
+            try {
+                resetIfRequired()
+                if (!continuation.isActive || closed.get()) return@submit
+                val operationHandle = nativeHandle
+                cancellationTarget.activate(operationHandle)
+                if (!continuation.isActive || closed.get()) return@submit
+                val result = try {
+                    operation(operationHandle)
+                } finally {
+                    cancellationTarget.deactivate()
+                }
+                if (continuation.isActive) continuation.resumeWith(Result.success(result))
+            } catch (error: QuickJsNativeException) {
+                val mapped = mapNative(error)
+                if (invalidatesContext(mapped.error)) discardContext()
+                if (continuation.isActive) continuation.resumeWith(Result.failure(mapped))
+            } catch (error: Throwable) {
+                if (continuation.isActive) continuation.resumeWith(Result.failure(error))
+            } finally {
+                cancellationTarget.deactivate()
+            }
+        }
+        continuation.invokeOnCancellation {
+            cancellationTarget.cancel()
+            future.cancel(false)
+        }
+    }
+
+    private fun resetIfRequired() {
+        if (!resetRequired) return
+        val previousHandle = nativeHandle
+        nativeHandle = 0
+        if (previousHandle != 0L) QuickJsNative.close(previousHandle)
+        if (closed.get()) throw QuickJsRuntimeException(QuickJsRuntimeError.CLOSED)
+        val replacementHandle = QuickJsNative.create(limits.maxMemoryBytes)
+        nativeHandle = replacementHandle
+        try {
+            verifiedModule?.let { module ->
+                QuickJsNative.evaluateModule(
+                    replacementHandle,
+                    module.source,
+                    module.filename,
+                    limits.maxExecutionWallTimeMs,
+                )
+            }
+            resetRequired = false
+        } catch (error: Throwable) {
+            nativeHandle = 0
+            QuickJsNative.close(replacementHandle)
+            throw error
+        }
+    }
+
+    private fun discardContext() {
+        resetRequired = true
+        val previousHandle = nativeHandle
+        nativeHandle = 0
+        if (previousHandle != 0L) QuickJsNative.close(previousHandle)
+    }
+
+    override fun close() {
+        if (!closed.compareAndSet(false, true)) return
+        val activeHandle = nativeHandle
+        if (activeHandle != 0L) QuickJsNative.cancel(activeHandle)
+        try {
+            executor.submit {
+                val handle = nativeHandle
+                nativeHandle = 0
+                if (handle != 0L) QuickJsNative.close(handle)
+            }.get()
+        } finally {
+            executor.shutdownNow()
+        }
+    }
+
+    private fun createInitialHandle(): Long = try {
         executor.submit<Long> { QuickJsNative.create(limits.maxMemoryBytes) }.get()
     } catch (error: ExecutionException) {
         executor.shutdownNow()
@@ -66,71 +188,44 @@ class QuickJsRuntimeLane(
         throw QuickJsRuntimeException(QuickJsRuntimeError.NATIVE_UNAVAILABLE, error)
     }
 
-    suspend fun evaluateModule(source: ByteArray, filename: String) {
-        require(source.isNotEmpty() && source.size <= 8 * 1024 * 1024) { "Invalid module source" }
-        require(filename.matches(Regex("^[A-Za-z0-9._/-]+\\.mjs$"))) { "Invalid module filename" }
-        submit {
-            QuickJsNative.evaluateModule(
-                nativeHandle,
-                source,
-                filename.encodeToByteArray(),
-                limits.maxExecutionWallTimeMs,
-            )
-        }
-    }
+    private class OperationCancellationTarget {
+        private val lock = Any()
+        private var activeHandle = 0L
 
-    suspend fun callJson(functionName: String, argumentsJson: String): String {
-        require(functionName.matches(Regex("^[A-Za-z_$][A-Za-z0-9_$]{0,127}$"))) { "Invalid function name" }
-        require(argumentsJson.encodeToByteArray().size <= 8 * 1024 * 1024) { "Arguments exceed host limit" }
-        val output = submit {
-            QuickJsNative.callJson(
-                nativeHandle,
-                functionName.encodeToByteArray(),
-                argumentsJson.encodeToByteArray(),
-                limits.maxExecutionWallTimeMs,
-            )
-        }
-        return output.decodeToString(throwOnInvalidSequence = true)
-    }
-
-    private suspend fun <T> submit(operation: () -> T): T = suspendCancellableCoroutine { continuation ->
-        if (closed.get()) {
-            continuation.resumeWith(Result.failure(QuickJsRuntimeException(QuickJsRuntimeError.CLOSED)))
-            return@suspendCancellableCoroutine
-        }
-        val started = AtomicBoolean(false)
-        val future = executor.submit {
-            if (!continuation.isActive) return@submit
-            started.set(true)
-            if (!continuation.isActive) {
-                QuickJsNative.cancel(nativeHandle)
-                return@submit
-            }
-            try {
-                val result = operation()
-                if (continuation.isActive) continuation.resumeWith(Result.success(result))
-            } catch (error: QuickJsNativeException) {
-                if (continuation.isActive) continuation.resumeWith(Result.failure(mapNative(error)))
-            } catch (error: Throwable) {
-                if (continuation.isActive) continuation.resumeWith(Result.failure(error))
+        fun activate(handle: Long) {
+            check(handle != 0L) { "Cannot execute with a closed QuickJS runtime" }
+            synchronized(lock) {
+                activeHandle = handle
             }
         }
-        continuation.invokeOnCancellation {
-            if (started.get()) QuickJsNative.cancel(nativeHandle)
-            future.cancel(false)
+
+        fun deactivate() {
+            synchronized(lock) {
+                activeHandle = 0L
+            }
+        }
+
+        fun cancel() {
+            synchronized(lock) {
+                if (activeHandle != 0L) QuickJsNative.cancel(activeHandle)
+            }
         }
     }
 
-    override fun close() {
-        if (!closed.compareAndSet(false, true)) return
-        try {
-            executor.submit { QuickJsNative.close(nativeHandle) }.get()
-        } finally {
-            executor.shutdownNow()
-        }
-    }
+    private data class VerifiedModule(
+        val source: ByteArray,
+        val filename: ByteArray,
+    )
 
     private companion object {
+        fun invalidatesContext(error: QuickJsRuntimeError): Boolean = when (error) {
+            QuickJsRuntimeError.MISSING_FUNCTION,
+            QuickJsRuntimeError.INVALID_ARGUMENTS,
+            QuickJsRuntimeError.NON_JSON_RESULT,
+            QuickJsRuntimeError.CLOSED -> false
+            else -> true
+        }
+
         fun mapNative(error: QuickJsNativeException): QuickJsRuntimeException {
             val code = runCatching { QuickJsRuntimeError.valueOf(error.message.orEmpty()) }
                 .getOrDefault(QuickJsRuntimeError.JS_EXCEPTION)
@@ -138,6 +233,7 @@ class QuickJsRuntimeLane(
         }
     }
 }
+
 
 private object QuickJsNative {
     init {

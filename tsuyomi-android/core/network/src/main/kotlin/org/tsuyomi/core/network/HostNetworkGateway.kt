@@ -21,6 +21,7 @@ import org.tsuyomi.shared.sourcecontract.HttpsOrigin
 import org.tsuyomi.shared.sourcecontract.NetworkCacheMode
 import org.tsuyomi.shared.sourcecontract.NetworkCacheState
 import org.tsuyomi.shared.sourcecontract.NetworkMethod
+import org.tsuyomi.shared.sourcecontract.SourceCookieMode
 import org.tsuyomi.shared.sourcecontract.SourceNetworkRequest
 import org.tsuyomi.shared.sourcecontract.SourceNetworkResponse
 
@@ -29,6 +30,8 @@ data class SourceNetworkGrant(
     val sourceId: String,
     val extensionVersion: String,
     val origins: Set<HttpsOrigin>,
+    val cookieMode: SourceCookieMode,
+    val cookieOrigins: Set<HttpsOrigin>,
     val maxConcurrentRequests: Int,
     val requestTimeoutMs: Int,
     val maxResponseBytes: Int,
@@ -39,7 +42,12 @@ data class SourceNetworkGrant(
         require(maxConcurrentRequests in 1..8)
         require(requestTimeoutMs in 1_000..120_000)
         require(maxResponseBytes in 1_024..16_777_216)
+        require(cookieMode != SourceCookieMode.NONE || cookieOrigins.isEmpty())
+        require(cookieOrigins.all { cookieOrigin -> origins.any { it.canonical == cookieOrigin.canonical } })
     }
+
+    fun allowsCookies(origin: HttpsOrigin): Boolean =
+        cookieMode == SourceCookieMode.SOURCE_SCOPED && cookieOrigins.any { it.canonical == origin.canonical }
 }
 
 data class HostHttpRequest(
@@ -97,7 +105,7 @@ class HostNetworkGateway(
 
     /** Imports user-approved request cookies into exactly one signed source/version origin scope. */
     fun importSourceCookies(grant: SourceNetworkGrant, origin: HttpsOrigin, rawCookie: String) {
-        require(grant.origins.any { it.canonical == origin.canonical }) { "Cookie origin is not granted" }
+        require(grant.allowsCookies(origin)) { "Cookie origin is not granted" }
         cookieJar.seed(grant, URI(origin.canonical), rawCookie)
     }
     private val locks = ConcurrentHashMap<String, Mutex>()
@@ -296,6 +304,7 @@ private class SourceCookieJar {
     private val cookies = ConcurrentHashMap<SourceScope, MutableList<StoredCookie>>()
 
     fun requestHeader(grant: SourceNetworkGrant, uri: URI): Map<String, String> {
+        if (!grant.allowsCookies(uri.asHttpsOrigin())) return emptyMap()
         val scope = SourceScope(grant.sourceId, grant.extensionVersion)
         val host = uri.host.lowercase()
         val path = uri.path.ifBlank { "/" }
@@ -309,6 +318,7 @@ private class SourceCookieJar {
     }
 
     fun seed(grant: SourceNetworkGrant, origin: URI, rawCookie: String) {
+        require(grant.allowsCookies(origin.asHttpsOrigin())) { "Cookie origin is not granted" }
         val scope = SourceScope(grant.sourceId, grant.extensionVersion)
         val entries = cookies.getOrPut(scope) { mutableListOf() }
         val host = origin.host.lowercase()
@@ -327,6 +337,7 @@ private class SourceCookieJar {
     }
 
     fun store(grant: SourceNetworkGrant, requestUri: URI, headers: Map<String, String>) {
+        if (!grant.allowsCookies(requestUri.asHttpsOrigin())) return
         val scope = SourceScope(grant.sourceId, grant.extensionVersion)
         val entries = cookies.getOrPut(scope) { mutableListOf() }
         headers.filterKeys { it.equals("set-cookie", ignoreCase = true) }.values
@@ -368,5 +379,9 @@ private class SourceCookieJar {
         val COOKIE_NAME = Regex("^[!#$%&'*+.^_`|~0-9A-Za-z-]{1,128}$")
     }
 }
+
+private fun URI.asHttpsOrigin(): HttpsOrigin = HttpsOrigin(
+    "https://${host}${if (port in 1..65535 && port != 443) ":$port" else ""}",
+)
 
 private fun ByteArray.startsWith(prefix: ByteArray): Boolean = size >= prefix.size && prefix.indices.all { this[it] == prefix[it] }

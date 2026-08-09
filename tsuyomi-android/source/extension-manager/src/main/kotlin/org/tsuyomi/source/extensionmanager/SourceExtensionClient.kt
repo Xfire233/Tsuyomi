@@ -4,10 +4,8 @@
  */
 package org.tsuyomi.source.extensionmanager
 
-import java.io.ByteArrayInputStream
 import java.io.Closeable
 import java.util.UUID
-import java.util.zip.ZipInputStream
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
@@ -39,6 +37,7 @@ import org.tsuyomi.shared.sourcecontract.SourceErrorCode
 import org.tsuyomi.shared.sourcecontract.SourceException
 import org.tsuyomi.shared.sourcecontract.SourceNetworkRequest
 import org.tsuyomi.shared.sourcecontract.SourceNetworkResponse
+import org.tsuyomi.shared.sourcecontract.SourceCookieMode
 import org.tsuyomi.source.quickjsruntime.QuickJsRuntimeError
 import org.tsuyomi.source.quickjsruntime.QuickJsRuntimeException
 import org.tsuyomi.source.quickjsruntime.QuickJsRuntimeLane
@@ -60,6 +59,12 @@ class SourceExtensionClient private constructor(
         origins = manifest.capabilities.network.origins,
         maxConcurrentRequests = manifest.capabilities.network.maxConcurrentRequests,
         requestTimeoutMs = manifest.capabilities.network.requestTimeoutMs,
+        cookieMode = if (manifest.capabilities.cookies.sourceScoped) {
+            SourceCookieMode.SOURCE_SCOPED
+        } else {
+            SourceCookieMode.NONE
+        },
+        cookieOrigins = manifest.capabilities.cookies.origins,
         maxResponseBytes = manifest.capabilities.network.maxResponseBytes,
     )
 
@@ -177,7 +182,7 @@ class SourceExtensionClient private constructor(
                 ),
             )
             return try {
-                runtime.evaluateModule(packageInfo.readVerifiedEntry(), manifest.entry)
+                runtime.evaluateModule(packageInfo.readVerifiedEntryModule(), manifest.entry)
                 SourceExtensionClient(packageInfo, gateway, runtime)
             } catch (failure: Throwable) {
                 runtime.close()
@@ -187,17 +192,6 @@ class SourceExtensionClient private constructor(
     }
 }
 
-private fun VerifiedHxpPackage.readVerifiedEntry(): ByteArray {
-    ZipInputStream(ByteArrayInputStream(archiveBytes)).use { zip ->
-        while (true) {
-            val entry = zip.nextEntry ?: break
-            if (entry.name == manifest.entry) {
-                return zip.readBytes().also { require(it.isNotEmpty() && it.size <= 8 * 1024 * 1024) }
-            }
-        }
-    }
-    throw HxpVerificationException(HxpVerificationError.MISSING_REQUIRED_FILE)
-}
 
 private fun parseRequest(value: JsonObject): SourceNetworkRequest = SourceNetworkRequest(
     url = value.requiredString("url"),

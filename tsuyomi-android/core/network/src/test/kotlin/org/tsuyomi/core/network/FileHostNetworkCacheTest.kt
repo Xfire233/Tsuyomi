@@ -18,6 +18,7 @@ import org.tsuyomi.shared.sourcecontract.HttpsOrigin
 import org.tsuyomi.shared.sourcecontract.NetworkCacheMode
 import org.tsuyomi.shared.sourcecontract.NetworkCacheState
 import org.tsuyomi.shared.sourcecontract.NetworkMethod
+import org.tsuyomi.shared.sourcecontract.SourceCookieMode
 import org.tsuyomi.shared.sourcecontract.SourceNetworkResponse
 import org.tsuyomi.shared.sourcecontract.SourceNetworkRequest
 
@@ -91,6 +92,8 @@ class FileHostNetworkCacheTest {
                 sourceId = "org.tsuyomi.wenku8",
                 extensionVersion = "1.0.0",
                 origins = setOf(HttpsOrigin("https://www.wenku8.net")),
+                cookieMode = SourceCookieMode.NONE,
+                cookieOrigins = emptySet(),
                 maxConcurrentRequests = 1,
                 requestTimeoutMs = 1_000,
                 maxResponseBytes = 1_024,

@@ -30,11 +30,13 @@ class ExtensionInstaller(
             }
         }
         val addedCapabilities = addedCapabilities(candidate.manifest, active?.manifest)
+        val resourceLimitIncreases = resourceLimitIncreases(candidate.manifest, active?.manifest)
         return PreparedExtensionInstall(
             candidate = candidate,
             active = active,
             addedCapabilities = addedCapabilities.sorted(),
-            capabilityGrantFingerprint = capabilityGrantFingerprint(candidate, addedCapabilities),
+            resourceLimitIncreases = resourceLimitIncreases,
+            capabilityGrantFingerprint = capabilityGrantFingerprint(candidate, addedCapabilities, resourceLimitIncreases),
             isDowngrade = active != null && candidate.manifest.version < active.manifest.version,
         )
     }
@@ -86,20 +88,68 @@ class ExtensionInstaller(
         candidate.capabilities.remoteLibrary.writeOperations
             .filterNot { it in activeCapabilities?.remoteLibrary?.writeOperations.orEmpty() }
             .forEach { add("remote-library:write:$it") }
-        if (candidate.capabilities.storageQuotaBytes > (activeCapabilities?.storageQuotaBytes ?: 0)) {
-            add("storage:${candidate.capabilities.storageQuotaBytes}")
-        }
+    }
+
+    private fun resourceLimitIncreases(
+        candidate: HxpManifest,
+        active: HxpManifest?,
+    ): List<ResourceLimitIncrease> {
+        val activeCapabilities = active?.capabilities
+        val activeResourceLimits = active?.resourceLimits
+        return listOf(
+            ResourceLimitIncrease(
+                ResourceLimit.MAX_EXECUTION_WALL_TIME_MS,
+                activeResourceLimits?.maxExecutionWallTimeMs?.toLong() ?: 0L,
+                candidate.resourceLimits.maxExecutionWallTimeMs.toLong(),
+            ),
+            ResourceLimitIncrease(
+                ResourceLimit.MAX_MEMORY_BYTES,
+                activeResourceLimits?.maxMemoryBytes?.toLong() ?: 0L,
+                candidate.resourceLimits.maxMemoryBytes.toLong(),
+            ),
+            ResourceLimitIncrease(
+                ResourceLimit.STORAGE_QUOTA_BYTES,
+                activeCapabilities?.storageQuotaBytes?.toLong() ?: 0L,
+                candidate.capabilities.storageQuotaBytes.toLong(),
+            ),
+            ResourceLimitIncrease(
+                ResourceLimit.NETWORK_CONCURRENT_REQUESTS,
+                activeCapabilities?.network?.maxConcurrentRequests?.toLong() ?: 0L,
+                candidate.capabilities.network.maxConcurrentRequests.toLong(),
+            ),
+            ResourceLimitIncrease(
+                ResourceLimit.NETWORK_REQUEST_TIMEOUT_MS,
+                activeCapabilities?.network?.requestTimeoutMs?.toLong() ?: 0L,
+                candidate.capabilities.network.requestTimeoutMs.toLong(),
+            ),
+            ResourceLimitIncrease(
+                ResourceLimit.NETWORK_RESPONSE_BYTES,
+                activeCapabilities?.network?.maxResponseBytes?.toLong() ?: 0L,
+                candidate.capabilities.network.maxResponseBytes.toLong(),
+            ),
+        ).filter { it.candidateValue > it.activeValue }
     }
 
     private fun capabilityGrantFingerprint(
         candidate: VerifiedHxpPackage,
         addedCapabilities: Set<String>,
+        resourceLimitIncreases: List<ResourceLimitIncrease>,
     ): String = sha256(
         buildString {
             append(candidate.packageSha256)
             append('\u0000')
             addedCapabilities.sorted().forEach { capability ->
+                append("capability:")
                 append(capability)
+                append('\n')
+            }
+            resourceLimitIncreases.forEach { increase ->
+                append("resource:")
+                append(increase.limit.name)
+                append(':')
+                append(increase.activeValue)
+                append(':')
+                append(increase.candidateValue)
                 append('\n')
             }
         }.toByteArray(StandardCharsets.UTF_8),
@@ -110,8 +160,24 @@ data class PreparedExtensionInstall(
     val candidate: VerifiedHxpPackage,
     val active: VerifiedHxpPackage?,
     val addedCapabilities: List<String>,
+    val resourceLimitIncreases: List<ResourceLimitIncrease>,
     val capabilityGrantFingerprint: String,
     val isDowngrade: Boolean,
+)
+
+enum class ResourceLimit {
+    MAX_EXECUTION_WALL_TIME_MS,
+    MAX_MEMORY_BYTES,
+    STORAGE_QUOTA_BYTES,
+    NETWORK_CONCURRENT_REQUESTS,
+    NETWORK_REQUEST_TIMEOUT_MS,
+    NETWORK_RESPONSE_BYTES,
+}
+
+data class ResourceLimitIncrease(
+    val limit: ResourceLimit,
+    val activeValue: Long,
+    val candidateValue: Long,
 )
 
 data class ExtensionInstallApproval(

@@ -8,6 +8,7 @@ import java.net.URI
 import java.nio.charset.Charset
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.tsuyomi.shared.sourcecontract.DecodeMode
 import org.tsuyomi.shared.sourcecontract.HttpsOrigin
@@ -15,12 +16,15 @@ import org.tsuyomi.shared.sourcecontract.NetworkCacheMode
 import org.tsuyomi.shared.sourcecontract.NetworkCacheState
 import org.tsuyomi.shared.sourcecontract.NetworkMethod
 import org.tsuyomi.shared.sourcecontract.SourceNetworkRequest
+import org.tsuyomi.shared.sourcecontract.SourceCookieMode
 
 class HostNetworkGatewayTest {
     private val grant = SourceNetworkGrant(
         sourceId = "org.tsuyomi.wenku8",
         extensionVersion = "0.1.0",
         origins = setOf(HttpsOrigin("https://www.wenku8.net")),
+        cookieMode = SourceCookieMode.SOURCE_SCOPED,
+        cookieOrigins = setOf(HttpsOrigin("https://www.wenku8.net")),
         maxConcurrentRequests = 2,
         requestTimeoutMs = 15_000,
         maxResponseBytes = 1_024,
@@ -97,6 +101,65 @@ class HostNetworkGatewayTest {
         assertEquals(null, first.headers["set-cookie"])
         assertEquals("session=opaque", requests[1].headers["cookie"])
         assertEquals(null, requests[2].headers["cookie"])
+    }
+
+    @Test
+    fun cookie_none_drops_server_set_cookie() = runBlocking {
+        val requests = mutableListOf<HostHttpRequest>()
+        val gateway = HostNetworkGateway(HostHttpTransport { received ->
+            requests += received
+            HostHttpResponse(
+                status = 200,
+                finalUrl = received.url,
+                headers = mapOf("set-cookie" to "server=unapproved; Path=/; Secure"),
+                bytes = "fixture".encodeToByteArray(),
+            )
+        })
+        val noCookieGrant = grant.copy(cookieMode = SourceCookieMode.NONE, cookieOrigins = emptySet())
+        val importFailure = runCatching {
+            gateway.importSourceCookies(noCookieGrant, HttpsOrigin("https://www.wenku8.net"), "handoff=unapproved")
+        }.exceptionOrNull()
+        assertTrue(importFailure is IllegalArgumentException)
+
+        gateway.request(noCookieGrant, request())
+        gateway.request(noCookieGrant, request())
+
+        assertEquals(null, requests[1].headers["cookie"])
+    }
+
+    @Test
+    fun source_scoped_cookies_reject_other_origins_and_preserve_allowed_handoff() = runBlocking {
+        val wwwOrigin = HttpsOrigin("https://www.wenku8.net")
+        val apiOrigin = HttpsOrigin("https://api.wenku8.net")
+        val scopedGrant = grant.copy(
+            origins = setOf(wwwOrigin, apiOrigin),
+            cookieOrigins = setOf(wwwOrigin),
+        )
+        val requests = mutableListOf<HostHttpRequest>()
+        val gateway = HostNetworkGateway(HostHttpTransport { received ->
+            requests += received
+            HostHttpResponse(
+                status = 200,
+                finalUrl = received.url,
+                headers = mapOf("set-cookie" to "server=approved; Path=/; Secure"),
+                bytes = "fixture".encodeToByteArray(),
+            )
+        })
+
+        gateway.importSourceCookies(scopedGrant, wwwOrigin, "handoff=approved")
+        val importFailure = runCatching {
+            gateway.importSourceCookies(scopedGrant, apiOrigin, "handoff=unapproved")
+        }.exceptionOrNull()
+        assertTrue(importFailure is IllegalArgumentException)
+
+        gateway.request(scopedGrant, request(url = "https://www.wenku8.net/search"))
+        gateway.request(scopedGrant, request(url = "https://www.wenku8.net/detail"))
+        gateway.request(scopedGrant, request(url = "https://api.wenku8.net/search"))
+        gateway.request(scopedGrant, request(url = "https://api.wenku8.net/detail"))
+
+        assertEquals("handoff=approved", requests[0].headers["cookie"])
+        assertEquals("handoff=approved; server=approved", requests[1].headers["cookie"])
+        assertEquals(null, requests[3].headers["cookie"])
     }
 
     @Test
