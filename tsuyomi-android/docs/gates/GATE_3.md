@@ -72,6 +72,7 @@ install app
 - Read at most 32 MiB of UTF-8 JSON before parsing.
 - Produce a deterministic export for the same database snapshot and injected `createdAt`: stable library ordering, stable shelf ordering, stable set ordering and stable JSON serialization.
 - Before launching `CreateDocument`, canonical serialization writes to a bounded app-cache preflight file capped at exactly 32 MiB plus one sentinel byte. At 32 MiB the export may proceed; at 32 MiB + 1 the app deletes the preflight file, does not launch or mutate a SAF destination, and shows the accessible safe failure `transfer-too-large` with the 32 MiB limit. It never truncates, silently omits records or splits one v1 document. The remediation text tells the user that this format cannot represent the current snapshot within its bound and that they may reduce library/shelf/local-tag data before retrying.
+- Every at-or-under-bound preflight is owned by `(ownerGeneration, canonicalDigest)` and is reusable only by that still-current export operation after digest verification. Picker cancel, successful destination close, provider open/write/close failure and owner destruction delete it in `finally`; a startup/foreground sweeper deletes orphaned or stale export preflights after process death. Missing files are already-clean success. No callback from an older generation may reuse or delete the current operation's file, and no success is persisted before destination close succeeds.
 - Exclude credentials, publisher trust, capability grants, HXP files, WebView state, Cookie state, cache, local search/browsing history, E-ink/device classification and arbitrary extension state.
 - Preserve stable identity, metadata, rating/tags, manual shelves, semantic progress and the portable reader preference subset defined by transfer v1.
 - Keep smart rules and subscription drafts Android-local because transfer v1 explicitly excludes them.
@@ -216,18 +217,22 @@ All user-selected sorts use stable identity as the final ascending tie-breaker. 
 
 Equal timestamps never use percentage, display order or import order as a conflict tie-breaker.
 
+`authorSortKey(authors)` is one shared canonical function, not a UI- or query-local interpretation. Each author is Unicode NFKC-normalized, Unicode whitespace runs collapse to one ASCII space, ends are trimmed and case is normalized with `Locale.ROOT`; blanks are discarded. Values are sorted by Unicode scalar-value lexicographic order and deduplicated. Their UTF-8 bytes are encoded in that order as a BLOB by escaping byte `0x00` as `0x00 0xFF` and terminating each value with `0x00 0x00`; an empty set is SQL `NULL` and sorts last. Room search projection, author predicates/sort/pagination and transfer set ordering use this exact function. Author sort is `authorSortKey ASC`, then stable identity.
+
 #### Durable cross-store import journal
 
-Room and DataStore cannot share one physical transaction. Gate 3 therefore guarantees crash-atomic **user exposure** with an application-owned recovery gate and an idempotent journal:
+Room and DataStore cannot share one physical transaction. Gate 3 therefore guarantees crash-atomic **user exposure** with an application-owned recovery gate and an idempotent journal.
+
+Normative states are `PREPARED`, `ROOM_APPLIED`, `PREFERENCES_APPLIED`, `COMPLETED`, `ABORTED` and `ABORTED_CLEANUP_PENDING`; no implementation-private status may bypass the transition/recovery rules below.
 
 1. After confirmation, serialize the already redacted/normalized `ImportPlan` to a bounded `NO_BACKUP` journal file, compute SHA-256, then insert an `import_session(PREPARED)` row containing that digest, path and the non-secret preference patch. A file without a session is an orphan and is deleted; a session never references a file whose digest was not verified.
 2. While a session is `PREPARED`, the import route remains in applying/recovery state. One Room transaction rechecks the digest, applies all canonical database records idempotently and changes the session to `ROOM_APPLIED`.
 3. DataStore then applies portable reader preferences and the Hikari global display preference in one `updateData`, together with `lastAppliedImportDigest`.
 4. Room changes the session to `PREFERENCES_APPLIED`; journal cleanup and the final `COMPLETED` transition are idempotent. If final Room bookkeeping fails after DataStore succeeds, `lastAppliedImportDigest` proves that preference replay is unnecessary and recovery completes the remaining Room transition.
-5. Application startup runs `ImportRecoveryCoordinator` before exposing the normal navigation graph. `PREPARED` resumes Room apply; `ROOM_APPLIED` replays the DataStore patch; `PREFERENCES_APPLIED` finalizes cleanup. Normal library/reader/settings content is never exposed while a confirmed session is incomplete.
-6. Before Room reaches `ROOM_APPLIED`, a persistent apply failure exposes explicit `重试` and `中止导入` actions. `中止导入` is a user action whose handler verifies the session/digest, marks the redacted audit `ABORTED`, deletes the journal, applies no preferences and returns to `more/data` with canonical user data unchanged. After `ROOM_APPLIED`, the operation is non-cancellable and the failure surface offers `重试` only until preferences/finalization complete.
+5. Application startup runs `ImportRecoveryCoordinator` before exposing the normal navigation graph. `PREPARED` resumes Room apply; `ROOM_APPLIED` replays the DataStore patch; `PREFERENCES_APPLIED` finalizes cleanup. Normal library/reader/settings content is never exposed while a confirmed mutating session is incomplete. The same startup/foreground sweeper processes `ABORTED` / `ABORTED_CLEANUP_PENDING` journal cleanup without blocking normal navigation because those states contain no canonical or preference mutation.
+6. Before Room reaches `ROOM_APPLIED`, a persistent apply failure exposes explicit `重试` and `中止导入` actions. `中止导入` is a user action whose Room transaction verifies the session/digest and records the redacted audit as `ABORTED`; canonical user data is already rolled back and no preference patch was applied. Journal deletion is a separate idempotent cleanup step: missing is success, failure records `ABORTED_CLEANUP_PENDING`, remains visible with `重试清理` under `more/data`, and is retried on every startup/foreground until the file is absent, after which the retained audit returns to `ABORTED`. After `ROOM_APPLIED`, the operation is non-cancellable and the failure surface offers `重试` only until preferences/finalization complete.
 
-Every transition is conditional on the same session ID and plan digest. Selecting another file cannot retarget a confirmed session. The normalized journal contains no credentials, raw rejected fields, Cookie values, cache or WebView state and is deleted after completion/abort.
+Every transition and cleanup action is conditional on the same session ID and plan digest. Selecting another file cannot retarget a confirmed session. The normalized journal contains no credentials, raw rejected fields, Cookie values, cache or WebView state. It is deleted after completion or abort cleanup; the redacted `ABORTED` audit remains.
 
 ### Source availability
 
@@ -275,7 +280,7 @@ Every transition is conditional on the same session ID and plan digest. Selectin
 - Use Android SAF only. No broad storage permission.
 - Import flow: select → bounded read → parse/plan → redacted warnings/conflicts → explicit confirm → durable journal/recovery gate → persistent result.
 - Cancel before confirm performs no mutation. After Room reaches `ROOM_APPLIED`, the confirmed import is non-cancellable and offers idempotent retry until DataStore/finalization completes. File-picker cancel returns unchanged state without an error.
-- Export flow computes a stable snapshot, canonical preflight bytes and digest before launching the destination picker. `transfer-too-large` never launches `CreateDocument`; provider/write failure is reported; no success is claimed before close succeeds.
+- Export flow computes a stable snapshot, canonical preflight bytes and digest before launching the destination picker. Its `(ownerGeneration, canonicalDigest)` lifecycle deletes the preflight on cancel, successful close, provider open/write/close failure, owner destruction or startup orphan sweep. `transfer-too-large` never launches `CreateDocument`; provider/write failure is reported; no success is claimed before close succeeds.
 
 ### `app`
 
@@ -378,7 +383,7 @@ Required states:
 - Library: empty, populated, selected collection, local search results, no results, multi-select, dormant source, write failure.
 - Collections: system/manual/smart/disabled subscription draft, create/edit validation, cycle/depth rejection, delete/reparent confirmation.
 - Local book: active source, dormant source, rating/tags, multiple collection membership, progress summary.
-- Import: picker cancelled, parsing, fatal document error, dry-run with warnings/conflicts, confirmation, applying, startup recovery resume, pre-`ROOM_APPLIED` persistent failure with explicit `重试` / `中止导入`, post-`ROOM_APPLIED` non-cancellable retry-only failure, success and persisted report.
+- Import: picker cancelled, parsing, fatal document error, dry-run with warnings/conflicts, confirmation, applying, startup recovery resume, pre-`ROOM_APPLIED` persistent failure with explicit `重试` / `中止导入`, post-`ROOM_APPLIED` non-cancellable retry-only failure, non-blocking `已中止，等待清理` with `重试清理`, success and persisted report.
 - Export: empty/nonempty snapshot, canonical preflight, `transfer-too-large`, destination cancelled, writing, success with digest, provider failure.
 - Reader preferences: Standard effective values and E-ink retained-but-overridden explanation.
 - Smart rule editor: empty group, valid nested groups, per-predicate parameter validation, AST-bound rejection (depth, nodes, term length and terms per predicate) with the offending node identified in text, unsupported rule version as read-only disabled state, save failure with the draft retained, and back navigation with unsaved-changes confirmation.
@@ -426,7 +431,7 @@ Each commit includes its tests and affected documentation.
 8. `test(gate3): record end-to-end admission evidence`
    - Gate document evidence, AVD recipes, checksums and known boundaries.
 
-Rollback order is the reverse. Reverting UI/feature commits first leaves schema 2 readable. The schema migration itself is not downgraded in-place: rollback retains schema-2 user data and ships a forward-compatible patch or feature-disable revert; it never destructively recreates the database.
+Rollback is forward-only whenever an import journal may exist. A rollback build hides Gate 3 import/export entry points but retains the `import_session` states, normalized-plan parser/digest verification, `lastAppliedImportDigest`, pre-navigation coordinator, recovery/abort UI and both import/export temp sweepers. It must recover or explicitly abort every `PREPARED`, `ROOM_APPLIED` and `PREFERENCES_APPLIED` session before exposing `NavHost`; only a later build proven to have zero incomplete sessions and zero journal files may remove that machinery. Reverse commit reverts apply only to completed clean states. Schema 2 user data is retained and never destructively recreated.
 
 ## Verification and acceptance matrix
 
@@ -445,9 +450,11 @@ Rollback order is the reverse. Reverting UI/feature commits first leaves schema 
 - Explicit library membership does not appear from browse metadata or progress alone.
 - Manual membership uniqueness, deterministic backfill/order repair, delete/reparent and concurrent cycle assignment.
 - Normative system/progress query fixtures cover absent/invalid/locator-only/0/fractional/1 progress, equal timestamps, null metadata, dormant transitions, time boundaries and stable sort ties.
+- Canonical author-key fixtures cover permuted, duplicate, mixed-case, Unicode, blank and multi-author inputs; sort/pagination are stable across repeated queries, migration and transfer round-trip.
 - FTS/local search escaping and parameter binding; malicious terms cannot alter query shape.
 - Smart query invalidation after rating/tag/progress/source-availability changes.
-- Cross-store import journal fault injection at `PREPARED`, Room commit, DataStore apply, Room finalization and cleanup. Process death/retry never exposes normal app content with an incomplete confirmed session; pre-Room failure can abort with no canonical/preference mutation.
+- Cross-store import journal fault injection at `PREPARED`, Room commit, DataStore apply, Room finalization and completion cleanup. Process death/retry never exposes normal content with an incomplete mutating session. Abort tests inject failure/process death before/after `ABORTED` and before/during/after file deletion; restart leaves canonical/preferences unchanged, does not incorrectly block normal navigation, retains only redacted audit and eventually removes the journal.
+- A feature-disabled rollback build is opened from file/Room/DataStore snapshots at each incomplete journal state; it recovers or aborts before `NavHost`, keeps entry points disabled and leaves no partial exposure or journal.
 - Process death/recreate restores selected stable collection/page/report state without serializing whole payloads.
 
 ### Product end-to-end on API 29
@@ -464,8 +471,8 @@ Rollback order is the reverse. Reverting UI/feature commits first leaves schema 
 
 - Picker cancel.
 - Unsupported format/version.
-- 32 MiB + 1 byte import.
-- Exact 32 MiB export succeeds preflight; 32 MiB + 1 export reports `transfer-too-large`, does not launch `CreateDocument`, leaves no destination/temp artifact and never claims success.
+- 32 MiB + 1 byte import is rejected before parse.
+- Exact and below-bound exports cover picker cancel, destination success, provider open/write/close failure, owner destruction/rotation and process death/relaunch; each leaves no preflight artifact and never reports false success. Exact 32 MiB may proceed. A 32 MiB + 1 export reports `transfer-too-large`, does not launch `CreateDocument` and leaves no destination/temp artifact.
 - Invalid UTF-8/JSON.
 - Duplicate identity, dangling shelf and parent cycle.
 - Malformed one-record Hikari input with unrelated valid records retained in the dry-run.
@@ -482,7 +489,7 @@ Rollback order is the reverse. Reverting UI/feature commits first leaves schema 
 |---|---|---|---|---|
 | `feature:library` | empty, populated system/manual/smart, dormant, search/no-result, multi-select, collection manager, smart editor, local book active/dormant/rating-tags/multi-membership/progress | full shell set: 360×800, 800×360, 360×320, 599×800, 600×800, 840×900; state-heavy variants at 360×800, 600×800 and 840×900 | standard-light, standard-dark, E-ink at 1.0; populated/local-book/manager at 1.3 and 2.0 on 360×800 and 600×800 | All breakpoints prove pane cutover; representative windows carry the combinatorial business states. Local Room details belong here, not in `feature:book`. |
 | `feature:book` | source detail not-in-library, added, remove-confirmation and write failure | 360×800, 600×800, 840×900 | standard-light and E-ink at 1.0; 360×800 at 2.0 | This module owns only source-detail membership actions, not the local book screen. |
-| `feature:backup` import | parsing, fatal, dry-run warnings/conflicts, confirmation, applying, startup recovery resume, pre-`ROOM_APPLIED` retry/abort failure, post-`ROOM_APPLIED` retry-only failure, success and persisted report | 360×800, 600×800, 840×900 | standard-light, standard-dark, E-ink at 1.0; dry-run/report/recovery failures at 2.0 on 360×800 | Compact, pane boundary and expanded report density are the material layouts; pre-navigation recovery remains feature-owned content. |
+| `feature:backup` import | parsing, fatal, dry-run warnings/conflicts, confirmation, applying, startup recovery resume, pre-`ROOM_APPLIED` retry/abort failure, post-`ROOM_APPLIED` retry-only failure, aborted-cleanup retry, success and persisted report | 360×800, 600×800, 840×900 | standard-light, standard-dark, E-ink at 1.0; dry-run/report/recovery/cleanup failures at 2.0 on 360×800 | Compact, pane boundary and expanded report density are the material layouts; pre-navigation recovery remains feature-owned content while aborted cleanup remains non-blocking under `more/data`. |
 | `feature:backup` export | empty/nonempty snapshot, `transfer-too-large`, writing, success with digest/summary, provider failure | 360×800, 600×800, 840×900 | standard-light and E-ink at 1.0; `transfer-too-large` and provider failure at 2.0 on 360×800 | Export has distinct progress/success/failure semantics and cannot borrow import references. |
 | `feature:settings` | portable reader settings under Standard; values retained but effectively overridden under E-ink; write failure | 360×800, 600×800, 840×900 | standard-light, standard-dark, E-ink at 1.0, 1.3 and 2.0 | Reuses the established settings and retained-value pattern at compact/pane/expanded widths. |
 
@@ -503,14 +510,14 @@ No app-module copied UI golden is permitted; production feature composables own 
 |---|---|
 | Browsed books silently become library books | Separate `book` from `library_entry`; regression test browse/read without add. |
 | Legacy secret exposure in reports/logs | Structured warning codes/field names only; fixtures contain sentinel secrets and tests assert absence from output/log-safe models. |
-| Partial import across Room/DataStore or process death | Durable redacted plan journal, digest-bound state machine, Room atomic mutation, DataStore applied-digest marker, startup recovery gate and idempotent transition fault tests. |
+| Partial import, abort cleanup or rollback across Room/DataStore/process death | Digest-bound journal; Room atomic mutation; DataStore applied-digest marker; startup recovery gate; idempotent `ABORTED` sweeper with explicit cleanup retry; rollback feature-disable build retains recovery contracts until incomplete states/files reach zero. |
 | Stale file plan applied after another selection | URI/document digest + generation bound confirmation token. |
 | Dynamic smart SQL injection | Typed AST, bounded validator, enum-owned SQL fragments and bound args; malicious-term tests. |
 | FTS/projection drift | Same Room transaction updates canonical row and projection; migration/rebuild test. |
 | Source uninstall deletes user state | Availability projection only; uninstall transition tests preserve library/progress/organization. |
 | Imported source causes network/write side effects | Pure planner and database apply have no extension/network dependency; instrumentation asserts zero source transport calls. |
 | Room migration blocks or hides existing Gate 2 users | Exported schema-1 fixture; deterministic membership backfill before new FK/query invariants; exact hierarchy/order/book/progress assertions; explicit nonmember-progress behavior; no destructive fallback. |
-| Large import/export causes allocation, unusable self-export or partial SAF output | 32 MiB input bound; item/string/AST/report limits; capped 32 MiB+1 export preflight file; `transfer-too-large` before picker; exact-bound tests and cleanup assertions. |
+| Large import/export causes allocation, unusable self-export, partial SAF output or orphan temp files | 32 MiB input bound; item/string/AST/report limits; generation/digest-bound capped 32 MiB+1 preflight; `finally` cleanup plus startup orphan sweep; `transfer-too-large` before picker; exact-bound and lifecycle fault tests. |
 | E-ink receives a second business path | Shared ViewModel/query state; only list presentation/paging policy differs. |
 | Portable preference has no consumer | Implement DataStore + reader/settings consumer in the same commit; otherwise omit/hide and fail plan acceptance. |
 | Transfer v1 cannot carry smart rules | Explicitly retain smart rules Android-local; document/report this boundary; no opaque extension field. |
@@ -549,6 +556,8 @@ The plan uses the recommended defaults below. Adviser may require a narrower or 
 - Initial verdict: **REQUEST_CHANGES**.
 - Findings: A1 cross-store Room/DataStore crash atomicity; A2 schema-1 manual-membership backfill; A3 normative system/progress query semantics; A4 over-limit export outcome.
 - Closure: changes are incorporated in this amended plan; independent follow-up review is pending.
+- Follow-up review input: `947503f490808ea4299ddfeb0879b3d978715d14`; verdict **REQUEST_CHANGES**. A2 **CLOSED**; A1 partial due abort-cleanup crash window and rollback recovery removal, A3 partial due plural-author key ambiguity, A4 partial due export preflight lifecycle gaps.
+- Second closure: changes are incorporated in this amended plan; independent follow-up review is pending.
 
 ## Authorization boundary
 
