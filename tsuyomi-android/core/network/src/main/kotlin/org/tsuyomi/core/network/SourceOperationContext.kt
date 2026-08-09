@@ -41,7 +41,7 @@ class SourceOperationContext internal constructor(
     init {
         require(kind != SourceOperationKind.REMOTE_LIBRARY_ADD || !addToken.isNullOrBlank())
         require(kind != SourceOperationKind.REMOTE_LIBRARY_ADD || cursor == null)
-        require(cursor.isNullOrEmpty().not() || cursor == null)
+        require(cursor == null || cursor.isNotBlank())
     }
 
     internal fun validate(request: SourceNetworkRequest) {
