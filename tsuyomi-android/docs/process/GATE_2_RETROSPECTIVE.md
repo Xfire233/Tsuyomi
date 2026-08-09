@@ -5,7 +5,7 @@
 
 ## 交付结论
 
-Gate 2 交付了签名 Wenku8 只读垂直切片；真正执行 required jobs 的 hosted-admission head `6544cf49ea340eed8940d12f1a3a14ba47c8d9d5` 通过全部检查。后续 Gate 不得把“功能实现完成”或只显示绿色的 check 视为交付；只有计划、独立审阅、实质步骤证据、可回退实现、分层验收和受保护合并门禁都闭合，才算完成。
+Gate 2 交付了签名 Wenku8 只读垂直切片；真正执行 required jobs 的 hosted-admission head `6544cf49b52d12a9abe6aecfdd6e29327cf01e5b` 通过全部检查。后续 Gate 不得把“功能实现完成”或只显示绿色的 check 视为交付；只有计划、独立审阅、实质步骤证据、可回退实现、分层验收和受保护合并门禁都闭合，才算完成。
 
 ## Gate 2 复盘
 
