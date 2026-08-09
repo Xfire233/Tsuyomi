@@ -78,3 +78,9 @@ class SourceOperationContext internal constructor(
         return values
     }
 }
+
+fun remoteLibraryReadContext(policy: RemoteOperationRequestPolicy, cursor: String?): SourceOperationContext =
+    SourceOperationContext(SourceOperationKind.REMOTE_LIBRARY_READ, policy, cursor = cursor)
+
+fun remoteLibraryAddContext(policy: RemoteOperationRequestPolicy, addToken: String): SourceOperationContext =
+    SourceOperationContext(SourceOperationKind.REMOTE_LIBRARY_ADD, policy, addToken = addToken)

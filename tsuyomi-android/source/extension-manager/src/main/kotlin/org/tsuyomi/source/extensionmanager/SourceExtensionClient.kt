@@ -22,6 +22,10 @@ import org.tsuyomi.core.network.HostNetworkError
 import org.tsuyomi.core.network.HostNetworkException
 import org.tsuyomi.core.network.HostNetworkGateway
 import org.tsuyomi.core.network.SourceNetworkGrant
+import org.tsuyomi.core.network.RemoteOperationRequestPolicy
+import org.tsuyomi.core.network.SourceOperationContext
+import org.tsuyomi.core.network.remoteLibraryAddContext
+import org.tsuyomi.core.network.remoteLibraryReadContext
 import org.tsuyomi.shared.model.BookIdentity
 import org.tsuyomi.shared.sourcecontract.DecodeMode
 import org.tsuyomi.shared.sourcecontract.NetworkCacheMode
@@ -30,6 +34,9 @@ import org.tsuyomi.shared.sourcecontract.ReaderBlock
 import org.tsuyomi.shared.sourcecontract.ReaderDocument
 import org.tsuyomi.shared.sourcecontract.SourceBookDetail
 import org.tsuyomi.shared.sourcecontract.SourceBookSummary
+import org.tsuyomi.shared.sourcecontract.RemoteLibraryAddOutcome
+import org.tsuyomi.shared.sourcecontract.RemoteLibraryAddResult
+import org.tsuyomi.shared.sourcecontract.RemoteLibraryPage
 import org.tsuyomi.shared.sourcecontract.SourceChapter
 import org.tsuyomi.shared.sourcecontract.SourceDiagnostic
 import org.tsuyomi.shared.sourcecontract.SourceDirectory
@@ -117,11 +124,59 @@ class SourceExtensionClient private constructor(
         )
     }
 
+    suspend fun listRemoteLibrary(cursor: String?): RemoteLibraryPage {
+        val policy = manifest.capabilities.remoteLibrary.policies[RemoteOperation.READ]
+            ?: fail(SourceErrorCode.MALFORMED_SOURCE_RESPONSE, "remote-library-read", "remote-read-not-granted")
+        val response = invokeNetwork(
+            "buildRemoteLibraryRequest",
+            arrayOf<Any?>(cursor),
+            "remote-library-read-network",
+            offlineOnly = false,
+            operationContext = remoteLibraryReadContext(policy.toNetworkPolicy(), cursor),
+        )
+        classify(response, "remote-library-read-classify")
+        val root = call("parseRemoteLibrary", arrayOf<Any?>(response.text.orEmpty()), "remote-library-read-parse").jsonObject
+        val items = root.requiredArray("items").map { parseSummary(it.jsonObject) }
+        val nextCursor = root.optionalString("nextCursor")
+        val complete = root["complete"]?.jsonPrimitive?.booleanOrNull
+            ?: fail(SourceErrorCode.MALFORMED_SOURCE_RESPONSE, "remote-library-read-parse", "missing-complete")
+        return try {
+            RemoteLibraryPage(items, nextCursor, complete)
+        } catch (_: IllegalArgumentException) {
+            fail(SourceErrorCode.MALFORMED_SOURCE_RESPONSE, "remote-library-read-parse", "invalid-page")
+        }
+    }
+
+    suspend fun addRemoteLibrary(remoteBookId: String, directActionToken: String): RemoteLibraryAddResult {
+        val policy = manifest.capabilities.remoteLibrary.policies[RemoteOperation.ADD]
+            ?: fail(SourceErrorCode.MALFORMED_SOURCE_RESPONSE, "remote-library-add", "remote-add-not-granted")
+        val response = invokeNetwork(
+            "buildRemoteLibraryAddRequest",
+            arrayOf<Any?>(remoteBookId),
+            "remote-library-add-network",
+            offlineOnly = false,
+            operationContext = remoteLibraryAddContext(policy.toNetworkPolicy(), directActionToken),
+        )
+        classify(response, "remote-library-add-classify")
+        val root = call("parseRemoteLibraryAdd", arrayOf<Any?>(response.text.orEmpty(), remoteBookId), "remote-library-add-parse").jsonObject
+        val identity = BookIdentity(root.requiredString("sourceId"), root.requiredString("remoteBookId"))
+        if (identity.sourceId != manifest.sourceId.value || identity.remoteBookId != remoteBookId) {
+            fail(SourceErrorCode.MALFORMED_SOURCE_RESPONSE, "remote-library-add-parse", "identity-mismatch")
+        }
+        val outcome = when (root.requiredString("outcome")) {
+            "applied" -> RemoteLibraryAddOutcome.APPLIED
+            "already-present" -> RemoteLibraryAddOutcome.ALREADY_PRESENT
+            else -> fail(SourceErrorCode.MALFORMED_SOURCE_RESPONSE, "remote-library-add-parse", "invalid-outcome")
+        }
+        return RemoteLibraryAddResult(identity, outcome)
+    }
+
     private suspend fun invokeNetwork(
         function: String,
         arguments: Array<out Any?>,
         stage: String,
         offlineOnly: Boolean,
+        operationContext: SourceOperationContext? = null,
     ): SourceNetworkResponse {
         val request = try {
             parseRequest(call(function, arguments, "$stage-request").jsonObject).let { built ->
@@ -133,7 +188,7 @@ class SourceExtensionClient private constructor(
             fail(SourceErrorCode.EXTENSION_RUNTIME_FAILURE, "$stage-request", "invalid-request-dto")
         }
         return try {
-            gateway.request(grant, request)
+            gateway.request(grant, request, operationContext)
         } catch (error: HostNetworkException) {
             fail(mapNetworkError(error.error), stage, error.error.name.lowercase(), error.diagnosticId)
         }
@@ -245,6 +300,15 @@ private fun parseDocument(value: JsonObject): ReaderDocument = ReaderDocument(
             else -> throw IllegalArgumentException("Unsupported reader block")
         }
     },
+)
+
+private fun HxpRemoteOperationPolicy.toNetworkPolicy(): RemoteOperationRequestPolicy = RemoteOperationRequestPolicy(
+    origin = origin,
+    method = method,
+    path = path,
+    fixedParameters = parameters.filterIsInstance<HxpRemoteParameter.Fixed>().associate { it.name to it.value },
+    cursorParameter = parameters.filterIsInstance<HxpRemoteParameter.Cursor>().singleOrNull()?.name,
+    referrerPath = referrerPath,
 )
 
 private fun JsonObject.requiredString(name: String): String = requireNotNull(this[name]?.jsonPrimitive?.contentOrNull)
