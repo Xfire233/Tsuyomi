@@ -49,6 +49,25 @@ class ManualVerificationHandoffInstrumentedTest {
         exerciseVerificationHandoff(DisplayPreference.EINK)
     }
 
+    @Test
+    fun recreation_closes_the_old_source_runtime_before_opening_a_new_session() {
+        cleanSessionState()
+        waitForText("书架")
+        composeRule.onNodeWithText("浏览").performClick()
+        waitForText("进入内容源")
+        composeRule.onNodeWithText("进入内容源").performClick()
+        waitForText("搜索已安装内容源")
+        waitForQuickJsLaneCount(1)
+
+        composeRule.activityRule.scenario.recreate()
+
+        waitForText("搜索已安装内容源")
+        waitForQuickJsLaneCount(1)
+        composeRule.onNodeWithText("搜索书名").performTextInput("fixture")
+        composeRule.onNodeWithText("搜索书名").performImeAction()
+        waitForText("雾港纪事")
+    }
+
     private fun exerciseVerificationHandoff(profile: DisplayPreference) {
         cleanSessionState()
         runBlocking {
@@ -112,6 +131,14 @@ class ManualVerificationHandoffInstrumentedTest {
     private fun waitForText(text: String) {
         composeRule.waitUntil(timeoutMillis = 15_000) {
             composeRule.onAllNodesWithText(text).fetchSemanticsNodes().isNotEmpty()
+        }
+    }
+
+    private fun waitForQuickJsLaneCount(expected: Int) {
+        composeRule.waitUntil(timeoutMillis = 15_000) {
+            Thread.getAllStackTraces().keys.count { thread ->
+                thread.isAlive && thread.name.startsWith("tsuyomi-quickjs-")
+            } == expected
         }
     }
 
