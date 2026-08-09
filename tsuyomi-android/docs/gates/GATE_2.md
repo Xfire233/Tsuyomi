@@ -8,7 +8,8 @@
 - Scope: **FROZEN**
 - Implementation: **COMPLETE**
 - Local verification: **PASS**
-- Hosted pull request: **PENDING**
+- Hosted pull request: **PASS** — [PR #1](https://github.com/Xfire233/Tsuyomi/pull/1)
+- Hosted required checks: **PASS** — [PR checks](https://github.com/Xfire233/Tsuyomi/pull/1/checks): `protocol-conformance`, `extensions-baseline`, `android-build-test-lint-goldens`, `android-api29-instrumentation`, `repository-policy`
 - Branch: `feature/gate-2-wenku8-read-slice`
 - Outcome: a locally imported, test-publisher-signed Wenku8 `.hxp` completes the read-only path through semantic progress restoration.
 
