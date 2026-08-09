@@ -11,6 +11,12 @@ Gate 是进入下一阶段的不可变准入点，不是完成百分比。设计
 
 ## 每个 Gate 的固定流程
 
+### 0. Plan and execution authorization
+
+实现前，Planner 必须将版本化计划包附在 PR 或 Gate 文档：目标/非目标、端到端与失败路径、组件和迁移、UI 影响、风险、验收矩阵、回退提交顺序。任何 UI/交互/golden 变化必须由独立 Designer 审阅；每个整体代码计划必须由独立 Adviser 审阅架构、安全、生命周期、并发/取消和验证。两项结论都绑定计划输入。
+
+默认必须在这些审阅通过后等待用户明确确认才开始实现。用户在当前请求中明确声明“无人值守”或“自主批准执行”时，实施者可批准已审阅的计划范围；范围扩大、UI 增加或风险变化会使授权失效并要求重审。无人值守实施授权不取代受保护分支的用户合并确认。
+
 ### 1. Scope
 
 在实现前记录：
@@ -32,7 +38,7 @@ Gate 是进入下一阶段的不可变准入点，不是完成百分比。设计
 - 协议、安全、持久化、迁移和兼容性；
 - 可执行验证矩阵，不只列 screenshot。
 
-设计产出必须经过独立 UI/UX 评审。结论仅允许 `approve`、`approve with changes`、`reject`；只有绑定目标 Git 输入和证据摘要的 `approve` 才准入实现。
+设计产出必须经过独立 Designer UI/UX 评审。结论仅允许 `approve`、`approve with changes`、`reject`；只有绑定目标 Git 输入和证据摘要的 `approve` 才准入实现。
 
 ### 3. Implementation
 
@@ -42,9 +48,9 @@ Gate 是进入下一阶段的不可变准入点，不是完成百分比。设计
 - clean cutover：迁移所有调用者并删除旧路径、重复实现和失效文档。
 - 新依赖必须同时更新 version/lock、verification metadata、第三方声明和许可证。
 
-### 4. Review
+### 4. Adviser code review
 
-独立代码评审对目标 Git 输入检查：
+独立 Adviser 代码评审对目标 Git 输入检查：
 
 - 正确性、生命周期、并发/取消、资源与分配；
 - 状态所有权和模块依赖；
@@ -54,6 +60,10 @@ Gate 是进入下一阶段的不可变准入点，不是完成百分比。设计
 - 是否存在文档、代码、fixture、golden 或协议漂移。
 
 每个 finding 必须记录严重度、证据路径、源头修复、验证和关闭提交。目标输入改变时，只允许明确标注“不影响审阅范围”，否则重审。公开仓库只保留适合长期维护的结论和规则，不提交本地会话、提示词或私有审阅转录。
+
+### 4.5 PR admission and merge authorization
+
+PR 创建后及最终功能变更后，Adviser 必须对 PR head 再审阅一次；新 finding 必须按严重度关闭，head 变化会使受影响审阅失效。所有 required checks 成功后仍必须等待用户人工确认才可合并。Designer/Adviser `approve`、CI success 和无人值守实施授权都不等同于 GitHub review 或合并许可。
 
 ### 5. Verification
 
