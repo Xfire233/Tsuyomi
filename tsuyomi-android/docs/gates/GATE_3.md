@@ -54,7 +54,7 @@ install app
 - Edit local rating and local tags. Remote tags remain read-only source metadata.
 - Search local titles, authors and normalized tags without network or extension execution.
 - Sort by title, author, added time, last read, metadata update, progress, rating and source.
-- Open a local book details screen from Room data. Dormant books remain readable as records; source-dependent actions are replaced by one truthful prerequisite explaining that the signed source must be installed.
+- Open a local book details screen from Room data. Dormant books remain readable as records; source-dependent actions are replaced by the message `此书的来源未安装。在「浏览」中安装对应签名来源后，书籍与进度自动恢复，无需重新添加。` and one explicit `前往浏览` action. The action switches to the Browse root; the library never embeds or automates source installation. Availability projection changes remove the dormant state immediately without manual refresh.
 - Preserve search and browsing history imported from Hikari as host-owned source-scoped history. Search suggestions appear only for an installed matching source; browsing timestamps may drive local sort but do not add a book to the library.
 
 ### Collections
@@ -211,6 +211,9 @@ Invariants:
 - Library item opens host-owned local details first; source actions are explicit and capability-gated.
 - Multi-select actions are explicit buttons/menu items and available to TalkBack, keyboard and DPAD; no swipe-only or long-press-only contract.
 - Empty, loading, populated, no-result, dormant, write-failure and retry states have persistent accessible feedback.
+- Collection and membership reorder is available only in edit mode through explicit per-row `上移` / `下移` actions with at least 48dp targets. There is no drag-only path. Standard and E-ink use the same commands; E-ink replaces state immediately without animation.
+- The library two-pane breakpoint is the existing 600dp application breakpoint. At 600dp and above, collection navigation and content are stable sibling panes. Below 600dp, including 360×320 double-compact, the collection selector is a single-pane top control.
+- E-ink list paging reuses `core:ui` `PaginationBar`; no feature-local pagination component is introduced. Multi-selection survives page changes and exposes a persistent textual selected count. Removing the last item on the last page moves to the previous valid page and announces the new page through an accessibility live region.
 
 ### Source book details
 
@@ -279,7 +282,7 @@ Invariants:
 |---|---|
 | 加入书架 | Visible on a valid source detail when not locally added; writes only host library state. |
 | 移出书架 | Visible for a library entry; confirmation explains preserved progress/history. |
-| 打开来源/目录 | Visible when a verified source is available; dormant state replaces it with the source-install prerequisite. |
+| 打开来源/目录 | Visible when a verified source is available. Dormant state shows `此书的来源未安装。在「浏览」中安装对应签名来源后，书籍与进度自动恢复，无需重新添加。` plus a real `前往浏览` handler; the library does not offer source installation. |
 | 评分/本地标签 | Visible for a library entry; durable local-only write with failure recovery. |
 | 手动集合编辑 | Visible for manual collections only. System collections cannot be renamed/reordered/deleted; smart collections reject direct membership writes. |
 | 智能规则编辑 | Visible for supported rule version; unknown versions are read-only disabled with explanation. |
@@ -289,10 +292,42 @@ Invariants:
 | 导入 legacy credential | Never offered. A warning states that sign-in data was deliberately skipped. |
 | E-ink list pagination | Visible only when `effectiveProfile == EINK`; Standard uses its normal list behavior. |
 | Reader theme incompatible with E-ink | Retained and shown disabled with the existing Standard-restoration explanation pattern. |
+| 本地搜索/排序 | Visible when the library contains any book; hidden for a completely empty library. It remains usable when every result is dormant because it never depends on a source runtime. |
+| 多选/批量操作 | Visible when the current collection is nonempty. Standard and E-ink use explicit actions with persistent selected-count text; write failure retains selection and offers retry. |
+| 集合重排 | Visible only for manual collections as explicit `上移` / `下移` actions. System, smart and subscription-draft rows do not expose reorder because their membership/order semantics are not manually writable. |
+| 查看最近导入报告 | Visible only when a completed `import_session` exists; otherwise hidden. The report contains only redacted codes, safe record references and field names. |
+| 来源搜索历史建议 | Visible on source search only when the matching source is installed and verified. Dormant-source history is retained but does not produce suggestions. |
 
 ## UI and interaction acceptance
 
 Designer review must bind the final information architecture and visual hierarchy. The implementation may not invent new screens beyond this reviewed list.
+
+### Information architecture and routes
+
+```text
+Library root
+├── library
+├── library/book/{sourceId}/{remoteBookId}
+├── library/collections
+└── library/collections/{collectionId}/rule
+
+Browse root
+└── existing source detail/directory/reader routes
+
+More root
+├── more/reader
+├── more/data
+└── more/data/report/{sessionId}
+```
+
+- `library/book/{sourceId}/{remoteBookId}` is a host-owned Room screen. Route arguments are stable IDs only.
+- `library/collections` is entered through a `管理集合` item in the compact collection selector and expanded collection pane. It contains `新建手动集合`, `新建智能集合`, and edit actions for existing user collections.
+- `library/collections/{collectionId}/rule` is entered from `新建智能集合` or an existing smart collection's edit action.
+- `more/reader` is the portable reader-settings screen owned by `feature:settings`.
+- `more/data` is owned by `feature:backup`. `查看最近导入报告` opens `more/data/report/{sessionId}` for the latest completed session; the stored session ID permits later report-history expansion without changing the route contract.
+- The existing Browse source-detail route gains local add/remove actions but remains source-owned.
+- `打开来源/目录` from a local book switches to the Browse root and opens/restores that stable book through the existing source flow. System Back remains within the Browse root. Selecting Library again uses the existing root `saveState`/`restoreState` behavior to restore the library stack, selected collection, page and selection state.
+
 
 Required states:
 
@@ -302,11 +337,12 @@ Required states:
 - Import: picker cancelled, parsing, fatal document error, dry-run with warnings/conflicts, confirmation, applying, success, storage/database failure, persisted report.
 - Export: empty/nonempty snapshot, destination cancelled, writing, success with digest, provider failure.
 - Reader preferences: Standard effective values and E-ink retained-but-overridden explanation.
+- Smart rule editor: empty group, valid nested groups, per-predicate parameter validation, AST-bound rejection (depth, nodes, term length and terms per predicate) with the offending node identified in text, unsupported rule version as read-only disabled state, save failure with the draft retained, and back navigation with unsaved-changes confirmation.
 
 Window/profile matrix:
 
 - 360×800 portrait, 800×360 landscape, 360×320 split/double-compact, 599dp boundary-below, 600dp boundary-at and 840×900 expanded.
-- `fontScale = 1.0` and `2.0`.
+- `fontScale = 1.0`, `1.3` and `2.0`.
 - forced Standard, forced E-ink, auto-recognized E-ink and auto-unknown Standard.
 - TalkBack traversal/actions, keyboard/DPAD focus order, orientation and process recreation.
 - No color-only update/dormant/warning state, no swipe-only collection action, no animated replacement dependency and no fixed-height text clipping.
@@ -396,11 +432,15 @@ Rollback order is the reverse. Reverting UI/feature commits first leaves schema 
 
 ### Screenshot/golden ownership
 
-- `feature:library`: system/manual/smart/dormant/populated/search/multi-select states across required window/profile fixtures.
-- `feature:backup`: dry-run warning, fatal error, applying, success/report and E-ink states.
-- `feature:settings`: portable reader settings and E-ink retained-value explanation.
-- `feature:book`: local add/remove membership and dormant prerequisite states.
-- No app-module copied UI golden; production feature composables own references.
+| Owner | Required states | Windows | Profiles / font scale | Fixture rationale |
+|---|---|---|---|---|
+| `feature:library` | empty, populated system/manual/smart, dormant, search/no-result, multi-select, collection manager, smart editor, local book active/dormant/rating-tags/multi-membership/progress | full shell set: 360×800, 800×360, 360×320, 599×800, 600×800, 840×900; state-heavy variants at 360×800, 600×800 and 840×900 | standard-light, standard-dark, E-ink at 1.0; populated/local-book/manager at 1.3 and 2.0 on 360×800 and 600×800 | All breakpoints prove pane cutover; representative windows carry the combinatorial business states. Local Room details belong here, not in `feature:book`. |
+| `feature:book` | source detail not-in-library, added, remove-confirmation and write failure | 360×800, 600×800, 840×900 | standard-light and E-ink at 1.0; 360×800 at 2.0 | This module owns only source-detail membership actions, not the local book screen. |
+| `feature:backup` import | parsing, fatal, dry-run warnings/conflicts, confirmation, applying, success, persisted report, storage/database failure | 360×800, 600×800, 840×900 | standard-light, standard-dark, E-ink at 1.0; dry-run/report at 2.0 on 360×800 | Compact, pane boundary and expanded report density are the material layouts. |
+| `feature:backup` export | empty/nonempty snapshot, writing, success with digest/summary, provider failure | 360×800, 600×800, 840×900 | standard-light and E-ink at 1.0; provider failure at 2.0 on 360×800 | Export has distinct progress/success/failure semantics and cannot borrow import references. |
+| `feature:settings` | portable reader settings under Standard; values retained but effectively overridden under E-ink; write failure | 360×800, 600×800, 840×900 | standard-light, standard-dark, E-ink at 1.0, 1.3 and 2.0 | Reuses the established settings and retained-value pattern at compact/pane/expanded widths. |
+
+No app-module copied UI golden is permitted; production feature composables own every reference.
 
 ### Repository / hosted admission
 
@@ -450,9 +490,10 @@ The plan uses the recommended defaults below. Adviser may require a narrower or 
 
 ### Designer
 
-- Target plan input: pending plan commit SHA.
-- Verdict: pending.
-- Blocking findings: pending.
+- Initial target plan input: `63ab05e7b486275502d1111f7932c7a018eab829`.
+- Initial verdict: **APPROVE_WITH_CHANGES**.
+- Findings: F1 route/IA binding; F2 reorder, breakpoint and paged-selection behavior; F3 option applicability gaps; F4 dormant prerequisite path; F5 golden fixture ownership; F6 smart-editor state contract.
+- Closure: changes are incorporated in this amended plan; independent follow-up review is pending.
 
 ### Adviser
 
