@@ -5,6 +5,7 @@ node_modules/
 dist/
 coverage/
 *.hxp
+!fixtures/wenku8/wenku8-fixture.hxp
 *.private.key
 *.public.key
 .DS_Store

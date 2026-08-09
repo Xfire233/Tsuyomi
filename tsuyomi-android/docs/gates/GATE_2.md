@@ -8,8 +8,9 @@
 - Scope: **FROZEN**
 - Implementation: **COMPLETE**
 - Local verification: **PASS**
-- Hosted pull request: **PASS** — [PR #1](https://github.com/Xfire233/Tsuyomi/pull/1)
-- Hosted required checks: **PASS** — [PR checks](https://github.com/Xfire233/Tsuyomi/pull/1/checks): `protocol-conformance`, `extensions-baseline`, `android-build-test-lint-goldens`, `android-api29-instrumentation`, `repository-policy`
+- Adviser remediation: **PASS — final independent review pending**
+- Hosted pull request: **PENDING RE-RUN** — [PR #1](https://github.com/Xfire233/Tsuyomi/pull/1); the recorded pass applies only to pre-remediation head `44b59a7be68da84bfd03dd28427592b5aad494c4`.
+- Hosted required checks: **PENDING RE-RUN** after the remediation commit is pushed. The prior head passed `protocol-conformance`, `extensions-baseline`, `android-build-test-lint-goldens`, `android-api29-instrumentation`, and `repository-policy`.
 - Branch: `feature/gate-2-wenku8-read-slice`
 - Outcome: a locally imported, test-publisher-signed Wenku8 `.hxp` completes the read-only path through semantic progress restoration.
 
@@ -62,6 +63,7 @@ Gate 2 stops at progress. Library organization, rating/tags, transfer export/imp
 8. The final Android static matrix passed `1193 actionable tasks`, including debug assembly, release Kotlin compilation, lint, JVM tests and four screenshot suites. The API 29 instrumentation matrix includes app, settings, UI, security, database, WebView and QuickJS runtime modules.
 9. Root REUSE 3.3 compliance passed for 395 files. Root and Android artifact policies passed for 405 and 324 candidate files respectively.
 10. Anonymous live Wenku8 homepage and search probes returned HTTP 403/login gating on 2026-08-09. This is recorded as best-effort live-site behavior; sanitized fixtures remain the acceptance authority and no automated verification bypass was attempted.
+11. Adviser remediation preserves the signed-central-directory executable entry, enforces signed Cookie mode/origins for WebView and transport, discards terminally failed QuickJS contexts, binds cancellation to one operation, closes source clients on Compose-owner disposal, and makes resource-limit increases approval-bound. The focused Android/API 29 run passed QuickJS runtime (5), app (3), and WebView (3) instrumentation tests plus debug assembly; the extension fixture run passed 6/6 tests, two deterministic rebuilds, and the committed checksum.
 
 ## Evidence boundary
 
