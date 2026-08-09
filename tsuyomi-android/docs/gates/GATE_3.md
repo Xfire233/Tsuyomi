@@ -493,7 +493,7 @@ The plan uses the recommended defaults below. Adviser may require a narrower or 
 - Initial target plan input: `63ab05e7b486275502d1111f7932c7a018eab829`.
 - Initial verdict: **APPROVE_WITH_CHANGES**.
 - Findings: F1 route/IA binding; F2 reorder, breakpoint and paged-selection behavior; F3 option applicability gaps; F4 dormant prerequisite path; F5 golden fixture ownership; F6 smart-editor state contract.
-- Closure: changes are incorporated in this amended plan; independent follow-up review is pending.
+- Closure review input: `70da4faa562f7fc0650685b4e3316de7a7f85255`; final verdict **APPROVE**; F1–F6 **CLOSED**; Blocking findings: none.
 
 ### Adviser
 
