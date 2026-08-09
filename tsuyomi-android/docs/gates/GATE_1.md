@@ -6,7 +6,7 @@
 - Evidence date: 2026-08-09
 - Technical baseline: **PASS**
 - Public-history conversion: **this evidence is preserved in the clean Monorepo baseline**
-- Hosted Gate 2 admission: **BLOCKED until the first push succeeds and protected-main required checks are configured**
+- Hosted Gate 2 admission: **PASS — public Monorepo, required checks, CODEOWNERS and protected `main` verified**
 
 The original local component histories are retained only in ignored private bundles. The public baseline is a clean Monorepo snapshot: the annotated `gate-1-baseline` tag and component version tags resolve to the same verified tree.
 
@@ -141,16 +141,14 @@ The debug APK is a local verification artifact and is excluded from Git. The scr
 - Android screenshot testing still emits its experimental-option warning and renderer security-manager warning.
 - These warnings did not hide lint errors, test failures or dependency verification failures.
 
-## Hosted governance prerequisite
+## Hosted governance verification
 
-The public repository is reserved at `https://github.com/Xfire233/Tsuyomi`. The clean Monorepo baseline must be pushed before GitHub branch protection and required checks can be enabled and verified.
+The public repository is `https://github.com/Xfire233/Tsuyomi`. Before Gate 2 development began, the following controls were observed on protected `main`:
 
-Before any Gate 2 branch is opened:
+1. the clean Monorepo baseline and immutable component/Gate tags were pushed without importing private histories;
+2. `repository-policy`, `protocol-conformance`, `extensions-baseline`, `android-build-test-lint-goldens`, and `android-api29-instrumentation` were configured as strict required checks;
+3. CODEOWNERS review, one approval, last-push approval, conversation resolution and linear history were required;
+4. administrator enforcement was enabled; force-push and branch deletion were disabled;
+5. hosted runs for commit `688e1acc05183c3cc929174c0d2bada4ad2adde1` passed all four workflows, including API 29 instrumentation.
 
-1. push `main` and the new clean component/Gate annotated tags without importing old local histories;
-2. wait for root and path-scoped GitHub Actions to pass;
-3. protect `main` and require the applicable quality workflows;
-4. require review from the resolvable owner in `.github/CODEOWNERS`;
-5. record protection evidence in the next governance change.
-
-Until these external controls exist, the technical baseline is complete but hosted Gate 2 admission remains blocked.
+Gate 2 admission is therefore open. Gate 2 work must use feature branches and pull requests; it must not bypass protected `main`.
