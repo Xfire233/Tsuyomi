@@ -33,11 +33,40 @@ jobs:
           else
             base="${{ github.event.before }}"
           fi
-          if [ -z "$base" ] || ! git cat-file -e "$base^{commit}" 2>/dev/null || ! git diff --quiet "$base" "$GITHUB_SHA" -- tsuyomi-extensions .github/workflows/extensions-quality.yml; then
+          if [ -z "$base" ] || ! git -C "$GITHUB_WORKSPACE" cat-file -e "$base^{commit}" 2>/dev/null || ! git -C "$GITHUB_WORKSPACE" diff --quiet "$base" "$GITHUB_SHA" -- tsuyomi-extensions .github/workflows/extensions-quality.yml; then
             echo "changed=true" >> "$GITHUB_OUTPUT"
           else
             echo "changed=false" >> "$GITHUB_OUTPUT"
           fi
-      - name: Documentation baseline
+      - name: Install locked Node dependencies
         if: steps.changes.outputs.changed == 'true'
-        run: test -f docs/DEVELOPMENT.md && test -f docs/WENKU8_ACCEPTANCE.md
+        run: npm ci
+      - name: Build TypeScript extensions
+        if: steps.changes.outputs.changed == 'true'
+        run: npm run build
+      - name: Run extension tests
+        if: steps.changes.outputs.changed == 'true'
+        run: npm test
+      - name: Verify deterministic public fixture
+        if: steps.changes.outputs.changed == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          fixture_directory=fixtures/wenku8
+          fixture_archive="$fixture_directory/wenku8-fixture.hxp"
+
+          (cd "$fixture_directory" && sha256sum --check wenku8-fixture.sha256)
+          committed_sha="$(sha256sum "$fixture_archive" | cut -d ' ' -f1)"
+
+          npm run package:fixture
+          first_sha="$(sha256sum "$fixture_archive" | cut -d ' ' -f1)"
+
+          npm run package:fixture
+          second_sha="$(sha256sum "$fixture_archive" | cut -d ' ' -f1)"
+
+          test "$first_sha" = "$second_sha"
+          test "$second_sha" = "$committed_sha"
+          (cd "$fixture_directory" && sha256sum --check wenku8-fixture.sha256)
+      - name: Reject generated fixture drift
+        if: steps.changes.outputs.changed == 'true'
+        run: git -C "$GITHUB_WORKSPACE" diff --exit-code -- tsuyomi-extensions
