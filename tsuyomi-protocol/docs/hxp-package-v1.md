@@ -9,7 +9,7 @@ This document is normative alongside the manifest schema. It specifies rules tha
 
 An `.hxp` is a ZIP containing `manifest.json`, the declared `entry`, optional `assets/` and `locales/`, and `signature.ed25519`. Paths use `/`, are relative, NFC-normalized, have no empty components, `.`/`..`, duplicate names, symlinks, or compression/encryption tricks. The uncompressed size, file count, individual file size, and compression ratio are host-bounded before extraction.
 
-`integrity.files` is the complete map of every regular archive file except `signature.ed25519`; all keys are normalized archive paths and all values are lowercase SHA-256 of raw file bytes. It includes `manifest.json` and the entry module. `integrity.contentDigest` is lowercase SHA-256 of the UTF-8 bytes of RFC 8785 canonical JSON for `integrity.files`. The host recomputes both maps before module evaluation.
+`integrity.files` is the complete map of every regular archive file except `manifest.json` and `signature.ed25519`; all keys are normalized archive paths and all values are lowercase SHA-256 of raw file bytes. It includes the entry module. Excluding `manifest.json` avoids an impossible self-referential digest; the detached signature authenticates the canonical manifest itself. `integrity.contentDigest` is lowercase SHA-256 of the UTF-8 bytes of RFC 8785 canonical JSON for `integrity.files`. The host recomputes both maps before module evaluation.
 
 `signature.ed25519` contains exactly a 64-byte Ed25519 detached signature. Its message is:
 

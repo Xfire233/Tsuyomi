@@ -7,13 +7,16 @@
 
 ```text
 extension.hxp
-├── manifest.json
+├── manifest.json        # canonical manifest and integrity.files map
 ├── index.mjs
 ├── assets/
 ├── locales/
-├── integrity.json
-└── signature.ed25519
+└── signature.ed25519    # detached Ed25519 signature of canonical manifest.json
 ```
+
+`integrity.files` MUST contain every archive entry other than `manifest.json` and
+`signature.ed25519`; excluding those two avoids an impossible manifest self-digest. The detached
+signature authenticates the manifest and its integrity map.
 
 ## Rules
 
@@ -27,4 +30,4 @@ extension.hxp
 
 The normative transport boundary is [`tsuyomi-protocol/docs/hxp-host-api-v1.md`](../../tsuyomi-protocol/docs/hxp-host-api-v1.md); package integrity and update trust rules are in [`tsuyomi-protocol/docs/hxp-package-v1.md`](../../tsuyomi-protocol/docs/hxp-package-v1.md).
 
-Wenku8 is the first vertical slice: install → grant → login/verification → search → detail → directory → chapter → locator/progress → library → transfer export/import. Its Android acceptance runs in forced standard and forced E-ink profiles.
+Wenku8 is the first vertical slice: install → grant → optional deliberate login/verification → search → detail → directory → chapter → locator/progress. Library organization and remote-library writes remain outside Gate 2.
