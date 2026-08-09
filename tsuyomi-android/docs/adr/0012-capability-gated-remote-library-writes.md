@@ -32,11 +32,10 @@ Only a direct user library action may initiate a remote write. Backup import, tr
 
 ## Migration impact
 
-Wenku8 and ESJZone write paths may be ported after read-only flows pass. Yamibo declares no unsupported write operation. Legacy writeback settings are not imported or enabled automatically.
+Gate 3 ports only the public typed Wenku8 fixture read/add path: explicit remote-favourites pull plus default-off, direct-user, add-only writeback. ESJZone, remote remove/move/folder actions and all automatic or bidirectional synchronization remain later Gate 4 scope. Legacy writeback settings are not imported or enabled automatically.
 
 ## Verification
 
-- A package without the declared operation cannot invoke it.
-- Adding an operation during update blocks until approved.
-- Writeback is off after fresh install, transfer import, and Hikari import.
-- Tests cover add, remove, move, denial, cancellation, partial failure, and source/API change errors.
+- A package without the declared operation cannot invoke it; adding an operation during update blocks until approved.
+- Writeback is off after fresh install, transfer import and Hikari import.
+- Gate 3 covers remote-favourites read, add, grant denial, cancellation, partial/ambiguous failure, source/API change and zero-implicit-write paths. Later Gate 4 evidence covers remove and move.

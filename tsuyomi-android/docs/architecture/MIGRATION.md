@@ -49,18 +49,18 @@ Migration preserves supported user contracts, not Flutter/GetX/Hive/Drift struct
 - complete the same search, detail, directory, chapter, and locator flow under forced E-ink mode with explicit pagination, fixed chrome, immediate navigation, and no decorative animation;
 - prove scroll, paged, and dual-page surfaces share one semantic locator contract; Yamibo migration later must use `postId` blocks rather than a separate reader persistence path.
 
-### Gate 3: library and migration
+### Gate 3: library, migration and user-mediated remote favourites
 
 - add many-to-many manual collections, system collections, validated local smart-rule collections, rating/tags, and dormant-source behavior;
 - do not execute source subscription collections until a compatible explicit discovery contract exists; imports create disabled drafts only;
-- implement `tsuyomi-transfer` export/import;
-- exercise clean-profile restoration through Android's system file picker.
+- implement `tsuyomi-transfer` export/import and clean-profile restoration through Android's system file picker;
+- port a public typed remote-library contract and Wenku8 fixture `0.2.0` only: after a manual controlled-login handoff, explicitly pull remote favourites; keep add-only writeback default-off and invoke it only from a direct local-add action with a host reconciliation record.
 
-### Gate 4: authorized writeback
+### Gate 4: remaining authorized writeback
 
-- add manifest operations `add`, `remove`, and `move`;
-- keep per-source writeback disabled by default;
-- port Wenku8 write paths with explicit grants, settings, reconciliation state, and failure evidence.
+- add remote `remove` and `move`, remote folder/shelf selection and their separate grants/settings;
+- retain per-source writeback disabled by default and forbid automatic/bidirectional/background synchronization;
+- broaden source-specific write paths only after explicit grants, reconciliation/failure evidence and a reviewed source contract.
 
 ### Gate 5: subsequent sources
 

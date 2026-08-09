@@ -43,15 +43,16 @@ These gates are ordering constraints, not separate products. A later gate must k
 
 ## Gate 3: local library and migration
 
-**Outcome:** a local-first reader retains books/progress/organization and moves safe Hikari data without secrets.
+**Outcome:** a local-first reader retains books/progress/organization and moves safe Hikari data without secrets; signed capability-aware sources may offer the narrowly bounded remote-favourites flow below.
 
 - Implement system/manual/smart collection queries, rating/tags, source dormancy, local search, explicit E-ink list pagination, and no automatic subscription execution.
 - Implement `tsuyomi-transfer` export/import with dry-run warnings, per-record recovery, conflict report, deterministic output, and no credentials/cache/WebView data.
 - Implement one-way Hikari import according to mapping: no cookies/accounts/browser state; compatible smart rules become local AST; subscriptions import disabled.
+- For a source whose signed manifest explicitly declares `remoteLibrary.read` and/or `add`, provide only user-mediated remote-favourites pull and add-only writeback: manual-login prompt, explicit pull, default-off per-source add setting, direct local-add token, host reconciliation and no automatic request. Gate 3 acceptance ports Wenku8 fixture `0.2.0` only.
 - Validate library/progress import with Wenku8 fixture data and clean-profile restoration via Android file picker.
 
-**Exit evidence:** export/import round-trip preserves stable identity, newest valid progress, manual shelves, safe preferences, and explicit warnings for dropped/incompatible legacy fields. A clean profile proves the imported books are dormant until the user installs/enables their source.
+**Exit evidence:** export/import round-trip preserves stable identity, newest valid progress, manual shelves, safe preferences, and explicit warnings for dropped/incompatible legacy fields. A clean profile proves imported books are dormant until the user installs their source. Remote-favourites fixture evidence proves signed capability approval, explicit pull, add-only direct writeback, reconciliation, no-write negative paths and Standard/E-ink parity.
 
 ## Explicitly later
 
-Remote-library writes, subscription execution, forum reply/write flows, forum read/verified owner-catalogue slice, local EPUB/TXT import, TTS, scheduled updates, vendor E-ink APIs, cloud sync, telemetry, and automatic crash reporting are not Gate 0–3 scope. The forum read slice must consume the pre-frozen `ForumThreadNavigation` contract and remains read-only.
+Remote favourite removal/move/folder selection, bidirectional or automatic sync, subscription execution, forum reply/write flows, forum read/verified owner-catalogue slice, local EPUB/TXT import, TTS, scheduled updates, vendor E-ink APIs, cloud sync, telemetry, and automatic crash reporting are not Gate 0–3 scope. The forum read slice must consume the pre-frozen `ForumThreadNavigation` contract and remains read-only.
