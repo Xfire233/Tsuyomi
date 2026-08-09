@@ -431,7 +431,8 @@ Each commit includes its tests and affected documentation.
 8. `test(gate3): record end-to-end admission evidence`
    - Gate document evidence, AVD recipes, checksums and known boundaries.
 
-Rollback is forward-only whenever an import journal may exist. A rollback build hides Gate 3 import/export entry points but retains the `import_session` states, normalized-plan parser/digest verification, `lastAppliedImportDigest`, pre-navigation coordinator, recovery/abort UI and both import/export temp sweepers. It must recover or explicitly abort every `PREPARED`, `ROOM_APPLIED` and `PREFERENCES_APPLIED` session before exposing `NavHost`; only a later build proven to have zero incomplete sessions and zero journal files may remove that machinery. Reverse commit reverts apply only to completed clean states. Schema 2 user data is retained and never destructively recreated.
+Rollback is forward-only whenever an import journal may exist. A rollback build hides Gate 3 import/export entry points but retains the `import_session` states, normalized-plan parser/digest verification, `lastAppliedImportDigest`, pre-navigation coordinator, recovery/abort UI and both import/export temp sweepers. It must recover or explicitly abort every `PREPARED`, `ROOM_APPLIED` and `PREFERENCES_APPLIED` session before exposing `NavHost`. Every build that accepts a direct upgrade from Gate 3/schema 2 retains this compatibility recovery path; it is not removed based on a release-wide state assertion or telemetry. A future schema migration may replace it only if its on-device database-open/pre-navigation migration consumes every defined Gate 3 journal state and journal-file form before exposing `NavHost`, and preserves the same no-partial-exposure contract. Reverse commit reverts apply only to completed clean states. Schema 2 user data is retained and never destructively recreated.
+
 
 ## Verification and acceptance matrix
 
@@ -452,6 +453,7 @@ Rollback is forward-only whenever an import journal may exist. A rollback build 
 - Normative system/progress query fixtures cover absent/invalid/locator-only/0/fractional/1 progress, equal timestamps, null metadata, dormant transitions, time boundaries and stable sort ties.
 - Canonical author-key fixtures cover permuted, duplicate, mixed-case, Unicode, blank and multi-author inputs; sort/pagination are stable across repeated queries, migration and transfer round-trip.
 - FTS/local search escaping and parameter binding; malicious terms cannot alter query shape.
+- Direct-upgrade matrix: snapshots from every Gate 3 journal state/file form skip the feature-disabled intermediate build and open the current schema-2-compatible build; it recovers or aborts before `NavHost` with no partial exposure or retained journal.
 - Smart query invalidation after rating/tag/progress/source-availability changes.
 - Cross-store import journal fault injection at `PREPARED`, Room commit, DataStore apply, Room finalization and completion cleanup. Process death/retry never exposes normal content with an incomplete mutating session. Abort tests inject failure/process death before/after `ABORTED` and before/during/after file deletion; restart leaves canonical/preferences unchanged, does not incorrectly block normal navigation, retains only redacted audit and eventually removes the journal.
 - A feature-disabled rollback build is opened from file/Room/DataStore snapshots at each incomplete journal state; it recovers or aborts before `NavHost`, keeps entry points disabled and leaves no partial exposure or journal.
@@ -507,7 +509,7 @@ No app-module copied UI golden is permitted; production feature composables own 
 ## Risks and mitigations
 
 | Risk | Source fix / proof |
-|---|---|
+| Partial import, abort cleanup or rollback across Room/DataStore/process death | Digest-bound journal; Room atomic mutation; DataStore applied-digest marker; startup recovery gate; idempotent `ABORTED` sweeper with explicit cleanup retry; every schema-2-compatible direct-upgrade build retains recovery or replaces it through an on-device pre-navigation migration that consumes every prior state/file form. |
 | Browsed books silently become library books | Separate `book` from `library_entry`; regression test browse/read without add. |
 | Legacy secret exposure in reports/logs | Structured warning codes/field names only; fixtures contain sentinel secrets and tests assert absence from output/log-safe models. |
 | Partial import, abort cleanup or rollback across Room/DataStore/process death | Digest-bound journal; Room atomic mutation; DataStore applied-digest marker; startup recovery gate; idempotent `ABORTED` sweeper with explicit cleanup retry; rollback feature-disable build retains recovery contracts until incomplete states/files reach zero. |
@@ -557,6 +559,8 @@ The plan uses the recommended defaults below. Adviser may require a narrower or 
 - Initial verdict: **REQUEST_CHANGES**.
 - Findings: A1 cross-store Room/DataStore crash atomicity; A2 schema-1 manual-membership backfill; A3 normative system/progress query semantics; A4 over-limit export outcome.
 - Closure: changes are incorporated in this amended plan; independent follow-up review is pending.
+- Second follow-up review input: `79981b8543f8088aaae2e7c49820bfe59e39dd58`; verdict **REQUEST_CHANGES**. A1–A4 and the four lifecycle closures were accepted; rollback compatibility remained open because a later build cannot prove every device has passed through an intermediate recovery build.
+- Third closure: every Gate 3/schema-2-compatible direct upgrade retains recovery unless an on-device pre-navigation migration consumes every prior journal state/file form; independent follow-up review is pending.
 - Follow-up review input: `947503f490808ea4299ddfeb0879b3d978715d14`; verdict **REQUEST_CHANGES**. A2 **CLOSED**; A1 partial due abort-cleanup crash window and rollback recovery removal, A3 partial due plural-author key ambiguity, A4 partial due export preflight lifecycle gaps.
 - Second closure: changes are incorporated in this amended plan; independent follow-up review is pending.
 
