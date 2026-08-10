@@ -156,9 +156,16 @@
         "method": { "enum": ["GET", "POST"] },
         "path": { "type": "string", "pattern": "^/[^?#]{0,1023}$" },
         "referrerPath": { "type": "string", "pattern": "^/[^?#]{0,1023}$" },
+        "redirects": {
+          "type": "array",
+          "maxItems": 5,
+          "uniqueItems": true,
+          "items": { "$ref": "#/$defs/remoteOperationRedirect" }
+        },
         "parameters": {
           "type": "object",
           "maxProperties": 64,
+          "propertyNames": { "type": "string", "minLength": 1, "maxLength": 256, "pattern": "\\S" },
           "additionalProperties": {
             "oneOf": [
               {
@@ -174,6 +181,28 @@
                 "properties": { "kind": { "enum": ["remoteBookId", "cursor"] } }
               }
             ]
+          }
+        }
+      }
+    },
+    "remoteOperationRedirect": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["origin", "method", "path", "parameters"],
+      "properties": {
+        "origin": { "$ref": "#/$defs/httpsOrigin" },
+        "method": { "const": "GET" },
+        "path": { "type": "string", "pattern": "^/[^?#]{0,1023}$" },
+        "referrerPath": { "type": "string", "pattern": "^/[^?#]{0,1023}$" },
+        "parameters": {
+          "type": "object",
+          "maxProperties": 64,
+          "propertyNames": { "type": "string", "minLength": 1, "maxLength": 256, "pattern": "\\S" },
+          "additionalProperties": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["kind", "value"],
+            "properties": { "kind": { "const": "fixed" }, "value": { "type": "string", "maxLength": 8192 } }
           }
         }
       }

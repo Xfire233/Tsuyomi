@@ -33,6 +33,7 @@
     <string name="remote_add_confirmed">已同步</string>
     <string name="remote_add_unresolved">网站未确认</string>
     <string name="remote_add_cancelled">未发送到网站</string>
+    <string name="local_remote_retry_unavailable">无法重试网站同步：需要已安装并打开对应内容源，且网站写回开关与该网站凭证仍然有效。</string>
     <string name="title_remote_library">网站收藏</string>
     <string name="remote_pull_success">已读取 %1$d 本，新增 %2$d 本到本地书架。</string>
     <string name="remote_pull_login_required">需要先手动登录；登录后仍由你决定是否重新读取。</string>

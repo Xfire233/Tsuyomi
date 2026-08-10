@@ -8,6 +8,7 @@
 - Consolidated Android, protocol, and extension components into one public monorepo.
 - Preserved independent component versions and path-scoped quality workflows.
 - Added public provenance, licensing boundaries, and local-only development-state rules.
+- Added the Gate 3 local-first library, explicit bounded transfer migration, smart collections, and signed add-only remote favourites with credential-gated retries and exact redirect policy.
 
 ## 0.1.0 - 2026-08-09
 

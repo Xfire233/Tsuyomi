@@ -56,6 +56,7 @@ class TransferCoordinator(
     private val exportDirectory = File(appContext.cacheDir, "transfer-export-preflight")
     private val exportMetadataFile = File(exportDirectory, "active.properties")
     private var pendingPlan: ImportPlan? = null
+    private var pendingBasePlan: ImportPlan? = null
     private var pendingPlanBytes: ByteArray? = null
     private var pendingPlanDigest: String? = null
     private var lastExportGeneration = 0L
@@ -133,6 +134,7 @@ class TransferCoordinator(
                     return
                 }
                 val (reviewedPlan, normalized) = reviewed
+                pendingBasePlan = parse.plan
                 pendingPlan = reviewedPlan
                 pendingPlanBytes = normalized
                 pendingPlanDigest = TransferCodec.digest(normalized)
@@ -142,7 +144,24 @@ class TransferCoordinator(
     }
 
     suspend fun confirmImport() {
-        val plan = pendingPlan ?: return
+        val basePlan = pendingBasePlan ?: return
+        val reviewedPlan = pendingPlan ?: return
+        val refreshedPlan = try {
+            repository.withDatabaseConflicts(basePlan)
+        } catch (_: Throwable) {
+            clearPendingPlan()
+            state = TransferUiState.Failure(appContext.getString(R.string.transfer_import_failed_code, "conflict-review-failed"))
+            return
+        }
+        if (refreshedPlan != reviewedPlan) {
+            val normalized = withContext(Dispatchers.IO) { ImportPlanCodec.encode(refreshedPlan) }
+            pendingPlan = refreshedPlan
+            pendingPlanBytes = normalized
+            pendingPlanDigest = TransferCodec.digest(normalized)
+            state = TransferUiState.Review(refreshedPlan.toReview())
+            return
+        }
+        val plan = reviewedPlan
         val bytes = pendingPlanBytes ?: return
         val digest = pendingPlanDigest ?: return
         state = TransferUiState.Working(appContext.getString(R.string.transfer_applying_file))
@@ -463,6 +482,7 @@ class TransferCoordinator(
     }
 
     private fun clearPendingPlan() {
+        pendingBasePlan = null
         pendingPlan = null
         pendingPlanBytes = null
         pendingPlanDigest = null

@@ -201,17 +201,49 @@ class HostNetworkGateway(
             )
         }
         var url = initialUrl
+        var method = request.method
+        var currentBody = body
+        var currentReferrer = referrer
+        var currentRedirect: RemoteOperationRedirectPolicy? = null
         var redirects = 0
         while (true) {
-            validateOperationBoundary(grant, request.copy(url = url.toString()), operationContext)
+            if (redirects == 0) {
+                validateOperationBoundary(grant, request.copy(url = url.toString()), operationContext)
+            } else if (operationContext != null) {
+                val redirect = currentRedirect ?: throw HostNetworkException(HostNetworkError.REDIRECT_DISALLOWED)
+                if (method != redirect.method) throw HostNetworkException(HostNetworkError.REDIRECT_DISALLOWED)
+                val expectedReferrer = redirect.referrerPath?.let { URI(redirect.origin.canonical + it) }
+                if (currentReferrer != expectedReferrer) throw HostNetworkException(HostNetworkError.REDIRECT_DISALLOWED)
+                validateProtectedAddSurface(
+                    grant,
+                    request.copy(
+                        url = url.toString(),
+                        method = method,
+                        form = request.form.takeIf { method == NetworkMethod.POST },
+                        utf8Body = request.utf8Body.takeIf { method == NetworkMethod.POST },
+                    ),
+                    operationContext,
+                )
+            } else {
+                validateOperationBoundary(
+                    grant,
+                    request.copy(
+                        url = url.toString(),
+                        method = method,
+                        form = request.form.takeIf { method == NetworkMethod.POST },
+                        utf8Body = request.utf8Body.takeIf { method == NetworkMethod.POST },
+                    ),
+                    null,
+                )
+            }
             val response = try {
                 transport.execute(
                     HostHttpRequest(
                         url = url,
-                        method = request.method,
+                        method = method,
                         headers = headers + cookieJar.requestHeader(grant, url),
-                        body = body,
-                        referrer = referrer,
+                        body = currentBody,
+                        referrer = currentReferrer,
                         timeoutMs = grant.requestTimeoutMs,
                         maxResponseBytes = grant.maxResponseBytes,
                     ),
@@ -221,8 +253,10 @@ class HostNetworkGateway(
             } catch (_: Throwable) {
                 throw HostNetworkException(HostNetworkError.TRANSPORT)
             }
+            if (response.finalUrl != url) throw HostNetworkException(HostNetworkError.REDIRECT_DISALLOWED)
             cookieJar.store(grant, url, response.headers)
             if (response.status !in 300..399) return response
+            if (response.status !in REDIRECT_STATUSES) return response
             val location = response.headers.entries.firstOrNull { it.key.equals("location", ignoreCase = true) }?.value
                 ?: return response
             if (++redirects > 5) throw HostNetworkException(HostNetworkError.REDIRECT_LIMIT)
@@ -230,6 +264,20 @@ class HostNetworkGateway(
                 parseAllowedUri(url.resolve(location).toString(), grant)
             } catch (_: HostNetworkException) {
                 throw HostNetworkException(HostNetworkError.REDIRECT_DISALLOWED)
+            }
+            if (operationContext != null) {
+                val redirect = operationContext.redirectFor(url)
+                    ?: throw HostNetworkException(HostNetworkError.REDIRECT_DISALLOWED)
+                if (response.status in 307..308 && redirect.method != method) {
+                    throw HostNetworkException(HostNetworkError.REDIRECT_DISALLOWED)
+                }
+                currentRedirect = redirect
+                method = redirect.method
+                currentBody = null
+                currentReferrer = redirect.referrerPath?.let { path -> URI(redirect.origin.canonical + path) }
+            } else if (response.status == 303 || method == NetworkMethod.POST && response.status in 301..302) {
+                method = NetworkMethod.GET
+                currentBody = null
             }
         }
     }
@@ -246,21 +294,30 @@ class HostNetworkGateway(
             operationContext.validate(request)
             return
         }
+        validateProtectedAddSurface(grant, request, operationContext)
         operationContext?.validate(request)
-        if (operationContext == null && grant.remoteAddPolicy?.matchesSurface(request) == true) {
+    }
+
+    private fun validateProtectedAddSurface(
+        grant: SourceNetworkGrant,
+        request: SourceNetworkRequest,
+        operationContext: SourceOperationContext?,
+    ) {
+        if (operationContext?.kind != SourceOperationKind.REMOTE_LIBRARY_ADD && grant.remoteAddPolicy?.matchesSurface(request) == true) {
             throw HostNetworkException(HostNetworkError.INVALID_REQUEST)
         }
     }
 
     private fun RemoteOperationRequestPolicy.matchesSurface(request: SourceNetworkRequest): Boolean {
-        if (request.method != method) return false
         val uri = runCatching { URI(request.url) }.getOrNull() ?: return false
-        if (!uri.scheme.equals("https", true) || uri.host.isNullOrBlank() || uri.path != path) return false
+        if (!uri.scheme.equals("https", true) || uri.host.isNullOrBlank()) return false
         val requestOrigin = runCatching {
             HttpsOrigin("https://${uri.host}${if (uri.port in 1..65535 && uri.port != 443) ":${uri.port}" else ""}")
         }.getOrNull() ?: return false
-        if (requestOrigin.canonical != origin.canonical) return false
-        return true
+        if (request.method == method && uri.path == path && requestOrigin.canonical == origin.canonical) return true
+        return redirects.any { redirect ->
+            request.method == redirect.method && uri.path == redirect.path && requestOrigin.canonical == redirect.origin.canonical
+        }
     }
 
     private fun allowedHeaders(headers: Map<String, String>): Map<String, String> {
@@ -345,6 +402,7 @@ class HostNetworkGateway(
         const val MAX_BODY_BYTES = 64 * 1024
         val UTF8_BOM = byteArrayOf(0xef.toByte(), 0xbb.toByte(), 0xbf.toByte())
         val REQUEST_HEADER_ALLOWLIST = setOf("accept", "accept-language", "if-none-match", "if-modified-since")
+        val REDIRECT_STATUSES = setOf(301, 302, 303, 307, 308)
         val EXPOSED_RESPONSE_HEADERS = setOf("content-type", "etag", "last-modified")
     }
 }

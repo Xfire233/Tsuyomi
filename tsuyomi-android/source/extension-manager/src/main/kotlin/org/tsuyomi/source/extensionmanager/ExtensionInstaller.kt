@@ -140,6 +140,7 @@ class ExtensionInstaller(
                 append(name).append(':').append(value.length).append(':').append(value).append('\n')
             }
             field("publisher", publisherFingerprint)
+            field("publisher-key-id", manifest.publisherKeyId)
             field("source", manifest.sourceId.value)
             field("remote-read", manifest.capabilities.remoteLibrary.read.toString())
             manifest.capabilities.remoteLibrary.writeOperations.sorted().forEach { field("remote-write", it) }
@@ -157,6 +158,25 @@ class ExtensionInstaller(
                     field("kind", parameter.canonicalKind())
                     field("name", parameter.name)
                     field("value", parameter.canonicalValue())
+                }
+                policy.redirects.sortedWith(
+                    compareBy<HxpRemoteRedirectTarget>(
+                        { it.origin.canonical },
+                        { it.path },
+                        { it.referrerPath.orEmpty() },
+                        { redirect -> redirect.parameters.sortedBy(HxpRemoteParameter.Fixed::name).joinToString("\u0000") { "${it.name.length}:${it.name}${it.value.length}:${it.value}" } },
+                    ),
+                ).forEach { redirect ->
+                    append("remote-redirect\n")
+                    field("origin", redirect.origin.canonical)
+                    field("method", redirect.method.name)
+                    field("path", redirect.path)
+                    field("referrer", redirect.referrerPath.orEmpty())
+                    redirect.parameters.sortedBy { it.name }.forEach { parameter ->
+                        append("remote-redirect-parameter\n")
+                        field("name", parameter.name)
+                        field("value", parameter.value)
+                    }
                 }
             }
         }.toByteArray(StandardCharsets.UTF_8),

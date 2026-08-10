@@ -32,6 +32,8 @@
     <string name="library_save_tags">保存标签</string>
     <string name="library_open_source">前往浏览</string>
     <string name="library_remove">移出书架</string>
+    <string name="library_retry_remote_sync">重试同步到网站</string>
+    <string name="library_retry_remote_sync_help">每次点击都会创建新的单次同步请求。对应签名来源、网站写回授权或该网站凭证失效时会安全拒绝；请前往「浏览」重新安装或登录后再试。</string>
     <string name="collection_existing_title">本地集合</string>
     <string name="collection_existing_empty">尚未创建集合。</string>
     <string name="collection_kind_manual">手动集合</string>

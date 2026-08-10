@@ -502,7 +502,29 @@ class SourceFlowControllerInstrumentedTest {
 
             assertEquals(RemoteAddUiResult.Unresolved, controller.addSelectedBook(FIXED_TIME))
             assertEquals(RemoteReconciliationState.UNRESOLVED, controller.selectedBookReconciliation)
-            val retryResult = controller.retrySelectedBookRemoteAdd(FIXED_TIME.plusSeconds(1))
+            File(context.noBackupFilesDir, "source-credentials").deleteRecursively()
+            assertEquals(
+                RemoteAddUiResult.Failure("remote-add-not-authorized"),
+                controller.retryLocalBookRemoteAdd(
+                    requireNotNull(library.book(selected.identity)),
+                    FIXED_TIME.plusMillis(500),
+                ),
+            )
+            assertFalse(requireNotNull(library.sourceRemotePolicy(sourceId)).addWritebackEnabled)
+            assertEquals(1, calls)
+            putCredential(sourceId)
+            assertTrue(library.setAddWritebackEnabled(sourceId, policy.capabilitySetFingerprint, true))
+            val retryResult = controller.retryLocalBookRemoteAdd(
+                requireNotNull(library.book(selected.identity)),
+                FIXED_TIME.plusSeconds(1),
+            )
+            assertEquals(
+                RemoteAddUiResult.Failure("remote-add-not-retryable"),
+                controller.retryLocalBookRemoteAdd(
+                    requireNotNull(library.book(selected.identity)),
+                    FIXED_TIME.plusSeconds(2),
+                ),
+            )
             assertEquals(RemoteReconciliationState.CONFIRMED.name, reconciliationState(acceptedReconciliationIds.last()))
             assertEquals(RemoteAddUiResult.Confirmed, retryResult)
 

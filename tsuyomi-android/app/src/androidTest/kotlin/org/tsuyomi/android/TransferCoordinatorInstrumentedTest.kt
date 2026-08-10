@@ -260,6 +260,35 @@ class TransferCoordinatorInstrumentedTest {
     }
 
     @Test
+    fun confirmationReopensReviewWhenDatabaseConflictsChanged() = runBlocking {
+        val fixture = fixture("review-refresh")
+        val input = File(context.cacheDir, "review-refresh-${fixture.sessionId}.json")
+        try {
+            input.writeBytes(
+                TransferCodec.encode(
+                    TransferSnapshot(Instant.EPOCH, fixture.plan.books, emptyList(), fixture.plan.readerPreferences),
+                ),
+            )
+            fixture.coordinator.readForReview(Uri.fromFile(input), context.contentResolver)
+            assertTrue(fixture.coordinator.state is TransferUiState.Review)
+            val incoming = fixture.plan.books.single()
+            RoomLibraryRepository(fixture.database).addToLibrary(
+                LibraryBook(incoming.identity, "确认前本地变更", Instant.EPOCH, Instant.EPOCH.plusSeconds(1)),
+            )
+
+            fixture.coordinator.confirmImport()
+
+            val refreshed = fixture.coordinator.state as TransferUiState.Review
+            assertTrue(refreshed.value.conflictCodes.any { it.startsWith("existing-book-metadata-retained · ") })
+            assertNull(fixture.repository.pending())
+            assertEquals("确认前本地变更", RoomLibraryRepository(fixture.database).book(incoming.identity)?.title)
+        } finally {
+            input.delete()
+            fixture.close()
+        }
+    }
+
+    @Test
     fun malformedReaderPreferencesFinishInFailureInsteadOfWorking() = runBlocking {
         val fixture = fixture("invalid-preferences")
         val input = File(context.cacheDir, "invalid-${fixture.sessionId}.json")

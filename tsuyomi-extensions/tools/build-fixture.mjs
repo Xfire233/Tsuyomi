@@ -61,6 +61,14 @@ const manifest = {
           origin: 'https://www.wenku8.net',
           method: 'POST',
           path: '/modules/article/bookcase.php',
+          redirects: [
+            {
+              origin: 'https://www.wenku8.net',
+              method: 'GET',
+              path: '/modules/article/bookcase-success.php',
+              parameters: { status: { kind: 'fixed', value: 'added' } },
+            },
+          ],
           parameters: { action: { kind: 'fixed', value: 'add' }, aid: { kind: 'remoteBookId' } },
         },
       },

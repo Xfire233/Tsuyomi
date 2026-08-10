@@ -20,6 +20,7 @@ import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
+import org.tsuyomi.core.database.room.SubscriptionDraftEntity
 import org.tsuyomi.core.database.room.ReadingProgressEntity
 import org.tsuyomi.shared.backup.ImportKind
 import org.tsuyomi.shared.backup.ImportSeverity
@@ -27,6 +28,8 @@ import org.tsuyomi.shared.backup.ImportPlan
 import org.tsuyomi.shared.backup.TransferBook
 import org.tsuyomi.shared.backup.TransferProgress
 import org.tsuyomi.shared.backup.TransferShelf
+import org.tsuyomi.shared.backup.ImportedSmartCollection
+import org.tsuyomi.shared.backup.ImportedSubscriptionDraft
 import org.tsuyomi.shared.locator.DocumentIdentity
 import org.tsuyomi.shared.locator.ReaderLocator
 import org.tsuyomi.shared.model.BookIdentity
@@ -35,6 +38,7 @@ import org.tsuyomi.shared.smartshelf.ProgressState
 import org.tsuyomi.shared.smartshelf.SmartPredicate
 import org.tsuyomi.shared.smartshelf.SmartRule
 import org.tsuyomi.shared.smartshelf.SmartRuleNode
+import org.tsuyomi.shared.smartshelf.SmartRuleCodec
 
 @RunWith(AndroidJUnit4::class)
 class RoomLibraryRepositoryInstrumentedTest {
@@ -153,6 +157,42 @@ class RoomLibraryRepositoryInstrumentedTest {
             reviewed.warnings.mapTo(linkedSetOf()) { it.safeCode },
         )
         assertTrue(reviewed.warnings.all { it.severity == ImportSeverity.CONFLICT })
+    }
+
+    @Test
+    fun importReviewRetainsCollidingSmartRulesAndSubscriptionDrafts() = runBlocking {
+        val transfer = RoomTransferRepository(database)
+        val existingRule = SmartRule(root = SmartRuleNode.Predicate(SmartPredicate.HasUnreadUpdate))
+        val importedRule = SmartRule(root = SmartRuleNode.Predicate(SmartPredicate.ProgressIn(setOf(ProgressState.READING))))
+        val existingRuleJson = SmartRuleCodec.encode(existingRule)
+        repository.createSmartCollection(
+            LibraryCollection("smart-collision", CollectionKind.SMART, "本地智能集合", null, 0),
+            existingRule,
+        )
+        repository.createCollection(LibraryCollection("subscription-collision", CollectionKind.SUBSCRIPTION, "本地订阅草稿", null, 1))
+        database.libraryDao().upsertSubscriptionDraft(
+            SubscriptionDraftEntity("subscription-collision", "existing", "{\"source\":\"local\"}", "{\"query\":\"local\"}", false, "local"),
+        )
+        val plan = ImportPlan(
+            kind = ImportKind.TSUYOMI_TRANSFER,
+            sourceCreatedAt = Instant.EPOCH,
+            books = emptyList(),
+            shelves = emptyList(),
+            readerPreferences = null,
+            smartCollections = listOf(ImportedSmartCollection("smart-collision", "导入智能集合", SmartRuleCodec.encode(importedRule))),
+            subscriptionDrafts = listOf(ImportedSubscriptionDraft("subscription-collision", "导入订阅草稿", "imported", "{}", "{}")),
+        )
+
+        val reviewed = transfer.withDatabaseConflicts(plan)
+
+        assertEquals(
+            setOf("existing-smart-collection-retained", "existing-subscription-draft-retained"),
+            reviewed.warnings.mapTo(linkedSetOf()) { it.safeCode },
+        )
+        transfer.prepare("collection-collision", reviewed, "digest", "plan.json", "{}", Instant.EPOCH)
+        transfer.applyRoomPlan("collection-collision", "digest", reviewed)
+        assertEquals(existingRuleJson, database.libraryDao().smartRule("smart-collision")?.astJson)
+        assertEquals("existing", database.libraryDao().subscriptionDraft("subscription-collision")?.mode)
     }
 
     @Test

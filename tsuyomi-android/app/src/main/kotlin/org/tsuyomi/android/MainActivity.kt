@@ -131,6 +131,17 @@ private object Routes {
         "library/book/${Uri.encode(identity.sourceId)}/${Uri.encode(identity.remoteBookId)}"
 }
 
+internal fun localRemoteRetryUnavailableMessageRes(
+    reconciliation: RemoteReconciliationState?,
+    enabled: Boolean,
+): Int? = if (
+    !enabled && reconciliation in setOf(RemoteReconciliationState.UNRESOLVED, RemoteReconciliationState.CANCELLED)
+) {
+    R.string.local_remote_retry_unavailable
+} else {
+    null
+}
+
 @Composable
 private fun TsuyomiApplicationRoot(controller: DisplayController) {
     val redrawEpoch by controller.redrawEpoch.collectAsStateWithLifecycle()
@@ -231,6 +242,8 @@ private fun TsuyomiApp(
     var libraryState by remember { mutableStateOf(LibraryUiState()) }
     var selectedLocalEntry by remember { mutableStateOf<LibraryEntry?>(null) }
     var localTagDraft by rememberSaveable { mutableStateOf("") }
+    var localRemoteRetryMessage by remember { mutableStateOf<String?>(null) }
+    var localRemoteRetryEnabled by remember { mutableStateOf(false) }
 
     suspend fun reloadLibrary() {
         libraryState = libraryState.copy(loading = true, failure = null)
@@ -243,6 +256,15 @@ private fun TsuyomiApp(
         } catch (_: Throwable) {
             libraryState.copy(loading = false, failure = resources.getString(R.string.library_read_failure_safe))
         }
+    }
+
+    suspend fun canRetryLocalRemote(entry: LibraryEntry?): Boolean {
+        val current = entry ?: return false
+        if (current.reconciliation !in setOf(RemoteReconciliationState.UNRESOLVED, RemoteReconciliationState.CANCELLED)) return false
+        val packageInfo = sourceInstaller.activePackage
+        val remotePolicy = sourceInstaller.remotePolicy()
+        return current.sourceAvailable && packageInfo?.manifest?.sourceId?.value == current.book.identity.sourceId &&
+            remotePolicy?.addWritebackEnabled == true && sourceInstaller.remoteAddCredentialReady()
     }
 
     var remoteLibraryLoading by remember { mutableStateOf(false) }
@@ -559,12 +581,17 @@ private fun TsuyomiApp(
                         val sourceId = backStackEntry.arguments?.getString("sourceId")
                         val remoteBookId = backStackEntry.arguments?.getString("remoteBookId")
                         var resolved by remember(sourceId, remoteBookId) { mutableStateOf(false) }
-                        LaunchedEffect(sourceId, remoteBookId) {
+                        LaunchedEffect(sourceId, remoteBookId, sourceInstaller.activePackage?.packageSha256) {
                             val identity = if (sourceId != null && remoteBookId != null) BookIdentity(sourceId, remoteBookId) else null
                             selectedLocalEntry = identity?.let { key ->
                                 application.libraryRepository.libraryEntries().firstOrNull { it.book.identity == key }
                             }
                             selectedLocalEntry?.let { localTagDraft = it.localTags.joinToString("，") }
+                            localRemoteRetryEnabled = canRetryLocalRemote(selectedLocalEntry)
+                            localRemoteRetryMessage = localRemoteRetryUnavailableMessageRes(
+                                reconciliation = selectedLocalEntry?.reconciliation,
+                                enabled = localRemoteRetryEnabled,
+                            )?.let(resources::getString)
                             resolved = true
                         }
                         val entry = selectedLocalEntry
@@ -593,6 +620,30 @@ private fun TsuyomiApp(
                                     }
                                 },
                                 onOpenSource = { selectRoot(Routes.Browse) },
+                                onRetryRemoteSync = {
+                                    localRemoteRetryEnabled = false
+                                    scope.launch {
+                                        val result = runCatching {
+                                            val packageInfo = sourceInstaller.activePackage
+                                            if (packageInfo?.manifest?.sourceId?.value == entry.book.identity.sourceId) {
+                                                sourceFlow.open(packageInfo)
+                                                sourceFlow.retryLocalBookRemoteAdd(entry.book)
+                                            } else {
+                                                RemoteAddUiResult.Failure("remote-add-source-not-open")
+                                            }
+                                        }.getOrElse { RemoteAddUiResult.Failure("remote-add-source-open-failed") }
+                                        if (result is RemoteAddUiResult.Failure) localRemoteRetryEnabled = false
+                                        localRemoteRetryMessage = when (result) {
+                                            is RemoteAddUiResult.Failure -> resources.getString(R.string.local_remote_retry_unavailable)
+                                            else -> null
+                                        }
+                                        reloadLibrary()
+                                        selectedLocalEntry = libraryState.entries.firstOrNull { it.book.identity == entry.book.identity }
+                                        localRemoteRetryEnabled = canRetryLocalRemote(selectedLocalEntry)
+                                    }
+                                },
+                                remoteRetryMessage = localRemoteRetryMessage,
+                                remoteRetryEnabled = localRemoteRetryEnabled,
                                 onRemove = {
                                     scope.launch {
                                         application.libraryRepository.removeFromLibrary(entry.book.identity)

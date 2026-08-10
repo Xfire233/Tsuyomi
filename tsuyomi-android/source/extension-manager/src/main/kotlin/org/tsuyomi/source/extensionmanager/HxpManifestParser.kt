@@ -206,7 +206,7 @@ internal object HxpManifestParser {
         value: JsonObject,
         networkOrigins: Set<HttpsOrigin>,
     ): HxpRemoteOperationPolicy {
-        value.requireKeys(setOf("origin", "method", "path", "parameters"), setOf("referrerPath"))
+        value.requireKeys(setOf("origin", "method", "path", "parameters"), setOf("referrerPath", "redirects"))
         val origin = runCatching { HttpsOrigin(value.string("origin")) }
             .getOrElse { fail(HxpVerificationError.INVALID_MANIFEST) }
         if (origin !in networkOrigins) fail(HxpVerificationError.CAPABILITY_POLICY_VIOLATION)
@@ -222,7 +222,7 @@ internal object HxpManifestParser {
             fail(HxpVerificationError.INVALID_MANIFEST)
         }
         val parameters = value.obj("parameters").entries.sortedBy { it.key }.map { (name, rule) ->
-            if (name.isBlank() || name.length > 256) fail(HxpVerificationError.INVALID_MANIFEST)
+            if (name.isBlank() || name.codePointCount(0, name.length) > 256) fail(HxpVerificationError.INVALID_MANIFEST)
             val ruleObject = rule.asObject()
             when (ruleObject.string("kind")) {
                 "fixed" -> {
@@ -245,7 +245,34 @@ internal object HxpManifestParser {
         if (parameters.count { it is HxpRemoteParameter.RemoteBookId } != (if (operation == RemoteOperation.ADD) 1 else 0) ||
             parameters.count { it is HxpRemoteParameter.Cursor } > 1
         ) fail(HxpVerificationError.CAPABILITY_POLICY_VIOLATION)
-        return HxpRemoteOperationPolicy(operation, origin, method, path, referrerPath, parameters)
+        val redirects: List<HxpRemoteRedirectTarget> = when (val rawRedirects = value["redirects"]) {
+            null -> emptyList()
+            is JsonArray -> rawRedirects.map { redirect -> parseRemoteRedirect(redirect.asObject(), networkOrigins) }
+            else -> fail(HxpVerificationError.INVALID_MANIFEST)
+        }
+        if (redirects.size > 5 || redirects.distinct() != redirects) fail(HxpVerificationError.CAPABILITY_POLICY_VIOLATION)
+        return HxpRemoteOperationPolicy(operation, origin, method, path, referrerPath, parameters, redirects)
+    }
+
+    private fun parseRemoteRedirect(value: JsonObject, networkOrigins: Set<HttpsOrigin>): HxpRemoteRedirectTarget {
+        value.requireKeys(setOf("origin", "method", "path", "parameters"), setOf("referrerPath"))
+        val origin = runCatching { HttpsOrigin(value.string("origin")) }.getOrElse { fail(HxpVerificationError.INVALID_MANIFEST) }
+        if (origin !in networkOrigins) fail(HxpVerificationError.CAPABILITY_POLICY_VIOLATION)
+        if (value.string("method") != NetworkMethod.GET.name) fail(HxpVerificationError.CAPABILITY_POLICY_VIOLATION)
+        val path = value.string("path")
+        if (!path.startsWith('/') || '?' in path || '#' in path || path.length > 1024) fail(HxpVerificationError.INVALID_MANIFEST)
+        val referrerPath = value.optionalString("referrerPath")
+        if (referrerPath != null && (!referrerPath.startsWith('/') || '?' in referrerPath || '#' in referrerPath || referrerPath.length > 1024)) {
+            fail(HxpVerificationError.INVALID_MANIFEST)
+        }
+        val parameters = value.obj("parameters").entries.sortedBy { it.key }.map { (name, rule) ->
+            if (name.isBlank() || name.codePointCount(0, name.length) > 256) fail(HxpVerificationError.INVALID_MANIFEST)
+            val ruleObject = rule.asObject()
+            ruleObject.requireKeys(setOf("kind", "value"))
+            if (ruleObject.string("kind") != "fixed") fail(HxpVerificationError.CAPABILITY_POLICY_VIOLATION)
+            HxpRemoteParameter.Fixed(name, ruleObject.string("value").bounded(0, 8192))
+        }
+        return HxpRemoteRedirectTarget(origin, NetworkMethod.GET, path, referrerPath, parameters)
     }
 
     private fun JsonObject.originSet(name: String, requireNonEmpty: Boolean = false): Set<HttpsOrigin> {

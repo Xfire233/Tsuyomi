@@ -201,6 +201,8 @@ internal interface LibraryDao {
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun upsertSubscriptionDraft(entity: SubscriptionDraftEntity)
+    @Query("SELECT * FROM subscription_drafts WHERE collection_id = :collectionId")
+    suspend fun subscriptionDraft(collectionId: String): SubscriptionDraftEntity?
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun upsertSearchHistory(entity: SearchHistoryEntity)

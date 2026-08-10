@@ -12,6 +12,22 @@ import org.tsuyomi.shared.sourcecontract.SourceNetworkRequest
 /** Host-minted policy for one remote-library transport operation. */
 enum class SourceOperationKind { REMOTE_LIBRARY_READ, REMOTE_LIBRARY_ADD }
 
+/** A signed, exact redirect destination for one remote-library operation. */
+data class RemoteOperationRedirectPolicy(
+    val origin: HttpsOrigin,
+    val method: NetworkMethod,
+    val path: String,
+    val fixedParameters: Map<String, String>,
+    val referrerPath: String? = null,
+) {
+    init {
+        require(method == NetworkMethod.GET)
+        require(path.startsWith('/') && '?' !in path && '#' !in path)
+        require(fixedParameters.keys.all { it.isNotBlank() })
+        require(referrerPath == null || (referrerPath.startsWith('/') && '?' !in referrerPath && '#' !in referrerPath))
+    }
+}
+
 data class RemoteOperationRequestPolicy(
     val origin: HttpsOrigin,
     val method: NetworkMethod,
@@ -20,6 +36,7 @@ data class RemoteOperationRequestPolicy(
     val remoteBookIdParameter: String? = null,
     val cursorParameter: String? = null,
     val referrerPath: String? = null,
+    val redirects: List<RemoteOperationRedirectPolicy> = emptyList(),
 ) {
     init {
         require(path.startsWith('/') && '?' !in path && '#' !in path)
@@ -27,6 +44,7 @@ data class RemoteOperationRequestPolicy(
         require(cursorParameter == null || (cursorParameter !in fixedParameters && cursorParameter != remoteBookIdParameter))
         require(fixedParameters.keys.all { it.isNotBlank() })
         require(referrerPath == null || (referrerPath.startsWith('/') && '?' !in referrerPath && '#' !in referrerPath))
+        require(redirects.distinct() == redirects)
     }
 }
 
@@ -70,6 +88,13 @@ class SourceOperationContext internal constructor(
         val expectedReferrer = policy.referrerPath?.let { URI(policy.origin.canonical + it).toString() }
         if (request.referrerUrl != expectedReferrer) throw HostNetworkException(HostNetworkError.INVALID_REQUEST)
     }
+
+    internal fun redirectFor(uri: URI): RemoteOperationRedirectPolicy? =
+        policy.redirects.singleOrNull { redirect ->
+            uri.scheme.equals("https", true) && uri.fragment == null && uri.path == redirect.path &&
+                HttpsOrigin("https://${uri.host}${if (uri.port in 1..65535 && uri.port != 443) ":${uri.port}" else ""}").canonical == redirect.origin.canonical &&
+                decodeQuery(uri.rawQuery) == redirect.fixedParameters
+        }
 
     private fun decodeQuery(rawQuery: String?): Map<String, String> {
         if (rawQuery.isNullOrEmpty()) return emptyMap()

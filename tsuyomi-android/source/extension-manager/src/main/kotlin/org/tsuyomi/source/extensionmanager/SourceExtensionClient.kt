@@ -23,6 +23,7 @@ import org.tsuyomi.core.network.HostNetworkException
 import org.tsuyomi.core.network.HostNetworkGateway
 import org.tsuyomi.core.network.SourceNetworkGrant
 import org.tsuyomi.core.network.RemoteOperationRequestPolicy
+import org.tsuyomi.core.network.RemoteOperationRedirectPolicy
 import org.tsuyomi.core.network.SourceOperationContext
 import org.tsuyomi.core.network.remoteLibraryAddContext
 import org.tsuyomi.core.network.remoteLibraryReadContext
@@ -311,6 +312,15 @@ private fun HxpRemoteOperationPolicy.toNetworkPolicy(): RemoteOperationRequestPo
     remoteBookIdParameter = parameters.filterIsInstance<HxpRemoteParameter.RemoteBookId>().singleOrNull()?.name,
     cursorParameter = parameters.filterIsInstance<HxpRemoteParameter.Cursor>().singleOrNull()?.name,
     referrerPath = referrerPath,
+    redirects = redirects.map { redirect ->
+        RemoteOperationRedirectPolicy(
+            origin = redirect.origin,
+            method = redirect.method,
+            path = redirect.path,
+            fixedParameters = redirect.parameters.associate { it.name to it.value },
+            referrerPath = redirect.referrerPath,
+        )
+    },
 )
 
 private fun JsonObject.requiredString(name: String): String = requireNotNull(this[name]?.jsonPrimitive?.contentOrNull)

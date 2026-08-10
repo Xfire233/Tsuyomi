@@ -75,3 +75,45 @@ test('hxp remote fixed parameter rule requires its exact literal', async () => {
   delete manifest.capabilities.remoteLibrary.policies.add.parameters.action.value;
   assert.equal(validate(manifest), false);
 });
+
+test('hxp remote redirect aliases are fixed GET destinations', async () => {
+  const ajv = createAjv();
+  const validate = ajv.compile(await loadJson('../schemas/hxp-manifest-v1.schema.json'));
+  const manifest = await loadJson('../fixtures/hxp/valid-minimal-manifest.json');
+  assert.equal(validate(manifest), true, ajv.errorsText(validate.errors));
+  manifest.capabilities.remoteLibrary.policies.add.redirects[0].method = 'POST';
+  assert.equal(validate(manifest), false);
+  manifest.capabilities.remoteLibrary.policies.add.redirects[0].method = 'GET';
+  manifest.capabilities.remoteLibrary.policies.add.redirects[0].parameters.aid = { kind: 'remoteBookId' };
+  assert.equal(validate(manifest), false);
+});
+
+test('hxp remote parameter names are nonblank and bounded', async () => {
+  const ajv = createAjv();
+  const validate = ajv.compile(await loadJson('../schemas/hxp-manifest-v1.schema.json'));
+
+  const blankRedirect = await loadJson('../fixtures/hxp/valid-minimal-manifest.json');
+  blankRedirect.capabilities.remoteLibrary.policies.add.redirects[0].parameters['   '] = { kind: 'fixed', value: 'added' };
+  assert.equal(validate(blankRedirect), false);
+
+  const longRedirect = await loadJson('../fixtures/hxp/valid-minimal-manifest.json');
+  longRedirect.capabilities.remoteLibrary.policies.add.redirects[0].parameters['a'.repeat(257)] = { kind: 'fixed', value: 'added' };
+  assert.equal(validate(longRedirect), false);
+
+  const blankOperation = await loadJson('../fixtures/hxp/valid-minimal-manifest.json');
+  blankOperation.capabilities.remoteLibrary.policies.add.parameters['\t'] = { kind: 'fixed', value: 'added' };
+  assert.equal(validate(blankOperation), false);
+});
+
+test('hxp parameter-name length counts astral Unicode code points', async () => {
+  const ajv = createAjv();
+  const validate = ajv.compile(await loadJson('../schemas/hxp-manifest-v1.schema.json'));
+
+  const maximum = await loadJson('../fixtures/hxp/valid-minimal-manifest.json');
+  maximum.capabilities.remoteLibrary.policies.add.redirects[0].parameters['😀'.repeat(256)] = { kind: 'fixed', value: 'added' };
+  assert.equal(validate(maximum), true, ajv.errorsText(validate.errors));
+
+  const oversized = await loadJson('../fixtures/hxp/valid-minimal-manifest.json');
+  oversized.capabilities.remoteLibrary.policies.add.redirects[0].parameters['😀'.repeat(257)] = { kind: 'fixed', value: 'added' };
+  assert.equal(validate(oversized), false);
+});

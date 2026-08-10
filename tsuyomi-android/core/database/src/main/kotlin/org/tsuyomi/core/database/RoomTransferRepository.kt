@@ -77,6 +77,16 @@ class RoomTransferRepository(private val database: TsuyomiDatabase) {
                 conflict("existing-shelf-retained", incoming.id, "shelf")
             }
         }
+        plan.smartCollections.forEach { incoming ->
+            if (dao.collection(incoming.collectionId) != null) {
+                conflict("existing-smart-collection-retained", incoming.collectionId, "smartCollection")
+            }
+        }
+        plan.subscriptionDrafts.forEach { incoming ->
+            if (dao.collection(incoming.collectionId) != null) {
+                conflict("existing-subscription-draft-retained", incoming.collectionId, "subscriptionDraft")
+            }
+        }
         plan.books.forEach { incoming ->
             val safeRef = "${incoming.identity.sourceId}:${incoming.identity.remoteBookId}"
             val existingBook = library.book(incoming.identity)
@@ -160,7 +170,7 @@ class RoomTransferRepository(private val database: TsuyomiDatabase) {
             )
         }
         plan.smartCollections.sortedBy { it.collectionId }.forEachIndexed { index, smart ->
-            dao.insertCollectionIfAbsent(
+            val inserted = dao.insertCollectionIfAbsent(
                 CollectionEntity(
                     smart.collectionId,
                     CollectionKind.SMART,
@@ -173,14 +183,14 @@ class RoomTransferRepository(private val database: TsuyomiDatabase) {
                     plan.sourceCreatedAt.nano,
                 ),
             )
-            if (dao.collection(smart.collectionId)?.kind == CollectionKind.SMART) {
+            if (inserted != -1L) {
                 val rule = SmartRuleCodec.decode(smart.astJson).getOrThrow()
                 SmartShelfQueryCompiler.requireWithinArgumentLimit(rule)
                 dao.upsertSmartRule(SmartRuleEntity(smart.collectionId, rule.version, smart.astJson, 1))
             }
         }
         plan.subscriptionDrafts.sortedBy { it.collectionId }.forEachIndexed { index, draft ->
-            dao.insertCollectionIfAbsent(
+            val inserted = dao.insertCollectionIfAbsent(
                 CollectionEntity(
                     draft.collectionId,
                     CollectionKind.SUBSCRIPTION,
@@ -193,7 +203,7 @@ class RoomTransferRepository(private val database: TsuyomiDatabase) {
                     plan.sourceCreatedAt.nano,
                 ),
             )
-            if (dao.collection(draft.collectionId)?.kind == CollectionKind.SUBSCRIPTION) {
+            if (inserted != -1L) {
                 dao.upsertSubscriptionDraft(
                     SubscriptionDraftEntity(
                         draft.collectionId,

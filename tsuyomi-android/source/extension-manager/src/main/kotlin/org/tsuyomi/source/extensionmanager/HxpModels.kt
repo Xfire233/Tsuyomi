@@ -78,6 +78,14 @@ sealed interface HxpRemoteParameter {
     data class Cursor(override val name: String) : HxpRemoteParameter
 }
 
+
+data class HxpRemoteRedirectTarget(
+    val origin: HttpsOrigin,
+    val method: NetworkMethod,
+    val path: String,
+    val referrerPath: String?,
+    val parameters: List<HxpRemoteParameter.Fixed>,
+)
 data class HxpRemoteOperationPolicy(
     val operation: RemoteOperation,
     val origin: HttpsOrigin,
@@ -85,6 +93,7 @@ data class HxpRemoteOperationPolicy(
     val path: String,
     val referrerPath: String?,
     val parameters: List<HxpRemoteParameter>,
+    val redirects: List<HxpRemoteRedirectTarget> = emptyList(),
 )
 
 data class HxpRemoteLibraryCapability(

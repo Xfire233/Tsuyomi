@@ -224,6 +224,9 @@ fun LocalBookDetailsScreen(
     onSaveTags: () -> Unit,
     onSetRating: (Int?) -> Unit,
     onOpenSource: () -> Unit,
+    onRetryRemoteSync: () -> Unit,
+    remoteRetryMessage: String?,
+    remoteRetryEnabled: Boolean,
     onRemove: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -252,6 +255,15 @@ fun LocalBookDetailsScreen(
         )
         TsuyomiButton(text = stringResource(R.string.library_save_tags), onClick = onSaveTags)
         entry.reconciliation?.let { Text(stringResource(it.label()), style = MaterialTheme.typography.titleMedium) }
+        if (entry.reconciliation in setOf(RemoteReconciliationState.UNRESOLVED, RemoteReconciliationState.CANCELLED)) {
+            TsuyomiButton(
+                text = stringResource(R.string.library_retry_remote_sync),
+                onClick = onRetryRemoteSync,
+                enabled = remoteRetryEnabled,
+            )
+            Text(stringResource(R.string.library_retry_remote_sync_help), color = MaterialTheme.colorScheme.onSurfaceVariant)
+            remoteRetryMessage?.let { Text(it, color = MaterialTheme.colorScheme.onSurfaceVariant) }
+        }
         TsuyomiButton(text = stringResource(R.string.library_open_source), onClick = onOpenSource)
         TsuyomiButton(text = stringResource(R.string.library_remove), onClick = onRemove, style = TsuyomiButtonStyle.SECONDARY)
     }

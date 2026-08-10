@@ -244,25 +244,62 @@ internal class SourceFlowController(
     suspend fun retrySelectedBookRemoteAdd(importedAt: Instant = Instant.now()): RemoteAddUiResult =
         remoteAddMutex.withLock {
             val summary = selectedBook ?: return@withLock RemoteAddUiResult.Failure("book-not-selected")
-            if (!selectedBookInLibrary || selectedBookReconciliation !in RETRYABLE_RECONCILIATION_STATES) {
-                return@withLock RemoteAddUiResult.Failure("remote-add-not-retryable")
-            }
-            val packageInfo = synchronized(clientLock) { activePackage }
-                ?: return@withLock RemoteAddUiResult.Failure("source-not-open")
-            val policy = library.sourceRemotePolicy(summary.identity.sourceId)
-            val availability = library.sourceAvailability(summary.identity.sourceId)
-            val addPolicy = packageInfo.manifest.capabilities.remoteLibrary.policies[RemoteOperation.ADD]
-            val credentialReady = addPolicy != null && remoteAddCredentialReady(packageInfo, addPolicy.origin)
-            if (policy?.addWritebackEnabled != true || availability?.available != true || addPolicy == null ||
-                policy.capabilitySetFingerprint.isBlank() || !credentialReady
-            ) {
-                if (selectedBook?.identity == summary.identity) selectedBookAddWritesRemote = false
-                return@withLock RemoteAddUiResult.Failure("remote-add-not-authorized")
-            }
             val existing = library.book(summary.identity)
                 ?: return@withLock RemoteAddUiResult.Failure("book-not-local")
-            executeRemoteAdd(summary, existing, packageInfo, policy, availability, addPolicy, importedAt)
+            retryRemoteAddLocked(summary, existing, selectedBookReconciliation, importedAt)
         }
+
+    /** Reconciles a local-only selection after the user explicitly chooses retry from its detail. */
+    suspend fun retryLocalBookRemoteAdd(
+        book: LibraryBook,
+        importedAt: Instant = Instant.now(),
+    ): RemoteAddUiResult = remoteAddMutex.withLock {
+        val packageInfo = synchronized(clientLock) { activePackage }
+        if (packageInfo?.manifest?.sourceId?.value != book.identity.sourceId) {
+            return@withLock RemoteAddUiResult.Failure("remote-add-source-not-open")
+        }
+        val currentEntry = library.libraryEntries().firstOrNull { it.book.identity == book.identity }
+            ?: return@withLock RemoteAddUiResult.Failure("book-not-local")
+        val currentBook = currentEntry.book
+        val summary = SourceBookSummary(
+            identity = currentBook.identity,
+            title = currentBook.title,
+            author = currentBook.author,
+            coverUrl = currentBook.coverUrl,
+            canonicalUrl = currentBook.canonicalUrl.orEmpty(),
+        )
+        retryRemoteAddLocked(summary, currentBook, currentEntry.reconciliation, importedAt)
+    }
+
+    private suspend fun retryRemoteAddLocked(
+        summary: SourceBookSummary,
+        existing: LibraryBook,
+        reconciliation: RemoteReconciliationState?,
+        importedAt: Instant,
+    ): RemoteAddUiResult {
+        if (reconciliation !in RETRYABLE_RECONCILIATION_STATES) {
+            return RemoteAddUiResult.Failure("remote-add-not-retryable")
+        }
+        val packageInfo = synchronized(clientLock) { activePackage }
+            ?: return RemoteAddUiResult.Failure("source-not-open")
+        if (packageInfo.manifest.sourceId.value != summary.identity.sourceId) {
+            return RemoteAddUiResult.Failure("remote-add-source-not-open")
+        }
+        val policy = library.sourceRemotePolicy(summary.identity.sourceId)
+        val availability = library.sourceAvailability(summary.identity.sourceId)
+        val addPolicy = packageInfo.manifest.capabilities.remoteLibrary.policies[RemoteOperation.ADD]
+        val credentialReady = addPolicy != null && remoteAddCredentialReady(packageInfo, addPolicy.origin)
+        if (policy?.addWritebackEnabled == true && !credentialReady) {
+            library.setAddWritebackEnabled(summary.identity.sourceId, policy.capabilitySetFingerprint, false)
+        }
+        if (policy?.addWritebackEnabled != true || availability?.available != true || addPolicy == null ||
+            policy.capabilitySetFingerprint.isBlank() || !credentialReady
+        ) {
+            if (selectedBook?.identity == summary.identity) selectedBookAddWritesRemote = false
+            return RemoteAddUiResult.Failure("remote-add-not-authorized")
+        }
+        return executeRemoteAdd(summary, existing, packageInfo, policy, availability, addPolicy, importedAt)
+    }
 
     private suspend fun addSelectedBookLocked(importedAt: Instant): RemoteAddUiResult {
         if (selectedBookInLibrary) return RemoteAddUiResult.Failure("book-already-added")
