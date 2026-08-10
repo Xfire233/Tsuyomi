@@ -518,6 +518,8 @@ Rollback is forward-only whenever an import journal or remote reconciliation may
 5. Export through the real system document picker and record SHA-256. Clear the app profile; import it through the real picker. Before source install, the book appears in `来源未安装` with rating/tags/shelves/progress intact and no source action.
 6. Install the same signed Wenku8 fixture. The existing stable book becomes available without duplication; opening the reader restores the imported semantic locator. Remote writeback remains off.
 7. Repeat the library/import/remote-controls path under forced E-ink with explicit list pagination, fixed chrome, immediate state replacement and no decorative animation.
+
+> Gate 3 历史证据边界：最终 fixture 用户流留下了 E-ink 横屏截图，但没有形成标准手机 `1080×2400` 竖屏与 E-ink `1264×1680` 竖屏两条独立验收记录，因此不得把既有横屏截图表述为这两条 portrait 证据。自此规则修订后的后续 Gate/PR 必须执行 [`AVD_MATRIX.md`](../verification/AVD_MATRIX.md) 的双竖屏基线；横屏只能作为附加窗口验证。
 8. Import the sanitized Hikari fixture. Verify Wenku8/ESJ/Yamibo identity mapping, compatible manual/smart organization, disabled subscription draft, reduced-precision progress warning and credential field-name warnings with no values; remote policy remains off.
 
 ### Negative and recovery product paths

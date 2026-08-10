@@ -88,6 +88,8 @@ python -m reuse lint
 
 跨组件 Gate 同时要求 protocol `npm ci && npm test`、extensions 的 build/fixture/package determinism 检查（实现后启用）、Android 相关检查，以及根 Monorepo REUSE/制品策略。
 
+Android Gate 的运行期验收至少包含两条不可互换的 API 29 portrait 证据：`Tsuyomi_API29` 的 `1080×2400` forced Standard 用户流，以及 `Tsuyomi_EInk_API29` 的 `1264×1680` forced E-ink 同一用户流。两者必须绑定同一目标 head，并分别记录分辨率、density、方向、font scale 和截图 SHA-256。横屏、分屏、golden 或在单一 AVD 上切换 profile 都不能替代任一 portrait 记录；缺失即阻塞 PR admission。完整矩阵以 [`AVD_MATRIX.md`](../verification/AVD_MATRIX.md) 为准。
+
 Required workflow 的 path detection 必须使用仓库根锚点（例如 `git -C "$GITHUB_WORKSPACE"`），不得依赖 job 默认 `working-directory`。Hosted 准入不仅检查 check conclusion；还必须确认目标 head、关键 build/test/instrumentation/package steps 非 `skipped`，并抽查 job step/log 证明命令真实执行。绿色空任务不是证据。
 
 ### 6. Evidence
@@ -99,6 +101,7 @@ Required workflow 的 path detection 必须使用仓库根锚点（例如 `git -
 - 精确命令、工具版本、设备/AVD recipe 版本；
 - 退出码和不可变产物 SHA-256；
 - screenshot/golden diff 结论；
+- 标准手机竖屏与 E-ink 竖屏的独立 AVD 记录；每条包含目标 head、物理分辨率、density、方向、profile、font scale、用户流结果和截图 SHA-256；
 - 已知限制、延期项和回退点。
 
 `build/` 中本地截图只能作为调试证据，不能替代版本化 Gate 记录。
