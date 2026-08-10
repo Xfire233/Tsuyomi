@@ -8,10 +8,14 @@ import {
   classifyPage,
   buildChapterRequest,
   buildSearchRequest,
+  buildRemoteLibraryAddRequest,
+  buildRemoteLibraryRequest,
   parseChapter,
   parseDetail,
   parseDirectory,
   parseSearch,
+  parseRemoteLibrary,
+  parseRemoteLibraryAdd,
 } from '../dist/modules/wenku8/index.mjs';
 
 const fixture = (name) => readFile(new URL(`../fixtures/wenku8/${name}.html`, import.meta.url), 'utf8');
@@ -79,4 +83,38 @@ test('login and challenge fixtures become typed remediation states', async () =>
   assert.equal(classifyPage(await fixture('login')), 'session-required');
   assert.equal(classifyPage(await fixture('challenge')), 'verification-required');
   assert.equal(classifyPage(await fixture('search')), 'ok');
+});
+
+test('remote favourites pagination is explicit bounded and complete', async () => {
+  assert.deepEqual(buildRemoteLibraryRequest(null), {
+    url: 'https://www.wenku8.net/modules/article/bookcase.php?action=list',
+    method: 'GET',
+    headers: { Accept: 'text/html,application/xhtml+xml' },
+    decode: 'gb18030',
+    cache: 'network-only',
+  });
+  const first = parseRemoteLibrary(await fixture('remote-library-page-1'));
+  assert.equal(first.complete, false);
+  assert.equal(first.nextCursor, 'page-2');
+  assert.equal(first.items[0].remoteBookId, '1234');
+  const second = parseRemoteLibrary(await fixture('remote-library-page-2'));
+  assert.equal(second.complete, true);
+  assert.equal(second.nextCursor, null);
+  assert.throws(() => buildRemoteLibraryRequest(''), /INVALID_REMOTE_CURSOR/);
+});
+
+test('remote add is an exact idempotent typed operation', async () => {
+  assert.deepEqual(buildRemoteLibraryAddRequest('1234'), {
+    url: 'https://www.wenku8.net/modules/article/bookcase.php',
+    method: 'POST',
+    headers: { Accept: 'text/html,application/xhtml+xml' },
+    form: { action: 'add', aid: '1234' },
+    decode: 'gb18030',
+    cache: 'network-only',
+  });
+  assert.deepEqual(parseRemoteLibraryAdd(await fixture('remote-add-applied'), '1234'), {
+    sourceId: 'org.tsuyomi.wenku8', remoteBookId: '1234', outcome: 'applied',
+  });
+  assert.equal(parseRemoteLibraryAdd(await fixture('remote-add-already-present'), '1234').outcome, 'already-present');
+  assert.throws(() => parseRemoteLibraryAdd('<html>ok</html>', '1234'), /AMBIGUOUS_REMOTE_ADD/);
 });

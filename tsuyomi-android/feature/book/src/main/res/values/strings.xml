@@ -11,6 +11,10 @@
     <string name="book_diagnostic_id">诊断编号：%1$s</string>
     <string name="book_diagnostic_stage">阶段：%1$s · 安全代码：%2$s</string>
     <string name="book_retry">重试网络请求</string>
+    <string name="book_retry_sync">重试同步到网站</string>
     <string name="book_offline">使用已有离线缓存</string>
     <string name="book_open_verification">打开手动登录或验证</string>
+    <string name="book_add_to_library">加入书架</string>
+    <string name="book_add_and_sync">加入书架并同步到网站</string>
+    <string name="book_remove_from_library">移出书架</string>
 </resources>

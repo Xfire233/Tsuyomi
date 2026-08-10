@@ -159,6 +159,25 @@ data class SourceBookSummary(
     }
 }
 
+data class RemoteLibraryPage(
+    val items: List<SourceBookSummary>,
+    val nextCursor: String?,
+    val complete: Boolean,
+) {
+    init {
+        require(items.size <= 100) { "Remote page is too large" }
+        require(nextCursor == null || nextCursor.isNotBlank()) { "Invalid remote cursor" }
+        require(complete || nextCursor != null) { "Incomplete page requires a cursor" }
+    }
+}
+
+enum class RemoteLibraryAddOutcome { APPLIED, ALREADY_PRESENT }
+
+data class RemoteLibraryAddResult(
+    val identity: BookIdentity,
+    val outcome: RemoteLibraryAddOutcome,
+)
+
 data class SourceBookDetail(
     val summary: SourceBookSummary,
     val description: String?,

@@ -19,7 +19,7 @@ class Gate2TestPublisherTest {
         val verified = HxpArchiveVerifier(InMemoryPublisherKeyStore(listOf(Gate2TestPublisher.key))).verify(fixture)
 
         assertEquals("org.tsuyomi.wenku8", verified.manifest.sourceId.value)
-        assertEquals("0.1.0", verified.manifest.version.original)
+        assertEquals("0.2.0", verified.manifest.version.original)
         assertEquals(Gate2TestPublisher.key.fingerprint, verified.publisherFingerprint)
     }
 }

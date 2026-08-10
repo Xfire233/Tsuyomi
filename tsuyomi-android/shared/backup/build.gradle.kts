@@ -8,4 +8,6 @@ plugins {
 dependencies {
     implementation(project(":shared:locator"))
     implementation(project(":shared:model"))
+    implementation(project(":shared:smart-shelf"))
+    implementation(libs.kotlinx.serialization.json)
 }

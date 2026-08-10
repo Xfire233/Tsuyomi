@@ -32,4 +32,13 @@
     <string name="browse_failure_verification">包未通过完整性、签名或兼容性验证。</string>
     <string name="browse_failure_install">安装未完成；已保留当前内容源版本。</string>
     <string name="browse_failure_expired_approval">待授权的内容源包已失效，请重新选择文件。</string>
+    <string name="browse_remote_library_action">网站收藏</string>
+    <string name="remote_library_loading">正在读取网站收藏</string>
+    <string name="remote_library_loading_message">仅在这次明确操作中连接来源网站。</string>
+    <string name="remote_library_manual_notice">网站收藏不会自动同步。下方操作只会在你点击时执行。</string>
+    <string name="remote_library_writeback_title">加入书架时同步到网站</string>
+    <string name="remote_library_writeback_message">默认关闭。开启后，只有你直接点击“加入书架”时才会发送添加请求；移出书架不会删除网站收藏。</string>
+    <string name="remote_library_pull_action">从网站读取收藏</string>
+    <string name="remote_library_empty_title">尚未读取网站收藏</string>
+    <string name="remote_library_empty_message">点击上方按钮执行一次手动读取。</string>
 </resources>

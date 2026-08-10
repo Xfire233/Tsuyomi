@@ -37,6 +37,7 @@ class ExtensionInstaller(
             addedCapabilities = addedCapabilities.sorted(),
             resourceLimitIncreases = resourceLimitIncreases,
             capabilityGrantFingerprint = capabilityGrantFingerprint(candidate, addedCapabilities, resourceLimitIncreases),
+            remoteCapabilitySetFingerprint = remoteCapabilitySetFingerprint(candidate.manifest, candidate.publisherFingerprint),
             isDowngrade = active != null && candidate.manifest.version < active.manifest.version,
         )
     }
@@ -66,6 +67,9 @@ class ExtensionInstaller(
             temporary.delete()
         }
     }
+
+    fun remoteCapabilitySetFingerprint(packageInfo: VerifiedHxpPackage): String =
+        remoteCapabilitySetFingerprint(packageInfo.manifest, packageInfo.publisherFingerprint)
 
     private fun addedCapabilities(candidate: HxpManifest, active: HxpManifest?): Set<String> = buildSet {
         val activeCapabilities = active?.capabilities
@@ -130,6 +134,53 @@ class ExtensionInstaller(
         ).filter { it.candidateValue > it.activeValue }
     }
 
+    private fun remoteCapabilitySetFingerprint(manifest: HxpManifest, publisherFingerprint: String): String = sha256(
+        buildString {
+            fun field(name: String, value: String) {
+                append(name).append(':').append(value.length).append(':').append(value).append('\n')
+            }
+            field("publisher", publisherFingerprint)
+            field("publisher-key-id", manifest.publisherKeyId)
+            field("source", manifest.sourceId.value)
+            field("remote-read", manifest.capabilities.remoteLibrary.read.toString())
+            manifest.capabilities.remoteLibrary.writeOperations.sorted().forEach { field("remote-write", it) }
+            manifest.capabilities.remoteLibrary.policies.toSortedMap(compareBy { it.name }).values.forEach { policy ->
+                append("remote-policy\n")
+                field("operation", policy.operation.name)
+                field("origin", policy.origin.canonical)
+                field("method", policy.method.name)
+                field("path", policy.path)
+                field("referrer", policy.referrerPath.orEmpty())
+                policy.parameters.sortedWith(
+                    compareBy<HxpRemoteParameter>({ it.name }, { it.canonicalKind() }, { it.canonicalValue() }),
+                ).forEach { parameter ->
+                    append("remote-parameter\n")
+                    field("kind", parameter.canonicalKind())
+                    field("name", parameter.name)
+                    field("value", parameter.canonicalValue())
+                }
+                policy.redirects.sortedWith(
+                    compareBy<HxpRemoteRedirectTarget>(
+                        { it.origin.canonical },
+                        { it.path },
+                        { it.referrerPath.orEmpty() },
+                        { redirect -> redirect.parameters.sortedBy(HxpRemoteParameter.Fixed::name).joinToString("\u0000") { "${it.name.length}:${it.name}${it.value.length}:${it.value}" } },
+                    ),
+                ).forEach { redirect ->
+                    append("remote-redirect\n")
+                    field("origin", redirect.origin.canonical)
+                    field("method", redirect.method.name)
+                    field("path", redirect.path)
+                    field("referrer", redirect.referrerPath.orEmpty())
+                    redirect.parameters.sortedBy { it.name }.forEach { parameter ->
+                        append("remote-redirect-parameter\n")
+                        field("name", parameter.name)
+                        field("value", parameter.value)
+                    }
+                }
+            }
+        }.toByteArray(StandardCharsets.UTF_8),
+    )
     private fun capabilityGrantFingerprint(
         candidate: VerifiedHxpPackage,
         addedCapabilities: Set<String>,
@@ -138,22 +189,23 @@ class ExtensionInstaller(
         buildString {
             append(candidate.packageSha256)
             append('\u0000')
-            addedCapabilities.sorted().forEach { capability ->
-                append("capability:")
-                append(capability)
-                append('\n')
-            }
+            addedCapabilities.sorted().forEach { append("capability:").append(it).append('\n') }
             resourceLimitIncreases.forEach { increase ->
-                append("resource:")
-                append(increase.limit.name)
-                append(':')
-                append(increase.activeValue)
-                append(':')
-                append(increase.candidateValue)
-                append('\n')
+                append("resource:").append(increase.limit.name).append(':').append(increase.activeValue).append(':').append(increase.candidateValue).append('\n')
             }
         }.toByteArray(StandardCharsets.UTF_8),
     )
+}
+
+private fun HxpRemoteParameter.canonicalKind(): String = when (this) {
+    is HxpRemoteParameter.Fixed -> "fixed"
+    is HxpRemoteParameter.RemoteBookId -> "remote-book-id"
+    is HxpRemoteParameter.Cursor -> "cursor"
+}
+
+private fun HxpRemoteParameter.canonicalValue(): String = when (this) {
+    is HxpRemoteParameter.Fixed -> value
+    is HxpRemoteParameter.RemoteBookId, is HxpRemoteParameter.Cursor -> ""
 }
 
 data class PreparedExtensionInstall(
@@ -162,6 +214,7 @@ data class PreparedExtensionInstall(
     val addedCapabilities: List<String>,
     val resourceLimitIncreases: List<ResourceLimitIncrease>,
     val capabilityGrantFingerprint: String,
+    val remoteCapabilitySetFingerprint: String,
     val isDowngrade: Boolean,
 )
 

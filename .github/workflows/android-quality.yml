@@ -53,7 +53,10 @@ jobs:
           :core:database:lintDebug
           :shared:model:test
           :shared:locator:test
+          :shared:smart-shelf:test
+          :shared:backup:test
           :reader:engine:test
+          :app:testDebugUnitTest
           :core:display:testDebugUnitTest
           :core:files:testDebugUnitTest
           :core:security:testDebugUnitTest

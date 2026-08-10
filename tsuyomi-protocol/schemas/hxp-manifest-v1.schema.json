@@ -98,8 +98,26 @@
               "type": "array",
               "uniqueItems": true,
               "items": { "enum": ["add", "remove", "move"] }
+            },
+            "policies": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "read": { "$ref": "#/$defs/remoteOperationPolicy" },
+                "add": { "$ref": "#/$defs/remoteOperationPolicy" }
+              }
             }
-          }
+          },
+          "allOf": [
+            {
+              "if": { "properties": { "read": { "const": true } }, "required": ["read"] },
+              "then": { "required": ["policies"], "properties": { "policies": { "type": "object", "required": ["read"], "properties": { "read": { "$ref": "#/$defs/remoteOperationPolicy" } } } } }
+            },
+            {
+              "if": { "properties": { "writeOperations": { "type": "array", "contains": { "const": "add" } } }, "required": ["writeOperations"] },
+              "then": { "required": ["policies"], "properties": { "policies": { "type": "object", "required": ["add"], "properties": { "add": { "$ref": "#/$defs/remoteOperationPolicy" } } } } }
+            }
+          ]
         },
         "storage": {
           "type": "object",
@@ -128,6 +146,66 @@
   "$defs": {
     "semver": { "type": "string", "pattern": "^(0|[1-9]\\d*)\\.(0|[1-9]\\d*)\\.(0|[1-9]\\d*)(?:-[0-9A-Za-z-]+(?:\\.[0-9A-Za-z-]+)*)?(?:\\+[0-9A-Za-z-]+(?:\\.[0-9A-Za-z-]+)*)?$" },
     "sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
-    "httpsOrigin": { "type": "string", "pattern": "^https://[A-Za-z0-9.-]+(?::[0-9]{1,5})?$" }
+    "httpsOrigin": { "type": "string", "pattern": "^https://[A-Za-z0-9.-]+(?::[0-9]{1,5})?$" },
+    "remoteOperationPolicy": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["origin", "method", "path", "parameters"],
+      "properties": {
+        "origin": { "$ref": "#/$defs/httpsOrigin" },
+        "method": { "enum": ["GET", "POST"] },
+        "path": { "type": "string", "pattern": "^/[^?#]{0,1023}$" },
+        "referrerPath": { "type": "string", "pattern": "^/[^?#]{0,1023}$" },
+        "redirects": {
+          "type": "array",
+          "maxItems": 5,
+          "uniqueItems": true,
+          "items": { "$ref": "#/$defs/remoteOperationRedirect" }
+        },
+        "parameters": {
+          "type": "object",
+          "maxProperties": 64,
+          "propertyNames": { "type": "string", "minLength": 1, "maxLength": 256, "pattern": "\\S" },
+          "additionalProperties": {
+            "oneOf": [
+              {
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["kind", "value"],
+                "properties": { "kind": { "const": "fixed" }, "value": { "type": "string", "maxLength": 8192 } }
+              },
+              {
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["kind"],
+                "properties": { "kind": { "enum": ["remoteBookId", "cursor"] } }
+              }
+            ]
+          }
+        }
+      }
+    },
+    "remoteOperationRedirect": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["origin", "method", "path", "parameters"],
+      "properties": {
+        "origin": { "$ref": "#/$defs/httpsOrigin" },
+        "method": { "const": "GET" },
+        "path": { "type": "string", "pattern": "^/[^?#]{0,1023}$" },
+        "referrerPath": { "type": "string", "pattern": "^/[^?#]{0,1023}$" },
+        "parameters": {
+          "type": "object",
+          "maxProperties": 64,
+          "propertyNames": { "type": "string", "minLength": 1, "maxLength": 256, "pattern": "\\S" },
+          "additionalProperties": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["kind", "value"],
+            "properties": { "kind": { "const": "fixed" }, "value": { "type": "string", "maxLength": 8192 } }
+          }
+        }
+      }
+    }
   }
 }

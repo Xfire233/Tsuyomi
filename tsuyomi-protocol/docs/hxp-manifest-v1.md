@@ -24,3 +24,7 @@ The host enforces network destinations, cookie partitions, storage quotas, resou
 The normative Host API v1 network boundary is [`hxp-host-api-v1.md`](hxp-host-api-v1.md). It defines the only extension-facing transport request/response/error shapes; it never exposes raw cookies, an HTTP client, or a WebView.
 
 Archive integrity, publisher trust, revocation, rotation, rollback, and capability-diff rules are normative in [`hxp-package-v1.md`](hxp-package-v1.md).
+
+## Signed remote-library redirects
+
+`capabilities.remoteLibrary.policies.{read,add}.redirects` is an optional, bounded list of exact success destinations. Every destination names one HTTPS origin, `GET`, path, fixed query parameters, and optional referrer path. The host follows a redirect for a signed remote operation only when its next request exactly matches one declared destination; undeclared locations and every non-`GET` follow-up fail closed. Redirect targets cannot bind cursors, book IDs, cookies, or arbitrary server-provided values, and they are included in the remote capability fingerprint.

@@ -38,11 +38,18 @@ sealed interface SourceBookState<out T> {
 @Composable
 fun BookDetailScreen(
     state: SourceBookState<SourceBookDetail>,
+    modifier: Modifier = Modifier,
+    inLibrary: Boolean = false,
+    addWritesRemote: Boolean = false,
+    reconciliationLabel: String? = null,
+    canRetryRemoteSync: Boolean = false,
+    onRetryRemoteSync: () -> Unit = {},
+    onAddToLibrary: () -> Unit = {},
+    onRemoveFromLibrary: () -> Unit = {},
     onOpenDirectory: () -> Unit,
     onRetry: () -> Unit,
     onUseOfflineCache: () -> Unit,
     onOpenVerification: () -> Unit,
-    modifier: Modifier = Modifier,
 ) {
     when (state) {
         SourceBookState.Loading -> StateView(
@@ -62,6 +69,27 @@ fun BookDetailScreen(
                 detail.status?.let { Text(stringResource(R.string.book_status, it)) }
                 detail.description?.let { Text(it) }
                 if (detail.tags.isNotEmpty()) Text(detail.tags.joinToString(" · "))
+                reconciliationLabel?.let { Text(it) }
+                if (canRetryRemoteSync) {
+                    TsuyomiButton(
+                        text = stringResource(R.string.book_retry_sync),
+                        onClick = onRetryRemoteSync,
+                        modifier = Modifier.fillMaxWidth(),
+                        style = TsuyomiButtonStyle.PRIMARY,
+                    )
+                }
+                TsuyomiButton(
+                    text = stringResource(
+                        when {
+                            inLibrary -> R.string.book_remove_from_library
+                            addWritesRemote -> R.string.book_add_and_sync
+                            else -> R.string.book_add_to_library
+                        },
+                    ),
+                    onClick = if (inLibrary) onRemoveFromLibrary else onAddToLibrary,
+                    modifier = Modifier.fillMaxWidth(),
+                    style = if (inLibrary) TsuyomiButtonStyle.SECONDARY else TsuyomiButtonStyle.PRIMARY,
+                )
                 TsuyomiButton(
                     text = stringResource(R.string.book_open_directory),
                     onClick = onOpenDirectory,

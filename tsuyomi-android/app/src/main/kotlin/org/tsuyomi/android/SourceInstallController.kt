@@ -13,10 +13,14 @@ import androidx.compose.runtime.setValue
 import java.io.File
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import org.tsuyomi.core.database.RoomLibraryRepository
+import org.tsuyomi.core.database.SourceRemotePolicy
 import org.tsuyomi.core.files.QuotaFileStore
 import org.tsuyomi.core.files.StorageQuota
 import org.tsuyomi.core.files.StorageRoot
 import org.tsuyomi.core.files.StorageRoots
+import org.tsuyomi.core.security.SourceCredentialPartition
+import org.tsuyomi.core.security.SourceCredentialStore
 import org.tsuyomi.feature.browse.BrowseInstallFailure
 import org.tsuyomi.feature.browse.BrowseResourceLimit
 import org.tsuyomi.feature.browse.BrowseResourceLimitIncrease
@@ -29,10 +33,15 @@ import org.tsuyomi.source.extensionmanager.HxpVerificationException
 import org.tsuyomi.source.extensionmanager.InstalledExtensionStore
 import org.tsuyomi.source.extensionmanager.PreparedExtensionInstall
 import org.tsuyomi.source.extensionmanager.VerifiedHxpPackage
+import org.tsuyomi.source.extensionmanager.RemoteOperation
 import org.tsuyomi.source.extensionmanager.ResourceLimit
 
 /** App-owned coordinator: the picker grants transient read access; only verified archives become durable. */
-class SourceInstallController(context: Context) {
+class SourceInstallController(
+    private val context: Context,
+    private val libraryRepository: RoomLibraryRepository,
+) {
+    private val credentialStore = SourceCredentialStore(context)
     private val stagingDirectory = File(context.cacheDir, "hxp-staging")
     private val store = InstalledExtensionStore(
         QuotaFileStore(
@@ -58,17 +67,22 @@ class SourceInstallController(context: Context) {
 
     suspend fun restoreInstalled() {
         if (activePackage != null) return
-        try {
-            val restored = withContext(Dispatchers.IO) {
-                store.installedSourceIds().firstNotNullOfOrNull(installer::readVerifiedActive)
-            } ?: return
+        val sourceIds = withContext(Dispatchers.IO) { store.installedSourceIds() }
+        sourceIds.forEach { sourceId ->
+            val restored = try {
+                withContext(Dispatchers.IO) { installer.readVerifiedActive(sourceId) }
+            } catch (_: ExtensionInstallException) {
+                markSourceUnavailable(sourceId.value)
+                resetToFailure(BrowseInstallFailure.VERIFICATION)
+                return
+            } ?: return@forEach
             activePackage = restored
+            synchronizeVerifiedPackage(restored, preserveWriteback = true)
             state = BrowseUiState.Installed(
                 sourceName = restored.manifest.displayName,
                 version = restored.manifest.version.original,
             )
-        } catch (_: ExtensionInstallException) {
-            resetToFailure(BrowseInstallFailure.VERIFICATION)
+            return
         }
     }
     suspend fun prepare(uri: Uri, resolver: ContentResolver) {
@@ -110,6 +124,7 @@ class SourceInstallController(context: Context) {
                 installer.activate(candidate, ExtensionInstallApproval.approve(candidate, allowDowngrade))
             }
             activePackage = candidate.candidate
+            synchronizeVerifiedPackage(candidate.candidate, preserveWriteback = !candidate.isDowngrade)
             prepared = null
             state = BrowseUiState.Installed(
                 sourceName = candidate.candidate.manifest.displayName,
@@ -128,12 +143,83 @@ class SourceInstallController(context: Context) {
     fun dismissFailure() {
         state = BrowseUiState.Empty
     }
+    suspend fun remotePolicy(): SourceRemotePolicy? {
+        val packageInfo = activePackage ?: return null
+        val sourceId = packageInfo.manifest.sourceId.value
+        val policy = libraryRepository.sourceRemotePolicy(sourceId) ?: return null
+        if (policy.addWritebackEnabled && !remoteAddCredentialReady()) {
+            libraryRepository.setAddWritebackEnabled(sourceId, policy.capabilitySetFingerprint, false)
+            return policy.copy(addWritebackEnabled = false)
+        }
+        return policy
+    }
+
+    fun remoteAddCredentialReady(): Boolean {
+        val packageInfo = activePackage ?: return false
+        val addPolicy = packageInfo.manifest.capabilities.remoteLibrary.policies[RemoteOperation.ADD] ?: return false
+        return runCatching {
+            credentialStore.getSnapshot(SourceCredentialPartition(packageInfo.manifest.sourceId.value, addPolicy.origin)) != null
+        }.getOrDefault(false)
+    }
+    suspend fun consumeFirstRemoteImportPrompt(): Boolean {
+        val packageInfo = activePackage ?: return false
+        if (packageInfo.manifest.capabilities.remoteLibrary.policies[RemoteOperation.READ] == null) return false
+        return libraryRepository.dismissFirstRemoteImportPrompt(
+            packageInfo.manifest.sourceId.value,
+            installer.remoteCapabilitySetFingerprint(packageInfo),
+        )
+    }
+
+
+    suspend fun setRemoteAddWritebackEnabled(enabled: Boolean): Boolean {
+        val packageInfo = activePackage ?: return false
+        val supportsAdd = packageInfo.manifest.capabilities.remoteLibrary.policies.containsKey(RemoteOperation.ADD)
+        if (enabled && (!supportsAdd || !remoteAddCredentialReady())) return false
+        return libraryRepository.setAddWritebackEnabled(
+            sourceId = packageInfo.manifest.sourceId.value,
+            capabilityFingerprint = installer.remoteCapabilitySetFingerprint(packageInfo),
+            enabled = enabled,
+        )
+    }
 
     private fun resetToFailure(reason: BrowseInstallFailure) {
         prepared = null
         state = BrowseUiState.Failure(reason)
     }
 
+
+    private suspend fun markSourceUnavailable(sourceId: String) {
+        val current = libraryRepository.sourceAvailability(sourceId)
+        libraryRepository.setSourceAvailability(
+            sourceId = sourceId,
+            version = current?.verifiedVersion,
+            available = false,
+            generation = (current?.generation ?: 0L) + 1L,
+        )
+    }
+
+    private suspend fun synchronizeVerifiedPackage(packageInfo: VerifiedHxpPackage, preserveWriteback: Boolean) {
+        val sourceId = packageInfo.manifest.sourceId.value
+        val currentAvailability = libraryRepository.sourceAvailability(sourceId)
+        val generation = (currentAvailability?.generation ?: 0L) + 1L
+        val capabilityFingerprint = installer.remoteCapabilitySetFingerprint(packageInfo)
+        val currentPolicy = libraryRepository.sourceRemotePolicy(sourceId)
+        val preservesPolicy = preserveWriteback &&
+            currentPolicy?.trustedPublisherFingerprint == packageInfo.publisherFingerprint &&
+            currentPolicy.capabilitySetFingerprint == capabilityFingerprint
+        val readPolicy = packageInfo.manifest.capabilities.remoteLibrary.policies[RemoteOperation.READ]
+        libraryRepository.saveSourceRemotePolicy(
+            SourceRemotePolicy(
+                sourceId = sourceId,
+                trustedPublisherFingerprint = packageInfo.publisherFingerprint,
+                capabilitySetFingerprint = capabilityFingerprint,
+                approvedOrigin = readPolicy?.origin?.canonical.orEmpty(),
+                addWritebackEnabled = preservesPolicy && currentPolicy.addWritebackEnabled,
+                firstImportPromptDismissed = preservesPolicy && currentPolicy.firstImportPromptDismissed,
+            ),
+        )
+        libraryRepository.setSourceAvailability(sourceId, packageInfo.manifest.version.original, true, generation)
+    }
     private fun copyToBoundedStaging(uri: Uri, resolver: ContentResolver): File {
         require(stagingDirectory.isDirectory || stagingDirectory.mkdirs()) { "Cannot create HXP staging directory" }
         val target = File.createTempFile("candidate-", ".hxp", stagingDirectory)

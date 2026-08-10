@@ -3,6 +3,8 @@
 <resources>
     <string name="settings_more_entry_title">设置</string>
     <string name="settings_more_entry_summary">显示模式与主题</string>
+    <string name="settings_more_transfer_title">数据迁移与备份</string>
+    <string name="settings_more_transfer_summary">导入 Hikari 或 Tsuyomi 文件，导出本地阅读数据</string>
     <string name="settings_more_about_title">关于</string>
 
     <string name="settings_display_section_profile">显示模式</string>

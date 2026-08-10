@@ -9,6 +9,7 @@ plugins {
 
 android {
     namespace = "org.tsuyomi.core.database"
+    sourceSets.getByName("androidTest").assets.srcDir("schemas")
 }
 
 ksp {
@@ -18,5 +19,8 @@ ksp {
 dependencies {
     implementation(project(":shared:locator"))
     implementation(project(":shared:model"))
+    implementation(project(":shared:backup"))
+    implementation(project(":shared:smart-shelf"))
+    implementation(libs.kotlinx.serialization.json)
     androidTestImplementation(libs.androidx.room.testing)
 }

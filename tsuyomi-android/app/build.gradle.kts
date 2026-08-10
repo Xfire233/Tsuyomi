@@ -12,8 +12,8 @@ android {
     namespace = "org.tsuyomi.android"
     defaultConfig {
         applicationId = "org.tsuyomi.android"
-        versionCode = 1
-        versionName = "0.1.0"
+        versionCode = 2
+        versionName = "0.2.0"
     }
     buildFeatures {
         buildConfig = true
@@ -36,6 +36,9 @@ dependencies {
     implementation(project(":feature:book"))
     implementation(project(":feature:reader"))
     implementation(project(":reader:engine"))
+    implementation(project(":shared:backup"))
+    implementation(project(":shared:smart-shelf"))
+    implementation(project(":feature:backup"))
     implementation(project(":shared:source-contract"))
     implementation(project(":core:files"))
     implementation(project(":source:extension-manager"))
@@ -56,4 +59,5 @@ dependencies {
     androidTestImplementation(platform(libs.androidx.compose.bom))
     androidTestImplementation(libs.androidx.compose.ui.test.junit4)
     debugImplementation(libs.androidx.compose.ui.test.manifest)
+    testImplementation(libs.junit)
 }

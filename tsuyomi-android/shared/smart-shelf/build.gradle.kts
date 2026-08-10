@@ -7,4 +7,5 @@ plugins {
 
 dependencies {
     implementation(project(":shared:model"))
+    implementation(libs.kotlinx.serialization.json)
 }

@@ -6,6 +6,7 @@ package org.tsuyomi.source.extensionmanager
 
 import java.security.MessageDigest
 import org.tsuyomi.shared.sourcecontract.HttpsOrigin
+import org.tsuyomi.shared.sourcecontract.NetworkMethod
 import org.tsuyomi.shared.sourcecontract.SourceId
 
 data class SemanticVersion(
@@ -66,7 +67,40 @@ data class HxpNetworkCapability(
 
 data class HxpCookieCapability(val sourceScoped: Boolean, val origins: Set<HttpsOrigin>)
 data class HxpWebLoginCapability(val enabled: Boolean, val origins: Set<HttpsOrigin>)
-data class HxpRemoteLibraryCapability(val read: Boolean, val writeOperations: Set<String>)
+
+enum class RemoteOperation { READ, ADD }
+
+sealed interface HxpRemoteParameter {
+    val name: String
+
+    data class Fixed(override val name: String, val value: String) : HxpRemoteParameter
+    data class RemoteBookId(override val name: String) : HxpRemoteParameter
+    data class Cursor(override val name: String) : HxpRemoteParameter
+}
+
+
+data class HxpRemoteRedirectTarget(
+    val origin: HttpsOrigin,
+    val method: NetworkMethod,
+    val path: String,
+    val referrerPath: String?,
+    val parameters: List<HxpRemoteParameter.Fixed>,
+)
+data class HxpRemoteOperationPolicy(
+    val operation: RemoteOperation,
+    val origin: HttpsOrigin,
+    val method: NetworkMethod,
+    val path: String,
+    val referrerPath: String?,
+    val parameters: List<HxpRemoteParameter>,
+    val redirects: List<HxpRemoteRedirectTarget> = emptyList(),
+)
+
+data class HxpRemoteLibraryCapability(
+    val read: Boolean,
+    val writeOperations: Set<String>,
+    val policies: Map<RemoteOperation, HxpRemoteOperationPolicy>,
+)
 data class HxpCapabilities(
     val network: HxpNetworkCapability,
     val cookies: HxpCookieCapability,

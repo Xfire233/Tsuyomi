@@ -156,7 +156,8 @@ class ManualVerificationHandoffInstrumentedTest {
             targetContext.assets.open("wenku8-fixture.hxp").use { input ->
                 fixture.outputStream().use(input::copyTo)
             }
-            val controller = SourceInstallController(targetContext)
+            val application = targetContext.applicationContext as TsuyomiApplication
+            val controller = SourceInstallController(targetContext, application.libraryRepository)
             controller.prepare(Uri.fromFile(fixture), targetContext.contentResolver)
             check(controller.state is BrowseUiState.Approval) { "Fixture source was not prepared" }
             controller.approve(allowDowngrade = false)

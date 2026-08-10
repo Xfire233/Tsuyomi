@@ -26,6 +26,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.unit.sp
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.flow.drop
 import kotlinx.coroutines.flow.distinctUntilChanged
@@ -37,6 +38,7 @@ import org.tsuyomi.reader.engine.ReaderDocumentSession
 import org.tsuyomi.reader.engine.ReaderPresentation
 import org.tsuyomi.reader.engine.defaultReaderPresentation
 import org.tsuyomi.shared.locator.LocatorPrecision
+import org.tsuyomi.shared.backup.PortableReaderPreferences
 import org.tsuyomi.shared.locator.ReaderLocator
 import org.tsuyomi.shared.sourcecontract.ReaderBlock
 import org.tsuyomi.shared.sourcecontract.ReaderDocument
@@ -47,10 +49,12 @@ fun ReaderSurface(
     restoredLocator: ReaderLocator?,
     onLocatorChanged: (ReaderLocator, LocatorPrecision) -> Unit,
     modifier: Modifier = Modifier,
+    preferences: PortableReaderPreferences = PortableReaderPreferences(flow = "scroll", fontScale = 1.0, lineHeight = 1.5, theme = "paper"),
 ) {
     val isEInk = LocalDisplayEnvironment.current.effectiveProfile == DisplayProfile.EINK
-    val session = remember(document.sourceId, document.remoteBookId, document.contentId, document.revision) {
-        ReaderDocumentSession(document, restoredLocator, defaultReaderPresentation(isEInk))
+    val initialPresentation = if (isEInk || preferences.flow == "paged") ReaderPresentation.PAGED else ReaderPresentation.SCROLL
+    val session = remember(document.sourceId, document.remoteBookId, document.contentId, document.revision, initialPresentation) {
+        ReaderDocumentSession(document, restoredLocator, initialPresentation)
     }
     var presentation by remember(session) { mutableStateOf(session.presentation) }
     var position by remember(session) { mutableStateOf(session.position) }
@@ -89,9 +93,9 @@ fun ReaderSurface(
             )
         }
         when (presentation) {
-            ReaderPresentation.SCROLL -> ScrollReader(document, position.blockIndex, ::navigate, Modifier.weight(1f))
-            ReaderPresentation.PAGED -> PagedReader(document, position.blockIndex, ::navigate, false, Modifier.weight(1f))
-            ReaderPresentation.DUAL_PAGE -> PagedReader(document, position.blockIndex, ::navigate, true, Modifier.weight(1f))
+            ReaderPresentation.SCROLL -> ScrollReader(document, position.blockIndex, ::navigate, preferences, Modifier.weight(1f))
+            ReaderPresentation.PAGED -> PagedReader(document, position.blockIndex, ::navigate, false, preferences, Modifier.weight(1f))
+            ReaderPresentation.DUAL_PAGE -> PagedReader(document, position.blockIndex, ::navigate, true, preferences, Modifier.weight(1f))
         }
     }
 }
@@ -101,6 +105,7 @@ private fun ScrollReader(
     document: ReaderDocument,
     initialIndex: Int,
     onPosition: (Int) -> Unit,
+    preferences: PortableReaderPreferences,
     modifier: Modifier,
 ) {
     val listState = rememberLazyListState(initialFirstVisibleItemIndex = initialIndex)
@@ -114,6 +119,7 @@ private fun ScrollReader(
         itemsIndexed(document.blocks, key = { _, block -> block.blockId }) { index, block ->
             ReaderBlockText(
                 block = block,
+                preferences = preferences,
                 modifier = Modifier
                     .fillMaxWidth()
                     .clickable { onPosition(index) }
@@ -129,14 +135,15 @@ private fun PagedReader(
     index: Int,
     onPosition: (Int) -> Unit,
     dual: Boolean,
+    preferences: PortableReaderPreferences,
     modifier: Modifier,
 ) {
     Column(modifier.fillMaxWidth().padding(20.dp), verticalArrangement = Arrangement.SpaceBetween) {
         Row(Modifier.weight(1f), horizontalArrangement = Arrangement.spacedBy(24.dp)) {
-            ReaderBlockText(document.blocks[index], Modifier.weight(1f))
+            ReaderBlockText(document.blocks[index], preferences, Modifier.weight(1f))
             if (dual) {
                 val second = document.blocks.getOrNull(index + 1)
-                if (second != null) ReaderBlockText(second, Modifier.weight(1f))
+                if (second != null) ReaderBlockText(second, preferences, Modifier.weight(1f))
             }
         }
         HorizontalDivider()
@@ -161,11 +168,15 @@ private fun PagedReader(
 }
 
 @Composable
-private fun ReaderBlockText(block: ReaderBlock, modifier: Modifier) {
+private fun ReaderBlockText(block: ReaderBlock, preferences: PortableReaderPreferences, modifier: Modifier) {
+    val scale = preferences.fontScale ?: 1.0
+    val lineHeight = preferences.lineHeight ?: 1.5
+    val body = MaterialTheme.typography.bodyLarge.copy(fontSize = (18.0 * scale).sp, lineHeight = (18.0 * scale * lineHeight).sp)
+    val heading = MaterialTheme.typography.titleMedium.copy(fontSize = (20.0 * scale).sp, lineHeight = (20.0 * scale * lineHeight).sp)
     when (block) {
-        is ReaderBlock.Paragraph -> Text(block.text, modifier, style = MaterialTheme.typography.bodyLarge)
-        is ReaderBlock.Heading -> Text(block.text, modifier, style = MaterialTheme.typography.titleMedium)
-        is ReaderBlock.Image -> Text(block.altText ?: stringResource(R.string.reader_image), modifier)
+        is ReaderBlock.Paragraph -> Text(block.text, modifier, style = body)
+        is ReaderBlock.Heading -> Text(block.text, modifier, style = heading)
+        is ReaderBlock.Image -> Text(block.altText ?: stringResource(R.string.reader_image), modifier, style = body)
     }
 }
 

@@ -30,6 +30,8 @@ import org.tsuyomi.core.files.StorageQuota
 import org.tsuyomi.core.files.StorageRoot
 import org.tsuyomi.core.files.StorageRoots
 import org.tsuyomi.shared.sourcecontract.SourceId
+import org.tsuyomi.shared.sourcecontract.HttpsOrigin
+import org.tsuyomi.shared.sourcecontract.NetworkMethod
 
 class HxpArchiveVerifierTest {
     @Test
@@ -186,6 +188,10 @@ class HxpArchiveVerifierTest {
         assertEquals(emptyList<ResourceLimitIncrease>(), unchanged.resourceLimitIncreases)
         assertEquals(widened.candidate.packageSha256, unchanged.candidate.packageSha256)
         assertNotEquals(widened.capabilityGrantFingerprint, unchanged.capabilityGrantFingerprint)
+        assertEquals(
+            restrictedPrepared.remoteCapabilitySetFingerprint,
+            widened.remoteCapabilitySetFingerprint,
+        )
 
         val staleApproval = ExtensionInstallApproval.approve(unchanged)
         val rejection = assertThrows(ExtensionInstallException::class.java) {
@@ -196,6 +202,93 @@ class HxpArchiveVerifierTest {
             restrictedPrepared.candidate.packageSha256,
             restrictedInstaller.readVerifiedActive(SourceId("org.tsuyomi.wenku8"))?.packageSha256,
         )
+    }
+
+    @Test
+    fun remoteFingerprintCanonicalizesParameterOrderAndIncludesPolicyValues() {
+        val fixture = signedFixture()
+        val verifier = HxpArchiveVerifier(InMemoryPublisherKeyStore(listOf(fixture.publisher)))
+        val verified = verifier.verify(fixture.writeToTemporaryFile())
+        val root = Files.createTempDirectory("remote-fingerprint").toFile()
+        val installer = newInstaller(root, verifier)
+        val parameters = listOf(
+            HxpRemoteParameter.Fixed("mode", "add"),
+            HxpRemoteParameter.RemoteBookId("aid"),
+        )
+        fun packageWith(
+            parameters: List<HxpRemoteParameter>,
+            publisherKeyId: String = verified.manifest.publisherKeyId,
+            redirects: List<HxpRemoteRedirectTarget> = emptyList(),
+        ): VerifiedHxpPackage {
+            val policy = HxpRemoteOperationPolicy(
+                operation = RemoteOperation.ADD,
+                origin = HttpsOrigin("https://www.wenku8.net"),
+                method = NetworkMethod.POST,
+                path = "/modules/article/bookcase.php",
+                referrerPath = "/modules/article/articleinfo.php?id={remoteBookId}",
+                parameters = parameters,
+                redirects = redirects,
+            )
+            val manifest = verified.manifest.copy(
+                publisherKeyId = publisherKeyId,
+                capabilities = verified.manifest.capabilities.copy(
+                    remoteLibrary = HxpRemoteLibraryCapability(
+                        read = false,
+                        writeOperations = setOf("add"),
+                        policies = mapOf(RemoteOperation.ADD to policy),
+                    ),
+                ),
+            )
+            return VerifiedHxpPackage(
+                manifest,
+                verified.packageSha256,
+                verified.publisherFingerprint,
+                verified.archiveBytes,
+                verified.readVerifiedEntryModule(),
+            )
+        }
+
+        val original = installer.remoteCapabilitySetFingerprint(packageWith(parameters))
+        val reordered = installer.remoteCapabilitySetFingerprint(packageWith(parameters.reversed()))
+        val altered = installer.remoteCapabilitySetFingerprint(
+            packageWith(listOf(HxpRemoteParameter.Fixed("mode", "remove"), HxpRemoteParameter.RemoteBookId("aid"))),
+        )
+        val remappedKeyId = installer.remoteCapabilitySetFingerprint(packageWith(parameters, publisherKeyId = "tsuyomi-fixture-key-remapped"))
+        val redirectParameters = listOf(HxpRemoteParameter.Fixed("status", "ok"), HxpRemoteParameter.Fixed("view", "compact"))
+        val redirected = installer.remoteCapabilitySetFingerprint(
+            packageWith(
+                parameters,
+                redirects = listOf(
+                    HxpRemoteRedirectTarget(
+                        origin = HttpsOrigin("https://www.wenku8.net"),
+                        method = NetworkMethod.GET,
+                        path = "/modules/article/complete.php",
+                        referrerPath = null,
+                        parameters = redirectParameters,
+                    ),
+                ),
+            ),
+        )
+        val redirectedReordered = installer.remoteCapabilitySetFingerprint(
+            packageWith(
+                parameters,
+                redirects = listOf(
+                    HxpRemoteRedirectTarget(
+                        origin = HttpsOrigin("https://www.wenku8.net"),
+                        method = NetworkMethod.GET,
+                        path = "/modules/article/complete.php",
+                        referrerPath = null,
+                        parameters = redirectParameters.reversed(),
+                    ),
+                ),
+            ),
+        )
+
+        assertEquals(original, reordered)
+        assertNotEquals(original, altered)
+        assertNotEquals(original, remappedKeyId)
+        assertNotEquals(original, redirected)
+        assertEquals(redirected, redirectedReordered)
     }
 
     @Test
@@ -223,10 +316,63 @@ class HxpArchiveVerifierTest {
         assertEquals(emptyList<ResourceLimitIncrease>(), preparedContracted.resourceLimitIncreases)
     }
 
+    @Test
+    fun signedManifestAcceptsOnlyFixedGetRedirectTargets() {
+        fun remoteLibrary(method: String, parameterKind: String = "fixed"): JsonObject {
+            val parameter = if (parameterKind == "fixed") {
+                JsonObject(mapOf("kind" to JsonPrimitive("fixed"), "value" to JsonPrimitive("ok")))
+            } else {
+                JsonObject(mapOf("kind" to JsonPrimitive(parameterKind)))
+            }
+            val redirect = JsonObject(
+                mapOf(
+                    "origin" to JsonPrimitive("https://www.wenku8.net"),
+                    "method" to JsonPrimitive(method),
+                    "path" to JsonPrimitive("/remote/complete"),
+                    "parameters" to JsonObject(mapOf("status" to parameter)),
+                ),
+            )
+            return JsonObject(
+                mapOf(
+                    "read" to JsonPrimitive(true),
+                    "writeOperations" to JsonArray(emptyList()),
+                    "policies" to JsonObject(
+                        mapOf(
+                            "read" to JsonObject(
+                                mapOf(
+                                    "origin" to JsonPrimitive("https://www.wenku8.net"),
+                                    "method" to JsonPrimitive("GET"),
+                                    "path" to JsonPrimitive("/remote/shelf"),
+                                    "parameters" to JsonObject(emptyMap()),
+                                    "redirects" to JsonArray(listOf(redirect)),
+                                ),
+                            ),
+                        ),
+                    ),
+                ),
+            )
+        }
+        val publisher = signedFixture().publisher
+        val verifier = HxpArchiveVerifier(InMemoryPublisherKeyStore(listOf(publisher)))
+
+        val verified = verifier.verify(signedFixture(remoteLibrary = remoteLibrary("GET")).writeToTemporaryFile())
+        val postFailure = assertThrows(HxpVerificationException::class.java) {
+            verifier.verify(signedFixture(remoteLibrary = remoteLibrary("POST")).writeToTemporaryFile())
+        }
+        val bindingFailure = assertThrows(HxpVerificationException::class.java) {
+            verifier.verify(signedFixture(remoteLibrary = remoteLibrary("GET", "cursor")).writeToTemporaryFile())
+        }
+
+        assertEquals("/remote/complete", verified.manifest.capabilities.remoteLibrary.policies.getValue(RemoteOperation.READ).redirects.single().path)
+        assertEquals(HxpVerificationError.CAPABILITY_POLICY_VIOLATION, postFailure.error)
+        assertEquals(HxpVerificationError.INVALID_MANIFEST, bindingFailure.error)
+    }
+
     private fun signedFixture(
         version: String = "0.1.0",
         limits: FixtureLimits = FixtureLimits(),
         payloadInArchive: ByteArray = ENTRY_BYTES,
+        remoteLibrary: JsonObject = JsonObject(mapOf("read" to JsonPrimitive(false), "writeOperations" to JsonArray(emptyList()))),
     ): SignedFixture {
         val privateKey = Ed25519PrivateKeyParameters(ByteArray(32) { (it + 1).toByte() }, 0)
         val publisher = PublisherKey(
@@ -236,7 +382,7 @@ class HxpArchiveVerifierTest {
         )
         val files = JsonObject(mapOf(ENTRY_PATH to JsonPrimitive(sha256(ENTRY_BYTES))))
         val contentDigest = sha256(JsonCanonicalizer(files.toString()).encodedUTF8)
-        val manifest = manifest(contentDigest, files, version, limits)
+        val manifest = manifest(contentDigest, files, version, limits, remoteLibrary)
         val canonicalManifest = JsonCanonicalizer(manifest).encodedUTF8
         val message = ByteArrayOutputStream().use { output ->
             output.write("tsuyomi-hxp-v1\u0000".toByteArray(StandardCharsets.US_ASCII))
@@ -264,6 +410,7 @@ class HxpArchiveVerifierTest {
         files: JsonObject,
         version: String,
         limits: FixtureLimits,
+        remoteLibrary: JsonObject,
     ): String = JsonObject(
         linkedMapOf(
             "format" to JsonPrimitive("tsuyomi-hxp"),
@@ -280,7 +427,7 @@ class HxpArchiveVerifierTest {
                     "network" to JsonObject(mapOf("origins" to JsonArray(listOf(JsonPrimitive("https://www.wenku8.net"))), "maxConcurrentRequests" to JsonPrimitive(limits.maxConcurrentRequests), "requestTimeoutMs" to JsonPrimitive(limits.requestTimeoutMs), "maxResponseBytes" to JsonPrimitive(limits.maxResponseBytes))),
                     "cookies" to JsonObject(mapOf("mode" to JsonPrimitive("sourceScoped"), "origins" to JsonArray(listOf(JsonPrimitive("https://www.wenku8.net"))))),
                     "webLogin" to JsonObject(mapOf("enabled" to JsonPrimitive(true), "origins" to JsonArray(listOf(JsonPrimitive("https://www.wenku8.net"))))),
-                    "remoteLibrary" to JsonObject(mapOf("read" to JsonPrimitive(false), "writeOperations" to JsonArray(emptyList()))),
+                    "remoteLibrary" to remoteLibrary,
                     "storage" to JsonObject(mapOf("quotaBytes" to JsonPrimitive(limits.storageQuotaBytes))),
                 ),
             ),
