@@ -37,6 +37,15 @@ Gate 4 的范围由真实设备/AVD 手工验收中可复现的产品发现项�
 
 | ID | 状态 | 设备/构建 | 复现步骤 | 实际结果 | 预期结果 | 证据 | 严重度 | 回归层级 |
 |---|---|---|---|---|---|---|---|---|
+| G4-UX-001 | TRIAGED | API 29 phone portrait / `0.2.0`；代码路径复核 | 从搜索结果打开 `雾港纪事`；再从书架打开同一 `BookIdentity` | 搜索进入 source-owned `source/detail`，书架进入 Room-owned `library/book/{sourceId}/{remoteBookId}`；标题、操作和返回栈分裂。本地页的“打开来源”只切换/恢复 Browse 根栈，不保证打开该书；详情→目录→章节→Reader 增加重复层级 | 同一 `BookIdentity` 无论从搜索、书架、历史或远程收藏进入，都落到一个 canonical book detail。页面先显示本地缓存/书架状态，再按来源可用性增强元数据和目录；来源不可用时本地详情仍可用。主要阅读动作不得要求经过重复详情页 | `MainActivity.Routes.Detail`、`Routes.LocalBook`、`LocalBookDetailsScreen.onOpenSource`；`GATE_3.md` 294、301–305、428–430 | P1 | route/navigation instrumentation；Room/source race and dormant-source tests；统一 screen semantics/goldens；两套 portrait AVD 用户流 |
+
+### G4-UX-001 设计约束
+
+- 使用稳定身份路由 `book/{sourceId}/{remoteBookId}` 作为唯一书籍详情入口；搜索、书架、历史和远程收藏只传稳定身份，不各自拥有详情页。
+- host 组合一个详情状态：Room 中的本地书架、评分、标签、集合、进度与 reconciliation 是本地真值；已验证来源只增量提供可刷新的简介、状态和目录，不得让网络或扩展阻塞本地内容。
+- dormant source 在同一页面内降级，保留本地信息与阅读进度，并把来源相关动作禁用/解释；不能跳到另一种“本地详情页”。
+- `继续阅读` / `开始阅读` 是详情页主动作。目录可作为同页章节区或一个明确的次级目的地，但不得再经过第二个书籍详情；Back 必须回到调用方列表并保留其查询、滚动和筛选状态。
+- source/local 的安全与生命周期所有权继续分离在状态层和 controller 层，不用重复页面或重复 route 表达内部边界。
 
 状态：`NEW`（待复现）→ `TRIAGED`（已归类）→ `READY`（可实现）→ `FIXED`（修复和回归证明完成）→ `DECLINED`（不属于产品缺陷，说明理由）。
 
