@@ -52,7 +52,17 @@ fun LibraryEmptyStateScreenshots() {
     DisplayEnvironmentProvider(environment) {
         TsuyomiTheme(environment) {
             Surface(Modifier.fillMaxSize()) {
-                LibraryScreen(onNavigateToBrowse = {})
+                LibraryScreen(
+                    state = LibraryUiState(loading = false),
+                    collections = emptyList(),
+                    selectedCollectionId = null,
+                    onCollectionChange = {},
+                    onQueryChange = {},
+                    onFilterChange = {},
+                    onOpenBook = {},
+                    onRetry = {},
+                    onManageCollections = {},
+                )
             }
         }
     }

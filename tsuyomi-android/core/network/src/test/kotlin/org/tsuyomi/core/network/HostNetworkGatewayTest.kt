@@ -222,6 +222,41 @@ class HostNetworkGatewayTest {
         gateway.request(grant, request(url = "https://www.wenku8.net/remote/shelf?mode=list"), context)
         assertEquals(1, transport.requests.size)
     }
+    @Test
+    fun remote_add_acceptance_is_single_use_and_rejection_has_zero_transport() = runBlocking {
+        val transport = RecordingTransport()
+        val registry = DirectActionTokenRegistry()
+        val gateway = HostNetworkGateway(transport, directActionTokens = registry)
+        val policy = RemoteOperationRequestPolicy(
+            origin = HttpsOrigin("https://www.wenku8.net"),
+            method = NetworkMethod.GET,
+            path = "/remote/shelf",
+            fixedParameters = mapOf("mode" to "add"),
+            remoteBookIdParameter = "bid",
+        )
+        val binding = DirectActionBinding("org.tsuyomi.wenku8", "42", "reconcile", "digest", "0.2.0", "capability", 7, 9)
+
+        val rejectedToken = registry.mint(binding) { false }
+        val rejected = assertHostFailure {
+            gateway.request(
+                grant,
+                request(url = "https://www.wenku8.net/remote/shelf?mode=add&bid=42"),
+                remoteLibraryAddContext(policy, "42", rejectedToken),
+            )
+        }
+        assertEquals(HostNetworkError.CANCELLED, rejected.error)
+        assertEquals(0, transport.requests.size)
+
+        val acceptedToken = registry.mint(binding) { true }
+        val context = remoteLibraryAddContext(policy, "42", acceptedToken)
+        gateway.request(grant, request(url = "https://www.wenku8.net/remote/shelf?mode=add&bid=42"), context)
+        assertEquals(1, transport.requests.size)
+        val replay = assertHostFailure {
+            gateway.request(grant, request(url = "https://www.wenku8.net/remote/shelf?mode=add&bid=42"), context)
+        }
+        assertEquals(HostNetworkError.CANCELLED, replay.error)
+        assertEquals(1, transport.requests.size)
+    }
 
     private fun request(
         url: String = "https://www.wenku8.net/book/1234.htm",
