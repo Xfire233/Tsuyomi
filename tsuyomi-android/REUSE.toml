@@ -12,6 +12,7 @@ path = [
   "feature/library/src/main/res/values/strings.xml",
   "feature/settings/src/main/res/values/strings.xml",
   "docs/gates/GATE_1/assets/**",
+  "docs/gates/GATE_4.md",
   "docs/design/GATE_1_UI.md",
   "docs/design/OPTION_APPLICABILITY.md",
   "docs/process/QUALITY_GATES.md",
