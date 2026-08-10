@@ -1,13 +1,282 @@
 <!-- SPDX-FileCopyrightText: 2026 Tsuyomi Contributors -->
 <!-- SPDX-License-Identifier: Apache-2.0 -->
 
-# Gate 4：手工设备发现项计划
+# Gate 4 plan — foundational UX and remaining authorized writeback
 
-## 目的
+## Status and review input
 
-Gate 4 的范围由真实设备/AVD 手工验收中可复现的产品发现项驱动。每一项都必须以用户可观察的行为、稳定复现步骤和目标设备证据描述；不得把单次操作失误、未验证猜测或历史横屏证据伪装成缺陷。
+- Planner status: **DRAFT FOR DESIGNER / ADVISER REVIEW**
+- Implementation authorization: **NOT GRANTED**
+- Planning branch / input head: `docs/gate4-manual-device-intake` / `9fd8c50358d0105d32246fb41375ecab6365c43f`
+- Product baseline: `org.tsuyomi.android` `0.2.0` / versionCode `2`; Host API `1.1.0`; HXP manifest v1; Room schema `2`
+- Gate 3 baseline: `d3e335a11565ae79e15d374062db637f3f9979d9`; dual-portrait evidence rule: `26bad358ab2ef4afac01b63b30e6c6c3e6de9c1c`
+- UI impact: **YES** — every root and task path, book details, Reader entry, library/collections/history, source and remote-library surfaces, transfer, settings, shared UI semantics and goldens.
+- Security-sensitive impact: **YES** — Gate 4B adds separately signed/capability-gated remote remove/move and remote target selection. Gate 4A must preserve the existing host-only credential, direct-action, reconciliation, redirect and cookie boundaries.
 
-本计划不追溯修改 Gate 3 的验收结论。Gate 3 已明确记录其缺少两条独立 portrait 运行期记录；后续实现或发布前的 AVD 验收遵守 `docs/verification/AVD_MATRIX.md` 的双竖屏基线。
+Gate 4 has two ordered checkpoints. **4A is foundational UX**: it repairs the current page model and every confirmed task-flow gap before remote writes are expanded. **4B is the original roadmap scope**: remaining authorized remote writeback. Gate 4 does not begin production implementation until independent Designer and Adviser approvals bind this exact plan input, after which explicit user implementation authorization remains required. A scope, protocol, route, persistence or risk-model change invalidates the affected approval.
+
+## Outcome
+
+A local-first reader whose standard user tasks are direct, truthful and recoverable: one book always means one detail surface; organization, tags, ratings and reading work from the point where users expect them; navigation returns to the precise prior context; every change is visibly acknowledged; all core flows remain accessible and equally usable in Standard and E-ink. Only after that foundation is proven may a user explicitly authorize remote remove/move against a signed source policy—never automatically, in the background or bidirectionally.
+
+## Scope partition and non-goals
+
+### Checkpoint 4A — foundational UX
+
+1. Canonical stable-identity book detail, precise navigation graph and Back/Up/root-stack contract.
+2. Complete local library operations promised by Gate 3: system views, sorting, collection lifecycle and many-to-many membership.
+3. Full mutation-state feedback for local and existing remote-add actions.
+4. Search/history/continue-reading, chapter/Reader entry, source/dormant/offline recovery and remote-library information architecture.
+5. Transfer/report information architecture, settings discovery and shared accessibility/E-ink/adaptive behavior.
+6. A complete task-flow product review in addition to code/design review.
+
+### Checkpoint 4B — remaining authorized writeback
+
+1. Signed, separately granted `remove` and `move` operation contracts and an explicit signed remote target/shelf projection.
+2. Per-source default-off remove/move settings, protected credential snapshots, one direct user command per operation and durable reconciliation.
+3. No implicit selection, no remote folder creation/deletion, no automatic/bidirectional/background synchronization, and no remote mutation on local import, source install, login, pull, retry timer or local remove unless the user explicitly chooses the corresponding remote operation.
+
+### Explicit non-goals
+
+- Gate 5 sources (ESJZone, Yamibo), official extension catalogue, production publisher keys, source subscription execution, local EPUB/TXT, TTS, cloud/account sync, telemetry, crash reporting, remote feature flags, vendor E-ink SDKs and physical waveform claims.
+- Copying Flutter or comparison-project code, brand, visual identity, GPL/AGPL implementation, credentials, cookies, caches or private content.
+- Gate 4B remote folder creation/deletion/reordering, remote delete as a side effect of local removal, remote membership mirroring, automatic pull, scheduled work or conflict “auto-resolution”.
+
+## Evidence base and product principles
+
+Tsuyomi’s current code audit identified duplicate book routes, missing manual-membership UI, silent mutations, incomplete system-library/sort/transfer contracts, generic remote state, E-ink pagination gaps and semantic/accessibility gaps. The fixed Flutter reference `Xfire233/hikari_novel_flutter_plus` commit `a1feba6d1dd8dbbdd2b5ae042e44f2ec54d26bef` confirms the useful concepts of persistent roots, local fallback, detail-owned reading entry and display adaptations, but its hidden/overflow actions, ambiguous state feedback, dense settings and class-ID membership model are not adopted. Mature-reader behavior was independently compared against Mihon `0.20.4`, Kotatsu current source, LNReader `2.1.2`, and only a clearly-labelled historical Legado fork because the official Legado repository no longer contains product source. Links and evidence are recorded in `docs/architecture/UX_RESEARCH.md`.
+
+1. **Task before screen.** A primary task must be available where a user naturally looks; core organization and reading never depend on an overflow menu, a prior screen’s stale state or an undiscoverable gesture.
+2. **Identity before ownership.** Route identity is stable `BookIdentity`; local/source/remote ownership changes data availability and permitted actions, not which book page the user sees.
+3. **One action, one truthful outcome.** Every mutation exposes `idle → working → success | recoverable failure | cancelled | unresolved`, prevents duplicate dispatch, uses persistent accessible feedback, and never calls a local change remotely synchronized without confirmed source evidence.
+4. **Navigation is a contract.** Back is chronological transient-state/route reversal; Up is semantic parent traversal; root selection switches independently restorable stacks. They are specified and tested separately.
+5. **Local-first is visible.** Room data, semantic progress and downloaded/local reader data remain useful when a source is dormant; source freshness, verification and remote capability are shown as provenance, not silently conflated with local truth.
+6. **Same behavior, profile-specific presentation.** Standard and E-ink share route, state and persistence trees. E-ink changes only presentation: fixed chrome, explicit pagination, immediate replacement and persistent textual feedback.
+7. **Progressive disclosure without concealment.** A compact detail prioritizes Read/Continue and organization. Secondary actions remain labelled and keyboard/TalkBack reachable; complex source/remote/security settings are grouped with clear summaries.
+
+## 4A information architecture and navigation contract
+
+### Canonical routes
+
+Clean cutover removes `library/book/{sourceId}/{remoteBookId}`, state-only `source/detail`, and state-only `source/remote-library`. The route graph becomes:
+
+```text
+Library root (independent stack)
+├── library/collections
+├── library/collections/{collectionId}
+└── book/{sourceId}/{remoteBookId}?origin={library|collection|history|search|remote}
+
+Browse root (independent stack)
+├── browse/source/{sourceId}/search
+├── browse/source/{sourceId}/remote-library
+└── book/{sourceId}/{remoteBookId}?origin={search|remote}
+
+More root (independent stack)
+├── more/display
+├── more/reader
+├── more/data
+└── more/data/report/{sessionId}
+
+Book detail (shared canonical stack node)
+├── book/{sourceId}/{remoteBookId}/directory
+└── book/{sourceId}/{remoteBookId}/reader/{chapterId}
+```
+
+Only stable IDs and a bounded caller-return token/context may enter a route. `origin` controls return destination and analytics-free UI wording only; it cannot select a source, capability, credential or book. Controller snapshots can restore source work but cannot retarget an already-addressed route. The host resolves current Room state first, then adds verified source detail/directory data when source ID, package generation and capability match. It never blocks local detail on a source request.
+
+### Back, Up and root selection
+
+| Input | Required behavior |
+|---|---|
+| System Back | Close modal → exit selection/edit mode → dismiss inline search/chapter drawer/settings sheet → pop current route → return to its explicit caller context. At a root, follow Android task policy; do not synthesize old nested routes. |
+| App-bar Up | Go to the semantic parent: Reader/Directory → canonical detail; detail → its recorded caller list/root; collection editor → collection manager; report → data. It never behaves as “switch Browse”. |
+| Bottom/rail root item | Switch to that root’s independently saved stack and UI state. Re-selecting an active root returns its stack to its root only through a labelled, deliberate command; it never changes another root’s stack. |
+| Precise cross-root action | `查看本书来源详情` carries the current identity and creates/restores that detail, preserving a Library return context. `浏览内容源` explicitly opens source root/search. No action may use generic `saveState` restoration to fulfil a book-specific request. |
+
+Every stack saves bounded list query, selected collection, sort, selection mode and position (or E-ink page); no scroll offset/page is reader progress. Process recreation restores only valid stable identifiers and drops invalid ephemeral UI safely.
+
+### Canonical detail and Reader
+
+The detail hierarchy is: title/author/source provenance/dormancy → primary `继续阅读` or `开始阅读` → local status (in library, progress, rating, tags, memberships) → source metadata and chapter entry → secondary source/remote actions. Continue resolution is deterministic: exact semantic locator → first unread source chapter → first chapter; unavailable content produces an explanatory disabled state and retry/use-local action, never a dead button. The directory is an explicit secondary destination; it may show chapter state, local availability and current chapter. Reader is given explicit book/chapter identity and returns to the same detail; its internal drawer/search/settings consume Back before Reader leaves.
+
+### Library, collections, search and history
+
+- Library has discoverable All, Continue, Recent, Unread and Dormant system views; local title/author/normalized-tag search; all Gate 3 sorts (title, author, added, last read, metadata update, progress, rating, source) with stable identity tie-breaking; contextual count/empty/error/retry state.
+- Empty library primary action is `浏览并添加书籍`; collection management is secondary. Collection chips/tabs preserve the chosen collection and clamp/reset an E-ink page when the result domain changes. Long chip/filter rows wrap, scroll or become a picker—never clip at `fontScale = 2.0`.
+- Manual collections support create, rename, explicit 48dp up/down reorder, presentation-only nesting/reparent with cycle protection, delete/reparent confirmation and a collection-detail list. Smart collections explain their rule and are read-only membership views; system collections are immutable.
+- Both directions expose manual membership: book detail `管理所属集合` displays every permitted manual collection, current membership and multi-select save; manual collection detail `管理书籍` searches/selects local books. Membership writes are one Room transaction, deduplicated, and report actual changed/unchanged values.
+- Library selection mode is explicit, count-labelled and keyboard/TalkBack operable. Back clears selection before route/root traversal. Gate 4A limits bulk actions to safe local operations (membership, local remove, local tags/rating when semantically unambiguous); source/network-heavy operations remain explicit per book until independently specified.
+- Local search history and browsing history become a user-visible host-owned History surface: source-scoped search suggestions only when its source is installed; grouped recent reading; explicit resume; per-item and clear-all removal confirmations. Gate 4A does not introduce a stealth “incognito” state—if history pause is added, it must be an explicit persisted/readable setting and a separately reviewed scope change.
+
+### Source, dormant/offline and remote-library surfaces
+
+- Browse identifies installed source, installed version, capability status and the primary search/discovery action. Import/approval/failure content scrolls at large text and preserves existing source activation until a new verified package is approved.
+- Source data on canonical detail distinguishes current, cached/stale and unavailable. Dormant books retain local title, membership, tags, rating, semantic progress and locally available chapters; source actions state why they are unavailable and offer `浏览内容源` only when that is the real destination.
+- Every long source list (search, directory, remote favourites) uses a shared Standard scroll/E-ink explicit-pagination policy, stable `BookIdentity`/chapter keys and row button semantics. Source errors distinguish retryable network, offline-cache, login/verification and malformed-source outcomes without raw secrets/HTML.
+- Remote-library route is source-ID-addressed. It shows signed read/add/remove/move capability/grant, credential-ready and source availability state before actions. Pull is user-confirmed, manual and cancellable, with page/item count, bounded-progress, empty/success/partial-or-failure semantics; it never starts due to route entry, login return, root change or restoration.
+
+### Mutation, confirmation and feedback policy
+
+Define shared, screen-independent `MutationUiState` and accessible `MutationResultBanner` in `core:ui`. Every affected command owns a keyed state machine; state is restored from durable truth after recreation where appropriate, while non-durable visual working state safely resolves to re-query/retry.
+
+| Command class | Working and duplicate prevention | Completion feedback | Confirmation |
+|---|---|---|---|
+| Tags, rating, manual membership, collection edit | Disable only the scoped command and preserve editable drafts | Persistent inline status, normalized/read-back value, polite live region, safe retry | No confirmation for reversible single-field edit |
+| Local remove / destructive local bulk action | Block repeat; preserve original list context | Clearly state what remains (progress/history/local metadata) and what does not happen remotely | Required before local removal |
+| Source search/pull/read | Explicit working/count/cancel state; no accidental duplicate network operation | Typed result, source/provenance and retry/cache/verification action | Pull confirmation when it changes local library membership |
+| Remote add/remove/move | Direct-action token accepted before transport; scoped disable; durable reconciliation is truth | Confirmed only on typed `applied`/`already-present`; otherwise persistent cancelled/unresolved with explicit retry | Required and source/website effect/target-specific before enable or destructive mutation |
+| SAF transfer | Picker, review, apply/recovery and report remain distinct | Redacted durable report and reopen route | Import confirm after review; abort/destructive cleanup confirm when allowed |
+
+`InfoBanner`/`InlineStatus` must gain an appropriate success/error live-region contract or a new semantic equivalent; transient Snackbar/toast/animation/color alone never proves completion. Result text names the affected book/collection/source safely, never leaks credentials, raw pages, cookies or diagnostics. All destructive dialogs make the default safe/cancel action accessible.
+
+### Settings, transfer and adaptive foundations
+
+- More becomes a grouped entry point for Display, Reader and Data. Reader settings are an explicit `more/reader` route, grouped by typography/layout, navigation/progress and effective E-ink constraints. They show persisted versus effective value; setting dependencies cannot create impossible combinations.
+- Data becomes `more/data`: separate `导入 Tsuyomi 数据`, `从 Hikari Novel 导入`, `导出 Tsuyomi 数据` and `查看最近导入报告`. Review shows format, bounded file state, merge/conflicts/warnings and sensitive-data exclusion before mutation. Completion offers an accurate result and persisted report; recovery gate remains above ordinary navigation.
+- Shared layouts use window-size classes rather than orientation alone. Compact, split-screen, landscape phone and ≥600dp pane variants preserve the same tasks, focus, selected state and route. Detail/forms scroll safely; no core action is beyond the viewport or gesture-only.
+- All icon-only controls have localized descriptions; rows declare button/selected/disabled/expanded state; headings, lists, collection membership, pagination, reader progress and mutation results have semantic values. Test TalkBack, keyboard/DPAD and 48dp targets. Font scale 2.0, system insets and physical keyboard never hide the last action.
+
+## 4B authorized remote writeback plan
+
+### Contract and security model
+
+4B extends—not generalizes—the existing signed remote operation policy. Protocol and parser introduce explicit `RemoteOperation.REMOVE` and `RemoteOperation.MOVE`, each with an exact signed HTTPS method/path/referrer/parameter grammar, declared exact redirect aliases and operation-specific typed host bindings. Remote targets are returned only by a signed read/list operation as bounded `(targetId, displayName, parentId?, kind)` data; target ID is opaque and is never extension-chosen during mutation. A move policy requires exactly one host-bound `remoteBookId` and one host-bound `remoteTargetId`; remove requires only the requested book identity. Operation methods and permissible parameter kinds are defined per operation in protocol tests before Android parsing.
+
+Remote policy fingerprints, package grant diffing and protected transport surfaces include read/add/remove/move policies and aliases. A new operation, target grammar/origin/redirect/publisher-key change disables only affected persisted writeback setting(s) pending explicit reauthorization. Generic/read/add context cannot access remove/move surfaces, and each nonmatching signed context rejects their aliases hop-by-hop before transport.
+
+Each remote command requires all of: verified active matching package/generation, signed operation policy and grant, the operation’s own default-off user setting, protected credential snapshot bound to that policy origin and credential revision, a visible direct user action/confirmation, a host-minted single-use token bound to source/book/operation/target/package/fingerprint/generation, and a durable operation-specific reconciliation row before network acceptance. One book-level mutex serializes conflicts. `NonCancellable` cancellation cleanup revokes unaccepted tokens and records the terminal durable state before rethrowing cancellation.
+
+### User operation semantics
+
+- **Remote remove:** never triggered by local `移出书架`. It is a separate explicit `从网站移除` action with source/website effect and local-retention choice made clear. Default is leave local library untouched; any optional local removal is a separately confirmed local transaction after remote outcome, never an implicit mirror.
+- **Remote move:** first opens a source-labelled target picker populated by an explicit read. It explains website effect, leaves local collection membership unchanged by default, and disables stale/unavailable/unauthorized targets with explanation. The selected opaque target is shown again in final confirmation.
+- **Retries:** `CANCELLED`/`UNRESOLVED` cannot auto-retry. A new explicit retry creates a new token/reconciliation from fresh Room/policy/credential/target state. Remote success is typed idempotent outcome; ambiguity never displays completed. Local data and semantic progress survive every remote failure/revocation.
+- **No target discovery means no move.** The UI fails closed and offers no arbitrary text field, guessed folder, inferred default or hidden source-selected target.
+
+### Persistence and migration
+
+Room schema `2 → 3` replaces add-only reconciliation with operation-kind/target snapshot fields (or a normalized operation table), preserves historical add rows as `ADD`, and adds per-source/per-operation enabled settings. Migration is atomic, exports schema, preserves local books/progress/tags/memberships, and leaves remove/move false. Transfer/Hikari import/export still excludes all capability grants, writeback settings, remote target IDs, reconciliations, credential revisions and source state. Existing add behavior retains its current enabled state only when its unchanged signed policy remains preserving; no migration enables a new operation.
+
+### 4B source fixture and protocol scope
+
+The acceptance source remains an updated public Wenku8 fixture only after protocol/manifest review. It must implement deterministic list-targets/remove/move responses including applied/already-present, pre-accept cancellation, ambiguous terminal failure, declared success aliases, unauthorized target and source-change cases. Live Wenku8 remains anonymous best effort and never an authority for deterministic acceptance. No third-party source is granted inferred write capability.
+
+## Components and clean-cutover order
+
+| Order | Component(s) | Work and invariant |
+|---:|---|---|
+| 1 | `core:ui`, `core:display` | shared mutation/result semantics, list/pagination/row semantics, adaptive state restoration; no feature-local duplicate feedback components. |
+| 2 | `core:database`, `shared:source-contract`, `source:extension-manager`, app navigation state | 4A stable detail projection, collection/history/sort/query persistence and source-safe route resolver. For 4B, protocol-first remove/move/target DTO, schema 3 and host operation context precede UI. |
+| 3 | `feature:library`, `feature:book`, `feature:search`, `feature:reader`, `feature:browse` | canonical detail, library/collection/history tasks, source/remote capability surfaces and Reader-parent contract; remove obsolete local/source detail routes. |
+| 4 | `feature:settings`, `feature:backup`, app root | grouped More, reader/data/report routes, recovery preservation, precise root-stack switching and route restoration. |
+| 5 | `tsuyomi-protocol`, `tsuyomi-extensions`, Android fixture trust | only after 4A review locks UX route/operation names; signed 4B schema/fixture/package, deterministic tests and no release trust key. |
+
+The implementation is deliberately split into reviewable, revertible commits: (1) shared UX state/semantics; (2) canonical route/detail cutover; (3) library/collection/history completion; (4) source/Reader/remote/transfer/settings completion; (5) 4A goldens/instrumentation/portrait evidence; (6) 4B protocol/schema/fixture; (7) 4B controller/UI/reconciliation; (8) 4B adversarial and device evidence. Each cutover migrates all callers and deletes obsolete routes, snapshots and duplicate screens in its own change; compatibility aliases or permanent routing shims are prohibited.
+
+## Risk register and mitigations
+
+| Risk | Source fix / guard |
+|---|---|
+| Canonical detail loses caller context or opens wrong book after recreation | stable IDs plus bounded caller token; no controller-selected object route truth; route/restore instrumentation and process-recreation tests. |
+| Local detail blocks on untrusted/slow source | Room-first projection and source enhancement as cancellable overlay; dormant/offline tests. |
+| Mutation result lies or duplicate operation runs | shared keyed state plus repository reload; scoped mutex/token/durable reconciliation; test repeated clicks/cancel/process death. |
+| Larger UX scope regresses signed writeback protections | keep 4A local/source read actions separate; 4B protocol-first independent security review; no UI handler can build a network request. |
+| Remove/move target substitution or redirect escalation | immutable host contexts with source/book/operation/target binding; exact policy/fingerprint; protected-surface check on every hop; adversarial fixtures prove zero transport calls. |
+| Remote ambiguity deletes/moves local state | local state independent; all uncertain terminal states remain unresolved; only user retry resolves. |
+| Large text/E-ink introduces unreachable controls | scroll-safe layouts, shared PaginationBar, no gesture-only essential action, semantics/golden/device matrix. |
+| UX review becomes subjective screenshot review | task matrix with step-level expected route/state/feedback and independent product reviewer evidence. |
+
+## 4A acceptance matrix
+
+| Task | Required proof |
+|---|---|
+| Canonical detail | Search, Library, manual/smart collection, History and remote favourites open equal `BookIdentity` detail; no duplicate surface; source unavailable preserves local state; process recreation never retargets identity. |
+| Reading flow | Detail exposes Continue/Start; locator/first-unread/first-chapter precedence works; directory and Reader Back/Up return to the exact detail/caller state. |
+| Organization | Create/rename/reorder/nest/delete manual collection; multi-membership from book and collection; smart/system edit restrictions; all sorts/system filters/query/selection and E-ink page reset. |
+| Mutations | Tags/rating/membership/add/remove/collection mutation success, controlled failure, cancellation and rapid repeat show truthful persistent outcome, retry where valid, normalized data and live announcement. |
+| Source/remote | install/approval/cancel/failure; search/list pagination; offline/dormant behavior; remote credential/grant absent; explicit pull prompt/cancel/count/empty/failure/retry; no automatic network/write. |
+| Transfer/settings | picker cancellation; separate import formats; bounded review/confirm/recovery/report; export outcomes; display/reader settings retention and effective E-ink explanation. |
+| Accessibility/adaptation | TalkBack, keyboard/DPAD, 48dp, `fontScale=2.0`, portrait/landscape/split/≥600dp; Standard and E-ink share task result. |
+
+## 4B acceptance matrix
+
+| Task | Required proof |
+|---|---|
+| Admission | missing/revoked operation grant, policy, active package/generation, credential revision, user setting, direct action or target prevents token/transport and disables/explains UI. |
+| Remove | final confirmation; typed applied/already-present only confirms; local remove alone emits zero remote call; cancellation/unresolved persists and explicit retry uses fresh state. |
+| Move | explicit target list and final target confirmation; hidden/stale/unauthorized target, wrong binding, generic context and redirect alias attempts fail closed before transport. |
+| Lifecycle | source update/removal/credential loss during each phase preserves local state, disables setting, revokes token, writes durable terminal reconciliation and never claims success. |
+| Migration/privacy | schema 2→3 preserves records; remove/move false after upgrade/import; transfer/backup/logs never carry target, token, credential, policy grant or reconciliation secrets. |
+
+## Verification and evidence requirements
+
+Automated proof includes feature-level semantic/UI tests, navigation and process-recreation instrumentation, Room migration/query/reconciliation contracts, extension/runtime/network adversarial tests, screenshots/goldens in all affected components, and the normal Android/protocol/extensions/REUSE/artifact-policy gates. Tests assert observable contracts, not implementation text.
+
+Every 4A/4B target head separately passes the mandatory portrait flow on both baselines: `Tsuyomi_API29` (`1080×2400`, 420dpi, forced Standard) and `Tsuyomi_EInk_API29` (`1264×1680`, 240dpi, forced E-ink). Each record includes target HEAD, `wm size`, `wm density`, orientation, profile, `font_scale`, user-flow result and screenshot SHA-256. Landscape, split-screen, Layoutlib and a profile switch on one device supplement but never replace these records. Physical E-ink tests remain required before release-ready waveform/ergonomic claims.
+
+Before implementation: independent Designer reviews the 4A/4B information architecture, task flows, accessibility and profile behavior; independent Adviser reviews module/persistence/protocol/security/lifecycle/concurrency/test plan. Before merge: both re-review affected final head; all P0/P1 findings close with source fix, regression proof, reusable rule and reversible commit. User explicitly authorizes implementation, PR creation and merge separately.
+
+## Independent review closure and user decision register
+
+### Review conclusions bound to this draft
+
+| Review | Verdict | Blocking amendments |
+|---|---|---|
+| Product / UX | **APPROVE WITH CHANGES** | Add a concrete History home/route; restore or explicitly defer smart-rule editing; define precise cross-root wording, active-root reselect, local-removal retention, post-login prompt and 4B action placement; register all audited UX defects. |
+| Architecture / security | **REJECT** | Define stable canonical-detail lifecycle/caller ownership; version 4B protocol; persist per-operation authorization; define operation-specific result/recovery/conflict projections; bind data/privacy/remote-effect defaults to user approval; define schema 2→3 rollback. |
+
+The reviewer reports are retained only in the private planning record; this public plan carries their evidence-backed requirements and decisions. The following entries are **not implementation authorization**. `PENDING` decisions block the affected 4A/4B work. After confirmation, the selected values replace these placeholders, affected sections receive a delta independent review, and only then may the user authorize implementation.
+
+### Confirmed additional findings
+
+| ID | Status | Problem / affected contract | Severity | Required regression tier |
+|---|---|---|---|---|
+| G4-UX-004 | READY | Library hides the existing `RECENT` filter, lacks all promised sort modes and does not clamp/reset E-ink page on selected-collection change. | P1 | Room query/sort contract; navigation/UI instrumentation; Standard/E-ink golden and portrait flow |
+| G4-UX-005 | READY | Library has no explicit selection mode; local-detail/filter layouts can clip or leave actions unreachable at `fontScale = 2.0`; long source lists lack uniform explicit E-ink pagination and row semantics. | P1 | Compose semantics/layout tests; TalkBack/DPAD; goldens; both portrait flows |
+| G4-UX-006 | READY | More/Data lacks separate Tsuyomi/Hikari import and report routes; More lacks the promised Reader settings route. | P1 | route/SAF/recovery instrumentation; persistent-report contracts; goldens; both portrait flows |
+| G4-UX-007 | READY | Source remote-library has no stable source route, capability/credential/pull state taxonomy, count progress or stable identity list key; essential result/error announcements are inconsistent. | P1 | source lifecycle/remote pull tests; semantics; E-ink pagination; both portrait flows |
+| G4-UX-008 | TRIAGED | History/resume surface is required by the intended local-first flow but has no root, route, entry point, retention policy or process-recreation contract. Pending D4/D8/D14. | P1 | route/recreation/history retention instrumentation; confirmation/UI semantics; both portrait flows |
+| G4-UX-009 | TRIAGED | Smart collection rule create/edit, unsaved-change and readable-rule flows promised by Gate 3 have no explicit 4A disposition. Pending D7. | P1 | AST/editor/Back semantics; TalkBack/goldens; both portrait flows |
+| G4-REMOTE-001 | TRIAGED | 4B remove/move/target protocol, grant receipts, reconciliation/recovery, result taxonomy, compatibility and schema rollback are not safely specified. Pending D5/D11–D18. | P1 | protocol/schema/runtime/network adversarial tests; API 29 migration/restart/rollback; fixture portrait flows |
+
+### User decisions — UX and local-data behavior
+
+| ID | Decision | Recommended default | Material alternatives | Scope |
+|---|---|---|---|---|
+| D1 | Supersede Gate 3’s two-detail route model with one canonical stable `book/{sourceId}/{remoteBookId}` page. | **Approve unification.** Host-composed Room-first detail with source enhancement; no visual or route-level dual detail. | Retain two surfaces, or only visually unify while keeping duplicate routes. Both retain the reproduced G4-UX-001 defect. | 4A |
+| D2 | Re-selecting the active bottom/rail root. | **Pop that root’s own stack to its root.** Other roots retain their stacks. | Do nothing plus a named root-reset action in the app bar. This needs a separately specified label/placement/announcement. | 4A |
+| D3 | Exact local-retention contract for `移出书架`. | **Delete library membership, manual memberships, rating and local tags; retain book metadata, semantic progress and browsing history.** Re-adding restores progress; confirmation says no website action occurs. | Full local erase including progress/history; or retain rating/tags too, requiring a different data model and explicit privacy semantics. | 4A |
+| D4 | Reading a book that is not in the local library. | **Record host-owned browsing history and semantic progress without adding the book to Library.** No source/network write follows. | Require 加入书架 before reading; or store history without resumable progress. | 4A |
+| D5 | 4B remote remove/move entry points. | **Canonical detail only**, in a labelled source/remote action section; per-book, visible-disabled-with-reason when unavailable; never bulk, gesture-only or duplicate remote-list actions. | Also place actions on remote-library rows or selection mode; both multiply high-risk action surfaces. | 4B |
+| D6 | Once-only post-login import prompt. | **Retain** `现在导入` / `暂不导入`; confirmation, not login completion, starts a pull. | Remove prompt and expose only manual pull in remote-library. | 4A |
+| D7 | Smart collection rule create/edit in 4A. | **Ship create and edit** at `library/collections/{collectionId}/rule`, including validation and unsaved-change Back confirmation. | Explicitly defer with a Gate 3 supersession note; create-only remains insufficient. | 4A |
+| D8 | History placement. | **`library/history`**, entered through a labelled Library app-bar action; Standard scroll/E-ink explicit pages; Back/Up return to Library. | Fourth root (breaks 3-root shell) or More (buries frequent resume task). | 4A |
+| D9 | Precise cross-root action label/destination. | **`在来源中打开本书`** opens the same addressed canonical detail on Browse’s stack while preserving the Library stack; disabled with explanation for dormant source. | `查看本书来源详情` implies a second detail; `前往浏览` describes only root switching and is the current defect. | 4A |
+| D10 | 4A library bulk-action boundary. | **Local-only:** collection membership, and only semantically unambiguous local metadata/remove actions. Source/network operations stay explicit per book. | Bulk source refresh/write actions; require separate source-load and security specification. | 4A |
+
+### User decisions — privacy, remote effects and compatibility
+
+| ID | Decision | Recommended default | Material alternatives | Scope |
+|---|---|---|---|---|
+| D11 | 4B compatibility boundary. | **HXP manifest v2 + Host API 1.2.0.** New packages require 1.2; old v1 read/add packages remain usable on new host; new packages are rejected by old host before extension evaluation/transport. | Extend manifest v1; rejected because its signed schema/parser defines only read/add and cannot safely express new policy/binding semantics. | 4B |
+| D12 | Remote target discovery and move scope. | **Explicit signed list-target operation; opaque target IDs; no free text/default/guessed target; no remote folder CRUD.** | Let extension choose a target or accept user text; rejects host validation and fail-closed target binding. | 4B |
+| D13 | Operation-specific authorization persistence. | **One receipt per `(sourceId, operation)`** with enabled value, publisher, operation-policy fingerprint, origin, package/manifest generation and approval revision; add migrates only if exact receipt matches; remove/move false. | A shared source fingerprint/flag; cannot preserve unaffected operations safely. | 4B |
+| D14 | History data policy. | **No new tracking category; host-local history/progress only; per-item and clear-all confirmation; exclude history from transfer unless its inclusion is explicit in export review.** | Always export history, or omit it permanently; each changes portability/privacy expectations. | 4A |
+| D15 | Remote remove/local data coupling. | **Remote remove never deletes local library data and UI offers no coupled delete option in Gate 4.** Local removal remains a later independent action under D3. | Offer a combined remove option; couples two failure domains and needs another confirmation/reconciliation model. | 4B |
+| D16 | Remote target/reconciliation retention. | **App-private Room stores opaque target ID plus bounded redacted display snapshot; exclude from transfer, export and logs; clear with source removal/explicit data erasure; retain unresolved evidence until user resolves/erases source.** | Persist richer target metadata or export it; expands privacy/portability surface. | 4B |
+| D17 | Unresolved remote-operation policy. | **Block later remote mutations for that book while any operation is PENDING, IN_FLIGHT or UNRESOLVED; only explicit retry/reconciliation for that row is permitted.** | Allow a different operation despite unresolved state; risks contradictory website state and hidden audit rows. | 4B |
+| D18 | Room schema 2→3 rollback. | **Forward-only schema 3; rollback build retains schema-3 reader but disables Gate 4B UI/transport.** Preserve local books, memberships, progress, history and unresolved evidence; no remote replay. | A tested non-destructive 3→2 downgrade; higher implementation/migration risk but allows old binary rollback. | 4B |
+
+### Mandatory post-decision technical amendments
+
+Once the corresponding decision is confirmed, the plan must make these objective additions before delta review:
+
+1. Add `library/history`, `more/about`, and—if D7 accepts—`library/collections/{collectionId}/rule` to the canonical graph; name their entry/empty/Back/Up/recreation behavior.
+2. Place directory/Reader inside the caller’s root stack; persist typed bounded caller-list arguments in its back-stack `SavedStateHandle`, encode arbitrary Unicode/reserved IDs safely, and fall back only to that origin root’s list when the caller is invalid.
+3. Create a `BookIdentity`-keyed detail lifecycle owner outside any root route; capture identity, package digest/version, source generation and cache/credential revision before source work; cancel/revalidate before every Room/UI commit.
+4. Define 4B result unions: ADD `applied|already-present`; REMOVE `applied|already-absent`; MOVE `applied|already-at-target`, each echoing exact identity and MOVE target. Raw HTTP success, wrong IDs/outcomes and success redirects never confirm reconciliation.
+5. Define operation phases and startup recovery: unaccepted/recovered orphan PENDING → CANCELLED; accepted IN_FLIGHT cancellation, timeout, source change, process death or lease loss → UNRESOLVED; only validated typed result → CONFIRMED. Project reconciliation by operation (and MOVE target), never by one latest row per book.
+6. Replace generic schema-revert language with D18’s chosen compatibility contract and API 29 upgrade/feature-disable/re-upgrade evidence.
 
 ## 本轮手工输入基线
 
