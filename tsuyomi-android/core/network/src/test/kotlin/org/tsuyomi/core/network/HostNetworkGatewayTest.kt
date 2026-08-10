@@ -19,6 +19,13 @@ import org.tsuyomi.shared.sourcecontract.SourceNetworkRequest
 import org.tsuyomi.shared.sourcecontract.SourceCookieMode
 
 class HostNetworkGatewayTest {
+    private val addPolicy = RemoteOperationRequestPolicy(
+        origin = HttpsOrigin("https://www.wenku8.net"),
+        method = NetworkMethod.GET,
+        path = "/remote/shelf",
+        fixedParameters = mapOf("mode" to "add"),
+        remoteBookIdParameter = "bid",
+    )
     private val grant = SourceNetworkGrant(
         sourceId = "org.tsuyomi.wenku8",
         extensionVersion = "0.1.0",
@@ -28,6 +35,7 @@ class HostNetworkGatewayTest {
         maxConcurrentRequests = 2,
         requestTimeoutMs = 15_000,
         maxResponseBytes = 1_024,
+        remoteAddPolicy = addPolicy,
     )
 
     @Test
@@ -223,17 +231,70 @@ class HostNetworkGatewayTest {
         assertEquals(1, transport.requests.size)
     }
     @Test
+    fun generic_context_cannot_reach_the_signed_add_surface() = runBlocking {
+        val transport = RecordingTransport()
+        val gateway = HostNetworkGateway(transport)
+        val addRequest = request(url = "https://www.wenku8.net/remote/shelf?mode=add&bid=42")
+
+        val genericFailure = assertHostFailure { gateway.request(grant, addRequest) }
+        val readFailure = assertHostFailure {
+            gateway.request(
+                grant,
+                addRequest,
+                remoteLibraryReadContext(
+                    RemoteOperationRequestPolicy(
+                        origin = HttpsOrigin("https://www.wenku8.net"),
+                        method = NetworkMethod.GET,
+                        path = "/remote/shelf",
+                        fixedParameters = mapOf("mode" to "list"),
+                    ),
+                    cursor = null,
+                ),
+            )
+        }
+
+        assertEquals(HostNetworkError.INVALID_REQUEST, genericFailure.error)
+        assertEquals(HostNetworkError.INVALID_REQUEST, readFailure.error)
+        assertEquals(0, transport.requests.size)
+        val parameterBypassFailure = assertHostFailure {
+            gateway.request(grant, request(url = "https://www.wenku8.net/remote/shelf?mode=list"))
+        }
+        assertEquals(HostNetworkError.INVALID_REQUEST, parameterBypassFailure.error)
+        assertEquals(0, transport.requests.size)
+    }
+
+    @Test
+    fun remote_add_rejects_cache_modes_before_token_acceptance() = runBlocking {
+        val transport = RecordingTransport()
+        val registry = DirectActionTokenRegistry()
+        val gateway = HostNetworkGateway(transport, directActionTokens = registry)
+        var acceptCalls = 0
+        val token = registry.mint(
+            DirectActionBinding("org.tsuyomi.wenku8", "42", "reconcile", "digest", "0.2.0", "capability", 7, 9),
+        ) {
+            acceptCalls += 1
+            true
+        }
+        val context = remoteLibraryAddContext(addPolicy, "42", token)
+        val cachedAdd = request(
+            url = "https://www.wenku8.net/remote/shelf?mode=add&bid=42",
+            cache = NetworkCacheMode.DEFAULT,
+            semanticCacheKey = "remote-add:42",
+        )
+
+        val failure = assertHostFailure { gateway.request(grant, cachedAdd, context) }
+
+        assertEquals(HostNetworkError.INVALID_REQUEST, failure.error)
+        assertEquals(0, acceptCalls)
+        assertEquals(0, transport.requests.size)
+    }
+
+    @Test
     fun remote_add_acceptance_is_single_use_and_rejection_has_zero_transport() = runBlocking {
         val transport = RecordingTransport()
         val registry = DirectActionTokenRegistry()
         val gateway = HostNetworkGateway(transport, directActionTokens = registry)
-        val policy = RemoteOperationRequestPolicy(
-            origin = HttpsOrigin("https://www.wenku8.net"),
-            method = NetworkMethod.GET,
-            path = "/remote/shelf",
-            fixedParameters = mapOf("mode" to "add"),
-            remoteBookIdParameter = "bid",
-        )
+        val policy = addPolicy
         val binding = DirectActionBinding("org.tsuyomi.wenku8", "42", "reconcile", "digest", "0.2.0", "capability", 7, 9)
 
         val rejectedToken = registry.mint(binding) { false }
@@ -247,7 +308,10 @@ class HostNetworkGatewayTest {
         assertEquals(HostNetworkError.CANCELLED, rejected.error)
         assertEquals(0, transport.requests.size)
 
-        val acceptedToken = registry.mint(binding) { true }
+        val acceptedToken = registry.mint(binding) {
+            assertEquals(0, transport.requests.size)
+            true
+        }
         val context = remoteLibraryAddContext(policy, "42", acceptedToken)
         gateway.request(grant, request(url = "https://www.wenku8.net/remote/shelf?mode=add&bid=42"), context)
         assertEquals(1, transport.requests.size)

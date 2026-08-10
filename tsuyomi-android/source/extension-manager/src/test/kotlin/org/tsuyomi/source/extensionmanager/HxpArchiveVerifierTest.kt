@@ -30,6 +30,8 @@ import org.tsuyomi.core.files.StorageQuota
 import org.tsuyomi.core.files.StorageRoot
 import org.tsuyomi.core.files.StorageRoots
 import org.tsuyomi.shared.sourcecontract.SourceId
+import org.tsuyomi.shared.sourcecontract.HttpsOrigin
+import org.tsuyomi.shared.sourcecontract.NetworkMethod
 
 class HxpArchiveVerifierTest {
     @Test
@@ -186,6 +188,10 @@ class HxpArchiveVerifierTest {
         assertEquals(emptyList<ResourceLimitIncrease>(), unchanged.resourceLimitIncreases)
         assertEquals(widened.candidate.packageSha256, unchanged.candidate.packageSha256)
         assertNotEquals(widened.capabilityGrantFingerprint, unchanged.capabilityGrantFingerprint)
+        assertEquals(
+            restrictedPrepared.remoteCapabilitySetFingerprint,
+            widened.remoteCapabilitySetFingerprint,
+        )
 
         val staleApproval = ExtensionInstallApproval.approve(unchanged)
         val rejection = assertThrows(ExtensionInstallException::class.java) {
@@ -196,6 +202,54 @@ class HxpArchiveVerifierTest {
             restrictedPrepared.candidate.packageSha256,
             restrictedInstaller.readVerifiedActive(SourceId("org.tsuyomi.wenku8"))?.packageSha256,
         )
+    }
+
+    @Test
+    fun remoteFingerprintCanonicalizesParameterOrderAndIncludesPolicyValues() {
+        val fixture = signedFixture()
+        val verifier = HxpArchiveVerifier(InMemoryPublisherKeyStore(listOf(fixture.publisher)))
+        val verified = verifier.verify(fixture.writeToTemporaryFile())
+        val root = Files.createTempDirectory("remote-fingerprint").toFile()
+        val installer = newInstaller(root, verifier)
+        val parameters = listOf(
+            HxpRemoteParameter.Fixed("mode", "add"),
+            HxpRemoteParameter.RemoteBookId("aid"),
+        )
+        fun packageWith(parameters: List<HxpRemoteParameter>): VerifiedHxpPackage {
+            val policy = HxpRemoteOperationPolicy(
+                operation = RemoteOperation.ADD,
+                origin = HttpsOrigin("https://www.wenku8.net"),
+                method = NetworkMethod.POST,
+                path = "/modules/article/bookcase.php",
+                referrerPath = "/modules/article/articleinfo.php?id={remoteBookId}",
+                parameters = parameters,
+            )
+            val manifest = verified.manifest.copy(
+                capabilities = verified.manifest.capabilities.copy(
+                    remoteLibrary = HxpRemoteLibraryCapability(
+                        read = false,
+                        writeOperations = setOf("add"),
+                        policies = mapOf(RemoteOperation.ADD to policy),
+                    ),
+                ),
+            )
+            return VerifiedHxpPackage(
+                manifest,
+                verified.packageSha256,
+                verified.publisherFingerprint,
+                verified.archiveBytes,
+                verified.readVerifiedEntryModule(),
+            )
+        }
+
+        val original = installer.remoteCapabilitySetFingerprint(packageWith(parameters))
+        val reordered = installer.remoteCapabilitySetFingerprint(packageWith(parameters.reversed()))
+        val altered = installer.remoteCapabilitySetFingerprint(
+            packageWith(listOf(HxpRemoteParameter.Fixed("mode", "remove"), HxpRemoteParameter.RemoteBookId("aid"))),
+        )
+
+        assertEquals(original, reordered)
+        assertNotEquals(original, altered)
     }
 
     @Test

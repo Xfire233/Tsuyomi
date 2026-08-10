@@ -29,8 +29,10 @@ import org.tsuyomi.feature.backup.TransferCompletion
 import org.tsuyomi.feature.backup.TransferReview
 import org.tsuyomi.feature.backup.TransferUiState
 import org.tsuyomi.shared.backup.ImportKind
+import org.tsuyomi.shared.backup.ImportSeverity
 import org.tsuyomi.shared.backup.ImportParseResult
 import org.tsuyomi.shared.backup.ImportPlan
+import org.tsuyomi.shared.backup.ImportWarning
 import org.tsuyomi.shared.backup.ImportPlanCodec
 import org.tsuyomi.shared.backup.ImportSummary
 import org.tsuyomi.shared.backup.MAX_TRANSFER_BYTES
@@ -106,9 +108,15 @@ class TransferCoordinator(
 
     suspend fun readForReview(uri: Uri, resolver: ContentResolver) {
         state = TransferUiState.Working(appContext.getString(R.string.transfer_reading_file))
-        val parse = withContext(Dispatchers.IO) {
-            val bytes = readBounded(uri, resolver)
-            TransferCodec.parse(bytes)
+        val parse = try {
+            withContext(Dispatchers.IO) {
+                val bytes = readBounded(uri, resolver)
+                TransferCodec.parse(bytes)
+            }
+        } catch (_: Throwable) {
+            clearPendingPlan()
+            state = TransferUiState.Failure(appContext.getString(R.string.transfer_import_failed_code, "invalid-transfer"))
+            return
         }
         when (parse) {
             is ImportParseResult.Fatal -> {
@@ -116,11 +124,19 @@ class TransferCoordinator(
                 state = TransferUiState.Failure(appContext.getString(R.string.transfer_import_failed_code, parse.safeCode))
             }
             is ImportParseResult.Ready -> {
-                val normalized = ImportPlanCodec.encode(parse.plan)
-                pendingPlan = parse.plan
+                val reviewed = try {
+                    val plan = repository.withDatabaseConflicts(parse.plan)
+                    plan to withContext(Dispatchers.IO) { ImportPlanCodec.encode(plan) }
+                } catch (_: Throwable) {
+                    clearPendingPlan()
+                    state = TransferUiState.Failure(appContext.getString(R.string.transfer_import_failed_code, "conflict-review-failed"))
+                    return
+                }
+                val (reviewedPlan, normalized) = reviewed
+                pendingPlan = reviewedPlan
                 pendingPlanBytes = normalized
                 pendingPlanDigest = TransferCodec.digest(normalized)
-                state = TransferUiState.Review(parse.plan.toReview())
+                state = TransferUiState.Review(reviewedPlan.toReview())
             }
         }
     }
@@ -455,16 +471,19 @@ class TransferCoordinator(
     private fun preferencePatch(plan: ImportPlan): String =
         "{\"reader\":${plan.readerPreferences != null},\"forceManualEInk\":${plan.forceManualEInk}}"
 
-    private fun ImportPlan.toReview() = TransferReview(
-        formatLabel = if (kind == ImportKind.HIKARI_BACKUP) "Hikari Novel" else "Tsuyomi transfer v1",
-        bookCount = books.size,
-        shelfCount = shelves.size,
-        smartCollectionCount = smartCollections.size,
-        disabledDraftCount = subscriptionDrafts.size,
-        warningCodes = warnings.sortedBy { it.ordinal }.map { warning ->
-            listOfNotNull(warning.safeCode, warning.safeRecordRef, warning.fieldName).joinToString(" · ")
-        },
-    )
+    private fun ImportPlan.toReview(): TransferReview {
+        fun ImportWarning.safeLabel(): String =
+            listOfNotNull(safeCode, safeRecordRef, fieldName).joinToString(" · ")
+        return TransferReview(
+            formatLabel = if (kind == ImportKind.HIKARI_BACKUP) "Hikari Novel" else "Tsuyomi transfer v1",
+            bookCount = books.size,
+            shelfCount = shelves.size,
+            smartCollectionCount = smartCollections.size,
+            disabledDraftCount = subscriptionDrafts.size,
+            warningCodes = warnings.filter { it.severity == ImportSeverity.WARNING }.sortedBy { it.ordinal }.map(ImportWarning::safeLabel),
+            conflictCodes = warnings.filter { it.severity == ImportSeverity.CONFLICT }.sortedBy { it.ordinal }.map(ImportWarning::safeLabel),
+        )
+    }
 
     private data class PreflightOwnership(
         val ownerGeneration: Long,

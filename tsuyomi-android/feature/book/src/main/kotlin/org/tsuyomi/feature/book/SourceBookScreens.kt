@@ -42,6 +42,8 @@ fun BookDetailScreen(
     inLibrary: Boolean = false,
     addWritesRemote: Boolean = false,
     reconciliationLabel: String? = null,
+    canRetryRemoteSync: Boolean = false,
+    onRetryRemoteSync: () -> Unit = {},
     onAddToLibrary: () -> Unit = {},
     onRemoveFromLibrary: () -> Unit = {},
     onOpenDirectory: () -> Unit,
@@ -68,6 +70,14 @@ fun BookDetailScreen(
                 detail.description?.let { Text(it) }
                 if (detail.tags.isNotEmpty()) Text(detail.tags.joinToString(" · "))
                 reconciliationLabel?.let { Text(it) }
+                if (canRetryRemoteSync) {
+                    TsuyomiButton(
+                        text = stringResource(R.string.book_retry_sync),
+                        onClick = onRetryRemoteSync,
+                        modifier = Modifier.fillMaxWidth(),
+                        style = TsuyomiButtonStyle.PRIMARY,
+                    )
+                }
                 TsuyomiButton(
                     text = stringResource(
                         when {

@@ -149,7 +149,17 @@ object TransferCodec {
             return ImportParseResult.Fatal("dangling-shelf-reference")
         }
         if (hasShelfParentCycle(shelves)) return ImportParseResult.Fatal("shelf-parent-cycle")
-        val preferences = root.obj("preferences")?.obj("reader")?.let(::parseReaderPreferences)
+        val preferencesObject = root["preferences"]?.let { value ->
+            value as? JsonObject ?: return ImportParseResult.Fatal("invalid-reader-preferences")
+        }
+        if (preferencesObject != null && preferencesObject.keys.any { it != "reader" }) {
+            return ImportParseResult.Fatal("invalid-reader-preferences")
+        }
+        val readerObject = preferencesObject?.get("reader")?.let { value ->
+            value as? JsonObject ?: return ImportParseResult.Fatal("invalid-reader-preferences")
+        }
+        val preferences = runCatching { readerObject?.let(::parseReaderPreferences) }
+            .getOrElse { return ImportParseResult.Fatal("invalid-reader-preferences") }
         val snapshot = TransferSnapshot(createdAt, books, shelves, preferences)
         val canonical = runCatching { encode(snapshot) }.getOrElse { return ImportParseResult.Fatal("invalid-transfer") }
         return ImportParseResult.Ready(
@@ -207,11 +217,22 @@ object TransferCodec {
 
     private fun parseReaderPreferences(value: JsonObject): PortableReaderPreferences {
         require(value.keys.all { it in setOf("flow", "fontScale", "lineHeight", "theme") })
-        val flow = value.string("flow"); require(flow == null || flow in setOf("scroll", "paged"))
-        val fontScale = value.primitive("fontScale")?.doubleOrNull; require(fontScale == null || fontScale in 0.5..3.0)
-        val lineHeight = value.primitive("lineHeight")?.doubleOrNull; require(lineHeight == null || lineHeight in 0.8..3.0)
-        val theme = value.string("theme"); require(theme == null || theme in setOf("paper", "warmGray", "nightInk", "black", "inkGreen"))
-        return PortableReaderPreferences(flow, fontScale, lineHeight, theme)
+        fun string(name: String, allowed: Set<String>): String? {
+            val element = value[name] ?: return null
+            require(element is JsonPrimitive && element.isString)
+            return requireNotNull(element.contentOrNull).also { require(it in allowed) }
+        }
+        fun number(name: String, range: ClosedFloatingPointRange<Double>): Double? {
+            val element = value[name] ?: return null
+            require(element is JsonPrimitive && !element.isString)
+            return requireNotNull(element.doubleOrNull).also { require(it in range) }
+        }
+        return PortableReaderPreferences(
+            flow = string("flow", setOf("scroll", "paged")),
+            fontScale = number("fontScale", 0.5..3.0),
+            lineHeight = number("lineHeight", 0.8..3.0),
+            theme = string("theme", setOf("paper", "warmGray", "nightInk", "black", "inkGreen")),
+        )
     }
 
     private fun bookJson(book: TransferBook): JsonObject = buildJsonObject {

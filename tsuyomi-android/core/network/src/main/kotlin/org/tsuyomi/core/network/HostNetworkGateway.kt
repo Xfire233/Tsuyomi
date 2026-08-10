@@ -35,6 +35,7 @@ data class SourceNetworkGrant(
     val maxConcurrentRequests: Int,
     val requestTimeoutMs: Int,
     val maxResponseBytes: Int,
+    val remoteAddPolicy: RemoteOperationRequestPolicy? = null,
 ) {
     init {
         require(sourceId.isNotBlank() && extensionVersion.isNotBlank())
@@ -44,6 +45,9 @@ data class SourceNetworkGrant(
         require(maxResponseBytes in 1_024..16_777_216)
         require(cookieMode != SourceCookieMode.NONE || cookieOrigins.isEmpty())
         require(cookieOrigins.all { cookieOrigin -> origins.any { it.canonical == cookieOrigin.canonical } })
+        require(remoteAddPolicy == null || remoteAddPolicy.remoteBookIdParameter != null)
+        require(remoteAddPolicy == null || remoteAddPolicy.cursorParameter == null)
+        require(remoteAddPolicy == null || origins.any { it.canonical == remoteAddPolicy.origin.canonical })
     }
 
     fun allowsCookies(origin: HttpsOrigin): Boolean =
@@ -116,7 +120,7 @@ class HostNetworkGateway(
         request: SourceNetworkRequest,
         operationContext: SourceOperationContext? = null,
     ): SourceNetworkResponse {
-        operationContext?.validate(request)
+        validateOperationBoundary(grant, request, operationContext)
         val uri = parseAllowedUri(request.url, grant)
         val referrer = request.referrerUrl?.let { parseAllowedUri(it, grant) }
         val body = requestBody(request)
@@ -199,7 +203,7 @@ class HostNetworkGateway(
         var url = initialUrl
         var redirects = 0
         while (true) {
-            operationContext?.validate(request.copy(url = url.toString()))
+            validateOperationBoundary(grant, request.copy(url = url.toString()), operationContext)
             val response = try {
                 transport.execute(
                     HostHttpRequest(
@@ -228,6 +232,35 @@ class HostNetworkGateway(
                 throw HostNetworkException(HostNetworkError.REDIRECT_DISALLOWED)
             }
         }
+    }
+
+    private fun validateOperationBoundary(
+        grant: SourceNetworkGrant,
+        request: SourceNetworkRequest,
+        operationContext: SourceOperationContext?,
+    ) {
+        if (operationContext?.kind == SourceOperationKind.REMOTE_LIBRARY_ADD) {
+            if (grant.remoteAddPolicy != operationContext.policy || request.cache != NetworkCacheMode.NETWORK_ONLY) {
+                throw HostNetworkException(HostNetworkError.INVALID_REQUEST)
+            }
+            operationContext.validate(request)
+            return
+        }
+        operationContext?.validate(request)
+        if (operationContext == null && grant.remoteAddPolicy?.matchesSurface(request) == true) {
+            throw HostNetworkException(HostNetworkError.INVALID_REQUEST)
+        }
+    }
+
+    private fun RemoteOperationRequestPolicy.matchesSurface(request: SourceNetworkRequest): Boolean {
+        if (request.method != method) return false
+        val uri = runCatching { URI(request.url) }.getOrNull() ?: return false
+        if (!uri.scheme.equals("https", true) || uri.host.isNullOrBlank() || uri.path != path) return false
+        val requestOrigin = runCatching {
+            HttpsOrigin("https://${uri.host}${if (uri.port in 1..65535 && uri.port != 443) ":${uri.port}" else ""}")
+        }.getOrNull() ?: return false
+        if (requestOrigin.canonical != origin.canonical) return false
+        return true
     }
 
     private fun allowedHeaders(headers: Map<String, String>): Map<String, String> {

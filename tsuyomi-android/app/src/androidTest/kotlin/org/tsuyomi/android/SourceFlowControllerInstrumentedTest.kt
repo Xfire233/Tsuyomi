@@ -474,6 +474,50 @@ class SourceFlowControllerInstrumentedTest {
         assertEquals(before.generation + 1, after.generation)
     }
 
+    @Test
+    fun unresolvedRemoteAddRetriesOnlyThroughANewExplicitAction() = runBlocking {
+        val packageInfo = installFixture()
+        val sourceId = packageInfo.manifest.sourceId.value
+        val selected = summary(sourceId, "7001", "重试收藏")
+        putCredential(sourceId)
+        var calls = 0
+        val acceptedReconciliationIds = mutableListOf<String>()
+        val session = FakeSession(
+            detail = { SourceBookDetail(it, "fixture", emptyList(), "连载中") },
+            addRemote = { remoteBookId, token ->
+                calls += 1
+                val binding = DirectActionTokenRegistry.process.accept(sourceId, remoteBookId, token)
+                acceptedReconciliationIds += binding.reconciliationId
+                assertEquals(RemoteReconciliationState.IN_FLIGHT.name, reconciliationState(binding.reconciliationId))
+                if (calls == 1) error("ambiguous response")
+                RemoteLibraryAddResult(selected.identity, RemoteLibraryAddOutcome.ALREADY_PRESENT)
+            },
+        )
+        val controller = controller { session }
+        try {
+            val policy = requireNotNull(library.sourceRemotePolicy(sourceId))
+            assertTrue(library.setAddWritebackEnabled(sourceId, policy.capabilitySetFingerprint, true))
+            controller.open(packageInfo)
+            controller.selectBook(selected)
+
+            assertEquals(RemoteAddUiResult.Unresolved, controller.addSelectedBook(FIXED_TIME))
+            assertEquals(RemoteReconciliationState.UNRESOLVED, controller.selectedBookReconciliation)
+            val retryResult = controller.retrySelectedBookRemoteAdd(FIXED_TIME.plusSeconds(1))
+            assertEquals(RemoteReconciliationState.CONFIRMED.name, reconciliationState(acceptedReconciliationIds.last()))
+            assertEquals(RemoteAddUiResult.Confirmed, retryResult)
+
+            assertEquals(2, calls)
+            assertEquals(2, acceptedReconciliationIds.distinct().size)
+            assertEquals(RemoteReconciliationState.CONFIRMED, controller.selectedBookReconciliation)
+            assertEquals(
+                RemoteReconciliationState.CONFIRMED,
+                library.libraryEntries().single { it.book.identity == selected.identity }.reconciliation,
+            )
+        } finally {
+            controller.close()
+        }
+    }
+
     private fun controller(
         openSession: (suspend (VerifiedHxpPackage) -> SourceFlowSession)? = null,
     ): SourceFlowController {
@@ -505,6 +549,15 @@ class SourceFlowControllerInstrumentedTest {
         File(context.noBackupFilesDir, "source-credentials").deleteRecursively()
         File(context.cacheDir, "wenku8-fixture.hxp").delete()
     }
+
+    private fun reconciliationState(id: String): String =
+        database.openHelper.readableDatabase.query(
+            "SELECT state FROM remote_library_reconciliation WHERE id = ?",
+            arrayOf(id),
+        ).use { cursor ->
+            check(cursor.moveToFirst()) { "Missing reconciliation $id" }
+            cursor.getString(0)
+        }
 
     private fun summary(sourceId: String, remoteBookId: String, title: String) = SourceBookSummary(
         identity = BookIdentity(sourceId, remoteBookId),

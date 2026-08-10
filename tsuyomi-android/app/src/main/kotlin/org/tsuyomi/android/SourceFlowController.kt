@@ -19,6 +19,8 @@ import org.tsuyomi.core.database.LibraryBook
 import org.tsuyomi.core.database.RemoteReconciliationState
 import org.tsuyomi.core.database.ReadingProgress
 import org.tsuyomi.core.database.RoomLibraryRepository
+import org.tsuyomi.core.database.SourceAvailability
+import org.tsuyomi.core.database.SourceRemotePolicy
 import org.tsuyomi.core.network.DirectActionBinding
 import org.tsuyomi.core.network.DirectActionTokenRegistry
 import org.tsuyomi.core.security.SourceCredentialPartition
@@ -39,6 +41,7 @@ import org.tsuyomi.shared.sourcecontract.SourceException
 import org.tsuyomi.source.extensionmanager.SourceExtensionClient
 import org.tsuyomi.source.extensionmanager.VerifiedHxpPackage
 import org.tsuyomi.source.extensionmanager.RemoteOperation
+import org.tsuyomi.source.extensionmanager.HxpRemoteOperationPolicy
 internal interface SourceFlowSession : Closeable {
     suspend fun search(query: String, page: Int = 1, offlineOnly: Boolean = false): List<SourceBookSummary>
     suspend fun detail(remoteBookId: String, offlineOnly: Boolean = false): SourceBookDetail
@@ -238,6 +241,29 @@ internal class SourceFlowController(
     suspend fun addSelectedBook(importedAt: Instant = Instant.now()): RemoteAddUiResult =
         remoteAddMutex.withLock { addSelectedBookLocked(importedAt) }
 
+    suspend fun retrySelectedBookRemoteAdd(importedAt: Instant = Instant.now()): RemoteAddUiResult =
+        remoteAddMutex.withLock {
+            val summary = selectedBook ?: return@withLock RemoteAddUiResult.Failure("book-not-selected")
+            if (!selectedBookInLibrary || selectedBookReconciliation !in RETRYABLE_RECONCILIATION_STATES) {
+                return@withLock RemoteAddUiResult.Failure("remote-add-not-retryable")
+            }
+            val packageInfo = synchronized(clientLock) { activePackage }
+                ?: return@withLock RemoteAddUiResult.Failure("source-not-open")
+            val policy = library.sourceRemotePolicy(summary.identity.sourceId)
+            val availability = library.sourceAvailability(summary.identity.sourceId)
+            val addPolicy = packageInfo.manifest.capabilities.remoteLibrary.policies[RemoteOperation.ADD]
+            val credentialReady = addPolicy != null && remoteAddCredentialReady(packageInfo, addPolicy.origin)
+            if (policy?.addWritebackEnabled != true || availability?.available != true || addPolicy == null ||
+                policy.capabilitySetFingerprint.isBlank() || !credentialReady
+            ) {
+                if (selectedBook?.identity == summary.identity) selectedBookAddWritesRemote = false
+                return@withLock RemoteAddUiResult.Failure("remote-add-not-authorized")
+            }
+            val existing = library.book(summary.identity)
+                ?: return@withLock RemoteAddUiResult.Failure("book-not-local")
+            executeRemoteAdd(summary, existing, packageInfo, policy, availability, addPolicy, importedAt)
+        }
+
     private suspend fun addSelectedBookLocked(importedAt: Instant): RemoteAddUiResult {
         if (selectedBookInLibrary) return RemoteAddUiResult.Failure("book-already-added")
         val summary = selectedBook ?: return RemoteAddUiResult.Failure("book-not-selected")
@@ -260,6 +286,18 @@ internal class SourceFlowController(
             }
             return RemoteAddUiResult.LocalOnly
         }
+        return executeRemoteAdd(summary, book, packageInfo, policy, availability, addPolicy, importedAt)
+    }
+
+    private suspend fun executeRemoteAdd(
+        summary: SourceBookSummary,
+        book: LibraryBook,
+        packageInfo: VerifiedHxpPackage,
+        policy: SourceRemotePolicy,
+        availability: SourceAvailability,
+        addPolicy: HxpRemoteOperationPolicy,
+        importedAt: Instant,
+    ): RemoteAddUiResult {
         val reconciliationId = library.beginRemoteAdd(
             book,
             packageInfo.packageSha256,
@@ -583,6 +621,13 @@ internal class SourceFlowController(
             ),
         )
     }
+    private companion object {
+        val RETRYABLE_RECONCILIATION_STATES = setOf(
+            RemoteReconciliationState.UNRESOLVED,
+            RemoteReconciliationState.CANCELLED,
+        )
+    }
+
 }
 
 sealed interface RemoteLibraryPullResult {

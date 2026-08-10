@@ -73,6 +73,7 @@ class SourceExtensionClient private constructor(
         },
         cookieOrigins = manifest.capabilities.cookies.origins,
         maxResponseBytes = manifest.capabilities.network.maxResponseBytes,
+        remoteAddPolicy = manifest.capabilities.remoteLibrary.policies[RemoteOperation.ADD]?.toNetworkPolicy(),
     )
 
     suspend fun search(query: String, page: Int = 1, offlineOnly: Boolean = false): List<SourceBookSummary> {

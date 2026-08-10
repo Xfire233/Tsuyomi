@@ -11,6 +11,13 @@
     <string name="transfer_review_counts">书籍 %1$d 本 · 手动集合 %2$d 个</string>
     <string name="transfer_review_local_counts">本地智能集合 %1$d 个 · 禁用草稿 %2$d 个</string>
     <string name="transfer_warning_title">处理提示（%1$d）</string>
+    <string name="transfer_conflict_title">合并冲突（%1$d）</string>
+    <string name="transfer_conflict_shelf">集合标识已存在，将保留本地集合名称、层级和顺序。</string>
+    <string name="transfer_conflict_metadata">本地书籍资料更新，将保留本地资料。</string>
+    <string name="transfer_conflict_rating">本地书籍资料更新，将保留本地评分。</string>
+    <string name="transfer_conflict_tags">本地标签已达上限，部分导入标签不会加入。</string>
+    <string name="transfer_conflict_progress">本地阅读进度更新或时间相同，将保留本地进度。</string>
+    <string name="transfer_conflict_unknown">检测到无法覆盖的本地数据，将保留本地值。</string>
     <string name="transfer_warning_more">另有 %1$d 条提示</string>
     <string name="transfer_sensitive_notice">继续后将合并本地数据。较新的有效书籍资料和语义阅读进度优先；不会启用来源、远程同步或订阅。</string>
     <string name="transfer_confirm_action">确认并导入</string>

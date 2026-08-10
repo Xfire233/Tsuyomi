@@ -136,22 +136,29 @@ class ExtensionInstaller(
 
     private fun remoteCapabilitySetFingerprint(manifest: HxpManifest, publisherFingerprint: String): String = sha256(
         buildString {
-            append("publisher:").append(publisherFingerprint).append('\n')
-            append("source:").append(manifest.sourceId.value).append('\n')
-            manifest.capabilities.network.origins.sortedBy { it.canonical }.forEach { append("network:").append(it.canonical).append('\n') }
-            append("cookies:").append(manifest.capabilities.cookies.sourceScoped).append('\n')
-            manifest.capabilities.cookies.origins.sortedBy { it.canonical }.forEach { append("cookie-origin:").append(it.canonical).append('\n') }
-            append("web-login:").append(manifest.capabilities.webLogin.enabled).append('\n')
-            manifest.capabilities.webLogin.origins.sortedBy { it.canonical }.forEach { append("web-login-origin:").append(it.canonical).append('\n') }
-            append("remote-read:").append(manifest.capabilities.remoteLibrary.read).append('\n')
-            manifest.capabilities.remoteLibrary.writeOperations.sorted().forEach { append("remote-write:").append(it).append('\n') }
-            manifest.capabilities.remoteLibrary.policies.toSortedMap(compareBy { it.name }).values.forEach { policy ->
-                append("remote-policy:").append(policy.operation.name).append(':').append(policy.origin.canonical).append(':').append(policy.method.name).append(':').append(policy.path).append(':').append(policy.referrerPath.orEmpty()).append('\n')
-                policy.parameters.forEach { parameter -> append("remote-parameter:").append(parameter).append('\n') }
+            fun field(name: String, value: String) {
+                append(name).append(':').append(value.length).append(':').append(value).append('\n')
             }
-            append("storage:").append(manifest.capabilities.storageQuotaBytes).append('\n')
-            append("wall:").append(manifest.resourceLimits.maxExecutionWallTimeMs).append('\n')
-            append("memory:").append(manifest.resourceLimits.maxMemoryBytes).append('\n')
+            field("publisher", publisherFingerprint)
+            field("source", manifest.sourceId.value)
+            field("remote-read", manifest.capabilities.remoteLibrary.read.toString())
+            manifest.capabilities.remoteLibrary.writeOperations.sorted().forEach { field("remote-write", it) }
+            manifest.capabilities.remoteLibrary.policies.toSortedMap(compareBy { it.name }).values.forEach { policy ->
+                append("remote-policy\n")
+                field("operation", policy.operation.name)
+                field("origin", policy.origin.canonical)
+                field("method", policy.method.name)
+                field("path", policy.path)
+                field("referrer", policy.referrerPath.orEmpty())
+                policy.parameters.sortedWith(
+                    compareBy<HxpRemoteParameter>({ it.name }, { it.canonicalKind() }, { it.canonicalValue() }),
+                ).forEach { parameter ->
+                    append("remote-parameter\n")
+                    field("kind", parameter.canonicalKind())
+                    field("name", parameter.name)
+                    field("value", parameter.canonicalValue())
+                }
+            }
         }.toByteArray(StandardCharsets.UTF_8),
     )
     private fun capabilityGrantFingerprint(
@@ -168,6 +175,17 @@ class ExtensionInstaller(
             }
         }.toByteArray(StandardCharsets.UTF_8),
     )
+}
+
+private fun HxpRemoteParameter.canonicalKind(): String = when (this) {
+    is HxpRemoteParameter.Fixed -> "fixed"
+    is HxpRemoteParameter.RemoteBookId -> "remote-book-id"
+    is HxpRemoteParameter.Cursor -> "cursor"
+}
+
+private fun HxpRemoteParameter.canonicalValue(): String = when (this) {
+    is HxpRemoteParameter.Fixed -> value
+    is HxpRemoteParameter.RemoteBookId, is HxpRemoteParameter.Cursor -> ""
 }
 
 data class PreparedExtensionInstall(

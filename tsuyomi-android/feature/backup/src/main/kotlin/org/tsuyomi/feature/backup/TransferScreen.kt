@@ -29,6 +29,7 @@ data class TransferReview(
     val smartCollectionCount: Int,
     val disabledDraftCount: Int,
     val warningCodes: List<String>,
+    val conflictCodes: List<String>,
 )
 
 data class TransferCompletion(
@@ -105,6 +106,12 @@ fun TransferScreen(
                     if (review.smartCollectionCount > 0 || review.disabledDraftCount > 0) {
                         Text(stringResource(R.string.transfer_review_local_counts, review.smartCollectionCount, review.disabledDraftCount))
                     }
+                    if (review.conflictCodes.isNotEmpty()) {
+                        HorizontalDivider()
+                        Text(stringResource(R.string.transfer_conflict_title, review.conflictCodes.size))
+                        review.conflictCodes.take(50).forEach { Text("• ${conflictLabel(it)}") }
+                        if (review.conflictCodes.size > 50) Text(stringResource(R.string.transfer_warning_more, review.conflictCodes.size - 50))
+                    }
                     if (review.warningCodes.isNotEmpty()) {
                         HorizontalDivider()
                         Text(stringResource(R.string.transfer_warning_title, review.warningCodes.size))
@@ -176,4 +183,22 @@ fun TransferScreen(
             }
         }
     }
+}
+
+
+@Composable
+private fun conflictLabel(label: String): String {
+    val parts = label.split(" · ")
+    val message = stringResource(
+        when (parts.firstOrNull()) {
+            "existing-shelf-retained" -> R.string.transfer_conflict_shelf
+            "existing-book-metadata-retained" -> R.string.transfer_conflict_metadata
+            "existing-rating-retained" -> R.string.transfer_conflict_rating
+            "local-tags-capacity-conflict" -> R.string.transfer_conflict_tags
+            "existing-progress-retained" -> R.string.transfer_conflict_progress
+            else -> R.string.transfer_conflict_unknown
+        },
+    )
+    val detail = parts.drop(1).joinToString(" · ")
+    return if (detail.isEmpty()) message else "$message（$detail）"
 }

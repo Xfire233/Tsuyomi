@@ -126,7 +126,7 @@ internal interface LibraryDao {
     @Query("SELECT * FROM remote_library_reconciliation WHERE source_id = :sourceId AND remote_book_id = :remoteBookId AND state IN ('PENDING_USER_ACTION','IN_FLIGHT') LIMIT 1")
     suspend fun activeReconciliation(sourceId: String, remoteBookId: String): RemoteLibraryReconciliationEntity?
 
-    @Query("SELECT * FROM remote_library_reconciliation WHERE source_id = :sourceId AND remote_book_id = :remoteBookId ORDER BY updated_at_epoch_second DESC LIMIT 1")
+    @Query("SELECT * FROM remote_library_reconciliation WHERE source_id = :sourceId AND remote_book_id = :remoteBookId ORDER BY rowid DESC LIMIT 1")
     suspend fun latestReconciliation(sourceId: String, remoteBookId: String): RemoteLibraryReconciliationEntity?
 
     @Query("UPDATE remote_library_reconciliation SET state = :nextState, updated_at_epoch_second = :updatedAt, diagnostic_id = :diagnosticId WHERE id = :id AND state = :expectedState")

@@ -22,9 +22,11 @@ import org.junit.Test
 import org.junit.runner.RunWith
 import org.tsuyomi.core.database.room.ReadingProgressEntity
 import org.tsuyomi.shared.backup.ImportKind
+import org.tsuyomi.shared.backup.ImportSeverity
 import org.tsuyomi.shared.backup.ImportPlan
 import org.tsuyomi.shared.backup.TransferBook
 import org.tsuyomi.shared.backup.TransferProgress
+import org.tsuyomi.shared.backup.TransferShelf
 import org.tsuyomi.shared.locator.DocumentIdentity
 import org.tsuyomi.shared.locator.ReaderLocator
 import org.tsuyomi.shared.model.BookIdentity
@@ -103,6 +105,87 @@ class RoomLibraryRepositoryInstrumentedTest {
         assertTrue(tags.containsAll(existing))
         assertTrue("new-a" in tags)
         assertFalse("new-b" in tags)
+    }
+
+    @Test
+    fun importReviewSurfacesExistingRoomConflictsBeforeConfirmation() = runBlocking {
+        val identity = BookIdentity("fixture.source", "review-conflicts")
+        val existingAt = Instant.parse("2026-08-09T00:00:00Z")
+        repository.addToLibrary(LibraryBook(identity, "本地标题", Instant.EPOCH, existingAt, authors = setOf("本地作者")))
+        repository.setRating(identity, 5)
+        repository.setLocalTags(identity, (0 until 64).map { "existing-$it" })
+        repository.createCollection(LibraryCollection("shared-shelf", CollectionKind.MANUAL, "本地集合", null, 0))
+        repository.saveProgress(progress(identity, "local-chapter", 20, 0.4, existingAt))
+        val plan = ImportPlan(
+            kind = ImportKind.TSUYOMI_TRANSFER,
+            sourceCreatedAt = Instant.EPOCH,
+            books = listOf(
+                TransferBook(
+                    identity = identity,
+                    title = "导入标题",
+                    authors = setOf("导入作者"),
+                    localTags = setOf("new-tag"),
+                    shelfIds = setOf("shared-shelf"),
+                    rating = 2.0,
+                    updatedAt = existingAt.minusSeconds(1),
+                    progress = TransferProgress(
+                        chapterId = "imported-chapter",
+                        characterOffset = 10,
+                        bookProgress = 0.2,
+                        updatedAt = existingAt.minusSeconds(1),
+                    ),
+                ),
+            ),
+            shelves = listOf(TransferShelf("shared-shelf", "导入集合", position = 1)),
+            readerPreferences = null,
+        )
+
+        val reviewed = RoomTransferRepository(database).withDatabaseConflicts(plan)
+
+        assertEquals(
+            setOf(
+                "existing-shelf-retained",
+                "existing-book-metadata-retained",
+                "existing-rating-retained",
+                "local-tags-capacity-conflict",
+                "existing-progress-retained",
+            ),
+            reviewed.warnings.mapTo(linkedSetOf()) { it.safeCode },
+        )
+        assertTrue(reviewed.warnings.all { it.severity == ImportSeverity.CONFLICT })
+    }
+
+    @Test
+    fun importReviewReportsRetainedRatingWithoutTreatingUnknownStatusAsMetadata() = runBlocking {
+        val identity = BookIdentity("fixture.source", "review-null-rating")
+        val existingAt = Instant.parse("2026-08-09T00:00:00Z")
+        repository.addToLibrary(
+            LibraryBook(
+                identity = identity,
+                title = "相同标题",
+                addedAt = Instant.EPOCH,
+                metadataUpdatedAt = existingAt,
+                status = "ongoing",
+            ),
+        )
+        val plan = ImportPlan(
+            kind = ImportKind.TSUYOMI_TRANSFER,
+            sourceCreatedAt = Instant.EPOCH,
+            books = listOf(
+                TransferBook(
+                    identity = identity,
+                    title = "相同标题",
+                    rating = 2.0,
+                    updatedAt = existingAt.minusSeconds(1),
+                ),
+            ),
+            shelves = emptyList(),
+            readerPreferences = null,
+        )
+
+        val reviewed = RoomTransferRepository(database).withDatabaseConflicts(plan)
+
+        assertEquals(listOf("existing-rating-retained"), reviewed.warnings.map { it.safeCode })
     }
 
     @Test

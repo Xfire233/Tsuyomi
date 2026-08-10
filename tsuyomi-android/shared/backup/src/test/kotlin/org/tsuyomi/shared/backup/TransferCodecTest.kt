@@ -34,6 +34,33 @@ class TransferCodecTest {
     }
 
     @Test
+    fun invalid_reader_preferences_return_a_fatal_parse_result() {
+        val malformedPreferences = listOf(
+            "[]",
+            "{\"unknown\":true}",
+            "{\"reader\":[]}",
+            "{\"reader\":{\"unknown\":true}}",
+            "{\"reader\":{\"flow\":\"continuous\"}}",
+            "{\"reader\":{\"flow\":1}}",
+            "{\"reader\":{\"fontScale\":9.0}}",
+            "{\"reader\":{\"fontScale\":\"1.2\"}}",
+            "{\"reader\":{\"lineHeight\":0.4}}",
+            "{\"reader\":{\"lineHeight\":true}}",
+            "{\"reader\":{\"theme\":\"neon\"}}",
+            "{\"reader\":{\"theme\":false}}",
+        )
+
+        malformedPreferences.forEach { preferences ->
+            val bytes = """{"format":"tsuyomi-transfer","version":1,"createdAt":"2026-08-08T00:00:00Z","library":[],"shelves":[],"preferences":$preferences}""".encodeToByteArray()
+            assertEquals(
+                "invalid-reader-preferences",
+                assertIs<ImportParseResult.Fatal>(TransferCodec.parse(bytes)).safeCode,
+                preferences,
+            )
+        }
+    }
+
+    @Test
     fun hikari_import_redacts_credentials_and_maps_all_supported_identities() {
         val bytes = """{"format":"hikari_novel_backup","schemaVersion":1,"createdAt":"2026-08-08T00:00:00Z","payload":{"auth":{"cookies":{"session":"secret"}},"bookshelf":{"folders":[{"id":"fav","name":"收藏"}],"items":[{"aid":"123","title":"文库"},{"aid":"esj:456","title":"ESJ"},{"aid":"yamibo:789","title":"百合会"}]},"readingData":{"readHistory":[{"aid":"123","cid":"9","location":12,"progress":0.5}]},"readerSettings":{"flow":"paged","fontScale":1.2}}}""".encodeToByteArray()
         val result = assertIs<ImportParseResult.Ready>(TransferCodec.parse(bytes))

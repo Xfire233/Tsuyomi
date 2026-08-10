@@ -22,6 +22,8 @@ import org.junit.runner.RunWith
 import org.tsuyomi.core.database.ImportSessionStatus
 import org.tsuyomi.core.database.RoomTransferRepository
 import org.tsuyomi.core.database.TsuyomiDatabase
+import org.tsuyomi.core.database.LibraryBook
+import org.tsuyomi.core.database.RoomLibraryRepository
 import org.tsuyomi.core.preferences.PortableReaderPreferencesRepository
 import org.tsuyomi.feature.backup.TransferUiState
 import org.tsuyomi.shared.backup.ImportKind
@@ -218,6 +220,57 @@ class TransferCoordinatorInstrumentedTest {
             failPreferences = false
             fixture.coordinator.retryRecovery()
             assertTrue(fixture.coordinator.state is TransferUiState.Completed)
+            assertNull(fixture.repository.pending())
+        } finally {
+            input.delete()
+            fixture.close()
+        }
+    }
+
+    @Test
+    fun reviewSurfacesRoomConflictsBeforeAnyImportMutation() = runBlocking {
+        val fixture = fixture("review-conflict")
+        val input = File(context.cacheDir, "review-${fixture.sessionId}.json")
+        try {
+            val identity = fixture.plan.books.single().identity
+            val existingAt = Instant.parse("2026-08-09T00:00:00Z")
+            val library = RoomLibraryRepository(fixture.database)
+            library.addToLibrary(LibraryBook(identity, "本地标题", Instant.EPOCH, existingAt))
+            input.writeBytes(
+                TransferCodec.encode(
+                    TransferSnapshot(
+                        createdAt = Instant.EPOCH,
+                        library = listOf(TransferBook(identity, "导入标题", updatedAt = existingAt.minusSeconds(1))),
+                        shelves = emptyList(),
+                        readerPreferences = null,
+                    ),
+                ),
+            )
+
+            fixture.coordinator.readForReview(Uri.fromFile(input), context.contentResolver)
+
+            val review = fixture.coordinator.state as TransferUiState.Review
+            assertTrue(review.value.conflictCodes.any { it.startsWith("existing-book-metadata-retained · ") })
+            assertEquals("本地标题", library.book(identity)?.title)
+            assertNull(fixture.repository.pending())
+        } finally {
+            input.delete()
+            fixture.close()
+        }
+    }
+
+    @Test
+    fun malformedReaderPreferencesFinishInFailureInsteadOfWorking() = runBlocking {
+        val fixture = fixture("invalid-preferences")
+        val input = File(context.cacheDir, "invalid-${fixture.sessionId}.json")
+        try {
+            input.writeText(
+                """{"format":"tsuyomi-transfer","version":1,"createdAt":"2026-08-08T00:00:00Z","library":[],"shelves":[],"preferences":{"reader":{"flow":1}}}""",
+            )
+
+            fixture.coordinator.readForReview(Uri.fromFile(input), context.contentResolver)
+
+            assertTrue(fixture.coordinator.state is TransferUiState.Failure)
             assertNull(fixture.repository.pending())
         } finally {
             input.delete()

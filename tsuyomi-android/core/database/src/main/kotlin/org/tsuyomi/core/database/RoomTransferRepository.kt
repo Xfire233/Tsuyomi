@@ -17,6 +17,8 @@ import org.tsuyomi.core.database.room.SmartRuleEntity
 import org.tsuyomi.core.database.room.SubscriptionDraftEntity
 import org.tsuyomi.shared.backup.ImportKind
 import org.tsuyomi.shared.backup.ImportPlan
+import org.tsuyomi.shared.backup.ImportSeverity
+import org.tsuyomi.shared.backup.ImportWarning
 import org.tsuyomi.shared.backup.ImportSummary
 import org.tsuyomi.shared.backup.TransferBook
 import org.tsuyomi.shared.backup.TransferProgress
@@ -52,6 +54,60 @@ data class ImportSession(
 class RoomTransferRepository(private val database: TsuyomiDatabase) {
     private val dao = database.libraryDao()
     private val library = RoomLibraryRepository(database)
+
+    suspend fun withDatabaseConflicts(plan: ImportPlan): ImportPlan = database.withTransaction {
+        val conflicts = mutableListOf<ImportWarning>()
+        val maximumAdditional = (MAX_IMPORT_WARNINGS - plan.warnings.size).coerceAtLeast(0)
+        fun conflict(safeCode: String, safeRecordRef: String, fieldName: String) {
+            if (conflicts.size >= maximumAdditional) return
+            conflicts += ImportWarning(
+                ordinal = plan.warnings.size + conflicts.size,
+                safeCode = safeCode,
+                safeRecordRef = safeRecordRef,
+                fieldName = fieldName,
+                severity = ImportSeverity.CONFLICT,
+            )
+        }
+
+        plan.shelves.forEach { incoming ->
+            val existing = dao.collection(incoming.id) ?: return@forEach
+            if (existing.kind != CollectionKind.MANUAL || existing.title != incoming.name ||
+                existing.parentCollectionId != incoming.parentId || existing.displayOrder != incoming.position.toLong()
+            ) {
+                conflict("existing-shelf-retained", incoming.id, "shelf")
+            }
+        }
+        plan.books.forEach { incoming ->
+            val safeRef = "${incoming.identity.sourceId}:${incoming.identity.remoteBookId}"
+            val existingBook = library.book(incoming.identity)
+            val metadataAccepted = existingBook == null || incoming.updatedAt > existingBook.metadataUpdatedAt
+            if (existingBook != null && !metadataAccepted && incoming.metadataDiffersFrom(existingBook)) {
+                conflict("existing-book-metadata-retained", safeRef, "metadata")
+            }
+            val existingEntry = dao.libraryEntry(incoming.identity.sourceId, incoming.identity.remoteBookId)
+            val incomingRating = incoming.rating?.takeIf { it > 0.0 }?.toInt()?.coerceIn(1, 5)
+            if (incomingRating != null && existingEntry != null && incomingRating != existingEntry.rating && !metadataAccepted) {
+                conflict("existing-rating-retained", safeRef, "rating")
+            }
+            val existingTags = dao.localTags(incoming.identity.sourceId, incoming.identity.remoteBookId)
+                .mapNotNull { normalizedLocalTag(it.displayTag)?.first }
+                .toSet()
+            val incomingTags = incoming.localTags.mapNotNull { normalizedLocalTag(it)?.first }.toSet()
+            if ((incomingTags - existingTags).size > (MAX_LOCAL_TAGS - existingTags.size).coerceAtLeast(0)) {
+                conflict("local-tags-capacity-conflict", safeRef, "localTags")
+            }
+            incoming.progress?.let { progress ->
+                val existingProgress = dao.progress(incoming.identity.sourceId, incoming.identity.remoteBookId)
+                val existingUpdatedAt = existingProgress
+                    ?.takeIf { it.isSemanticallyValid() }
+                    ?.let { Instant.ofEpochSecond(it.updatedAtEpochSecond, it.updatedAtNano.toLong()) }
+                if (existingUpdatedAt != null && progress.updatedAt <= existingUpdatedAt) {
+                    conflict("existing-progress-retained", safeRef, "progress")
+                }
+            }
+        }
+        plan.copy(warnings = plan.warnings + conflicts)
+    }
 
     suspend fun prepare(
         sessionId: String,
@@ -315,6 +371,16 @@ class RoomTransferRepository(private val database: TsuyomiDatabase) {
 }
 
 private const val MAX_LOCAL_TAGS = 64
+private const val MAX_IMPORT_WARNINGS = 10_000
+
+private fun TransferBook.metadataDiffersFrom(existing: LibraryBook): Boolean =
+    title != existing.title ||
+        authors != existing.authors ||
+        canonicalUrl != existing.canonicalUrl ||
+        coverUrl != existing.coverUrl ||
+        (status != "unknown" && status != existing.status) ||
+        remoteTags != existing.remoteTags
+
 
 private fun normalizedLocalTag(raw: String): Pair<String, String>? {
     val display = raw.trim().replace(Regex("\\s+"), " ").takeIf { it.isNotEmpty() } ?: return null

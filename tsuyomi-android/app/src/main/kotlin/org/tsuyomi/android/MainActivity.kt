@@ -247,6 +247,7 @@ private fun TsuyomiApp(
 
     var remoteLibraryLoading by remember { mutableStateOf(false) }
     var showPostLoginImportPrompt by remember { mutableStateOf(false) }
+    var showWritebackEnableConfirmation by remember { mutableStateOf(false) }
     var remoteLibraryMessage by remember { mutableStateOf<String?>(null) }
     var remoteWritebackEnabled by remember { mutableStateOf(false) }
     var remoteWritebackAvailable by remember { mutableStateOf(false) }
@@ -423,6 +424,36 @@ private fun TsuyomiApp(
             dismissButton = {
                 TextButton(onClick = { showPostLoginImportPrompt = false }) {
                     Text(stringResource(R.string.post_login_import_later))
+                }
+            },
+        )
+    }
+    if (showWritebackEnableConfirmation) {
+        val sourceName = sourceInstaller.activePackage?.manifest?.displayName
+            ?: sourceInstaller.activePackage?.manifest?.sourceId?.value.orEmpty()
+        AlertDialog(
+            onDismissRequest = { showWritebackEnableConfirmation = false },
+            title = { Text(stringResource(R.string.remote_writeback_confirm_title, sourceName)) },
+            text = { Text(stringResource(R.string.remote_writeback_confirm_message)) },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        showWritebackEnableConfirmation = false
+                        scope.launch {
+                            val updated = sourceInstaller.setRemoteAddWritebackEnabled(true)
+                            val actualPolicy = sourceInstaller.remotePolicy()
+                            remoteWritebackEnabled = updated || actualPolicy?.addWritebackEnabled == true
+                            remoteWritebackAvailable = sourceInstaller.remoteAddCredentialReady()
+                            remoteLibraryMessage = resources.getString(
+                                if (remoteWritebackEnabled) R.string.remote_writeback_enabled else R.string.remote_writeback_disabled,
+                            )
+                        }
+                    },
+                ) { Text(stringResource(R.string.remote_writeback_confirm_enable)) }
+            },
+            dismissButton = {
+                TextButton(onClick = { showWritebackEnableConfirmation = false }) {
+                    Text(stringResource(R.string.remote_writeback_confirm_cancel))
                 }
             },
         )
@@ -611,14 +642,15 @@ private fun TsuyomiApp(
                             writebackEnabled = remoteWritebackEnabled,
                             onPull = { scope.launch { performRemotePull() } },
                             onWritebackChanged = { enabled ->
-                                scope.launch {
-                                    val updated = sourceInstaller.setRemoteAddWritebackEnabled(enabled)
-                                    val actualPolicy = sourceInstaller.remotePolicy()
-                                    remoteWritebackEnabled = if (updated) enabled else actualPolicy?.addWritebackEnabled == true
-                                    remoteWritebackAvailable = sourceInstaller.remoteAddCredentialReady()
-                                    remoteLibraryMessage = resources.getString(
-                                        if (remoteWritebackEnabled) R.string.remote_writeback_enabled else R.string.remote_writeback_disabled,
-                                    )
+                                if (enabled) {
+                                    showWritebackEnableConfirmation = true
+                                } else {
+                                    scope.launch {
+                                        sourceInstaller.setRemoteAddWritebackEnabled(false)
+                                        remoteWritebackEnabled = false
+                                        remoteWritebackAvailable = sourceInstaller.remoteAddCredentialReady()
+                                        remoteLibraryMessage = resources.getString(R.string.remote_writeback_disabled)
+                                    }
                                 }
                             },
                             onOpenBook = { book ->
@@ -660,6 +692,17 @@ private fun TsuyomiApp(
                                         RemoteReconciliationState.CANCELLED -> R.string.remote_add_cancelled
                                     },
                                 )
+                            },
+                            canRetryRemoteSync = sourceFlow.selectedBookAddWritesRemote &&
+                                sourceFlow.selectedBookReconciliation in setOf(
+                                    RemoteReconciliationState.UNRESOLVED,
+                                    RemoteReconciliationState.CANCELLED,
+                                ),
+                            onRetryRemoteSync = {
+                                scope.launch {
+                                    sourceFlow.retrySelectedBookRemoteAdd()
+                                    reloadLibrary()
+                                }
                             },
                             onAddToLibrary = { scope.launch { sourceFlow.addSelectedBook(); reloadLibrary() } },
                             onRemoveFromLibrary = { scope.launch { sourceFlow.removeSelectedBook(); reloadLibrary() } },

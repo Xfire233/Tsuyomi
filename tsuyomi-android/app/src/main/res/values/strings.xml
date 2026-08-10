@@ -45,6 +45,10 @@
     <string name="remote_pull_failed">读取失败：%1$s</string>
     <string name="remote_writeback_enabled">已开启。仅直接加入书架时发送网站添加请求。</string>
     <string name="remote_writeback_disabled">已关闭。加入书架只保存在本地。</string>
+    <string name="remote_writeback_confirm_title">%1$s：启用网站同步？</string>
+    <string name="remote_writeback_confirm_message">新加入书架时将同步到网站；移出书架不会删除网站收藏。</string>
+    <string name="remote_writeback_confirm_enable">启用</string>
+    <string name="remote_writeback_confirm_cancel">取消</string>
     <string name="transfer_recovery_working">正在核对内部导入记录并继续未完成的步骤。</string>
     <string name="transfer_recovery_blocked">内部恢复文件缺失或校验失败。可重试恢复，或在尚未合并书库时放弃此次导入。</string>
     <string name="transfer_reading_file">正在按 32 MiB 上限读取并检查文件。</string>
