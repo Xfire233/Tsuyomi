@@ -28,12 +28,18 @@ fun MoreScreen(
     onOpenDisplaySettings: () -> Unit,
     onOpenAbout: () -> Unit,
     modifier: Modifier = Modifier,
+    onOpenDataTransfer: () -> Unit = {},
 ) {
     CenteredSettingsColumn(modifier) {
         SettingsActionRow(
             title = stringResource(R.string.settings_more_entry_title),
             summary = stringResource(R.string.settings_more_entry_summary),
             onClick = onOpenDisplaySettings,
+        )
+        SettingsActionRow(
+            title = stringResource(R.string.settings_more_transfer_title),
+            summary = stringResource(R.string.settings_more_transfer_summary),
+            onClick = onOpenDataTransfer,
         )
         SettingsActionRow(
             title = stringResource(R.string.settings_more_about_title),

@@ -63,6 +63,8 @@ fun BrowseScreen(
     onDismissApproval: () -> Unit,
     onDismissFailure: () -> Unit,
     modifier: Modifier = Modifier,
+    remoteLibraryAvailable: Boolean = false,
+    onOpenRemoteLibrary: () -> Unit = {},
 ) {
     when (state) {
         BrowseUiState.Empty -> EmptySourceScreen(onRequestImport, modifier)
@@ -72,7 +74,7 @@ fun BrowseScreen(
             message = stringResource(R.string.browse_preparing_message, state.fileName),
             modifier = modifier,
         )
-        is BrowseUiState.Installed -> InstalledSourceScreen(state, onOpenInstalledSource, onRequestImport, modifier)
+        is BrowseUiState.Installed -> InstalledSourceScreen(state, onOpenInstalledSource, onRequestImport, remoteLibraryAvailable, onOpenRemoteLibrary, modifier)
         is BrowseUiState.Failure -> FailureSourceScreen(state, onRequestImport, onDismissFailure, modifier)
         is BrowseUiState.Approval -> SourceApprovalScreen(state, onApproveInstall, onDismissApproval, modifier)
     }
@@ -103,6 +105,8 @@ private fun InstalledSourceScreen(
     state: BrowseUiState.Installed,
     onOpenSource: () -> Unit,
     onRequestImport: () -> Unit,
+    remoteLibraryAvailable: Boolean,
+    onOpenRemoteLibrary: () -> Unit,
     modifier: Modifier,
 ) {
     Column(
@@ -120,6 +124,14 @@ private fun InstalledSourceScreen(
             onClick = onOpenSource,
             style = TsuyomiButtonStyle.PRIMARY,
         )
+        if (remoteLibraryAvailable) {
+            TsuyomiButton(
+                text = stringResource(R.string.browse_remote_library_action),
+                onClick = onOpenRemoteLibrary,
+                modifier = Modifier.padding(top = 8.dp),
+                style = TsuyomiButtonStyle.SECONDARY,
+            )
+        }
         TsuyomiButton(
             text = stringResource(R.string.browse_import_another_action),
             onClick = onRequestImport,

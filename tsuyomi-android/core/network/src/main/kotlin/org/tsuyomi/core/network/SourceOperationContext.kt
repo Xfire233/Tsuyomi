@@ -77,8 +77,8 @@ class SourceOperationContext internal constructor(
         rawQuery.split('&').forEach { pair ->
             val equals = pair.indexOf('=')
             if (equals <= 0) throw HostNetworkException(HostNetworkError.INVALID_REQUEST)
-            val name = java.net.URLDecoder.decode(pair.substring(0, equals), Charsets.UTF_8)
-            val value = java.net.URLDecoder.decode(pair.substring(equals + 1), Charsets.UTF_8)
+            val name = java.net.URLDecoder.decode(pair.substring(0, equals), Charsets.UTF_8.name())
+            val value = java.net.URLDecoder.decode(pair.substring(equals + 1), Charsets.UTF_8.name())
             if (values.put(name, value) != null) throw HostNetworkException(HostNetworkError.INVALID_REQUEST)
         }
         return values

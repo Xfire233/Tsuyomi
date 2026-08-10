@@ -11,5 +11,6 @@ android {
 
 dependencies {
     implementation(libs.androidx.datastore.preferences)
+    implementation(project(":shared:backup"))
     implementation(libs.kotlinx.coroutines.android)
 }

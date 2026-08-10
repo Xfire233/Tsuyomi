@@ -68,6 +68,9 @@ class ExtensionInstaller(
         }
     }
 
+    fun remoteCapabilitySetFingerprint(packageInfo: VerifiedHxpPackage): String =
+        remoteCapabilitySetFingerprint(packageInfo.manifest, packageInfo.publisherFingerprint)
+
     private fun addedCapabilities(candidate: HxpManifest, active: HxpManifest?): Set<String> = buildSet {
         val activeCapabilities = active?.capabilities
         candidate.capabilities.network.origins

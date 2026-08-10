@@ -19,6 +19,7 @@ import org.tsuyomi.core.ui.components.TsuyomiButton
 import org.tsuyomi.core.ui.components.TsuyomiButtonStyle
 import org.tsuyomi.core.ui.components.TsuyomiStateKind
 import org.tsuyomi.reader.ui.ReaderSurface
+import org.tsuyomi.shared.backup.PortableReaderPreferences
 import org.tsuyomi.shared.locator.LocatorPrecision
 import org.tsuyomi.shared.locator.ReaderLocator
 import org.tsuyomi.shared.sourcecontract.ReaderDocument
@@ -32,10 +33,11 @@ fun ReaderScreen(
     failure: SourceException?,
     restoredLocator: ReaderLocator?,
     onLocatorChanged: (ReaderLocator, LocatorPrecision) -> Unit,
+    modifier: Modifier = Modifier,
+    preferences: PortableReaderPreferences = PortableReaderPreferences(flow = "scroll", fontScale = 1.0, lineHeight = 1.5, theme = "paper"),
     onRetry: () -> Unit,
     onUseOfflineCache: () -> Unit,
     onOpenVerification: () -> Unit,
-    modifier: Modifier = Modifier,
 ) {
     when {
         loading -> StateView(
@@ -43,7 +45,7 @@ fun ReaderScreen(
             title = stringResource(R.string.reader_loading_chapter),
             modifier = modifier,
         )
-        document != null -> ReaderSurface(document, restoredLocator, onLocatorChanged, modifier)
+        document != null -> ReaderSurface(document, restoredLocator, onLocatorChanged, modifier = modifier, preferences = preferences)
         failure != null -> Column(
             modifier = modifier.fillMaxSize().padding(24.dp),
             verticalArrangement = Arrangement.Center,

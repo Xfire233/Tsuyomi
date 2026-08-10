@@ -100,6 +100,7 @@ class HostNetworkException(
 class HostNetworkGateway(
     private val transport: HostHttpTransport,
     private val cache: HostNetworkCache = InMemoryHostNetworkCache(),
+    private val directActionTokens: DirectActionTokenRegistry = DirectActionTokenRegistry.process,
 ) {
     private val cookieJar = SourceCookieJar()
 
@@ -188,6 +189,13 @@ class HostNetworkGateway(
         referrer: URI?,
         operationContext: SourceOperationContext?,
     ): HostHttpResponse {
+        if (operationContext?.kind == SourceOperationKind.REMOTE_LIBRARY_ADD) {
+            directActionTokens.accept(
+                sourceId = grant.sourceId,
+                remoteBookId = requireNotNull(operationContext.remoteBookId),
+                token = requireNotNull(operationContext.addToken),
+            )
+        }
         var url = initialUrl
         var redirects = 0
         while (true) {

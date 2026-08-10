@@ -1,0 +1,26 @@
+<!-- SPDX-FileCopyrightText: 2026 Tsuyomi Contributors -->
+<!-- SPDX-License-Identifier: Apache-2.0 -->
+<resources>
+    <string name="transfer_local_notice">导入和导出只通过系统文件选择器进行。Tsuyomi 不会上传文件，也不会导入帐号、Cookie、凭证、网页状态或缓存。</string>
+    <string name="transfer_import_action">选择备份文件</string>
+    <string name="transfer_export_action">导出 Tsuyomi 数据</string>
+    <string name="transfer_working_title">正在处理本地文件</string>
+    <string name="transfer_recovery_title">正在恢复未完成的导入</string>
+    <string name="transfer_review_title">确认导入内容</string>
+    <string name="transfer_review_format">格式：%1$s</string>
+    <string name="transfer_review_counts">书籍 %1$d 本 · 手动集合 %2$d 个</string>
+    <string name="transfer_review_local_counts">本地智能集合 %1$d 个 · 禁用草稿 %2$d 个</string>
+    <string name="transfer_warning_title">处理提示（%1$d）</string>
+    <string name="transfer_warning_more">另有 %1$d 条提示</string>
+    <string name="transfer_sensitive_notice">继续后将合并本地数据。较新的有效书籍资料和语义阅读进度优先；不会启用来源、远程同步或订阅。</string>
+    <string name="transfer_confirm_action">确认并导入</string>
+    <string name="transfer_cancel_action">取消</string>
+    <string name="transfer_complete_title">导入完成</string>
+    <string name="transfer_export_complete_title">导出文件已写入</string>
+    <string name="transfer_complete_counts">导入书籍 %1$d 本 · 集合 %2$d 个 · 提示 %3$d 条</string>
+    <string name="transfer_failure_title">未完成</string>
+    <string name="transfer_done_action">返回</string>
+    <string name="transfer_recovery_retry_action">重试恢复</string>
+    <string name="transfer_cleanup_retry_action">重试清理</string>
+    <string name="transfer_recovery_abort_action">放弃此次导入</string>
+</resources>
