@@ -14,3 +14,5 @@
 *.aab binary
 *.hxp binary
 *.bundle binary
+
+tsuyomi-android/source/quickjs-runtime/src/main/cpp/quickjs-ng/** linguist-vendored=true
