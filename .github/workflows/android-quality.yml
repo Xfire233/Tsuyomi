@@ -142,6 +142,10 @@ jobs:
             kill "$emulator_pid" 2>/dev/null || true
             exit 1
           fi
+          "$ADB" shell wm size 1080x2400
+          "$ADB" shell wm density 420
+          "$ADB" shell wm size
+          "$ADB" shell wm density
           "$ADB" shell settings put global window_animation_scale 0
           "$ADB" shell settings put global transition_animation_scale 0
           "$ADB" shell settings put global animator_duration_scale 0
