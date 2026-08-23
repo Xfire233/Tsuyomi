@@ -1,0 +1,5 @@
+<!-- SPDX-FileCopyrightText: 2026 Tsuyomi Contributors -->
+<!-- SPDX-License-Identifier: Apache-2.0 -->
+<paths xmlns:android="http://schemas.android.com/apk/res/android">
+    <cache-path name="review_share" path="review-share/" />
+</paths>

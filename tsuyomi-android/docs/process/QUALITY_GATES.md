@@ -26,6 +26,7 @@ Gate 是进入下一阶段的不可变准入点，不是完成百分比。设计
 - persisted/effective/capability 状态；
 - 安全、隐私、E-ink、无障碍、离线和失败边界；
 - 回退时允许丢弃和必须保留的数据。
+- Android UI/交互改动先执行仓库级 `tools/skills/tsuyomi-android-review/SKILL.md` R1 流程；其本地忽略报告只选择受影响 Review Graph 节点和验证层，不授予批准。
 
 ### 2. Design
 

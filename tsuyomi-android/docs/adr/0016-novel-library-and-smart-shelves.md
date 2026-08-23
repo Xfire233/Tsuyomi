@@ -28,6 +28,8 @@ The host library uses typed collections with stable host IDs:
 
 Collection hierarchy is presentation-only: parent collections group the navigation tree but never alter membership semantics. System collections—All library, Continue reading, Recent reading, Unread updates, and Dormant sources—are immutable definitions, not rows users can delete.
 
+**2026 RC2.1 conflict-reconciliation amendment:** “immutable” applies to each system collection's stable identity and query definition, not to a mandatory always-visible presentation row. `Continue reading`, `Recent reading`, `Read later`, `Updates` and `Dormant sources` are created by default as Library `SystemNode` presentations; users may hide them and rebuild them from the shared create flow. They may be repositioned in manual-order mode without renaming or changing their rules. Only `Read later` accepts explicit membership writes; all other system membership remains derived. Manual collection presentation depth is capped at two levels. Creating a folder by dropping one book onto another requires a name/effect confirmation and atomically creates one manual collection containing both books.
+
 A smart rule is a versioned, bounded AST: `all`, `any`, `not`, and typed predicates. Initial predicates are source identity, manual shelf membership, normalized tags/facets, author/title terms, source status, rating range, added/read/metadata-update windows, progress state, unread/update state, and dormant-source state. Human text predicates use normalized Room FTS/search projection. There is no arbitrary SQL, JavaScript, regular expression, source HTML, or network condition in a smart rule.
 
 Smart membership is computed from Room projections and is never stored as a mutable duplicate list. Room invalidation re-evaluates affected collection flows after a transaction. Rule schema validation limits AST depth, node count, term size, and supported fields before persistence; unknown rule versions are read-only/disabled rather than guessed.
@@ -51,4 +53,6 @@ Hikari manual folders map to manual collections and explicit memberships. Compat
 - Foreign-key, unique-membership, collection-cycle, sort-order, and system-collection tests pass.
 - Rule parser/compiler tests cover validity limits, all/any/not precedence, FTS terms, time boundaries, and source update invalidation.
 - A source refresh proves complete replace, incomplete response, incremental merge, duplicate identity, new-marker clearing, cancellation, and no implicit remote write.
+- System-node verification distinguishes immutable query definition from hide/rebuild/reorder presentation state; only Read Later accepts membership writes.
+- Folder-drop verification proves cancel is a no-op and confirm atomically creates the named collection with both memberships.
 - E-ink and standard profiles expose the same collection actions through explicit pagination and non-color-only update state.

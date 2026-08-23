@@ -20,6 +20,10 @@ This directory is one Git repository containing three independently versioned co
 
 Set `ANDROID_SDK_ROOT` (or `ANDROID_HOME`) locally, then run `tsuyomi-android/tools/Doctor.ps1`. The script validates tools and generates ignored `local.properties`; no user-specific SDK path belongs in version control.
 
+## Android UI review workflow
+
+Android UI, navigation, interaction, prototype, display-profile, accessibility, and Review Graph work starts with `tools/skills/tsuyomi-android-review/SKILL.md`; its adjacent `review-policy.json` alone selects active/deferred profiles. Product contracts and human approval authority remain in Android design/Gate documents.
+
 ## Component boundary
 
 The monorepo permits atomic cross-component PRs but not source-level boundary violations. Android, protocol, and extensions interoperate through versioned schemas, DTOs, sanitized fixtures, signed `.hxp` artifacts, and release metadata. Android must not import extension implementation code, and extensions must not receive Android platform handles.

@@ -1,0 +1,103 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://tsuyomi.invalid/schemas/interactive-prototype-review-v2.json",
+  "title": "Tsuyomi interactive prototype review export",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema", "provisional", "productionAuthorized", "build", "device", "reviewCatalog", "nodeComments", "progress", "summary", "controlMode", "exportedAt"],
+  "properties": {
+    "schema": {"const": "tsuyomi-interactive-prototype-review-v2"},
+    "provisional": {"const": true},
+    "productionAuthorized": {"const": false},
+    "build": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["applicationId", "versionName", "versionCode", "buildId", "designRulesSha256", "dataSchemaVersion", "reviewSchemaVersion", "reviewCatalogVersion"],
+      "properties": {
+        "applicationId": {"const": "org.tsuyomi.prototype.uiatlas"},
+        "versionName": {"type": "string"},
+        "versionCode": {"type": "integer", "minimum": 1},
+        "buildId": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+        "designRulesSha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+        "dataSchemaVersion": {"type": "integer", "minimum": 1},
+        "reviewSchemaVersion": {"const": 2},
+        "reviewCatalogVersion": {"const": 2}
+      }
+    },
+    "device": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["sdk", "widthPx", "heightPx", "densityDpi", "fontScale", "locale"],
+      "properties": {
+        "sdk": {"type": "integer", "minimum": 29},
+        "widthPx": {"type": "integer", "minimum": 1},
+        "heightPx": {"type": "integer", "minimum": 1},
+        "densityDpi": {"type": "integer", "minimum": 1},
+        "fontScale": {"type": "number", "exclusiveMinimum": 0},
+        "locale": {"type": "string", "minLength": 1}
+      }
+    },
+    "reviewCatalog": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "title", "family", "kind", "requiredStates", "operations", "visualChecks", "humanOnlyChecks"],
+        "properties": {
+          "id": {"type": "string", "pattern": "^[LBMSX][0-9]{2}$"},
+          "title": {"type": "string", "minLength": 1},
+          "family": {"enum": ["library", "book_reader", "source", "more", "cross_cutting"]},
+          "kind": {"enum": ["surface", "high_risk", "cross_cutting"]},
+          "route": {"type": "string", "minLength": 1},
+          "requiredStates": {"type": "array", "items": {"type": "string"}},
+          "operations": {"type": "array", "minItems": 1, "items": {"type": "string", "minLength": 1}},
+          "visualChecks": {"type": "array", "minItems": 1, "items": {"type": "string", "minLength": 1}},
+          "humanOnlyChecks": {"type": "array", "minItems": 1, "items": {"type": "string", "minLength": 1}}
+        }
+      }
+    },
+    "nodeComments": {
+      "type": "array",
+      "maxItems": 28,
+      "items": {"$ref": "page-comment.schema.json"}
+    },
+    "wholePrototypeComment": {"type": "string", "minLength": 1},
+    "progress": {
+      "type": "object",
+      "propertyNames": {"pattern": "^[LBMSX][0-9]{2}$"},
+      "additionalProperties": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["verdict"],
+        "properties": {
+          "visitedAt": {"type": "string", "format": "date-time"},
+          "aiTriagedAt": {"type": "string", "format": "date-time"},
+          "humanReviewedAt": {"type": "string", "format": "date-time"},
+          "approvedAt": {"type": "string", "format": "date-time"},
+          "verdict": {"enum": ["pending", "accept", "revise", "blocked", "not_applicable"]},
+          "visualEvidenceHash": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+          "interactionEvidenceHash": {"type": "string", "pattern": "^[0-9a-f]{64}$"}
+        }
+      }
+    },
+    "summary": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["totalNodes", "visited", "aiTriaged", "humanReviewed", "approved"],
+      "properties": {
+        "totalNodes": {"const": 28},
+        "visited": {"type": "integer", "minimum": 0, "maximum": 28},
+        "aiTriaged": {"type": "integer", "minimum": 0, "maximum": 28},
+        "humanReviewed": {"type": "integer", "minimum": 0, "maximum": 28},
+        "approved": {"type": "integer", "minimum": 0, "maximum": 28}
+      }
+    },
+    "controlMode": {"enum": ["automation", "paused", "human"]},
+    "includedStaleBuilds": {
+      "type": "array",
+      "items": {"type": "string", "pattern": "^[0-9a-f]{64}$"}
+    },
+    "exportedAt": {"type": "string", "format": "date-time"}
+  }
+}

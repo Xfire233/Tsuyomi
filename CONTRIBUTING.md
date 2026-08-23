@@ -22,12 +22,14 @@ Test source, deterministic fixtures, screenshot goldens, and GitHub Actions rema
 - UI、交互、导航、文案、视觉层级或 golden 变更必须先获 Designer 审阅；整体代码计划必须先获 Adviser 审阅。
 - 未明确声明“无人值守”或“自主批准执行”时，审阅完成后必须等待用户确认才开始实现。该授权只覆盖审阅过的范围。
 - 开 PR 后及最终功能变更后必须有 Adviser PR review；required checks 全绿后仍只由用户确认合并。
+- Android UI、导航、交互、原型、显示配置或无障碍改动先按 `tools/skills/tsuyomi-android-review/SKILL.md` 执行 R1；当前活跃/延后 profile 只读取相邻的 `review-policy.json`。`.local/` 影响报告只选择节点和验证层，不表示批准。
 
 Before opening a PR, run the checks relevant to each changed path:
 
 ```text
 python -m reuse lint
 python tools/check_repository.py
+python -m unittest discover -s tools/skills/tsuyomi-android-review/scripts -p '*_test.py'
 
 cd tsuyomi-protocol
 npm ci
@@ -41,6 +43,13 @@ cd ../tsuyomi-android
   :feature:library:validateDebugScreenshotTest \
   :feature:browse:validateDebugScreenshotTest \
   :feature:settings:validateDebugScreenshotTest
+
+# When :prototype:ui-atlas changes
+./gradlew --no-daemon --console=plain --dependency-verification strict \
+  -Ptsuyomi.prototype=true \
+  :prototype:ui-atlas:assembleDebug \
+  :prototype:ui-atlas:assembleDebugAndroidTest \
+  :prototype:ui-atlas:lintDebug
 ```
 
 ## Licensing and secrets

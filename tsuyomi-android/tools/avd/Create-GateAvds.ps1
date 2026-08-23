@@ -2,7 +2,8 @@
 # SPDX-License-Identifier: Apache-2.0
 
 param(
-    [switch]$Force
+    [switch]$Force,
+    [switch]$ReviewWorkOnly
 )
 
 $ErrorActionPreference = 'Stop'
@@ -24,10 +25,10 @@ $avdHome = if ([string]::IsNullOrWhiteSpace($env:ANDROID_AVD_HOME)) {
 
 function Set-ConfigValue([string]$Path, [string]$Key, [string]$Value) {
     $lines = @(Get-Content $Path)
-    $prefix = "$Key ="
+    $pattern = "^\s*$([regex]::Escape($Key))\s*="
     $found = $false
     $updated = foreach ($line in $lines) {
-        if ($line.StartsWith($prefix, [System.StringComparison]::Ordinal)) {
+        if ($line -match $pattern) {
             $found = $true
             "$Key = $Value"
         } else {
@@ -64,6 +65,7 @@ function New-GateAvd(
     Set-ConfigValue $config 'hw.lcd.density' $Density
     Set-ConfigValue $config 'hw.ramSize' '1536M'
     Set-ConfigValue $config 'hw.initialOrientation' 'portrait'
+    Set-ConfigValue $config 'hw.keyboard' 'yes'
     Set-ConfigValue $config 'PlayStore.enabled' 'no'
     Set-ConfigValue $config 'tag.id' 'default'
     Set-ConfigValue $config 'abi.type' 'x86_64'
@@ -71,6 +73,12 @@ function New-GateAvd(
     Set-ConfigValue $config 'fastboot.forceColdBoot' 'yes'
     Set-ConfigValue $config 'fastboot.forceFastBoot' 'no'
     Set-ConfigValue $config 'showDeviceFrame' 'no'
+}
+
+if ($ReviewWorkOnly) {
+    New-GateAvd 'Tsuyomi_Review_Work_API29' 1080 2400 420
+    Write-Host 'Review work AVD created. It is non-canonical and must not own final human evidence.'
+    return
 }
 
 New-GateAvd 'Tsuyomi_API29' 1080 2400 420

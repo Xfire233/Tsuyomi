@@ -29,8 +29,8 @@ collection_refresh_run(id, collectionId, startedAt, completedAt?, completeness, 
 
 - `collection_book` is unique on `(collectionId, sourceId, remoteBookId)`.
 - Manual collection ordering is stable and repaired transactionally after moves/deletes.
-- Parent graph is acyclic and depth-bounded.
-- System collections cannot be renamed, moved, or deleted.
+- Parent graph is acyclic and presentation depth is capped at two levels.
+- System collection identities/query definitions cannot be renamed or deleted. Their Library presentation nodes are default-created but may be hidden, rebuilt and reordered; only Read Later accepts direct membership writes.
 - Smart collections cannot receive direct membership writes.
 - Candidate deletion in replace mode requires a completed run marked complete.
 - Source uninstall makes related book rows dormant; it does not delete collection relations.

@@ -67,6 +67,14 @@ jobs:
           :feature:library:validateDebugScreenshotTest
           :feature:browse:validateDebugScreenshotTest
           :feature:settings:validateDebugScreenshotTest
+      - name: Build and lint isolated UI atlas prototype
+        if: steps.changes.outputs.changed == 'true'
+        run: >-
+          ./gradlew --no-daemon --console=plain --dependency-verification strict
+          -Ptsuyomi.prototype=true
+          :prototype:ui-atlas:assembleDebug
+          :prototype:ui-atlas:assembleDebugAndroidTest
+          :prototype:ui-atlas:lintDebug
       - name: Lock state is stable
         if: steps.changes.outputs.changed == 'true'
         run: |
@@ -141,6 +149,7 @@ jobs:
         if: steps.changes.outputs.changed == 'true'
         run: >-
           ./gradlew --no-daemon --console=plain --dependency-verification strict
+          -Ptsuyomi.prototype=true
           :app:connectedDebugAndroidTest
           :feature:settings:connectedDebugAndroidTest
           :core:ui:connectedDebugAndroidTest
@@ -148,3 +157,4 @@ jobs:
           :core:database:connectedDebugAndroidTest
           :core:webview:connectedDebugAndroidTest
           :source:quickjs-runtime:connectedDebugAndroidTest
+          :prototype:ui-atlas:connectedDebugAndroidTest

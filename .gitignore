@@ -8,6 +8,8 @@
 **/node_modules/
 **/dist/
 **/coverage/
+**/__pycache__/
+*.py[cod]
 **/*.tsbuildinfo
 
 # Android and IDE local state
@@ -32,6 +34,9 @@ tsuyomi-android/build-logic/.kotlin/
 **/test-results/
 **/reports/
 **/artifacts/
+**/screenshots/
+**/tsuyomi-atlas-review-bundle*.json
+tsuyomi-android/buildinteractive-*smoke-traces/
 *.log
 *.trace
 *.profraw

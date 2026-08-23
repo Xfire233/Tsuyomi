@@ -16,6 +16,7 @@ local.properties
 .fleet/
 .run/
 Thumbs.db
+/.exe/
 *.swp
 keystore.properties
 *.jks
@@ -33,9 +34,17 @@ keystore.properties
 /reports/
 /artifacts/
 /screenshots/
+/buildinteractive-*smoke-traces/
 *.log
 *.trace
 *.profraw
+
+# Local-only Gate 4 atlas evidence and browser reviewer
+# Product prototype source stays reviewable; generated pixels, reviewer UI, and exports do not.
+/prototype/ui-atlas/src/screenshotTestDebug/
+/prototype/ui-atlas/render-browser-atlas.bat
+/prototype/ui-atlas/tools/
+**/tsuyomi-atlas-review-bundle*.json
 
 # Local AI-assistant configuration and transcripts
 .claude/
