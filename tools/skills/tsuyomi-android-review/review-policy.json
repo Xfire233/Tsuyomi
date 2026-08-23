@@ -1,0 +1,48 @@
+{
+  "schema": "tsuyomi-android-review-policy-v1",
+  "mode": "gate4-standard-first",
+  "effectiveFrom": "2026-08-20",
+  "activeProfiles": [
+    "STANDARD"
+  ],
+  "deferredProfiles": [
+    {
+      "profile": "EINK",
+      "status": "FROZEN",
+      "preserveImplementation": true,
+      "preserveContracts": true,
+      "preserveInventory": true,
+      "baselineBuildId": "3be8ea00cdac3ed7164fd170929bfb97a1c498cf63032fbbec4630ea5bd095d7"
+    }
+  ],
+  "gate4Milestone": "Complete and human-review all Standard UX before resuming full E-ink design and review.",
+  "routineReview": {
+    "buildOnce": true,
+    "deployOncePerActiveDevice": true,
+    "captureOnlyAffectedVisualStates": true,
+    "journeysOnlyForChangedTransitions": true
+  },
+  "directEinkChangeException": {
+    "allowed": [
+      "compile affected E-ink code",
+      "run affected non-visual contract tests",
+      "run one targeted launch smoke only when needed to prevent an unusable retained implementation"
+    ],
+    "forbidden": [
+      "new E-ink design decisions",
+      "routine E-ink screenshot matrices",
+      "routine E-ink Review Graph passes",
+      "updating E-ink goldens or approval state"
+    ]
+  },
+  "resume": {
+    "trigger": "Explicit user decision after the Gate 4 Standard UX milestone.",
+    "mode": "full-eink-restoration",
+    "requiredScope": [
+      "reconcile every change accumulated since baselineBuildId",
+      "review all 28 Review Graph nodes against the retained E-ink contracts",
+      "execute the complete E-ink route-state and interaction inventory",
+      "restore physical E-ink qualitative review before any E-ink readiness claim"
+    ]
+  }
+}

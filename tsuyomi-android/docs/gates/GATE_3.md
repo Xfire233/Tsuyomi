@@ -18,6 +18,8 @@
 
 This amended document is the common frozen input for the renewed Designer and Adviser reviews. D1–D14 are confirmed planning inputs, but the D1 scope expansion invalidated prior approval. No production implementation begins until the renewed reviews close and the user explicitly authorizes this amended plan.
 
+> **Historical Gate boundary after Gate 4 reconciliation:** Gate 3 is complete historical evidence. Where this document conflicts with `DESIGN_DIRECTION_HANDOFF.md` §1.2 or `GATE_4.md`, the Gate 4 contract is normative. In particular, Gate 4 supersedes Gate 3's post-login import prompt/generic pull wording, split local/source Detail routes and `前往浏览` flow, template/manager navigation, and removal semantics that discarded rating/tags. Active behavior is: login return performs no implicit work; copy/calibration/write are distinct explicit commands; one canonical Detail owns chapters; local removal retains annotations; SystemNode presentation may hide/rebuild/reorder and only Read Later accepts direct membership. The historical paragraphs below remain solely as Gate 3 provenance and are not Gate 4 implementation instructions.
+
 ## Outcome
 
 A local-first reader preserves books, semantic progress, ratings, local tags and organization across process/device restoration; it safely imports supported Hikari data without credentials, browser state or caches, and exposes only user-mediated, signed-capability remote favourite actions.
@@ -52,6 +54,8 @@ install app
   - 最近阅读;
   - 有未读更新;
   - 来源未安装.
+
+Gate 4 reconciliation supersedes the presentation requirement above: these stable query definitions become default-created `SystemNode` presentations that may be hidden, rebuilt and manually reordered. Their rules remain immutable; only Read Later accepts direct membership writes. The Gate 4 historical boundary near the document header governs all other conflicting UI/remote/detail/removal instructions below.
 - Create, rename, reorder, nest and delete manual collections.
 - Add/remove multiple books to/from multiple manual collections.
 - Edit local rating and local tags. Remote tags remain read-only source metadata.
@@ -211,8 +215,8 @@ Invariants:
 - `book` existence is not library membership; `library_entry` is the explicit membership source.
 - Progress may exist without library membership.
 - Manual membership requires both a manual collection and a library entry.
-- System collections are fixed query definitions, never mutable rows.
-- Collection parent graph is acyclic and depth-bounded; order is repaired transactionally after move/delete.
+- System collections are fixed query definitions, never mutable membership rows; Gate 4 may hide/rebuild/reorder their presentation nodes, and only Read Later gains explicit membership.
+- Collection parent graph is acyclic and depth-bounded in Gate 3; Gate 4 tightens presentation depth to two levels. Order is repaired transactionally after move/delete.
 - Smart collections reject direct membership writes.
 - Subscription rows remain `enabled=false` and have no execution method in Gate 3.
 - Local rating is nullable; Hikari's default zero maps to unrated unless the legacy record proves an explicit value.
@@ -380,7 +384,7 @@ Every transition and cleanup action is conditional on the same session ID and pl
 | 移出书架 | Visible for a library entry; confirmation explains preserved progress/history and `不会删除网站收藏`. |
 | 打开来源/目录 | Visible when a verified source is available. Dormant state shows `此书的来源未安装。在「浏览」中安装对应签名来源后，书籍与进度自动恢复，无需重新添加。` plus a real `前往浏览` handler; the library does not offer source installation. |
 | 评分/本地标签 | Visible for a library entry; durable local-only write with failure recovery. |
-| 手动集合编辑 | Visible for manual collections only. System collections cannot be renamed/reordered/deleted; smart collections reject direct membership writes. |
+| 手动集合编辑 | Gate 3: visible for manual collections only. Gate 4 amendment: system query definitions still cannot be renamed/deleted, but their presentation nodes may hide/rebuild/reorder; only Read Later accepts direct membership. Smart collections reject direct membership writes. |
 | 智能规则编辑 | Visible for supported rule version; unknown versions are read-only disabled with explanation. |
 | 远程收藏与同步 | Visible on the Browse-root installed-source card only when that source is verified and has granted `remoteLibrary.read`; otherwise hidden. If `read` remains valid but previously enabled `add` becomes invalid, the writeback switch remains disabled with `来源更新后需要重新授权`; it may recover only after renewed capability approval and credential readiness. |
 | 导入远程收藏 | Visible only for an installed, verified source with a granted `remoteLibrary.read` capability. After a user-mediated credential handoff, the first result is an explicit import question; later pulls remain explicit and merge-only. |
@@ -577,7 +581,7 @@ The following decisions are user-confirmed. D1 and D11–D14 expand the previous
 | D2 | Merge-only import; no destructive replace. | Imports never delete newer local state. |
 | D3 | Guided nested smart-rule editor. | No raw expression, JSON or SQL. |
 | D4 | Delete collection/memberships, reparent children, preserve books. | No recursive book deletion. |
-| D5 | Remove local library membership/rating/tags but preserve progress/history. | Local removal never removes a remote favourite. |
+| D5 | **[HISTORICAL — superseded by Gate 4 D19]** Gate 3 removed local library membership/rating/tags while preserving progress/history. Gate 4 instead retains rating/local tags and removes only the explicitly named presence origins. | Local removal never removes a remote favourite. |
 | D6 | Implement and consume portable flow/font scale/line height/theme. | E-ink safely overrides effective incompatible values. |
 | D7 | Preserve imported subscription drafts as read-only `尚不可执行`. | No refresh/execution. |
 | D8 | Verified installed package means source available; no generic source-enable switch. | Remote policy is a separate capability-gated setting, not availability. |

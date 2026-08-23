@@ -67,6 +67,14 @@ jobs:
           :feature:library:validateDebugScreenshotTest
           :feature:browse:validateDebugScreenshotTest
           :feature:settings:validateDebugScreenshotTest
+      - name: Build and lint isolated UI atlas prototype
+        if: steps.changes.outputs.changed == 'true'
+        run: >-
+          ./gradlew --no-daemon --console=plain --dependency-verification strict
+          -Ptsuyomi.prototype=true
+          :prototype:ui-atlas:assembleDebug
+          :prototype:ui-atlas:assembleDebugAndroidTest
+          :prototype:ui-atlas:lintDebug
       - name: Lock state is stable
         if: steps.changes.outputs.changed == 'true'
         run: |
@@ -134,6 +142,10 @@ jobs:
             kill "$emulator_pid" 2>/dev/null || true
             exit 1
           fi
+          "$ADB" shell wm size 1080x2400
+          "$ADB" shell wm density 420
+          "$ADB" shell wm size
+          "$ADB" shell wm density
           "$ADB" shell settings put global window_animation_scale 0
           "$ADB" shell settings put global transition_animation_scale 0
           "$ADB" shell settings put global animator_duration_scale 0
@@ -141,6 +153,7 @@ jobs:
         if: steps.changes.outputs.changed == 'true'
         run: >-
           ./gradlew --no-daemon --console=plain --dependency-verification strict
+          -Ptsuyomi.prototype=true
           :app:connectedDebugAndroidTest
           :feature:settings:connectedDebugAndroidTest
           :core:ui:connectedDebugAndroidTest
@@ -148,3 +161,4 @@ jobs:
           :core:database:connectedDebugAndroidTest
           :core:webview:connectedDebugAndroidTest
           :source:quickjs-runtime:connectedDebugAndroidTest
+          :prototype:ui-atlas:connectedDebugAndroidTest

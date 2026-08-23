@@ -1,0 +1,33 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://tsuyomi.invalid/schemas/live-review-signal-v1.json",
+  "title": "Tsuyomi live ADB review signal",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema",
+    "sessionId",
+    "revision",
+    "kind",
+    "applicationId",
+    "buildId",
+    "nodeId",
+    "route",
+    "profile",
+    "reviewSha256",
+    "submittedAt"
+  ],
+  "properties": {
+    "schema": {"const": "tsuyomi-live-review-signal-v1"},
+    "sessionId": {"type": "string", "format": "uuid"},
+    "revision": {"type": "integer", "minimum": 1},
+    "kind": {"enum": ["node", "batch_ready"]},
+    "applicationId": {"const": "org.tsuyomi.prototype.uiatlas"},
+    "buildId": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "nodeId": {"type": "string", "pattern": "^[LBMSX][0-9]{2}$"},
+    "route": {"type": "string", "minLength": 1},
+    "profile": {"enum": ["STANDARD", "EINK"]},
+    "reviewSha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "submittedAt": {"type": "string", "format": "date-time"}
+  }
+}

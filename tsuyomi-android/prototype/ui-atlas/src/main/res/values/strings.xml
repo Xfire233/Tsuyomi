@@ -1,0 +1,5 @@
+<!-- SPDX-FileCopyrightText: 2026 Tsuyomi Contributors -->
+<!-- SPDX-License-Identifier: Apache-2.0 -->
+<resources>
+    <string name="atlas_app_name">Tsuyomi 界面图册</string>
+</resources>

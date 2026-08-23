@@ -55,3 +55,11 @@ include(":feature:reader")
 include(":feature:settings")
 include(":feature:backup")
 include(":feature:extensions")
+
+// Temporary prototype UI atlas (constitution §16.3, TsuyomiUiAtlasSpec.md §1). Fixture-only,
+// excluded from the release build graph: it is included only when the build is invoked with
+// `-Ptsuyomi.prototype=true`. Production modules never depend on it; it depends on nothing in
+// production.
+if (providers.gradleProperty("tsuyomi.prototype").map { it.toBoolean() }.getOrElse(false)) {
+    include(":prototype:ui-atlas")
+}

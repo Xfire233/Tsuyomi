@@ -24,3 +24,5 @@ jobs:
         run: python -m reuse lint
       - name: Reject repository artifacts
         run: python tools/check_repository.py
+      - name: Review workflow tests
+        run: python -m unittest discover -s tools/skills/tsuyomi-android-review/scripts -p '*_test.py'
