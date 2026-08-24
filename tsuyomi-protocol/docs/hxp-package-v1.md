@@ -35,4 +35,4 @@ The host compares normalized capability sets before activating an update. Adding
 
 ## Conformance cases
 
-Gate 0 includes deterministic policy cases for successful same-key update, capability expansion, revoked publisher, valid/invalid key rotation, repository rollback, and invalid capability origin subsets. The package toolchain later adds real archive, hash, canonicalization, Ed25519, and signed-metadata test vectors before any production package is installed.
+Phase 0 includes deterministic policy cases for successful same-key update, capability expansion, revoked publisher, valid/invalid key rotation, repository rollback, and invalid capability origin subsets. The package toolchain later adds real archive, hash, canonicalization, Ed25519, and signed-metadata test vectors before any production package is installed.

@@ -6,7 +6,7 @@
 本地优先、面向墨水屏的原生 Android 轻小说阅读器。使用 Kotlin 与 Jetpack Compose 构建，目标平台为 Android 10 及以上版本（`minSdk 29`）。
 
 > [!IMPORTANT]
-> 项目目前完成的是 Gate 1 原生应用基础设施、显示系统、数据/安全契约与 UI 基线，尚不是可日常使用的完整阅读器。Wenku8 搜索、详情、目录、章节和阅读器垂直切片属于后续 Gate。
+> 项目目前完成的是 Phase 1 原生应用基础设施、显示系统、数据/安全契约与 UI 基线，尚不是可日常使用的完整阅读器。Wenku8 搜索、详情、目录、章节和阅读器垂直切片属于后续 Phase。
 
 ## 项目目标
 
@@ -15,11 +15,11 @@
 - **全局墨水屏模式**：Standard 与 E-ink 复用同一路由、业务状态和持久数据；E-ink 是应用根级显示配置，不是阅读器内的局部开关。
 - **来源与宿主分离**：规划中的内容来源以签名、平台无关的 `.hxp` 包交付，通过版本化 Host API 运行；不是 Android APK 插件。
 - **语义阅读进度**：持久化章节与文本语义位置，而不是依赖易失效的页码、像素偏移或滚动百分比。
-- **可审计发布**：面向 GitHub Releases 与 F-Droid；依赖锁、校验元数据、第三方声明、REUSE 和 Gate 证据随代码版本化。
+- **可审计发布**：面向 GitHub Releases 与 F-Droid；依赖锁、校验元数据、第三方声明、REUSE、Phase 证据和 gate 判定随代码版本化。
 
 ## 当前状态
 
-Gate 1 已建立并通过本地验证：
+Phase 1 已建立并通过本地验证：
 
 - Android API 29 构建与 instrumentation 基线；
 - Standard、手动 E-ink、自动识别状态和动态颜色决策；
@@ -30,7 +30,7 @@ Gate 1 已建立并通过本地验证：
 - 真实 feature composable 的 screenshot golden；
 - Gradle dependency locking、严格校验、REUSE 与仓库制品检查。
 
-完整证据见 [`docs/gates/GATE_1.md`](docs/gates/GATE_1.md)。开发阶段和未实现范围见 [`docs/architecture/GATES_0_3.md`](docs/architecture/GATES_0_3.md)。
+完整证据见 [`docs/phases/PHASE_1.md`](docs/phases/PHASE_1.md)。开发阶段和未实现范围见 [`docs/architecture/DELIVERY_PHASES_0_3.md`](docs/architecture/DELIVERY_PHASES_0_3.md)。
 
 ## 组件边界
 
@@ -60,14 +60,14 @@ $env:ANDROID_SDK_ROOT = '<your-android-sdk>'
 ./tools/Doctor.ps1
 ./gradlew.bat --no-daemon --console=plain --dependency-verification strict :app:assembleDebug
 python -m reuse lint
-python tools/check_repository.py
+python ../tools/check_repository.py --scope android
 ```
 
 完整质量命令和固定 AVD 参数分别见：
 
 - [`docs/process/QUALITY_GATES.md`](docs/process/QUALITY_GATES.md)
 - [`docs/verification/AVD_MATRIX.md`](docs/verification/AVD_MATRIX.md)
-- [`tools/avd/Create-GateAvds.ps1`](tools/avd/Create-GateAvds.ps1)
+- [`tools/avd/Create-ReviewAvds.ps1`](tools/avd/Create-ReviewAvds.ps1)
 
 ## 架构与贡献
 
@@ -85,7 +85,7 @@ python tools/check_repository.py
 
 Tsuyomi 是独立项目，与 Hikari Novel、Hikari Novel Plus、Wenku8、ESJZone、Yamibo、300X、Tachiyomi、Mihon、Inkwell、LightNovelReader 及其维护者均无官方关系。
 
-当前 Gate 1 基线**没有复制、翻译或改编下列项目的源文件、图片、字体、站点 Logo、布局或组件实现**。这些项目用于行为迁移、公开架构研究和设计取舍；Tsuyomi 的实现从协议、可观察行为和独立测试出发。若未来引入上游代码或素材，必须先完成许可证兼容审查，并在同一变更中保留版权/NOTICE、标记修改、更新 [`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md) 和 REUSE 元数据。
+当前 Phase 1 基线**没有复制、翻译或改编下列项目的源文件、图片、字体、站点 Logo、布局或组件实现**。这些项目用于行为迁移、公开架构研究和设计取舍；Tsuyomi 的实现从协议、可观察行为和独立测试出发。若未来引入上游代码或素材，必须先完成许可证兼容审查，并在同一变更中保留版权/NOTICE、标记修改、更新 [`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md) 和 REUSE 元数据。
 
 特别鸣谢 **[Tachiyomi](https://github.com/tachiyomiorg)**。其长期形成的 Android 阅读器体验、来源扩展生态、书库组织方式和开放社区，为包括 Tsuyomi 在内的许多阅读器项目提供了重要灵感。Tachiyomi 官方核心项目已经停止维护并下线；本鸣谢不表示 Tsuyomi 是其分支、继任者或官方关联项目。
 

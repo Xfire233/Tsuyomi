@@ -6,6 +6,7 @@ version = 1
 [[annotations]]
 path = [
   "Tsuyomi.code-workspace",
+  "tsuyomi-android/README.md",
   "tsuyomi-protocol/package.json",
   "tsuyomi-protocol/package-lock.json",
   "tsuyomi-protocol/schemas/*.json",
@@ -16,8 +17,8 @@ path = [
   "tsuyomi-android/core/database/schemas/**",
   "tsuyomi-android/core/ui/src/screenshotTestDebug/reference/**",
   "tsuyomi-android/feature/*/src/screenshotTestDebug/reference/**",
-  "tsuyomi-android/docs/gates/GATE_1/assets/**",
-  "tsuyomi-android/docs/design/GATE_1_UI.md",
+  "tsuyomi-android/docs/phases/PHASE_1/assets/**",
+  "tsuyomi-android/docs/design/PHASE_1_UI.md",
   "tsuyomi-android/docs/design/DESIGN_DIRECTION_HANDOFF.md",
   "tsuyomi-android/docs/design/DESIGN_REFERENCE_REVIEW.md",
   "tsuyomi-android/docs/design/INTERACTIVE_PROTOTYPE_PLAN.md",
@@ -27,7 +28,7 @@ path = [
   "tsuyomi-android/docs/process/QUALITY_GATES.md",
   "tsuyomi-android/docs/verification/AVD_MATRIX.md",
   "tsuyomi-android/docs/process/REPOSITORY_GOVERNANCE.md",
-  "tsuyomi-android/docs/process/GATE_2_RETROSPECTIVE.md",
+  "tsuyomi-android/docs/process/PHASE_2_RETROSPECTIVE.md",
   "tsuyomi-extensions/package.json",
   "tsuyomi-extensions/package-lock.json",
   "tsuyomi-extensions/tsconfig.json",

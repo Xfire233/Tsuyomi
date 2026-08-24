@@ -6,7 +6,7 @@
 本地优先、面向墨水屏的原生 Android 轻小说阅读器。Android 宿主使用 Kotlin 与 Jetpack Compose；平台无关协议和签名来源扩展与宿主在同一个 Monorepo 中独立版本化。
 
 > [!IMPORTANT]
-> 项目目前完成 Gate 1 基础设施、显示系统、数据/安全契约和 UI 基线，尚不是可日常使用的完整阅读器。Wenku8 搜索、详情、目录、章节和阅读器垂直切片属于后续 Gate。
+> 项目目前完成 Phase 1 基础设施、显示系统、数据/安全契约和 UI 基线，尚不是可日常使用的完整阅读器。Wenku8 搜索、详情、目录、章节和阅读器垂直切片属于后续 Phase。
 
 ## 目录
 
@@ -22,7 +22,7 @@
 protocol-vX.Y.Z
 extensions-vX.Y.Z
 android-vX.Y.Z
-gate-N-baseline
+phase-N-baseline
 ```
 
 ## 项目原则

@@ -12,6 +12,7 @@ import org.tsuyomi.core.files.StorageQuota
 import org.tsuyomi.core.files.StorageRoot
 import org.tsuyomi.core.files.StorageRoots
 import org.tsuyomi.core.network.HostNetworkGateway
+import org.tsuyomi.core.network.DirectActionTokenRegistry
 import org.tsuyomi.core.network.FileHostNetworkCache
 import org.tsuyomi.core.network.SourceNetworkGrant
 import org.tsuyomi.shared.sourcecontract.SourceCookieMode
@@ -24,6 +25,7 @@ internal object SourceGatewayFactory {
         context: Context,
         packageInfo: VerifiedHxpPackage,
         transport: HostHttpTransport,
+        directActionTokens: DirectActionTokenRegistry,
     ): HostNetworkGateway {
         val manifest = packageInfo.manifest
         val grant = SourceNetworkGrant(
@@ -60,8 +62,8 @@ internal object SourceGatewayFactory {
             )
         }
         val gateway = HostNetworkGateway(
-            transport,
-            FileHostNetworkCache(
+            transport = transport,
+            cache = FileHostNetworkCache(
                 files = QuotaFileStore(
                     roots = StorageRoots.from(context),
                     root = StorageRoot.CACHE,
@@ -70,6 +72,7 @@ internal object SourceGatewayFactory {
                 ),
                 partition = cachePartition,
             ),
+            directActionTokens = directActionTokens,
         )
         credentialSnapshots.forEach { (origin, snapshot) ->
             gateway.importSourceCookies(

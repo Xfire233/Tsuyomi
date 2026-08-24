@@ -362,7 +362,7 @@
 - query draft inert；一次显式提交同时启动本地与所选在线来源，完成项进入一个主结果流并共享一个总进度。
 - Exact `BookIdentity` 合并到 canonical item；同名不同 identity 分开。内部来源失败可独立重试，但正常来源 status strip/lane 不常驻。
 - Search/Remote/Tags 支持 grid/list/compact。Tags 用 `本地 / 来源` tab 明确所有权且总览不显示书籍数。
-- D33 高级公共/本地/来源专属筛选与 descriptor UI 在 Atlas/Gate 4A 暂缓；未来重启时仍必须使用真实 M3 控件和 bounded data descriptor，不把字段和值拼成 `·` 字符串。
+- D33 高级公共/本地/来源专属筛选与 descriptor UI 在 Atlas/Phase 4A 暂缓；未来重启时仍必须使用真实 M3 控件和 bounded data descriptor，不把字段和值拼成 `·` 字符串。
 
 ### F4. 详情/目录
 

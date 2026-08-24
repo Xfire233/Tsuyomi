@@ -34,7 +34,7 @@ A smart rule is a versioned, bounded AST: `all`, `any`, `not`, and typed predica
 
 Smart membership is computed from Room projections and is never stored as a mutable duplicate list. Room invalidation re-evaluates affected collection flows after a transaction. Rule schema validation limits AST depth, node count, term size, and supported fields before persistence; unknown rule versions are read-only/disabled rather than guessed.
 
-A subscription collection is not a remote write target and does not run automatically in Gate 0–3. A direct user refresh invokes a declared extension discovery operation and records candidates using stable source identity, first/last seen timestamps, source-response completeness, and `isNew`. `incremental` retains earlier candidates; `replace` removes only candidates absent from a successful, complete response. A failed, cancelled, or incomplete response never removes candidates. Subscription candidates become library books only through an explicit user action.
+A subscription collection is not a remote write target and does not run automatically in Phase 0–3. A direct user refresh invokes a declared extension discovery operation and records candidates using stable source identity, first/last seen timestamps, source-response completeness, and `isNew`. `incremental` retains earlier candidates; `replace` removes only candidates absent from a successful, complete response. A failed, cancelled, or incomplete response never removes candidates. Subscription candidates are local-only until direct user promotion to library membership; subscriptions never write remote data.
 
 ## Rejected alternatives
 

@@ -69,7 +69,7 @@ Features must not implement `if (eInk)` branches for colors and durations throug
 
 ## Refresh behavior
 
-Gate 1 exposes only a real manual redraw request while the effective profile is E-ink. It increments
+Phase 1 exposes only a real manual redraw request while the effective profile is E-ink. It increments
 the root redraw epoch and invalidates the stable Compose drawing layer. The control is hidden under
 standard profile and never claims a vendor waveform or hardware full refresh.
 

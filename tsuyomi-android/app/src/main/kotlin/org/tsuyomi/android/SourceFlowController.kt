@@ -70,8 +70,14 @@ internal class SourceFlowController(
     private val context: Context,
     private val library: RoomLibraryRepository,
     private val snapshotStore: SourceFlowSnapshotStore,
+    private val directActionTokens: DirectActionTokenRegistry = DirectActionTokenRegistry(),
     private val openSession: suspend (VerifiedHxpPackage) -> SourceFlowSession = { packageInfo ->
-        ExtensionSourceFlowSession(SourceExtensionClient.open(packageInfo, Gate2SourceGateway.create(context, packageInfo)))
+        ExtensionSourceFlowSession(
+            SourceExtensionClient.open(
+                packageInfo,
+                Phase2SourceGateway.create(context, packageInfo, directActionTokens),
+            ),
+        )
     },
 ) : Closeable {
     private val credentialStore = SourceCredentialStore(context)
@@ -170,7 +176,7 @@ internal class SourceFlowController(
         val summaries = linkedMapOf<BookIdentity, SourceBookSummary>()
         var cursor: String? = null
         var aggregateBytes = 0L
-        repeat(100) { pageIndex ->
+        repeat(MAX_REMOTE_LIBRARY_PAGES) { pageIndex ->
             val page = try { requireClient().listRemoteLibrary(cursor) } catch (error: SourceException) {
                 return when (error.code) {
                     SourceErrorCode.SESSION_REQUIRED -> RemoteLibraryPullResult.LoginRequired
@@ -185,7 +191,9 @@ internal class SourceFlowController(
                     item.canonicalUrl.encodeToByteArray().size + (item.author?.encodeToByteArray()?.size ?: 0) +
                     (item.coverUrl?.encodeToByteArray()?.size ?: 0)
                 aggregateBytes += normalizedBytes
-                if (aggregateBytes > 8L * 1024 * 1024) return RemoteLibraryPullResult.Failure("aggregate-limit")
+                if (aggregateBytes > MAX_REMOTE_LIBRARY_AGGREGATE_BYTES) {
+                    return RemoteLibraryPullResult.Failure("aggregate-limit")
+                }
                 summaries.putIfAbsent(item.identity, item)
                 books.putIfAbsent(
                     item.identity,
@@ -199,7 +207,7 @@ internal class SourceFlowController(
                         canonicalUrl = item.canonicalUrl,
                     ),
                 )
-                if (books.size > 5_000) return RemoteLibraryPullResult.Failure("record-limit")
+                if (books.size > MAX_REMOTE_LIBRARY_RECORDS) return RemoteLibraryPullResult.Failure("record-limit")
             }
             if (page.complete) {
                 if (page.nextCursor != null) return RemoteLibraryPullResult.Failure("complete-with-cursor")
@@ -233,7 +241,7 @@ internal class SourceFlowController(
             val next = page.nextCursor ?: return RemoteLibraryPullResult.Failure("incomplete-page")
             if (!seenCursors.add(next)) return RemoteLibraryPullResult.Failure("duplicate-cursor")
             cursor = next
-            if (pageIndex == 99) return RemoteLibraryPullResult.Failure("page-limit")
+            if (pageIndex == MAX_REMOTE_LIBRARY_PAGES - 1) return RemoteLibraryPullResult.Failure("page-limit")
         }
         return RemoteLibraryPullResult.Failure("page-limit")
     }
@@ -355,7 +363,7 @@ internal class SourceFlowController(
             availability.generation,
             operationGeneration,
         )
-        val token = DirectActionTokenRegistry.process.mint(
+        val token = directActionTokens.mint(
             DirectActionBinding(
                 summary.identity.sourceId,
                 summary.identity.remoteBookId,
@@ -561,7 +569,7 @@ internal class SourceFlowController(
         identity: BookIdentity,
         diagnosticId: String?,
     ): RemoteAddUiResult = withContext(NonCancellable) {
-        DirectActionTokenRegistry.process.revoke(token)
+        directActionTokens.revoke(token)
         val cancelled = library.transitionRemoteAdd(
             reconciliationId,
             RemoteReconciliationState.PENDING_USER_ACTION,
@@ -659,6 +667,9 @@ internal class SourceFlowController(
         )
     }
     private companion object {
+        const val MAX_REMOTE_LIBRARY_PAGES = 100
+        const val MAX_REMOTE_LIBRARY_AGGREGATE_BYTES = 8L * 1024 * 1024
+        const val MAX_REMOTE_LIBRARY_RECORDS = 5_000
         val RETRYABLE_RECONCILIATION_STATES = setOf(
             RemoteReconciliationState.UNRESOLVED,
             RemoteReconciliationState.CANCELLED,

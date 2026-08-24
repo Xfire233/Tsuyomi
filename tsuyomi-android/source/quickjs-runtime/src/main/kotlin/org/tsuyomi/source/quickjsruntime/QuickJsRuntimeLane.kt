@@ -8,6 +8,7 @@ import java.io.Closeable
 import java.util.concurrent.ExecutionException
 import java.util.concurrent.Executors
 import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.atomic.AtomicReference
 import kotlinx.coroutines.suspendCancellableCoroutine
 
 const val QUICKJS_NG_VERSION = "0.16.1"
@@ -58,6 +59,11 @@ class QuickJsRuntimeLane(
     private var nativeHandle: Long = createInitialHandle()
     private var verifiedModule: VerifiedModule? = null
     private var resetRequired = false
+    private val nextOperationArmedObserver = AtomicReference<(() -> Unit)?>(null)
+
+    internal fun onNextOperationArmedForTest(observer: () -> Unit) {
+        check(nextOperationArmedObserver.compareAndSet(null, observer)) { "An operation observer is already registered" }
+    }
 
     suspend fun evaluateModule(source: ByteArray, filename: String) {
         require(source.isNotEmpty() && source.size <= 8 * 1024 * 1024) { "Invalid module source" }
@@ -68,7 +74,6 @@ class QuickJsRuntimeLane(
                 handle,
                 module.source,
                 module.filename,
-                limits.maxExecutionWallTimeMs,
             )
             verifiedModule = module
         }
@@ -82,7 +87,6 @@ class QuickJsRuntimeLane(
                 handle,
                 functionName.encodeToByteArray(),
                 argumentsJson.encodeToByteArray(),
-                limits.maxExecutionWallTimeMs,
             )
         }
         return output.decodeToString(throwOnInvalidSequence = true)
@@ -104,7 +108,10 @@ class QuickJsRuntimeLane(
                 resetIfRequired()
                 if (!continuation.isActive || closed.get()) return@submit
                 val operationHandle = nativeHandle
+                QuickJsNative.prepareOperation(operationHandle, limits.maxExecutionWallTimeMs)
+                if (!continuation.isActive || closed.get()) return@submit
                 cancellationTarget.activate(operationHandle)
+                nextOperationArmedObserver.getAndSet(null)?.invoke()
                 if (!continuation.isActive || closed.get()) return@submit
                 val result = try {
                     operation(operationHandle)
@@ -138,11 +145,11 @@ class QuickJsRuntimeLane(
         nativeHandle = replacementHandle
         try {
             verifiedModule?.let { module ->
+                QuickJsNative.prepareOperation(replacementHandle, limits.maxExecutionWallTimeMs)
                 QuickJsNative.evaluateModule(
                     replacementHandle,
                     module.source,
                     module.filename,
-                    limits.maxExecutionWallTimeMs,
                 )
             }
             resetRequired = false
@@ -241,17 +248,16 @@ private object QuickJsNative {
     }
 
     external fun create(memoryLimitBytes: Long): Long
+    external fun prepareOperation(nativeHandle: Long, wallTimeMillis: Int)
     external fun evaluateModule(
         nativeHandle: Long,
         source: ByteArray,
         filename: ByteArray,
-        wallTimeMillis: Int,
     )
     external fun callJson(
         nativeHandle: Long,
         functionName: ByteArray,
         argumentsJson: ByteArray,
-        wallTimeMillis: Int,
     ): ByteArray
     external fun cancel(nativeHandle: Long)
     external fun close(nativeHandle: Long)

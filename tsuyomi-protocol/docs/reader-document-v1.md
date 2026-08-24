@@ -13,4 +13,4 @@ A document content digest identifies exactly the normalized block payload. A cha
 
 Forum catalogue routing is deliberately outside `ReaderDocument` and specified by [`forum-navigation-v1.md`](forum-navigation-v1.md). A document renders one resolved physical page; navigation records which original source routes alias that page and which derived owner entries passed host verification. This separation lets the host preserve direct source selection, de-duplicate only directional traversal, and restrict semantic cross-page jumps to explicit history-resume transitions.
 
-The fixture set begins with an ordinary thread page and semantic post locator. Gate 0 grows it with plain chapter, mixed image/text, malformed block, missing-anchor, content-revision, and cross-host Unicode-offset cases.
+The fixture set begins with an ordinary thread page and semantic post locator. Phase 0 grows it with plain chapter, mixed image/text, malformed block, missing-anchor, content-revision, and cross-host Unicode-offset cases.

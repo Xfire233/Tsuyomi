@@ -7,7 +7,7 @@
 
 A book is the host record keyed by `(sourceId, remoteBookId)`. A collection is a named library view. Source website folders/favorites are source state; they are never the same object as host collections.
 
-| Collection kind | Membership source | Gate 0–3 behavior |
+| Collection kind | Membership source | Phase 0–3 behavior |
 |---|---|---|
 | System | fixed host query | All, Continue reading, Recent reading, Unread updates, Dormant sources |
 | Manual | `collection_book` many-to-many relation | create, reorder, nest for presentation, multi-select add/remove |
@@ -73,7 +73,7 @@ user refresh
 
 `incremental` only adds/updates seen candidates. `replace` removes stale candidates after a complete successful refresh. New badges clear only when the user views the collection or explicitly marks them read. A subscription refresh never changes source website favorites, local manual shelves, or library membership without user action.
 
-Gate 3 implements system, manual, and smart collections. Subscription execution waits for the source discovery API after the Wenku8 read path is stable.
+Phase 3 implements system, manual, and smart collections. Subscription execution waits for the source discovery API after the Wenku8 read path is stable.
 
 ## Hikari migration
 

@@ -5,9 +5,9 @@
 package org.tsuyomi.source.quickjsruntime
 
 import androidx.test.ext.junit.runners.AndroidJUnit4
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.async
 import kotlinx.coroutines.cancelAndJoin
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
 import org.junit.Test
@@ -50,8 +50,10 @@ class QuickJsRuntimeLaneInstrumentedTest {
     fun resetsContextAfterCancelledExecution() = runBlocking {
         QuickJsRuntimeLane("cancellation", QuickJsRuntimeLimits(4L * 1024 * 1024, 1_000)).use { lane ->
             lane.evaluateModule(resetFixtureModule(), "cancellation.mjs")
+            val operationArmed = CompletableDeferred<Unit>()
+            lane.onNextOperationArmedForTest { operationArmed.complete(Unit) }
             val invocation = async { lane.callJson("poisonAndSpin", "[]") }
-            delay(25)
+            operationArmed.await()
             invocation.cancelAndJoin()
 
             assertEquals("\"clean\"", lane.callJson("state", "[]"))
@@ -62,8 +64,10 @@ class QuickJsRuntimeLaneInstrumentedTest {
     fun cancellationDoesNotInterruptTheNextSerialOperation() = runBlocking {
         QuickJsRuntimeLane("late-cancellation", QuickJsRuntimeLimits(4L * 1024 * 1024, 1_000)).use { lane ->
             lane.evaluateModule(resetFixtureModule(), "late-cancellation.mjs")
+            val operationArmed = CompletableDeferred<Unit>()
+            lane.onNextOperationArmedForTest { operationArmed.complete(Unit) }
             val firstInvocation = async { lane.callJson("poisonAndSpin", "[]") }
-            delay(25)
+            operationArmed.await()
 
             firstInvocation.cancel()
             assertEquals("\"clean\"", lane.callJson("state", "[]"))
@@ -76,6 +80,8 @@ class QuickJsRuntimeLaneInstrumentedTest {
         val lane = QuickJsRuntimeLane("close", QuickJsRuntimeLimits(4L * 1024 * 1024, 1_000))
         try {
             lane.evaluateModule(resetFixtureModule(), "close.mjs")
+            val operationArmed = CompletableDeferred<Unit>()
+            lane.onNextOperationArmedForTest { operationArmed.complete(Unit) }
             val invocation = async {
                 try {
                     lane.callJson("poisonAndSpin", "[]")
@@ -84,7 +90,7 @@ class QuickJsRuntimeLaneInstrumentedTest {
                     error
                 }
             }
-            delay(25)
+            operationArmed.await()
             lane.close()
             assertEquals(QuickJsRuntimeError.CANCELLED, invocation.await().error)
 

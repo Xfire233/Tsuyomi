@@ -82,9 +82,9 @@ Use the installed `find-skills` skill for open-ecosystem discovery and Android C
 
 `review-policy.json` is the single machine-readable source for active and deferred display profiles.
 
-Current mode is `gate4-standard-first`:
+Current mode is `phase4-standard-first`:
 
-- Execute routine design and review only on `STANDARD` until the Gate 4 Standard UX milestone is complete and the user explicitly resumes E-ink work.
+- Execute routine design and review only on `STANDARD` until the Phase 4 Standard UX milestone is complete and the user explicitly resumes E-ink work.
 - Keep all E-ink implementation, contracts, node checks, fixtures, tests, and inventory entries intact but deferred. Do not delete, redesign, approve, or update E-ink goldens during the freeze.
 - A direct E-ink code change may receive compile, non-visual contract tests, and at most one targeted launch smoke needed to avoid leaving retained code unusable. It does not trigger the E-ink matrix.
 - On resume, reconcile every change since the frozen build ID and run the complete retained E-ink design/review scope. No pre-freeze E-ink approval automatically carries forward.
@@ -194,7 +194,7 @@ Each action is one interaction or one assertion, executed in order. A failure ma
 
 Hand off the same APK, node, route, state, active profile, and evidence. Human-only items include long-reading comfort, Reader seek feel, TalkBack experience, trust/destructive wording, and visual/brand judgment.
 
-During `gate4-standard-first`, all E-ink qualitative and full-matrix items remain explicitly deferred. After the resume trigger, physical E-ink ghosting, waveform, refresh latency, hardware keys, and reading fatigue return as mandatory human evidence.
+During `phase4-standard-first`, all E-ink qualitative and full-matrix items remain explicitly deferred. After the resume trigger, physical E-ink ghosting, waveform, refresh latency, hardware keys, and reading fatigue return as mandatory human evidence.
 
 ### R4.1 — Live AVD review loop
 
@@ -214,12 +214,12 @@ Use two Standard AVDs when human review and code iteration overlap:
 
 `node` submissions may be processed while the human continues reviewing the stable APK. Only `batch_ready` permits replacing the APK on the human-review AVD. Install with data preservation, create a new build lineage, and require the human to re-review affected nodes on the exact replacement APK. A bridge event or comment never implies `humanReviewedAt`, `approvedAt`, `ACCEPT`, production authorization, or E-ink approval.
 
-If the non-canonical development AVD is absent, create only that AVD without recreating either Gate device:
+If the non-canonical development AVD is absent, create only that AVD without recreating either canonical review device:
 
 ```text
 C:/Windows/System32/WindowsPowerShell/v1.0/powershell.exe \
   -ExecutionPolicy Bypass \
-  -File tsuyomi-android/tools/avd/Create-GateAvds.ps1 \
+  -File tsuyomi-android/tools/avd/Create-ReviewAvds.ps1 \
   -ReviewWorkOnly
 ```
 
@@ -251,7 +251,7 @@ Run `android studio check` once per IDE-assisted session. Successful compiler/li
 
 - Embedded Running Devices + Layout Inspector is the best interactive supplement for hierarchy, attributes, overlap, recomposition and reference-image overlays. It does not carry human comments or replace canonical Android CLI evidence.
 - Compose Preview, Animation Preview and Compose UI Check should preflight isolated components, accessibility and adaptive-layout issues before device review. They do not prove navigation, persistence, system bars or real-window behavior.
-- Live Edit can shorten pure composable function-body iteration on an optional API 30+ development AVD, but the canonical Gate AVD is API 29, which Google does not support for Live Edit. Live Edit state is not an exact APK and never supplies final evidence; always rebuild and verify the exact API 29 APK.
+- Live Edit can shorten pure composable function-body iteration on an optional API 30+ development AVD, but the canonical review AVD is API 29, which Google does not support for Live Edit. Live Edit state is not an exact APK and never supplies final evidence; always rebuild and verify the exact API 29 APK.
 - Gemini Transform UI / Match UI can propose Preview diffs, but it is a separate cloud-assisted editor, not the Tsuyomi review authority or OMP comment channel. Use only when explicitly requested and review every diff.
 - Google Journeys may exercise a pre-installed APK without upgrading this AGP 8.13.1 project to the AGP 9 test-suite integration. Keep the existing changed-transition-only rule; AI vision navigation is evidence for the selected Journey, not human qualitative approval.
 
@@ -274,4 +274,4 @@ Run `android studio check` once per IDE-assisted session. Successful compiler/li
 
 Every R1/R2/R3 output records exact build ID, policy SHA/mode, catalog version, node IDs, active/deferred profiles, device facts, commands, observed results, artifact hashes, fallbacks, and pending human items.
 
-Store generated evidence under ignored `.local/` or `tsuyomi-android/build/`. Version control contains only stable contracts, this skill/policy, schemas, tests, and concise Gate decisions.
+Store generated evidence under ignored `.local/` or `tsuyomi-android/build/`. Version control contains only stable contracts, this skill/policy, schemas, tests, and concise Phase or checkpoint decisions.

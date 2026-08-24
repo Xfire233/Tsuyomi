@@ -1,7 +1,7 @@
 <!-- SPDX-FileCopyrightText: 2026 Tsuyomi Contributors -->
 <!-- SPDX-License-Identifier: Apache-2.0 -->
 
-# Gate 4 UX research evidence
+# Phase 4 UX research evidence
 
 ## Method and limits
 
@@ -11,7 +11,7 @@ The fixed migration reference is `Xfire233/hikari_novel_flutter_plus` commit `a1
 
 ## Evidence matrix
 
-| Area | Observed pattern | Gate 4 decision |
+| Area | Observed pattern | Phase 4 decision |
 |---|---|---|
 | Detail and Reader | Hikari detail combines source/local metadata and offers a continuation path; LNReader's stable novel screen owns category actions and chapter/Reader entry; Kotatsu Reader exposes detail as parent. | One host-composed stable-identity Tsuyomi detail owns local status, source enhancement, chapter entry and Continue/Start. Reader returns to that detail. |
 | Collections | Mihon categories expose counts/selection; LNReader retains the last category and separates category management; Hikari supports folders but hides important moves in selection/menus. | Preserve selected collection and counts; expose membership from both book and manual-collection surfaces; use explicit 48dp reorder controls rather than Hikari-style opaque class IDs or drag-only interaction. |
@@ -20,7 +20,7 @@ The fixed migration reference is `Xfire233/hikari_novel_flutter_plus` commit `a1
 | E-ink/adaptive | Hikari switches long lists to explicit E-ink page mode; Mihon groups E-ink reader controls; Kotatsu/LNReader adapt phone/tablet layouts. | Shared Standard scroll/E-ink pagination behavior, fixed E-ink chrome and window-size—not orientation-only—adaptation. |
 | Offline/source state | Hikari falls back to locally cached detail; Kotatsu/LNReader distinguish offline/downloaded content. | Room/progress/local content remain usable for dormant source; clearly label freshness/source availability and do not fabricate online state. |
 | Settings and transfer | Hikari groups many settings in a long page and exposes backup choices, but lacks Tsuyomi-style safe preflight/report constraints. Mature readers group reader controls. | Group More into Display/Reader/Data; retain Tsuyomi bounded preflight, redaction and recovery, with separate import formats and persisted report route. |
-| Network-heavy operations | Mihon cautions that bulk source work can trigger anti-bot controls. | Gate 4 keeps remote work explicit, bounded and per-user action; it does not add background/batch source mutations. |
+| Network-heavy operations | Mihon cautions that bulk source work can trigger anti-bot controls. | Phase 4 keeps remote work explicit, bounded and per-user action; it does not add background/batch source mutations. |
 
 ## Direct evidence
 
@@ -49,7 +49,7 @@ The fixed migration reference is `Xfire233/hikari_novel_flutter_plus` commit `a1
 - Official Legado availability limitation: <https://raw.githubusercontent.com/gedoor/legado/main/README.md>
 - Historical fork only, labeled substitute: <https://raw.githubusercontent.com/HapeLee/legado-with-MD3/main/app/src/main/assets/web/help/md/appHelp.md>
 
-## Tsuyomi-specific findings driving Gate 4
+## Tsuyomi-specific findings driving Phase 4
 
 - `MainActivity.Routes.LocalBook`, `Routes.Detail`, and `LocalBookDetailsScreen.onOpenSource` split the same `BookIdentity` and can restore unrelated Browse state.
 - `RoomLibraryRepository.addManualMembership` / `removeManualMembership` exist, but `LocalBookDetailsScreen` and `CollectionManagerScreen` expose no membership UI.

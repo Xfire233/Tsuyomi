@@ -29,7 +29,7 @@ enum class AtlasArchetype {
 }
 
 /**
- * Fixture routes retained by the standalone Atlas host. Removed Gate 4 destinations are resolved
+ * Fixture routes retained by the standalone Atlas host. Removed Phase 4 destinations are resolved
  * by [parse] directly to their canonical successor and therefore have no enum entry or renderable
  * standalone surface.
  *

@@ -12,7 +12,7 @@ import androidx.compose.ui.graphics.vector.PathParser
 import androidx.compose.ui.unit.dp
 
 /**
- * Gate 1 iconography: simple original glyphs drawn as Compose [ImageVector]s. No legacy project
+ * Phase 1 iconography: simple original glyphs drawn as Compose [ImageVector]s. No legacy project
  * artwork is referenced, copied, or traced.
  */
 object TsuyomiIcons {

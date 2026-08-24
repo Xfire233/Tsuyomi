@@ -30,4 +30,4 @@ signature authenticates the manifest and its integrity map.
 
 The normative transport boundary is [`tsuyomi-protocol/docs/hxp-host-api-v1.md`](../../tsuyomi-protocol/docs/hxp-host-api-v1.md); package integrity and update trust rules are in [`tsuyomi-protocol/docs/hxp-package-v1.md`](../../tsuyomi-protocol/docs/hxp-package-v1.md).
 
-Wenku8 is the first vertical slice: install → grant → optional deliberate login/verification → search → detail → directory → chapter → locator/progress. Library organization and remote-library writes remain outside Gate 2.
+Wenku8 is the first vertical slice: install → grant → optional deliberate login/verification → search → detail → directory → chapter → locator/progress. Library organization and remote-library writes remain outside Phase 2.

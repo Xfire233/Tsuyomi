@@ -10,5 +10,5 @@
 - Record every third-party adoption in `THIRD_PARTY_NOTICES.md`.
 - Use SemVer and update `CHANGELOG.md`; every package/tool change records the compatible protocol version and deterministic artifact digest.
 - Dependency changes must update lock state, `THIRD_PARTY_NOTICES.md`, REUSE metadata, and package verification evidence together.
-- Gate evidence binds the exact extensions SHA to protocol and Android SHAs; do not test against ‘latest’ contracts.
-- Run `python tools/check_repository.py`; built `.hxp`, secrets, live cookies, dumps, and unknown root files are forbidden.
+- Phase evidence binds the exact extensions SHA to protocol and Android SHAs; do not test against ‘latest’ contracts.
+- Run `python ../tools/check_repository.py --scope extensions`; built `.hxp`, secrets, live cookies, dumps, and unknown root files are forbidden.

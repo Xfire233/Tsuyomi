@@ -53,6 +53,7 @@ object AtlasMotion {
     const val IMMEDIATE_MS = 40
     const val FADE_IN_MS = 120
     const val FADE_OUT_MS = 90
+    const val READER_CHROME_MS = 140
     const val EXPAND_MS = 220
     const val SPATIAL_MS = 220
     const val BACKDROP_MS = 100

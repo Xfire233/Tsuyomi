@@ -22,7 +22,11 @@ Set `ANDROID_SDK_ROOT` (or `ANDROID_HOME`) locally, then run `tsuyomi-android/to
 
 ## Android UI review workflow
 
-Android UI, navigation, interaction, prototype, display-profile, accessibility, and Review Graph work starts with `tools/skills/tsuyomi-android-review/SKILL.md`; its adjacent `review-policy.json` alone selects active/deferred profiles. Product contracts and human approval authority remain in Android design/Gate documents.
+Android UI, navigation, interaction, prototype, display-profile, accessibility, and Review Graph work starts with `tools/skills/tsuyomi-android-review/SKILL.md`; its adjacent `review-policy.json` alone selects active/deferred profiles. Product contracts and human approval authority remain in Android design/Phase documents and explicit gate outcomes.
+
+## Design decision continuity
+
+Agent-assisted design work follows [`tsuyomi-android/docs/process/DESIGN_MEMORY_WORKFLOW.md`](tsuyomi-android/docs/process/DESIGN_MEMORY_WORKFLOW.md). Versioned contracts remain authoritative; Mnemopi, `to-spec` issues and the ignored local handoff provide cross-conversation continuity without becoming parallel product contracts. Explicit user corrections are reconciled into the owning contract, Review Graph obligation and observable regression seam in the same work session.
 
 ## Component boundary
 
@@ -36,7 +40,7 @@ A cross-component PR updates protocol contracts and fixtures first, extension pr
 protocol-vX.Y.Z
 extensions-vX.Y.Z
 android-vX.Y.Z
-gate-N-baseline
+phase-N-baseline
 ```
 
-Every Gate records one monorepo Git SHA plus the exact protocol, extension manifest/SDK, and Android application versions. `latest`, uncommitted local paths, and branch names are not compatibility references.
+Every Phase evidence document records one monorepo Git SHA plus the exact protocol, extension manifest/SDK, and Android application versions. `latest`, uncommitted local paths, and branch names are not compatibility references.

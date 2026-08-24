@@ -14,15 +14,15 @@ This document proves `UI_CONSTITUTION.md` and does not define product behavior. 
 3. **Fixture-only:** no production Room/DataStore, network, source/extension manager, credentials/cookies, real WebView network loads, real source packages or branding assets. Canonical capture launches remain deterministic and bypass persisted state. The separately approved interactive debug host may keep two versioned atomic JSON snapshots in its own `noBackupFilesDir`: one for synthetic fake-product state and one for Review Graph node comments/progress. It may export review JSON only through an explicit user-selected SAF document or share action. It never reads production storage, and `重置假数据` / `清空审阅意见` remain separate confirmed operations.
 4. **Full-screen rendering**: the atlas renders real full-screen pages — complete route screens with app bars, content, footers, modals — not component galleries. A reviewer navigates it like the product.
 5. **Determinism**: fixed clock, fixed locale (zh-CN primary; en + an RTL locale for the RTL pass), seeded fixture data, animations driven by the profile switch (Standard / reduced-motion / E-ink instant), fontScale forced per capture config. Identical input → pixel-identical frame on repeat runs.
-6. **Deletion/extraction**: only after manifest-bound manual Atlas approval **and** separate explicit Gate 4 production implementation authorization may §10 execute. Until both exist, the fixture-only module remains isolated and intact.
+6. **Deletion/extraction**: only after manifest-bound manual Atlas approval **and** separate explicit Phase 4 production implementation authorization may §10 execute. Until both exist, the fixture-only module remains isolated and intact.
 7. **M3-backed fairness:** Standard prototype wrappers delegate to actual Material 3 `Button` family, `IconButton`, FAB/Extended FAB, app bars, `ModalBottomSheet`, `ListItem`, `Card`, menus, selection controls and text fields. `Surface`/`Box + clickable` imitations do not count as M3 evidence. E-ink may specialize rendering behind the same Atlas semantic API.
 8. **Platform-modal capture adapter:** the Compose screenshot host cannot capture `ModalBottomSheet`'s platform layer. Declarative screenshot previews therefore set an Atlas-only flag that reuses the exact sheet content inside an in-tree Material 3 `BottomSheetScaffold`; interactive Standard routes still execute the real `ModalBottomSheet`. The manifest labels these frames `converged-*`, and the adapter is deleted with the prototype rather than extracted to production.
 9. **Visible viewport evidence:** canonical surface evidence uses direct API 29 AVD captures with real status/navigation bars. Declarative host stills may simulate insets/cutouts only for supplementary matrix coverage. A–H is visual-direction smoke, not full acceptance. When E-ink review is active again, every canonical E-ink frame includes real window chrome and passes full-frame grayscale.
-10. **Temporary profile execution policy:** `tools/skills/tsuyomi-android-review/review-policy.json` selects the profiles executed by routine review. During `gate4-standard-first`, Standard is active and every E-ink artifact, assertion, fixture and node obligation remains retained but deferred. No E-ink design decision, golden update or readiness claim is made until the explicit restoration pass.
+10. **Temporary profile execution policy:** `tools/skills/tsuyomi-android-review/review-policy.json` selects the profiles executed by routine review. During `phase4-standard-first`, Standard is active and every E-ink artifact, assertion, fixture and node obligation remains retained but deferred. No E-ink design decision, golden update or readiness claim is made until the explicit restoration pass.
 
 ---
 
-## 2. Screen and state inventory (every current and Gate 4 route)
+## 2. Screen and state inventory (every current and Phase 4 route)
 
 ### 2.1 Coverage rule
 
@@ -77,7 +77,7 @@ The finite artifact set is defined only by the machine-readable canonical invent
 
 ### 2.4 Review Graph coverage
 
-`ReviewNodeCatalog.kt` version 2 is the executable review-scope authority. Its 28 stable nodes cover the 20 route/surface rows above, Reader seek/settings high-risk work and six cross-cutting tasks. The table's required-state cells total 105 route-state obligations; a node may aggregate related states, but may not erase them.
+`ReviewNodeCatalog.kt` version 3 is the executable review-scope authority. Its 28 stable nodes cover the 20 route/surface rows above, Reader seek/settings high-risk work and six cross-cutting tasks. The table's required-state cells total 105 route-state obligations; a node may aggregate related states, but may not erase them. Version 3 makes the Standard Reader partial→full upward-drag, unchanged quick-controls tree, full-height downward-dismiss and Back-collapse state machine explicit in B03.
 
 Node families are `L01–L08` Library, `B01–B03` Book/Reader, `S01–S04` Source, `M01–M07` More and `X01–X06` cross-cutting. Route entry records only `visitedAt`. AI triage, human review, approval and visual/interaction evidence remain independent. Removed routes migrate to their successor node rather than reappearing as standalone screens.
 
@@ -155,7 +155,7 @@ Recording format: Standard scenes use 60fps/30fps as assigned by §6.1; reduced-
 
 ## 6. Device / window / profile matrix
 
-Baseline devices remain `Tsuyomi_API29` 1080×2400@420 and `Tsuyomi_EInk_API29` 1264×1680@240. During `gate4-standard-first`, only the Standard device is active for routine review; the wide and compact E-ink devices remain frozen restoration targets and are not routine completion requirements.
+Baseline devices remain `Tsuyomi_API29` 1080×2400@420 and `Tsuyomi_EInk_API29` 1264×1680@240. During `phase4-standard-first`, only the Standard device is active for routine review; the wide and compact E-ink devices remain frozen restoration targets and are not routine completion requirements.
 
 ### 6.1 Canonical inventory schema
 
@@ -238,7 +238,7 @@ Review state is layered:
 
 Node comments identify `AI`, `HUMAN` or `MIXED` authorship and auto-save on debounce plus node exit. Visual and interaction evidence use separate lowercase SHA-256 fields. `AUTOMATION`, `PAUSED` and `HUMAN` control modes permit immediate same-state handoff. AI may draft and attach evidence but may not approve, update goldens or replace a human conclusion.
 
-Before the current Gate 4 Standard UX milestone, the reviewer must show:
+Before the current Phase 4 Standard UX milestone, the reviewer must show:
 
 - all 20 route/surface rows and 105 route-state obligations accounted for on Standard by one evidence owner each;
 - exact counts for visited, AI-triaged, human-reviewed and approved nodes;
@@ -253,11 +253,11 @@ Any failed assertion prevents approval. Empty comments are omitted. Old builds a
 ## 10. Extraction and deletion protocol (only after RC2.1 manual approval **and** separate implementation authorization)
 
 1. Record the §9 approval tuple: RC2.1 version, handoff/reference hashes, prototype build ID, review catalog version, full 20-surface/105-obligation evidence, node comments/progress, manifest and evidence hashes. This freezes reviewed choices but authorizes no production change.
-2. Obtain separate, explicit Gate 4 production implementation authorization. Without it, keep the Atlas fixture-only; do not edit production UI, move production fixtures/goldens or delete the prototype.
+2. Obtain separate, explicit Phase 4 production implementation authorization. Without it, keep the Atlas fixture-only; do not edit production UI, move production fixtures/goldens or delete the prototype.
 3. Reissue the constitution as **v1.0** with approved RC2.1 outcomes incorporated and register route/component amendments.
 4. Extract only approved tokens/contracts into `core:ui` and production feature API shapes. Standard semantic components must wrap the real M3 delegates proven by the Atlas; rewrite—never copy—the namespaced prototype forks.
 5. Move approved fixtures (sanitized of atlas namespace) and golden images into the owning production modules' screenshot-test sources.
-6. **Delete** `:prototype:ui-atlas` entirely: module, settings inclusion, fixtures not moved, recordings working copies (gate-evidence copies retained outside the repo), every component fork. No `Legacy`/`V2`/compat aliases.
+6. **Delete** `:prototype:ui-atlas` entirely: module, settings inclusion, fixtures not moved, recordings working copies (approval-evidence copies retained outside the repo), every component fork. No `Legacy`/`V2`/compat aliases.
 7. Run constitution §16.4 static checks: build fails if any prototype namespace/symbol/dependency remains in the release graph; DAG check green; denied-import check green.
 8. Regenerate the production golden matrix from production composables (atlas goldens are reference, not reused pixels).
 9. Close UI-P0-B with both the approval tuple and explicit implementation authorization as evidence; continue only within the separately authorized 4A–4C scope.

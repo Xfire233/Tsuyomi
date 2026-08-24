@@ -47,4 +47,19 @@ class DirectActionTokenRegistryTest {
         assertEquals(0, accepted)
         assertEquals(binding, registry.revoke(token))
     }
+
+    @Test
+    fun token_is_accepted_only_by_its_owner_registry() = runBlocking {
+        val owner = DirectActionTokenRegistry()
+        val unrelated = DirectActionTokenRegistry()
+        var accepted = 0
+        val token = owner.mint(binding) { accepted += 1; true }
+
+        val unrelatedFailure = runCatching {
+            unrelated.accept(binding.sourceId, binding.remoteBookId, token)
+        }.exceptionOrNull()
+        assertEquals(HostNetworkError.CANCELLED, (unrelatedFailure as HostNetworkException).error)
+        assertEquals(binding, owner.accept(binding.sourceId, binding.remoteBookId, token))
+        assertEquals(1, accepted)
+    }
 }

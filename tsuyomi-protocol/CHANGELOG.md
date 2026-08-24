@@ -9,4 +9,4 @@
 
 ### Added
 
-- Versioned ReaderDocument, forum navigation, Host API, HXP package/trust, transfer, backup-mapping schemas, fixtures, and conformance tests required by the Gate 0/1 baseline.
+- Versioned ReaderDocument, forum navigation, Host API, HXP package/trust, transfer, backup-mapping schemas, fixtures, and conformance tests required by the Phase 0/1 baseline.

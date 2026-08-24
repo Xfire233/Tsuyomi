@@ -40,61 +40,33 @@ class ReviewBridgeTest(unittest.TestCase):
             "reviewSha256": hashlib.sha256(self.review_raw).hexdigest(),
             "submittedAt": "2026-08-20T12:00:00Z",
         }
+        self.policy = bridge.SubmissionPolicy(bridge.PACKAGE, frozenset({"STANDARD"}))
 
     def test_valid_submission(self) -> None:
-        bridge.validate_submission(
-            self.signal,
-            self.review,
-            self.review_raw,
-            bridge.PACKAGE,
-            {"STANDARD"},
-        )
+        bridge.validate_submission(self.signal, self.review, self.review_raw, self.policy)
 
     def test_payload_hash_mismatch_is_rejected(self) -> None:
         changed = dict(self.signal, reviewSha256="b" * 64)
         with self.assertRaisesRegex(bridge.BridgeError, "hash mismatch"):
-            bridge.validate_submission(
-                changed,
-                self.review,
-                self.review_raw,
-                bridge.PACKAGE,
-                {"STANDARD"},
-            )
+            bridge.validate_submission(changed, self.review, self.review_raw, self.policy)
 
     def test_deferred_profile_is_rejected(self) -> None:
         changed = dict(self.signal, profile="EINK")
         with self.assertRaisesRegex(bridge.BridgeError, "is not active"):
-            bridge.validate_submission(
-                changed,
-                self.review,
-                self.review_raw,
-                bridge.PACKAGE,
-                {"STANDARD"},
-            )
+            bridge.validate_submission(changed, self.review, self.review_raw, self.policy)
 
     def test_persistence_is_content_addressed_and_deduplicated(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             output = root / ".local" / "ai-reviews" / "live"
-            event = bridge.persist_submission(
-                self.signal,
-                self.review_raw,
-                "emulator-5554",
-                output,
-                root,
-            )
+            persistence = bridge.PersistenceContext("emulator-5554", output, root)
+            event = bridge.persist_submission(self.signal, self.review_raw, persistence)
             self.assertIsNotNone(event)
             assert event is not None
             artifact = root / event["reviewArtifact"]
             self.assertEqual(self.review_raw, artifact.read_bytes())
             self.assertIsNone(
-                bridge.persist_submission(
-                    self.signal,
-                    self.review_raw,
-                    "emulator-5554",
-                    output,
-                    root,
-                )
+                bridge.persist_submission(self.signal, self.review_raw, persistence)
             )
             self.assertTrue((output / "latest.json").is_file())
             self.assertTrue((output / "bridge-state.json").is_file())

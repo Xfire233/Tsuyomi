@@ -18,6 +18,7 @@ import androidx.compose.ui.test.onRoot
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.performTouchInput
 import androidx.compose.ui.test.performTextInput
 import androidx.test.core.app.ActivityScenario
@@ -79,6 +80,7 @@ class LibraryShortcutDragInstrumentedTest {
         drag(
             sourceDescription = "山中邮差，长按多选，移动可拖动至快捷书架",
             targetText = "快捷书架",
+            preHoldNudge = Offset.Zero,
         )
 
         composeRule.waitUntil(5_000) {
@@ -125,6 +127,7 @@ class LibraryShortcutDragInstrumentedTest {
             sourceDescription = "继续阅读，长按多选，移动可拖动排序",
             targetDescription = "最近阅读，长按多选，移动可拖动排序",
             dropAfterTarget = true,
+            preHoldNudge = Offset.Zero,
         )
 
         composeRule.waitUntil(5_000) {
@@ -132,6 +135,25 @@ class LibraryShortcutDragInstrumentedTest {
         }
         val persisted = stateFile.readText()
         assertTrue(persisted.indexOf("recent") < persisted.indexOf("continue"))
+    }
+
+    @Test
+    fun horizontal_shortcut_shelf_scroll_never_upgrades_to_drag_after_timeout() {
+        val anchor = composeRule.onNodeWithContentDescription("继续阅读，长按多选，移动可拖动排序")
+        val leftBefore = anchor.fetchSemanticsNode().boundsInRoot.left
+
+        composeRule.onNodeWithContentDescription("最近阅读，长按多选，移动可拖动排序").performTouchInput {
+            down(centerRight)
+            moveTo(centerLeft, 200)
+            advanceEventTime(600)
+            up()
+        }
+        composeRule.waitForIdle()
+
+        val leftAfter = anchor.fetchSemanticsNode().boundsInRoot.left
+        assertTrue("shortcut shelf did not scroll: before=$leftBefore after=$leftAfter", leftAfter < leftBefore - 1f)
+        assertFalse(stateFile.exists() && stateFile.readText().contains("ShortcutMoved"))
+        composeRule.onNodeWithContentDescription("已选择").assertDoesNotExist()
     }
 
     @Test
@@ -152,6 +174,7 @@ class LibraryShortcutDragInstrumentedTest {
         drag(
             sourceDescription = "夜航船，长按多选，移动可拖动排序",
             targetDescription = "继续阅读，长按多选，移动可拖动排序",
+            preHoldNudge = Offset.Zero,
         )
 
         composeRule.waitUntil(5_000) {
@@ -551,7 +574,7 @@ class LibraryShortcutDragInstrumentedTest {
 
     @Test
     fun dragging_a_shortcut_to_the_delete_target_requires_confirmation_then_persists() {
-        dragToDelete("继续阅读，长按多选，移动可拖动排序")
+        dragToDelete("继续阅读，长按多选，移动可拖动排序", preHoldNudge = Offset.Zero)
 
         composeRule.onNodeWithText("移出快捷书架？").assertExists()
         composeRule.onNodeWithText("取消").performClick()
@@ -562,7 +585,7 @@ class LibraryShortcutDragInstrumentedTest {
                 .isNotEmpty(),
         )
 
-        dragToDelete("继续阅读，长按多选，移动可拖动排序")
+        dragToDelete("继续阅读，长按多选，移动可拖动排序", preHoldNudge = Offset.Zero)
         composeRule.onNodeWithText("移出").performClick()
         composeRule.waitUntil(5_000) {
             stateFile.exists() && stateFile.readText().contains("ShortcutRemoved")
@@ -779,6 +802,27 @@ class LibraryShortcutDragInstrumentedTest {
     }
 
     @Test
+    fun vertical_library_scroll_never_upgrades_to_drag_after_timeout() {
+        val anchorDescription = "山中邮差，长按多选，移动可拖动至快捷书架"
+        val sourceDescription = "纸灯巷的守夜人，长按多选，移动可拖动至快捷书架"
+        val topBefore = bottommostNode(anchorDescription).fetchSemanticsNode().boundsInRoot.top
+
+        bottommostNode(sourceDescription).performTouchInput {
+            down(center)
+            moveTo(center + Offset(0f, -180f), 200)
+            advanceEventTime(600)
+            up()
+        }
+        composeRule.waitForIdle()
+
+        val topAfter = bottommostNode(anchorDescription).fetchSemanticsNode().boundsInRoot.top
+        assertTrue("library did not scroll: before=$topBefore after=$topAfter", topAfter < topBefore - 1f)
+        assertFalse(stateFile.exists() && stateFile.readText().contains("LibraryBooksReordered"))
+        assertFalse(stateFile.exists() && stateFile.readText().contains("ShortcutBookDropped"))
+        composeRule.onNodeWithContentDescription("已选择").assertDoesNotExist()
+    }
+
+    @Test
     fun selected_books_drag_into_a_collection_as_one_batch() {
         composeRule.onNodeWithContentDescription("纸灯巷的守夜人，长按多选，移动可拖动至快捷书架")
             .performTouchInput { longClick() }
@@ -928,6 +972,118 @@ class LibraryShortcutDragInstrumentedTest {
         assertTrue(composeRule.onAllNodes(hasStateDescription("已选择")).fetchSemanticsNodes().size == 1)
     }
 
+    @Test
+    fun book_detail_keeps_tags_and_add_action_on_one_compact_line() {
+        openBookDetail()
+        composeRule.onNodeWithTag("detail-identity-module").assertExists()
+        composeRule.onNodeWithTag("detail-tag-actions-module").assertExists()
+
+
+        composeRule.onNodeWithText("添加标签").assertDoesNotExist()
+        val lastTag = composeRule.onNodeWithText("民俗").fetchSemanticsNode().boundsInRoot
+        val addTag = composeRule.onNodeWithContentDescription("添加标签").fetchSemanticsNode().boundsInRoot
+        assertTrue("add tag must follow the final tag", addTag.left >= lastTag.right - 1f)
+        assertTrue(
+            "tag and add button must share one row",
+            kotlin.math.abs(addTag.center.y - lastTag.center.y) <= 1f,
+        )
+
+        composeRule.onNodeWithText("移出书架").assertDoesNotExist()
+        composeRule.onNodeWithText("网站操作").assertDoesNotExist()
+        composeRule.onNodeWithContentDescription("更多操作").performClick()
+        composeRule.onNodeWithText("移出书架").assertExists()
+        composeRule.onNodeWithText("从网站移除收藏").assertExists()
+        composeRule.onNodeWithText("移动网站收藏").assertExists()
+        composeRule.onNodeWithText("网站操作").assertDoesNotExist()
+    }
+
+    @Test
+    fun book_detail_introduction_and_directory_share_one_compact_text_column() {
+        openBookDetail()
+        composeRule.onNodeWithText("全文目录").performScrollTo()
+
+        composeRule.onNodeWithTag("detail-introduction-module").assertExists()
+        composeRule.onNodeWithTag("detail-directory-module").assertExists()
+        val introductionBounds = composeRule.onNodeWithTag("detail-introduction-module").fetchSemanticsNode().boundsInRoot
+        val introductionTitleBounds = composeRule.onNodeWithText("简介").fetchSemanticsNode().boundsInRoot
+        val introductionBodyBounds = composeRule
+            .onNodeWithText("雾港的旧灯塔再次亮起，记录员沿着失真的航线寻找一段被删去的夜航日志。")
+            .fetchSemanticsNode()
+            .boundsInRoot
+        assertTrue(kotlin.math.abs(introductionTitleBounds.left - introductionBodyBounds.left) <= 4f)
+        assertTrue(introductionBodyBounds.top - introductionTitleBounds.bottom <= introductionTitleBounds.height / 2f)
+        assertTrue(
+            introductionBounds.height <= introductionTitleBounds.height * 2f + introductionBodyBounds.height,
+        )
+
+        val directoryTitleBounds = composeRule.onNodeWithText("全文目录").fetchSemanticsNode().boundsInRoot
+        val chapterTitleBounds = composeRule
+            .onNodeWithTag("chapter-title-1", useUnmergedTree = true)
+            .fetchSemanticsNode()
+            .boundsInRoot
+        assertTrue(kotlin.math.abs(directoryTitleBounds.left - introductionBodyBounds.left) <= 4f)
+        assertTrue(kotlin.math.abs(chapterTitleBounds.left - introductionBodyBounds.left) <= 4f)
+    }
+
+    @Test
+    fun book_detail_directory_header_uses_compact_stateful_controls() {
+        openBookDetail()
+        composeRule.onNodeWithText("全文目录").performScrollTo()
+
+        composeRule.onNodeWithText("全部章节").assertDoesNotExist()
+        val titleBounds = composeRule.onNodeWithText("全文目录").assertExists().fetchSemanticsNode().boundsInRoot
+        val countBounds = composeRule.onNodeWithText("200章").assertExists().fetchSemanticsNode().boundsInRoot
+        val unreadBounds = composeRule.onNodeWithText("仅看未读").assertExists().fetchSemanticsNode().boundsInRoot
+        val sortButton = composeRule.onNodeWithContentDescription("当前顺序：正序，点按切换").assertExists()
+        val sortBounds = sortButton.fetchSemanticsNode().boundsInRoot
+        composeRule.onNodeWithText("当前章节").assertDoesNotExist()
+        assertTrue(kotlin.math.abs(titleBounds.center.y - countBounds.center.y) <= 1f)
+        assertTrue(kotlin.math.abs(countBounds.center.y - unreadBounds.center.y) <= 1f)
+        assertTrue(kotlin.math.abs(unreadBounds.top - sortBounds.top) <= 1f)
+        assertTrue(kotlin.math.abs(unreadBounds.height - sortBounds.height) <= 1f)
+        assertTrue(unreadBounds.width > sortBounds.width)
+
+        sortButton.performClick()
+        composeRule.onNodeWithContentDescription("当前顺序：倒序，点按切换").assertExists()
+    }
+
+    @Test
+    fun book_detail_chapters_use_semantic_status_and_distinct_markers() {
+        openBookDetail()
+        composeRule.onNodeWithText("全文目录").performScrollTo()
+
+        composeRule.onNodeWithText("已读").assertDoesNotExist()
+        composeRule.onNodeWithText("已下载").assertDoesNotExist()
+        assertTrue(composeRule.onAllNodesWithContentDescription("已下载").fetchSemanticsNodes().isNotEmpty())
+        assertTrue(composeRule.onAllNodes(hasStateDescription("已读，已下载")).fetchSemanticsNodes().isNotEmpty())
+        assertTrue(composeRule.onAllNodes(hasStateDescription("未读")).fetchSemanticsNodes().isNotEmpty())
+        composeRule.onNodeWithTag("chapter-update-marker-200", useUnmergedTree = true).assertExists()
+        composeRule.onNodeWithTag("chapter-update-marker-198", useUnmergedTree = true).assertExists()
+        composeRule.onNodeWithTag("chapter-unread-marker-197", useUnmergedTree = true).assertExists()
+        composeRule.onNodeWithTag("chapter-unread-marker-200", useUnmergedTree = true).assertDoesNotExist()
+        val updateMarkerBounds = composeRule
+            .onNodeWithTag("chapter-update-marker-200", useUnmergedTree = true)
+            .fetchSemanticsNode()
+            .boundsInRoot
+        val unreadMarkerBounds = composeRule
+            .onNodeWithTag("chapter-unread-marker-197", useUnmergedTree = true)
+            .fetchSemanticsNode()
+            .boundsInRoot
+        assertTrue(kotlin.math.abs(updateMarkerBounds.width - unreadMarkerBounds.width) <= 1f)
+        assertTrue(kotlin.math.abs(updateMarkerBounds.height - unreadMarkerBounds.height) <= 1f)
+        assertTrue(composeRule.onAllNodes(hasStateDescription("有更新，未读")).fetchSemanticsNodes().isNotEmpty())
+
+        composeRule.onNodeWithText("仅看未读").performClick()
+        composeRule.onNodeWithText("第1章 · 灯影").assertDoesNotExist()
+        composeRule.onNodeWithText("第12章 · 旧信").assertExists()
+    }
+
+
+    private fun openBookDetail() {
+        bottommostNode("纸灯巷的守夜人，长按多选，移动可拖动至快捷书架").performClick()
+        composeRule.onNodeWithText("书籍详情").assertExists()
+    }
+
     private fun createUserCollection(name: String) {
         composeRule.onNodeWithContentDescription("新建收藏夹").performClick()
         composeRule.onNode(hasSetTextAction()).performTextInput(name)
@@ -1011,7 +1167,11 @@ class LibraryShortcutDragInstrumentedTest {
         composeRule.waitForIdle()
     }
 
-    private fun dragToDelete(sourceDescription: String, sourceIndex: Int = 0) {
+    private fun dragToDelete(
+        sourceDescription: String,
+        sourceIndex: Int = 0,
+        preHoldNudge: Offset = Offset(36f, 0f),
+    ) {
         val source = composeRule.onAllNodesWithContentDescription(sourceDescription)[sourceIndex]
         val sourceBounds = source.fetchSemanticsNode().boundsInRoot
         val targetBounds = composeRule
@@ -1023,7 +1183,7 @@ class LibraryShortcutDragInstrumentedTest {
 
         source.performTouchInput {
             down(center)
-            moveTo(center + Offset(36f, 0f), 160)
+            moveTo(center + preHoldNudge, 160)
             advanceEventTime(500)
             moveTo(center + delta, 300)
             up()
@@ -1038,6 +1198,7 @@ class LibraryShortcutDragInstrumentedTest {
         dropAfterTarget: Boolean = false,
         sourceIndex: Int = 0,
         targetIndex: Int = 0,
+        preHoldNudge: Offset = Offset(36f, 0f),
     ) {
         val source = composeRule.onAllNodesWithContentDescription(sourceDescription)[sourceIndex]
         val target = if (targetText != null) {
@@ -1056,13 +1217,23 @@ class LibraryShortcutDragInstrumentedTest {
 
         source.performTouchInput {
             down(center)
-            moveTo(center + Offset(36f, 0f), 160)
+            moveTo(center + preHoldNudge, 160)
             advanceEventTime(500)
             moveTo(center + delta, 300)
             up()
         }
         composeRule.waitForIdle()
     }
+
+    private fun bottommostNode(description: String) = composeRule
+        .onAllNodesWithContentDescription(description)
+        .let { nodes ->
+            val index = nodes.fetchSemanticsNodes()
+                .withIndex()
+                .maxBy { (_, node) -> node.boundsInRoot.top }
+                .index
+            nodes[index]
+        }
 
     private fun storedList(key: String): List<String> {
         val encoded = JSONObject(stateFile.readText())

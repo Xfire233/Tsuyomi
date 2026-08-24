@@ -9,4 +9,4 @@
 
 ### Added
 
-- Gate 0/1 extension development, security, packaging, and Wenku8 acceptance contracts. Runtime extension code starts in Gate 2.
+- Phase 0/1 extension development, security, packaging, and Wenku8 acceptance contracts. Runtime extension code starts in Phase 2.

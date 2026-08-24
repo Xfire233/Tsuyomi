@@ -5,7 +5,7 @@
 
 ## Scope and invariants
 
-The initial reader serves normalized remote chapters and forum-thread pages. Local EPUB/TXT import is not a Gate 0–3 dependency, but it must later produce the same `ReaderDocument`; it must not introduce a second renderer or progress model.
+The initial reader serves normalized remote chapters and forum-thread pages. Local EPUB/TXT import is not a Phase 0–3 dependency, but it must later produce the same `ReaderDocument`; it must not introduce a second renderer or progress model.
 
 The following values are never durable progress: rendered page index, dual-page spread index, pixel scroll position, scroll extent, image load state, or layout cache identity. The only durable truth is the semantic locator described in ADR 0015.
 

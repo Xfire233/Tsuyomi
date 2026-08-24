@@ -37,7 +37,7 @@ const manifest = {
   hostApi: { minInclusive: '1.1.0', maxExclusive: '2.0.0' },
   entry: entryPath,
   integrity: { algorithm: 'sha256', contentDigest, files },
-  signing: { algorithm: 'Ed25519', keyId: 'tsuyomi-gate2-fixture', signatureFile: 'signature.ed25519' },
+  signing: { algorithm: 'Ed25519', keyId: 'tsuyomi-phase2-fixture', signatureFile: 'signature.ed25519' },
   capabilities: {
     network: {
       origins: ['https://www.wenku8.net'],

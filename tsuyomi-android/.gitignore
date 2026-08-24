@@ -39,7 +39,7 @@ keystore.properties
 *.trace
 *.profraw
 
-# Local-only Gate 4 atlas evidence and browser reviewer
+# Local-only Phase 4 atlas evidence and browser reviewer
 # Product prototype source stays reviewable; generated pixels, reviewer UI, and exports do not.
 /prototype/ui-atlas/src/screenshotTestDebug/
 /prototype/ui-atlas/render-browser-atlas.bat
