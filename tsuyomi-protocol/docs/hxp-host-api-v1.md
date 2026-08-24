@@ -3,7 +3,7 @@
 
 # HXP Host API v1: network boundary
 
-This document freezes the network portion of Host API v1. It is normative for Android hosts and HXP extensions once Gate 0 conformance fixtures are added. It does not grant a source API or a WebView object to extension code.
+This document freezes the network portion of Host API v1. It is normative for Android hosts and HXP extensions once Phase 0 conformance fixtures are added. It does not grant a source API or a WebView object to extension code.
 
 ## Invocation
 
@@ -99,4 +99,4 @@ This method does not expose a WebView or cookies. A separate host-controlled UI 
 
 ## Conformance minimum
 
-Gate 0 fixtures must prove: origin and redirect rejection; header/body/response limits; each decoder; semantic alias cache isolation; offline stale marker; cancellation; error redaction; no extension cookie observation; and no implicit WebView/remote-write transition.
+Phase 0 fixtures must prove: origin and redirect rejection; header/body/response limits; each decoder; semantic alias cache isolation; offline stale marker; cancellation; error redaction; no extension cookie observation; and no implicit WebView/remote-write transition.

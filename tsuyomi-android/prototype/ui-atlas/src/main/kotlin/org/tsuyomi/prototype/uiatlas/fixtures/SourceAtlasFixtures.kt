@@ -101,16 +101,9 @@ object SourceAtlasFixtures {
         val number: Int,
         val title: String,
         val read: Boolean,
+        val updated: Boolean,
         val downloaded: Boolean,
-    ) {
-        /** Row caption per constitution §5.2 slot 4 ordering: state flags as text. */
-        val statusLabel: String
-            get() = buildList {
-                if (number == CURRENT_CHAPTER) add("当前阅读")
-                if (read) add("已读")
-                if (downloaded) add("已下载")
-            }.joinToString(" · ")
-    }
+    )
 
     const val DIRECTORY_TOTAL = 200
     const val CURRENT_CHAPTER = 12
@@ -129,6 +122,7 @@ object SourceAtlasFixtures {
             number = number,
             title = "第${number}章 · ${chapterMotifs[index % chapterMotifs.size]}",
             read = number < CURRENT_CHAPTER,
+            updated = number > DIRECTORY_TOTAL - 3,
             downloaded = number in 1..24,
         )
     }
@@ -220,6 +214,9 @@ object SourceAtlasFixtures {
 
     /** Page inside the seek target chapter shown by the static WYSIWYG preview strip. */
     const val SEEK_TARGET_PAGE = 3
+
+    /** Current-chapter percentage used by the Standard Reader scrub-preview evidence. */
+    const val SEEK_TARGET_PROGRESS = 68
 
     /** Title of the seek target chapter, derived from the same motif table as [chapters]. */
     val seekTargetTitle: String

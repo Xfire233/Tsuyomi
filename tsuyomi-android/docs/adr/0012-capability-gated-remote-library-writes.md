@@ -34,8 +34,8 @@ Transport acceptance is the cancellation linearization point. Proven pre-accept 
 
 ## Migration impact
 
-Gate 3 ports only the public typed Wenku8 fixture read/add path: explicit remote-favourites pull plus default-off, direct-user, add-only writeback. ESJZone, remote remove/move/folder actions and all automatic or bidirectional synchronization remain later Gate 4 scope. Legacy writeback settings are not imported or enabled automatically.
+Phase 3 ports only the public typed Wenku8 fixture read/add path: explicit remote-favourites pull plus default-off, direct-user, add-only writeback. ESJZone, remote remove/move/folder actions and all automatic or bidirectional synchronization remain later Phase 4 scope. Legacy writeback settings are not imported or enabled automatically.
 
 - A package without the declared operation, exact approved policy/context or exact one-use token cannot invoke it; native transport records zero calls. Adding/changing an operation policy during update blocks until approved, while a same-publisher policy-identical update preserves the explicit setting.
 - Writeback is off after fresh install, transfer import and Hikari import, and all updates except a preserving update.
-- Gate 3 covers remote-favourites read, add, grant denial, malicious read-context/redirect attempts, lifecycle linearization, pre/post-accept cancellation, partial/ambiguous failure, source/API change and zero-implicit-write paths. Later Gate 4 evidence covers remove and move.
+- Phase 3 covers remote-favourites read, add, grant denial, malicious read-context/redirect attempts, lifecycle linearization, pre/post-accept cancellation, partial/ambiguous failure, source/API change and zero-implicit-write paths. Later Phase 4 evidence covers remove and move.

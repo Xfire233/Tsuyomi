@@ -29,6 +29,7 @@ Before opening a PR, run the checks relevant to each changed path:
 ```text
 python -m reuse lint
 python tools/check_repository.py
+python -m unittest tools/check_repository_test.py
 python -m unittest discover -s tools/skills/tsuyomi-android-review/scripts -p '*_test.py'
 
 cd tsuyomi-protocol

@@ -38,12 +38,12 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.saveable.rememberSaveable
-import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.unit.dp
 import org.tsuyomi.prototype.uiatlas.components.AtlasIcons
 import org.tsuyomi.prototype.uiatlas.model.AtlasContext
@@ -211,7 +211,9 @@ fun AtlasApp(
         setChromeVisible = { readerChromeVisible = it },
     )
     val readerImmersiveActive = route == AtlasRoute.BOOK_READER && readerImmersive && !readerChromeVisible
-    SideEffect { onReaderImmersiveChanged(readerImmersiveActive) }
+    LaunchedEffect(readerImmersiveActive) {
+        onReaderImmersiveChanged(readerImmersiveActive)
+    }
     LaunchedEffect(route) {
         reviewOpen = false
     }
@@ -222,6 +224,7 @@ fun AtlasApp(
     BackHandler(enabled = currentStack().size > 1) { pop() }
 
     AtlasTheme(environment = environment) {
+        val showReaderReviewFab = LocalDensity.current.fontScale < 1.5f
         CompositionLocalProvider(
             LocalAtlasNavigation provides navigation,
             LocalAtlasReaderPresentation provides readerPresentation,
@@ -260,7 +263,7 @@ fun AtlasApp(
                             )
                         }
                     }
-                    if (route == AtlasRoute.BOOK_READER && !initial.capture && !readerImmersiveActive && !reviewOpen) {
+                    if (route == AtlasRoute.BOOK_READER && !initial.capture && !readerChromeVisible && !readerImmersiveActive && !reviewOpen && showReaderReviewFab) {
                         SmallFloatingActionButton(
                             onClick = { reviewOpen = true; readerChromeVisible = true },
                             modifier = Modifier

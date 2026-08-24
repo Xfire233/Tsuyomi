@@ -5,12 +5,12 @@
 
 - 日期：2026-08-13
 - 输入：`DESIGN_REFERENCE_REVIEW.md`、Flutter 参考项目 `hikari_novel_flutter`、RC2 Atlas `manifestSha256=1013fb35c0b566d2ad60cf8087dd7c3e7815c3995870f1ce2b7cdb184939d3`、`tsuyomi-atlas-review-bundle-0813.json`。
-- 性质：这是 RC2.1 设计与下一轮 fixture Atlas 的约束，不是 Gate 4 生产实现授权。
+- 性质：这是 RC2.1 设计与下一轮 fixture Atlas 的约束，不是 Phase 4 生产实现授权。
 - 纠正：上一版把 31 个项目压成“亮点/风险”，但没有把可复用的页面骨架、几何、状态语法和操作位置落实到每个 Tsuyomi 页面；因此虽然引用很多，Atlas 仍像独立猜测。本版以“参考事实 → 审阅问题 → Tsuyomi 具体合同”重做。
 
 ## 0. 文档职责与最新审阅
 
-本文件从本轮起只保存**审阅原件、归一化意见和 supersession 历史**，不再作为第二份产品 UI 合同。当前可见 UI 的唯一执行合同是 `UI_CONSTITUTION.md` 的 Active constraint spine；Atlas 只证明该 spine，Gate 4 只管理范围和授权。
+本文件从本轮起只保存**审阅原件、归一化意见和 supersession 历史**，不再作为第二份产品 UI 合同。当前可见 UI 的唯一执行合同是 `UI_CONSTITUTION.md` 的 Active constraint spine；Atlas 只证明该 spine，Phase 4 只管理范围和授权。
 
 最新绑定审阅：`build/atlas-review/tsuyomi-atlas-b0417a5d6ea7-review.json`，SHA-256 `4886767c7ab846f07e8c9afe59d0e1f82e2dc10f9843cd378792f8a9686a5c49`，manifest `b0417a5d6ea76e07c5d06cf93524c2d92defd3089186d133aaba7fe1d8a3f73b`。新增 stable IDs：`B041-B`、`B041-D`、`B041-H`。
 
@@ -135,8 +135,8 @@ Coverage IDs are stable references to non-empty review inputs. `I-*` = initial b
 
 | Review IDs | Normalized obligation / supersession | Active contract | Evidence assertion |
 |---|---|---|---|
-| `I-D19` | Read Later remains an independent presence origin | Constitution §0/§5.5; Gate 4 D19/D20 | S2 system membership; S4 folder/membership mutation |
-| `I-D32`, `I-D33`, `I-F09-search`, `R2-search`, `M-search`, `M-d`, `L-d` | One shared search route; inert draft; one-submit concurrent basic search; one progress/flow; exact identity only; D33 advanced filters explicitly superseded/deferred | §1.2 Search; Constitution §6.3a; Gate 4 D32/D33 | S10; D board denylist for filters, lanes, status/tutorial prose |
+| `I-D19` | Read Later remains an independent presence origin | Constitution §0/§5.5; Phase 4 D19/D20 | S2 system membership; S4 folder/membership mutation |
+| `I-D32`, `I-D33`, `I-F09-search`, `R2-search`, `M-search`, `M-d`, `L-d` | One shared search route; inert draft; one-submit concurrent basic search; one progress/flow; exact identity only; D33 advanced filters explicitly superseded/deferred | §1.2 Search; Constitution §6.3a; Phase 4 D32/D33 | S10; D board denylist for filters, lanes, status/tutorial prose |
 | `I-Q1` | Restrained Standard motion; E-ink/reduced immediate | Constitution §11 | 30/60fps motion matrix; S9 working-state profile pair |
 | `I-Q2`, `I-Q3`, `I-F01-library`, `I-F02-library`, `R2-library`, `M-library`, `M-a`, `M-f`, `L-a` | High-density cover-preserving Library; regular-phone fixed three columns; equal cards; compact/list alternatives; discoverable shortcut shelf | §1.2 Library; Constitution §5.2–5.6 | A board geometry assertions; S1/S3/S15 |
 | `I-Q4` | Real empty state with restrained monochrome emoticon, reason and recovery | Handoff §2.1; Constitution §9.1 | S14 empty-state inventory; F2 |
@@ -151,9 +151,9 @@ Coverage IDs are stable references to non-empty review inputs. `I-*` = initial b
 | `I-F05-collections`, `I-F06-collection-templates`, `R2-collections`, `R2-collection-templates`, `R2-collection`, `M-collections`, `M-collection-templates`, `M-collection` | Collections are Library peers with three layouts; template manager removed; SystemNodes hide/rebuild; two-level hierarchy; desktop-style creation/manual order | Handoff §1.2/§5.1–5.2; Constitution §5.5; ADR 0016 amendment | S1–S4; A board |
 | `R2-collection-rule`, `M-collection-rule` | Database-backed rule values use pickers; create entry/help are discoverable; drafts/validation survive | Handoff §5.2; Constitution §6.3 | S11 |
 | `R2-tags`, `M-tags`, `M-g`, `L-g` | Local/source tabs, visible compact/list switch, compact chips without counts, list rows with book counts, no `·` or teaching prose | Constitution Board G | S13 + G board |
-| `R2-mirror`, `M-mirror` | Website/local ownership never blurs; local partition appears only after explicit mirror-page creation and never remote-writes | Handoff §1.2/§5.2; Gate 4 D24 | S8 |
+| `R2-mirror`, `M-mirror` | Website/local ownership never blurs; local partition appears only after explicit mirror-page creation and never remote-writes | Handoff §1.2/§5.2; Phase 4 D24 | S8 |
 | `I-F07-book-detail`, `R2-book-detail`, `M-book-detail`, `M-b`, `L-b` | Compact Detail whitelist; rating fixed in the header at cover right; tags/dynamic split; no repeated source; cache top-level; full chapters; standard icons; direction-driven single FAB | Constitution Board B | S5 + B board |
-| `I-F08-directory`, `R2-directory`, `M-directory` | Routine directory removed; chapters integrated; sorting/download/cache state use standard glyph/action slots | Handoff §5.4; Gate 4 canonical graph | S5 |
+| `I-F08-directory`, `R2-directory`, `M-directory` | Routine directory removed; chapters integrated; sorting/download/cache state use standard glyph/action slots | Handoff §5.4; Phase 4 canonical graph | S5 |
 | `R2-reader`, `M-reader`, `M-c`, `L-c` | Center-tap chrome; direct progress rail; tap-to-jump; semantic locator truth and exactly one final commit remain required; preview presentation is deferred | Constitution Board C / §14 | S6 physical-device evidence later; no current C approval frame |
 | `R2-reader-settings`, `M-reader-settings`, `M-h`, `L-h`, `B041-H` | Bottom-level settings entry and complete inventory remain. Standard keeps one partial/full sheet with four first-viewport controls; E-ink replaces quick/group pages with one dedicated full-screen AppBar route showing all typography/page/navigation/device sections, two columns wide and stacked compact. | Handoff §1.2; Constitution Board H / §14.1 | S7 + H board |
 | `R2-browse`, `M-browse` | Browse uses one consistent real-M3 action hierarchy and sufficient density | Constitution Browse route / §6.4 | S17 |
@@ -395,7 +395,7 @@ Hikari Flutter 不计入上述 31 个清单项，但作为迁移需求基线单�
 - 搜索采用单一显式提交模型：输入只更新 query draft，不刷新结果、不访问本地仓库或网络；按搜索键后，同一 session 同时启动本地搜索与所选在线来源搜索。不得要求用户先搜本地再第二次确认在线。
 - 常态页面可见元素限于搜索 field/按钮、来源选择、布局动作、一个总进度指示和统一结果流。不得常驻显示操作教程、local-first 解释、exact identity 解释、来源调度说明或逐来源正常状态文字；这些内容只进入帮助页或无障碍描述。
 - 同一 exact `BookIdentity` 在内部合并；不同 identity 即使同名仍分开。单来源失败不得删除已返回项；失败以紧凑图标或按需详情呈现，不展开正常来源状态流水账。
-- 高级公共/本地/来源专属筛选以及 D33 descriptor UI 在 Atlas 与 Gate 4A 均暂缓；当前搜索结果仍支持三布局，选中摘要使用独立 label/value，不用 `·` 串。
+- 高级公共/本地/来源专属筛选以及 D33 descriptor UI 在 Atlas 与 Phase 4A 均暂缓；当前搜索结果仍支持三布局，选中摘要使用独立 label/value，不用 `·` 串。
 
 ### 5.7 Updates、Remote Library、Tags、Browse、Help
 
@@ -427,4 +427,4 @@ RC2.1-3 的 17 张图与绑定审阅保留为 rejected evidence，不在其文�
 
 ## 8. 当前授权边界
 
-本文件授权重新设计 fixture-only `:prototype:ui-atlas` 和同步设计文档；**不授权生产 Gate 4 提取、提交、推送、PR 或合并**。收藏夹模型已明确，不再需要为上述四项重复询问；若实现中出现新的远端写入语义、删除语义或数据迁移选择，再单独询问。
+本文件授权重新设计 fixture-only `:prototype:ui-atlas` 和同步设计文档；**不授权生产 Phase 4 提取、提交、推送、PR 或合并**。收藏夹模型已明确，不再需要为上述四项重复询问；若实现中出现新的远端写入语义、删除语义或数据迁移选择，再单独询问。

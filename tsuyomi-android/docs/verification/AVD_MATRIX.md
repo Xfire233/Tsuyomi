@@ -13,7 +13,7 @@
 - navigation：three-button 与 keyboard/DPAD 场景均验证
 - 启动：验收前 wipe data/cold boot；不得依赖 snapshot 中的应用状态
 
-SDK package 和 emulator 的实际 revision必须记录在 `docs/gates/GATE_N.md`；升级 revision 会使运行期证据失效并要求重跑。
+SDK package 和 emulator 的实际 revision 必须记录在 `docs/phases/PHASE_N.md`；升级 revision 会使运行期证据失效并要求重跑。
 
 ## AVD 配方
 
@@ -26,16 +26,16 @@ E-ink AVD 只证明 Android/Compose profile 行为，不证明实体面板 ghost
 
 ## 不可替代的竖屏基线
 
-每次 Gate 或 PR 的运行期 AVD 验收必须在同一目标 head 上分别完成并记录以下两次独立验证：
+每个 Phase exit/admission gate 或 PR 的运行期 AVD 验收必须在同一目标 head 上分别完成并记录以下两次独立验证：
 
 | 验证 | AVD | 物理分辨率与方向 | profile | 最低证据 |
 |---|---|---|---|---|
 | 标准手机竖屏 | `Tsuyomi_API29` | `1080×2400` portrait | forced Standard | 受影响用户流完成；记录 `wm size`、`wm density`、方向、`font_scale` 和至少一张截图 SHA-256 |
 | E-ink 竖屏 | `Tsuyomi_EInk_API29` | `1264×1680` portrait | forced E-ink | 同一受影响用户流完成；记录 `wm size`、`wm density`、方向、`font_scale` 和至少一张截图 SHA-256 |
 
-两条记录必须分别列入 `docs/gates/GATE_N.md`，不能用同一 AVD、profile 切换、Layoutlib golden、横屏、分屏或另一种分辨率替代。横屏与分屏仍是附加必测窗口；它们不抵扣上述两次竖屏验收。缺少任一竖屏基线即阻塞 Gate/PR 准入。
+两条记录必须分别列入 `docs/phases/PHASE_N.md`，不能用同一 AVD、profile 切换、Layoutlib golden、横屏、分屏或另一种分辨率替代。横屏与分屏仍是附加必测窗口；它们不抵扣上述两次竖屏验收。缺少任一竖屏基线即阻塞对应 admission gate / PR 准入。
 
-用 `tools/avd/Create-GateAvds.ps1` 创建；脚本只读取 `ANDROID_SDK_ROOT`/`ANDROID_HOME`，不写入用户路径到仓库。
+用 `tools/avd/Create-ReviewAvds.ps1` 创建；脚本只读取 `ANDROID_SDK_ROOT`/`ANDROID_HOME`，不写入用户路径到仓库。
 
 ## 每次验收矩阵
 
@@ -61,4 +61,4 @@ adb shell settings get system font_scale
 adb shell getprop ro.build.version.sdk
 ```
 
-执行后把命令、结果摘要和截图 SHA-256 写入 Gate evidence；标准手机竖屏和 E-ink 竖屏必须使用独立小节或表格行。`build/acceptance` 只作本地暂存。
+执行后把命令、结果摘要和截图 SHA-256 写入 Phase evidence；标准手机竖屏和 E-ink 竖屏必须使用独立小节或表格行。`build/acceptance` 只作本地暂存。

@@ -52,7 +52,7 @@ class SourceInstallController(
         ),
     )
     private val installer = ExtensionInstaller(
-        verifier = HxpArchiveVerifier(Gate2LocalTrust.resolver()),
+        verifier = HxpArchiveVerifier(Phase2LocalTrust.resolver()),
         store = store,
         stagingDirectory = stagingDirectory,
     )

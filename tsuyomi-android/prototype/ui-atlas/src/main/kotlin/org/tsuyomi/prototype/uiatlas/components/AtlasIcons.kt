@@ -38,6 +38,7 @@ object AtlasIcons {
     val FolderOpen = Icons.Outlined.FolderOpen
     val Document = Icons.Outlined.Description
     val ReadLater = Icons.Outlined.BookmarkBorder
+    val Bookmarked = Icons.Outlined.BookmarkAdded
     val Updates = Icons.Outlined.NotificationsActive
     val Compass = Icons.Outlined.Explore
     val More = Icons.Outlined.MoreHoriz
@@ -54,6 +55,7 @@ object AtlasIcons {
     val MoveEarlier = Icons.AutoMirrored.Outlined.ArrowBack
     val MoveLater = Icons.AutoMirrored.Outlined.ArrowForward
     val Cache = Icons.Outlined.Download
+    val Downloaded = Icons.Outlined.DownloadDone
     val Filter = Icons.Outlined.FilterList
     val Sort = Icons.AutoMirrored.Outlined.Sort
     val Refresh = Icons.Outlined.Refresh

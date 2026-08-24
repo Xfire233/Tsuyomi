@@ -31,7 +31,7 @@ import org.tsuyomi.core.ui.theme.TsuyomiSpacing
  * disabled at the first/last page; loading and error are persistent inline states, never
  * transient. The status is a polite live region reading "第 x 页，共 y 页".
  *
- * Gate 1 validates this component through previews and test hosts only; no fake long list is
+ * Phase 1 validates this component through previews and test hosts only; no fake long list is
  * shipped in the app.
  */
 @Composable

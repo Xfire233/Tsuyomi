@@ -39,4 +39,4 @@ The complete UTF-8 JSON document is limited to 32 MiB before parsing. Library en
 
 Each host may retain a complete native backup containing implementation-specific state. A host that ever includes credentials must require explicit opt-in and password encryption; Tsuyomi Android v1 does not import legacy credentials. Native backups are not portable protocol artifacts.
 
-The normative JSON Schema and semantic conformance fixtures cover progress conflict resolution, deterministic library ordering, duplicate identities, and size limits. Reader-document and locator schemas/fixtures are available separately; HXP package cryptographic vectors remain Gate 0 work. No secret-bearing field may be added.
+The normative JSON Schema and semantic conformance fixtures cover progress conflict resolution, deterministic library ordering, duplicate identities, and size limits. Reader-document and locator schemas/fixtures are available separately; HXP package cryptographic vectors remain Phase 0 work. No secret-bearing field may be added.

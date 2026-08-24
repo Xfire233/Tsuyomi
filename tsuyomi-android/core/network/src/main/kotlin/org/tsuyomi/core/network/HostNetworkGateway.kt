@@ -104,7 +104,7 @@ class HostNetworkException(
 class HostNetworkGateway(
     private val transport: HostHttpTransport,
     private val cache: HostNetworkCache = InMemoryHostNetworkCache(),
-    private val directActionTokens: DirectActionTokenRegistry = DirectActionTokenRegistry.process,
+    private val directActionTokens: DirectActionTokenRegistry = DirectActionTokenRegistry(),
 ) {
     private val cookieJar = SourceCookieJar()
 
@@ -259,7 +259,7 @@ class HostNetworkGateway(
             if (response.status !in REDIRECT_STATUSES) return response
             val location = response.headers.entries.firstOrNull { it.key.equals("location", ignoreCase = true) }?.value
                 ?: return response
-            if (++redirects > 5) throw HostNetworkException(HostNetworkError.REDIRECT_LIMIT)
+            if (++redirects > MAX_REDIRECTS) throw HostNetworkException(HostNetworkError.REDIRECT_LIMIT)
             url = try {
                 parseAllowedUri(url.resolve(location).toString(), grant)
             } catch (_: HostNetworkException) {
@@ -400,6 +400,7 @@ class HostNetworkGateway(
 
     private companion object {
         const val MAX_BODY_BYTES = 64 * 1024
+        const val MAX_REDIRECTS = 5
         val UTF8_BOM = byteArrayOf(0xef.toByte(), 0xbb.toByte(), 0xbf.toByte())
         val REQUEST_HEADER_ALLOWLIST = setOf("accept", "accept-language", "if-none-match", "if-modified-since")
         val REDIRECT_STATUSES = setOf(301, 302, 303, 307, 308)

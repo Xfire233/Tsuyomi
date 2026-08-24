@@ -1,0 +1,9 @@
+# SPDX-FileCopyrightText: 2026 Tsuyomi Contributors
+# SPDX-License-Identifier: Apache-2.0
+
+profile = "medium"
+report_ignore = "git-info-exclude"
+
+exclude = [
+  "tsuyomi-android/source/quickjs-runtime/src/main/cpp/quickjs-ng/**",
+]

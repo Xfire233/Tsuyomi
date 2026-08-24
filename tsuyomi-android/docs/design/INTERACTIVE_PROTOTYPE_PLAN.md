@@ -5,7 +5,7 @@
 
 Status: **FINAL — revised through user decision `IP-07` on 2026-08-20.**
 
-This plan implements only the isolated `:prototype:ui-atlas` debug application. It does not authorize production Gate 4 code, production persistence, network/source execution, commits, pushes, PRs, merges, or extraction into production modules.
+This plan implements only the isolated `:prototype:ui-atlas` debug application. It does not authorize production Phase 4 code, production persistence, network/source execution, commits, pushes, PRs, merges, or extraction into production modules.
 
 ## 1. Goal and deliverable
 
@@ -38,7 +38,7 @@ Product-visible behavior follows, in order:
 
 1. `docs/design/UI_CONSTITUTION.md` Active constraint spine;
 2. compatible detailed rules in that Constitution;
-3. `docs/gates/GATE_4.md` scope, sequencing and safety boundaries;
+3. `docs/phases/PHASE_4.md` scope, sequencing and safety boundaries;
 4. `docs/design/UI_ATLAS.md` evidence mechanics;
 5. this plan only where the documents above leave an implementation boundary open.
 
@@ -48,7 +48,7 @@ This plan may choose prototype mechanics, review tooling and deterministic simul
 
 `tools/skills/tsuyomi-android-review/SKILL.md` is the only runbook. `review-policy.json` is the only machine-readable source for active/deferred profiles. This plan owns prototype architecture and acceptance behavior, not commands, tool fallback order, or per-run evidence selection.
 
-R1 still accounts for all 28 nodes and every affected obligation. During `gate4-standard-first`, R2–R4 execute routine design/review only on Standard; E-ink obligations remain represented but deferred. Workflow-only changes stop after R1, and an empty delta never upgrades review state.
+R1 still accounts for all 28 nodes and every affected obligation. During `phase4-standard-first`, R2–R4 execute routine design/review only on Standard; E-ink obligations remain represented but deferred. Workflow-only changes stop after R1, and an empty delta never upgrades review state.
 
 ## 3. Implemented-state constraints
 
@@ -294,7 +294,7 @@ Only scenarios valid for that action are shown. Scenario selection is debug meta
 
 ### 9.1 Review node identity and context
 
-`ReviewNodeCatalog.kt` is the single source of truth for review scope. Catalog version 2 contains 28 stable nodes covering all 20 route/surface rows, Reader high-risk work and cross-cutting tasks. Route changes resolve to a node; they do not imply that the node was reviewed.
+`ReviewNodeCatalog.kt` is the single source of truth for review scope. Catalog version 3 contains 28 stable nodes covering all 20 route/surface rows, Reader high-risk work and cross-cutting tasks. Version 3 makes B03's Standard Reader partial/full Sheet gesture and Back state machine explicit. Route changes resolve to a node; they do not imply that the node was reviewed.
 
 Opening or editing the reviewer captures read-only context metadata:
 
@@ -463,7 +463,7 @@ Acceptance: comments survive restart, v1 route comments migrate to successor nod
 
 ### Phase 7 — Self-review and APK delivery
 
-Execute the current runbook in `SKILL.md`; do not duplicate it here. During `gate4-standard-first`, a complete AI review accounts for all 28 nodes, 20 surfaces and 105 obligations on the Standard profile, reusing the designated evidence owner for each obligation rather than producing a duplicate PNG, hierarchy and Journey.
+Execute the current runbook in `SKILL.md`; do not duplicate it here. During `phase4-standard-first`, a complete AI review accounts for all 28 nodes, 20 surfaces and 105 obligations on the Standard profile, reusing the designated evidence owner for each obligation rather than producing a duplicate PNG, hierarchy and Journey.
 
 The delivery still binds one exact APK to build ID, R1 report, AI `PENDING` draft, selected Journey traces, review export/recovery state, permission check and installed-APK byte comparison. E-ink artifacts remain frozen and are absent from routine completion counts until the explicit restoration pass.
 
@@ -484,11 +484,11 @@ The plan was counter-reviewed against local-first execution, truthful mutation s
 |---|---|---|
 | `IP-01` | **Atomic JSON dual storage.** | Fake product data and review records use separate versioned `AtomicFile` snapshots in `noBackupFilesDir`. Both survive relaunch; fake-data reset and comment clear remain independent. No Room or DataStore. |
 | `IP-02` | **Compact review affordance.** | A debug edge control is available on ordinary routes without materially covering product content, hidden during capture and while Reader immersive chrome is absent. Standard uses a scrollable M3 sheet; E-ink uses an opaque full-screen page. |
-| `IP-03` | **Stable Review Graph nodes.** | Catalog version 2 owns 28 stable nodes. Each node has one comment, independent progress timestamps, verdict, author and separate visual/interaction evidence hashes across route states/profiles. |
+| `IP-03` | **Stable Review Graph nodes.** | Catalog version 3 owns 28 stable nodes. Each node has one comment, independent progress timestamps, verdict, author and separate visual/interaction evidence hashes across route states/profiles. B03 explicitly preserves the Standard Reader partial/full Sheet gesture and Back state machine. |
 | `IP-04` | **Experimental Reader seek-preview.** | Implement it for interaction evidence, retain semantic locator and single-commit assertions, and require physical-device human approval for presentation, ghosting and gesture comfort. |
 | `IP-05` | **Complete route-state scope.** | The debug APK covers 20 route/surface rows and 105 route-state obligations. A–H remains a fast visual-direction smoke set and never substitutes for full coverage. |
 | `IP-06` | **AI advisory, human authority.** | AI may operate the APK, attach evidence and write a pending draft. Only a human verdict may set `humanReviewedAt` or `approvedAt`; automation can be paused and handed off in the same state. |
-| `IP-07` | **Gate 4 Standard-first review freeze.** | Until the Gate 4 Standard UX milestone is complete and the user explicitly resumes E-ink work, routine design/review executes only Standard. All E-ink implementation, contracts, fixtures, node obligations and inventory remain intact and deferred. Restoration reconciles every accumulated change since the frozen build ID and runs the complete retained E-ink design/review scope; no E-ink readiness is implied during the freeze. |
+| `IP-07` | **Phase 4 Standard-first review freeze.** | Until the Phase 4 Standard UX milestone is complete and the user explicitly resumes E-ink work, routine design/review executes only Standard. All E-ink implementation, contracts, fixtures, node obligations and inventory remain intact and deferred. Restoration reconciles every accumulated change since the frozen build ID and runs the complete retained E-ink design/review scope; no E-ink readiness is implied during the freeze. |
 | `IP-08` | **ADB live human-review bridge.** | Manual SAF/share transfer is fallback, not the routine same-host path. Explicit in-app submission writes a current-build JSON payload plus a monotonic metadata-only signal in private no-backup storage. A host watcher validates policy, schema, build identity and SHA-256 before emitting an OMP event; it never infers approval or installs onto the human-review AVD without the batch-ready signal. |
 
 Resolved cross-cutting safeguards:

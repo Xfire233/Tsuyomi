@@ -147,13 +147,27 @@ Java_org_tsuyomi_source_quickjsruntime_QuickJsNative_create(
 }
 
 extern "C" JNIEXPORT void JNICALL
+Java_org_tsuyomi_source_quickjsruntime_QuickJsNative_prepareOperation(
+    JNIEnv* env,
+    jclass,
+    jlong nativeHandle,
+    jint wallTimeMillis
+) {
+    auto handle = fromHandle(nativeHandle);
+    if (handle == nullptr || handle->context == nullptr) {
+        throwStable(env, "CLOSED");
+        return;
+    }
+    beginOperation(handle.get(), wallTimeMillis);
+}
+
+extern "C" JNIEXPORT void JNICALL
 Java_org_tsuyomi_source_quickjsruntime_QuickJsNative_evaluateModule(
     JNIEnv* env,
     jclass,
     jlong nativeHandle,
     jbyteArray sourceValue,
-    jbyteArray filenameValue,
-    jint wallTimeMillis
+    jbyteArray filenameValue
 ) {
     auto handle = fromHandle(nativeHandle);
     if (handle == nullptr || handle->context == nullptr) {
@@ -164,7 +178,6 @@ Java_org_tsuyomi_source_quickjsruntime_QuickJsNative_evaluateModule(
     auto filename = byteArray(env, filenameValue);
     source.push_back(0);
     filename.push_back(0);
-    beginOperation(handle.get(), wallTimeMillis);
     JSValue result = JS_Eval(
         handle->context,
         reinterpret_cast<const char*>(source.data()),
@@ -187,8 +200,7 @@ Java_org_tsuyomi_source_quickjsruntime_QuickJsNative_callJson(
     jclass,
     jlong nativeHandle,
     jbyteArray functionNameValue,
-    jbyteArray argumentsJsonValue,
-    jint wallTimeMillis
+    jbyteArray argumentsJsonValue
 ) {
     auto handle = fromHandle(nativeHandle);
     if (handle == nullptr || handle->context == nullptr) {
@@ -199,7 +211,6 @@ Java_org_tsuyomi_source_quickjsruntime_QuickJsNative_callJson(
     auto argumentsJson = byteArray(env, argumentsJsonValue);
     functionName.push_back(0);
     argumentsJson.push_back(0);
-    beginOperation(handle.get(), wallTimeMillis);
 
     JSValue global = JS_GetGlobalObject(handle->context);
     JSValue extension = JS_GetPropertyStr(handle->context, global, "tsuyomiExtension");

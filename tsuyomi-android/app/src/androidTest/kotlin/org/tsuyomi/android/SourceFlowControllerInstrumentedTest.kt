@@ -47,6 +47,7 @@ class SourceFlowControllerInstrumentedTest {
     private val context = InstrumentationRegistry.getInstrumentation().targetContext
     private lateinit var database: TsuyomiDatabase
     private lateinit var library: RoomLibraryRepository
+    private lateinit var directActionTokens: DirectActionTokenRegistry
 
     @Before
     fun setUp() {
@@ -55,6 +56,7 @@ class SourceFlowControllerInstrumentedTest {
             .allowMainThreadQueries()
             .build()
         library = RoomLibraryRepository(database)
+        directActionTokens = DirectActionTokenRegistry()
     }
 
     @After
@@ -165,7 +167,7 @@ class SourceFlowControllerInstrumentedTest {
         val session = FakeSession(
             detail = { SourceBookDetail(it, "fixture", emptyList(), "连载中") },
             addRemote = { remoteBookId, token ->
-                DirectActionTokenRegistry.process.accept(sourceId, remoteBookId, token)
+                directActionTokens.accept(sourceId, remoteBookId, token)
                 accepted.complete(Unit)
                 releaseResponse.await()
                 RemoteLibraryAddResult(selected.identity, RemoteLibraryAddOutcome.APPLIED)
@@ -203,7 +205,7 @@ class SourceFlowControllerInstrumentedTest {
         val secondBook = summary(sourceId, "3003", "第二本")
         val session = FakeSession(
             addRemote = { remoteBookId, token ->
-                DirectActionTokenRegistry.process.accept(sourceId, remoteBookId, token)
+                directActionTokens.accept(sourceId, remoteBookId, token)
                 accepted.complete(Unit)
                 releaseResponse.await()
                 RemoteLibraryAddResult(firstBook.identity, RemoteLibraryAddOutcome.APPLIED)
@@ -248,7 +250,7 @@ class SourceFlowControllerInstrumentedTest {
             addRemote = { remoteBookId, token ->
                 transportEntered.complete(Unit)
                 releaseAcceptance.await()
-                DirectActionTokenRegistry.process.accept(sourceId, remoteBookId, token)
+                directActionTokens.accept(sourceId, remoteBookId, token)
                 RemoteLibraryAddResult(selected.identity, RemoteLibraryAddOutcome.APPLIED)
             },
         )
@@ -286,7 +288,7 @@ class SourceFlowControllerInstrumentedTest {
             addRemote = { remoteBookId, token ->
                 transportEntered.complete(Unit)
                 releaseAcceptance.await()
-                DirectActionTokenRegistry.process.accept(sourceId, remoteBookId, token)
+                directActionTokens.accept(sourceId, remoteBookId, token)
                 RemoteLibraryAddResult(selected.identity, RemoteLibraryAddOutcome.APPLIED)
             },
         )
@@ -350,7 +352,7 @@ class SourceFlowControllerInstrumentedTest {
         val session = FakeSession(
             addRemote = { remoteBookId, token ->
                 calls.incrementAndGet()
-                DirectActionTokenRegistry.process.accept(sourceId, remoteBookId, token)
+                directActionTokens.accept(sourceId, remoteBookId, token)
                 transportEntered.complete(Unit)
                 releaseResponse.await()
                 RemoteLibraryAddResult(selected.identity, RemoteLibraryAddOutcome.APPLIED)
@@ -486,7 +488,7 @@ class SourceFlowControllerInstrumentedTest {
             detail = { SourceBookDetail(it, "fixture", emptyList(), "连载中") },
             addRemote = { remoteBookId, token ->
                 calls += 1
-                val binding = DirectActionTokenRegistry.process.accept(sourceId, remoteBookId, token)
+                val binding = directActionTokens.accept(sourceId, remoteBookId, token)
                 acceptedReconciliationIds += binding.reconciliationId
                 assertEquals(RemoteReconciliationState.IN_FLIGHT.name, reconciliationState(binding.reconciliationId))
                 if (calls == 1) error("ambiguous response")
@@ -545,9 +547,20 @@ class SourceFlowControllerInstrumentedTest {
     ): SourceFlowController {
         val snapshotStore = SourceFlowSnapshotStore((context.applicationContext as TsuyomiApplication).preferencesDataStore)
         return if (openSession == null) {
-            SourceFlowController(context, library, snapshotStore)
+            SourceFlowController(
+                context = context,
+                library = library,
+                snapshotStore = snapshotStore,
+                directActionTokens = directActionTokens,
+            )
         } else {
-            SourceFlowController(context, library, snapshotStore, openSession)
+            SourceFlowController(
+                context = context,
+                library = library,
+                snapshotStore = snapshotStore,
+                directActionTokens = directActionTokens,
+                openSession = openSession,
+            )
         }
     }
 

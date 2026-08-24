@@ -49,5 +49,48 @@ class PrototypeBuildIdentityTest(unittest.TestCase):
             self.assertNotEqual(expected, r1.compute_prototype_build_id(root))
 
 
+class PhaseContractDetectionTest(unittest.TestCase):
+    def test_phase_four_contract_expands_all_review_nodes(self) -> None:
+        node_ids = ["L01", "B01", "S01", "M01", "X06"]
+
+        category, selected, reasons = r1.classify_change(
+            "tsuyomi-android/docs/phases/PHASE_4.md",
+            node_ids,
+        )
+
+        self.assertEqual("contract", category)
+        self.assertEqual(set(node_ids), selected)
+        self.assertEqual(["binding UI/review contract changed"], reasons)
+
+    def test_domain_classifiers_preserve_scope_precedence(self) -> None:
+        node_ids = [
+            "L01", "L08", "B01", "B03", "S01", "S04", "M02", "M03", "M04", "M05",
+            "X01", "X02", "X03", "X04", "X05", "X06",
+        ]
+        cases = (
+            (
+                "tsuyomi-android/source/quickjs-runtime/src/main/kotlin/Runtime.kt",
+                "runtime",
+                {"S01", "S04", "B01", "L08", "X05"},
+            ),
+            (
+                "tsuyomi-android/feature/library/src/androidTest/kotlin/LibraryTest.kt",
+                "evidence",
+                {"L01", "L08", "B01", "X01", "X02", "X04", "X05"},
+            ),
+            (
+                "tools/skills/tsuyomi-android-review/scripts/review_bridge.py",
+                "workflow",
+                {"X06"},
+            ),
+        )
+
+        for path, expected_category, expected_nodes in cases:
+            with self.subTest(path=path):
+                category, selected, _ = r1.classify_change(path, node_ids)
+                self.assertEqual(expected_category, category)
+                self.assertEqual(expected_nodes, selected)
+
+
 if __name__ == "__main__":
     unittest.main()

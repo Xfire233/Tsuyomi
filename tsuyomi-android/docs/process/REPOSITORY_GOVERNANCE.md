@@ -43,12 +43,13 @@ Monorepo 允许一个 PR 原子修改协议、生产者和消费者，但禁止�
 
 - 三个组件分别使用 SemVer；0.x 阶段仍必须明确 breaking change。
 - tag 使用组件前缀：`protocol-vX.Y.Z`、`extensions-vX.Y.Z`、`android-vX.Y.Z`。
-- Gate 基线使用单一 annotated tag：`gate-1-baseline`、`gate-2-baseline`，指向同时通过全部相关组件检查的 Monorepo 提交。
-- annotated tag 消息记录 Gate 文档、三个组件版本和制品摘要；tag 不移动。
+- Future delivery baselines use one annotated tag named `phase-N-baseline`, pointing to the Monorepo commit that passed every applicable component and admission/release gate.
+- Immutable historical tags `gate-1-baseline` and `gate-2-baseline` remain exact published facts and never move; they are not active naming templates.
+- Annotated tag messages record the owning Phase document, three component versions and artifact digest; tags do not move.
 
-## Gate 基线
+## Phase baseline
 
-`tsuyomi-android/docs/gates/GATE_N.md` 记录：
+`tsuyomi-android/docs/phases/PHASE_N.md` 记录：
 
 ```text
 monorepo Git SHA
@@ -77,7 +78,7 @@ android versionName/versionCode + APK digest
 
 优先使用 `git revert`，不重写公共历史。
 
-1. 定位最近通过的 Gate/release tag。
+1. 定位最近通过的 Phase/release tag；历史回退点可能仍是不可变的 `gate-1-baseline` 或 `gate-2-baseline`。
 2. 回退包含问题的 Monorepo 提交；若提交跨组件，整体 revert 保持原子兼容。
 3. 数据库/文件格式只能回退到明确支持的版本；若 downgrade 不安全，保留数据并回退功能入口，不执行破坏性降级。
 4. 重跑根级 required checks 和受影响组件检查。
@@ -85,13 +86,13 @@ android versionName/versionCode + APK digest
 
 每个新增持久化 schema、Host API 或 `.hxp` 格式都必须在设计阶段写出 forward migration、rollback boundary 和不可逆条件。
 
-## 首次公开基线
+## 首次公开基线（历史记录）
 
-首次 push 前：
+首次公开 push 使用以下流程；它不再是未来 baseline 命名模板：
 
 1. 私有旧历史只保存为根目录 `.local/history/*.bundle`，不得上传；
 2. 删除嵌套 `.git` 和子目录无效 GitHub workflow；
 3. 从干净文件快照创建单一根提交，确保公开历史不含凭据、本机路径、辅助开发会话或私有审阅记录；
 4. 运行根级 REUSE/制品检查及三个组件的全部相关测试；
-5. 记录一个 Monorepo SHA 与组件/制品摘要并创建新的 `gate-1-baseline` annotated tag；
+5. 记录一个 Monorepo SHA 与组件/制品摘要；历史上创建了不可移动的 `gate-1-baseline` annotated tag；
 6. 推送 `main` 和新 tag 后启用 branch protection、required checks 和 CODEOWNERS。

@@ -3,7 +3,7 @@
 
 ## Contract
 
-- Gate / issue:
+- Phase / checkpoint / issue:
 - User-visible behavior and non-goals:
 - Affected components and versions:
 - Rollback boundary:

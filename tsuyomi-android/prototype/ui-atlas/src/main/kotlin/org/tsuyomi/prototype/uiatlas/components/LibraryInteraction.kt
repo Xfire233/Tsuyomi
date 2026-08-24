@@ -12,6 +12,7 @@ import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.PressInteraction
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.foundation.gestures.Orientation
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -32,6 +33,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
@@ -481,6 +483,12 @@ private fun Rect.collectionDropBounds(): Rect = Rect(
     bottom = bottom - height * 0.10f,
 )
 
+private fun Offset.isDominantScrollMovement(orientation: Orientation, touchSlop: Float): Boolean {
+    val primary = kotlin.math.abs(if (orientation == Orientation.Horizontal) x else y)
+    val cross = kotlin.math.abs(if (orientation == Orientation.Horizontal) y else x)
+    return primary > touchSlop && primary >= cross
+}
+
 @Composable
 internal fun Modifier.libraryDragSource(
     payload: String,
@@ -490,80 +498,112 @@ internal fun Modifier.libraryDragSource(
     draggedBookIds: Set<String> = emptySet(),
     canRemove: Boolean = true,
     libraryReorderSource: Boolean = false,
-    tapStateKey: Int = 0,
     startDragOnLongPress: Boolean = false,
+    scrollOrientation: Orientation,
     bookId: String? = null,
     onTap: () -> Unit,
 ): Modifier {
     if (!enabled) return this
     val interactionSource = remember(subjectKey, coordinator) { MutableInteractionSource() }
     val indication = LocalIndication.current
+    val currentOnTap by rememberUpdatedState(onTap)
+    val currentStartDragOnLongPress by rememberUpdatedState(startDragOnLongPress)
     return onGloballyPositioned { coordinator.registerSource(subjectKey, it.boundsInWindow()) }
         .semantics { onClick { onTap(); true } }
         .graphicsLayer {
             alpha = if (coordinator.activeSubjectKey == subjectKey || bookId in coordinator.activeBookIds) 0.34f else 1f
         }
         .indication(interactionSource, indication)
-        .pointerInput(payload, subjectKey, coordinator, tapStateKey, interactionSource, startDragOnLongPress) {
+        .pointerInput(payload, subjectKey, coordinator, interactionSource, scrollOrientation) {
             coroutineScope gestureScope@{
                 awaitEachGesture {
                     val down = awaitFirstDown(requireUnconsumed = false)
+                    val dragOnLongPress = currentStartDragOnLongPress
                     val press = PressInteraction.Press(down.position)
                     interactionSource.tryEmit(press)
                     var current = down
                     var preHoldDistance = 0f
                     var started = false
-                    var longPressTriggered = false
+                    var longPressActivated = false
+                    var scrollGestureWon = false
                     var interactionFinished = false
+
+                    fun startDrag() {
+                        coordinator.start(
+                            subjectKey = subjectKey,
+                            payload = payload,
+                            localPosition = down.position,
+                            draggedBookIds = draggedBookIds,
+                            canRemove = canRemove,
+                            libraryReorderSource = libraryReorderSource,
+                        )
+                        val displacement = current.position - down.position
+                        if (displacement != Offset.Zero) coordinator.moveBy(displacement)
+                        started = true
+                    }
+
                     val longPressJob = this@gestureScope.launch {
                         delay(viewConfiguration.longPressTimeoutMillis)
+                        if (scrollGestureWon) return@launch
+                        longPressActivated = true
                         if (!interactionFinished) {
                             interactionSource.tryEmit(PressInteraction.Release(press))
                             interactionFinished = true
                         }
-                        if (!startDragOnLongPress && preHoldDistance <= viewConfiguration.touchSlop) {
-                            longPressTriggered = true
-                            coordinator.onLongPress(subjectKey)
+                        if (dragOnLongPress || preHoldDistance > viewConfiguration.touchSlop) {
+                            startDrag()
                         } else {
-                            coordinator.start(
-                                subjectKey = subjectKey,
-                                payload = payload,
-                                localPosition = down.position,
-                                draggedBookIds = draggedBookIds,
-                                canRemove = canRemove,
-                                libraryReorderSource = libraryReorderSource,
-                            )
-                            val displacement = current.position - down.position
-                            if (displacement != Offset.Zero) coordinator.moveBy(displacement)
-                            started = true
+                            coordinator.onLongPress(subjectKey)
                         }
                     }
                     try {
-                        while (current.pressed && !longPressTriggered) {
-                            current = awaitPointerEvent(PointerEventPass.Initial).changes.firstOrNull { it.id == down.id }
+                        while (current.pressed && !scrollGestureWon) {
+                            val change = awaitPointerEvent(PointerEventPass.Initial).changes
+                                .firstOrNull { it.id == down.id }
                                 ?: break
-                            val delta = current.positionChange()
-                            if (!started) {
-                                preHoldDistance += delta.getDistance()
-                            } else {
-                                current.consume()
-                                if (delta != Offset.Zero) coordinator.moveBy(delta)
+                            current = change
+                            val displacement = change.position - down.position
+                            preHoldDistance = displacement.getDistance()
+                            when {
+                                started -> {
+                                    val delta = change.positionChange()
+                                    change.consume()
+                                    if (delta != Offset.Zero) coordinator.moveBy(delta)
+                                }
+
+                                longPressActivated && preHoldDistance > viewConfiguration.touchSlop -> {
+                                    startDrag()
+                                    change.consume()
+                                }
+
+                                !longPressActivated && displacement.isDominantScrollMovement(
+                                    scrollOrientation,
+                                    viewConfiguration.touchSlop,
+                                ) -> {
+                                    scrollGestureWon = true
+                                    longPressJob.cancel()
+                                    if (!interactionFinished) {
+                                        interactionSource.tryEmit(PressInteraction.Cancel(press))
+                                        interactionFinished = true
+                                    }
+                                }
                             }
                         }
-                        if (!longPressTriggered) {
-                            if (!started) {
-                                longPressJob.cancel()
-                                if (!interactionFinished) {
-                                    if (preHoldDistance <= viewConfiguration.touchSlop) {
-                                        interactionSource.tryEmit(PressInteraction.Release(press))
-                                    } else {
-                                        interactionSource.tryEmit(PressInteraction.Cancel(press))
+                        if (!scrollGestureWon) {
+                            when {
+                                started -> coordinator.finish(viewConfiguration.touchSlop)
+                                !longPressActivated -> {
+                                    longPressJob.cancel()
+                                    if (!interactionFinished) {
+                                        if (preHoldDistance <= viewConfiguration.touchSlop) {
+                                            interactionSource.tryEmit(PressInteraction.Release(press))
+                                        } else {
+                                            interactionSource.tryEmit(PressInteraction.Cancel(press))
+                                        }
+                                        interactionFinished = true
                                     }
-                                    interactionFinished = true
+                                    if (preHoldDistance <= viewConfiguration.touchSlop) currentOnTap()
                                 }
-                                if (preHoldDistance <= viewConfiguration.touchSlop) onTap()
-                            } else {
-                                coordinator.finish(viewConfiguration.touchSlop)
                             }
                         }
                     } finally {

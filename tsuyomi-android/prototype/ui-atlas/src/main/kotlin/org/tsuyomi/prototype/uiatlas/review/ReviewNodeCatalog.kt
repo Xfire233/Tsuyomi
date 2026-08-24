@@ -37,7 +37,7 @@ data class ReviewNode(
 )
 
 object ReviewNodeCatalog {
-    const val VERSION = 2
+    const val VERSION = 3
 
     val nodes: List<ReviewNode> = listOf(
         node("L01", "混合书架", ReviewNodeFamily.LIBRARY, AtlasRoute.LIBRARY,
@@ -82,19 +82,19 @@ object ReviewNodeCatalog {
             human = listOf("本地整理不会修改网站是否真正易懂", "远端操作的风险感")),
         node("B01", "书籍详情", ReviewNodeFamily.BOOK_READER, AtlasRoute.BOOK_DETAIL,
             states(AtlasPageState.LOADING, AtlasPageState.CONTENT, AtlasPageState.ERROR, AtlasPageState.OFFLINE, AtlasPageState.MUTATION, AtlasPageState.UNRESOLVED, AtlasPageState.SELECTION, AtlasPageState.MODAL),
-            "评分、添加标签、稍后再读和缓存", "运行刷新、离线、错误与 unresolved", "操作章节选择、排序、过滤、跳转并进入 Reader 后返回",
-            visual = listOf("评分固定在 header", "标签、添加和稍后再读几何一致", "完整章节已整合且 FAB 不遮挡内容"),
-            human = listOf("主操作优先级与页面密度", "评分可发现性", "章节扫描效率和 FAB 干扰程度")),
+            "评分、加号标签、稍后再读和缓存", "运行刷新、离线、错误与 unresolved", "操作未读过滤、图标方向切换和右上角二级动作并进入 Reader 后返回",
+            visual = listOf("评分固定在 header", "实际标签后紧随同一行加号且不预留空行", "简介与目录模块边界清楚且视觉语法统一", "全文目录、总章数、未读筛选和排序整合在单一无边框目录头", "已读浅灰常规字重且未读深色加粗带前导圆点", "下载图标与当前章节标记层级明确", "移出书架与网站动作只在 overflow", "完整章节已整合且 FAB 不遮挡内容"),
+            human = listOf("主操作优先级与页面密度", "评分可发现性", "章节状态与排序方向能否一眼识别", "二级动作是否无重复且作用域明确")),
         node("B02", "Reader 基础阅读", ReviewNodeFamily.BOOK_READER, AtlasRoute.BOOK_READER,
             states(AtlasPageState.LOADING, AtlasPageState.CONTENT, AtlasPageState.ERROR, AtlasPageState.OFFLINE),
-            "中心点击显示 chrome", "前后翻页并切换滚动和分页", "操作目录、搜索、书签、immersive、文本和图片章节",
-            visual = listOf("正文不被栏遮挡", "点击区域、章节 ticks 和当前位置可见", "E-ink 无动态装饰"),
-            human = listOf("连续阅读舒适度", "点击区域误触与阅读节奏", "chrome 是否打断注意力")),
+            "中心点击无波纹地显示或隐藏 chrome", "使用上章、目录、设置和下章并切换最近阅读模式", "遍历纯文本、图文混排、回复流、搜索、书签和大图",
+            visual = listOf("140ms 淡入位移不打断正文", "顶部仅返回、标题、书签和搜索", "底部 Material Slider、章节位置和四个动作层级清楚", "隐藏 chrome 只保留 LinearProgressIndicator", "E-ink 冻结页面无变化"),
+            human = listOf("连续阅读舒适度", "点击区滚动仲裁与误触", "图文和回复流是否仍像一个阅读器", "chrome 是否打断注意力")),
         node("B03", "Reader 跳转与设置", ReviewNodeFamily.BOOK_READER, ReviewNodeKind.HIGH_RISK, AtlasRoute.BOOK_READER,
             states(AtlasPageState.CONTENT, AtlasPageState.MODAL),
-            "执行 seek hold、move、cancel、commit 和 return origin", "Standard 设置从 partial 拉到 full 并用 scrim 和 Back 关闭", "E-ink 打开全屏设置、遍历全部分组并返回",
-            visual = listOf("preview 与 commit 分离且只提交一次", "Standard 首屏四项完整", "E-ink 为不透明页面且无 sheet 手势"),
-            human = listOf("seek 信心和取消安全感", "真实设备触感与动画舒适度", "E-ink 残影、刷新和音量键")),
+            "拖动 Material Slider 预览并提交一次语义章节", "在目录、书签、搜索三页签间切换并跳转", "Standard 设置部分态向上拖动扩展同一 Sheet 且快速四项保持挂载；完整态向下拖动直接关闭，Back 返回快速层；再遍历排版、页面、导航和设备",
+            visual = listOf("preview 与 commit 分离且只提交一次", "目录从底部打开且当前章节可识别", "Standard 首屏四项与底部四按钮完整", "部分态/全高态保持同一 Sheet 和同一快速控件树", "全高下拉直接关闭且 Back 层级明确", "双页窗口约束明确"),
+            human = listOf("seek 信心和取消安全感", "底部目录的扫描效率", "上拉扩展与全高下拉关闭是否符合直觉", "真实设备触感与动画舒适度", "设置密度与可理解性")),
         node("S01", "浏览", ReviewNodeFamily.SOURCE, AtlasRoute.BROWSE,
             states(AtlasPageState.LOADING, AtlasPageState.CONTENT, AtlasPageState.EMPTY, AtlasPageState.ERROR, AtlasPageState.MUTATION),
             "搜索、导入、安装或更新来源", "打开来源、网站收藏和验证", "检查空态和错误态",

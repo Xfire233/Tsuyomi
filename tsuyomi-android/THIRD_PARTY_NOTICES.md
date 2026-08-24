@@ -3,7 +3,7 @@
 
 # Third-party notices
 
-Direct dependencies and checked-in build tools in the Gate 1 baseline are recorded below. Transitive artifacts are fixed by Gradle lock state and `gradle/verification-metadata.xml`; their license metadata remains available in the upstream artifacts.
+Direct dependencies and checked-in build tools in the Phase 1 baseline are recorded below. Transitive artifacts are fixed by Gradle lock state and `gradle/verification-metadata.xml`; their license metadata remains available in the upstream artifacts.
 
 | Project | Pinned version | License | Scope / distribution |
 |---|---:|---|---|
@@ -28,7 +28,7 @@ Direct dependencies and checked-in build tools in the Gate 1 baseline are record
 
 ## Research and migration references
 
-The projects below informed migration requirements or architecture research. The Gate 1 baseline does not distribute their source files, assets, fonts, logos, binaries, or modified versions. Listing them here preserves provenance; it does not claim affiliation or change their licenses.
+The projects below informed migration requirements or architecture research. The Phase 1 baseline does not distribute their source files, assets, fonts, logos, binaries, or modified versions. Listing them here preserves provenance; it does not claim affiliation or change their licenses.
 
 | Project | Upstream copyright / license | Research boundary | Material distributed by Tsuyomi |
 |---|---|---|---|
@@ -46,4 +46,4 @@ The MIT notices above must accompany any future copy or substantial portion. Apa
 
 ## Asset and source-copy status
 
-No upstream source file, font, image, site logo, layout, component implementation, or other asset is copied or adapted into the Gate 1 application. Dependency upgrades or future source adoption must update this file, the applicable upstream notices/licenses, version catalog or protocol lock state, verification metadata, REUSE metadata, and validation evidence together.
+No upstream source file, font, image, site logo, layout, component implementation, or other asset is copied or adapted into the Phase 1 application. Dependency upgrades or future source adoption must update this file, the applicable upstream notices/licenses, version catalog or protocol lock state, verification metadata, REUSE metadata, and validation evidence together.

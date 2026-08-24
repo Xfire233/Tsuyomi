@@ -56,7 +56,4 @@ class DirectActionTokenRegistry {
         record.binding
     }
 
-    companion object {
-        val process: DirectActionTokenRegistry = DirectActionTokenRegistry()
-    }
 }

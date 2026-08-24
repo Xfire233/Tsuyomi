@@ -5,6 +5,7 @@ version = 1
 
 [[annotations]]
 path = [
+  "README.md",
   "core/database/schemas/**",
   "**/*gradle.lockfile",
   "prototype/ui-atlas/review/*.json",
@@ -12,10 +13,10 @@ path = [
   "feature/*/src/screenshotTestDebug/reference/**",
   "feature/library/src/main/res/values/strings.xml",
   "feature/settings/src/main/res/values/strings.xml",
-  "docs/gates/GATE_1/assets/**",
-  "docs/gates/GATE_4.md",
+  "docs/phases/PHASE_1/assets/**",
+  "docs/phases/PHASE_4.md",
   "docs/architecture/UX_RESEARCH.md",
-  "docs/design/GATE_1_UI.md",
+  "docs/design/PHASE_1_UI.md",
   "docs/design/DESIGN_DIRECTION_HANDOFF.md",
   "docs/design/INTERACTIVE_PROTOTYPE_PLAN.md",
   "docs/design/DESIGN_REFERENCE_REVIEW.md",
