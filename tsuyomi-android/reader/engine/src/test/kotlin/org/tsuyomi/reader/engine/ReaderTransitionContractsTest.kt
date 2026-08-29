@@ -50,13 +50,15 @@ class ReaderTransitionContractsTest {
         val cache = SettledPositionCache().also { it.record(capture) }
 
         val result = PresentationSwitchTransaction.begin(
-            transactionId = 3,
-            targetId = "paged",
-            sourceEpochs = source,
-            targetEpochs = target,
-            captures = cache,
-            mountedCapture = capture,
-            mountedRendererIsRebuilding = false,
+            PresentationSwitchRequest(
+                transactionId = 3,
+                targetId = "paged",
+                sourceEpochs = source,
+                targetEpochs = target,
+                captures = cache,
+                mountedCapture = capture,
+                mountedRendererIsRebuilding = false,
+            ),
         )
 
         assertEquals(
@@ -251,13 +253,15 @@ class ReaderTransitionContractsTest {
         val cache = SettledPositionCache().also { it.record(capture) }
         return assertIs<PresentationSwitchStart.Started>(
             PresentationSwitchTransaction.begin(
-                transactionId = 19,
-                targetId = "paged",
-                sourceEpochs = source,
-                targetEpochs = target,
-                captures = cache,
-                mountedCapture = capture,
-                mountedRendererIsRebuilding = false,
+                PresentationSwitchRequest(
+                    transactionId = 19,
+                    targetId = "paged",
+                    sourceEpochs = source,
+                    targetEpochs = target,
+                    captures = cache,
+                    mountedCapture = capture,
+                    mountedRendererIsRebuilding = false,
+                ),
             ),
         ).transaction
     }

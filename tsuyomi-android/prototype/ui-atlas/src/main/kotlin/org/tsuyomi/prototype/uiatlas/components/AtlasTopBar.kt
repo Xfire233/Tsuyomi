@@ -14,8 +14,6 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.only
 import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.size
-import androidx.compose.material3.DropdownMenu
-import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -27,9 +25,7 @@ import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.Immutable
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalWindowInfo
@@ -60,8 +56,13 @@ data class AtlasTopBarSelector(
 @Immutable
 data class AtlasOverflowItem(
     val label: String,
+    val icon: ImageVector? = null,
+    val enabled: Boolean = true,
+    val destructive: Boolean = false,
     val onClick: () -> Unit,
-)
+) {
+    constructor(label: String, onClick: () -> Unit) : this(label, null, true, false, onClick)
+}
 
 @Immutable
 data class AtlasSelectionBar(
@@ -151,7 +152,7 @@ fun AtlasTopBar(
                 applicableBulkActions.take(actionBudget).forEach { action ->
                     AtlasIconButton(action.icon, action.label, action.onClick)
                 }
-                AtlasOverflowMenu(applicableBulkActions.drop(actionBudget), if (selection.count > 0) selection.overflow else emptyList())
+                AtlasTopBarOverflowMenu(applicableBulkActions.drop(actionBudget), if (selection.count > 0) selection.overflow else emptyList())
             } else {
                 if (selector != null) {
                     TextButton(onClick = selector.onClick, enabled = selector.enabled) {
@@ -159,7 +160,7 @@ fun AtlasTopBar(
                     }
                 }
                 visibleActions.forEach { action -> AtlasIconButton(action.icon, action.label, action.onClick) }
-                AtlasOverflowMenu(foldedActions, overflow)
+                AtlasTopBarOverflowMenu(foldedActions, overflow)
             }
         },
         colors = TopAppBarDefaults.topAppBarColors(containerColor = MaterialTheme.colorScheme.surface),
@@ -168,26 +169,21 @@ fun AtlasTopBar(
 }
 
 @Composable
-private fun AtlasOverflowMenu(
+private fun AtlasTopBarOverflowMenu(
     folded: List<AtlasTopBarAction>,
     items: List<AtlasOverflowItem>,
 ) {
-    if (folded.isEmpty() && items.isEmpty()) return
-    var expanded by remember { mutableStateOf(false) }
-    AtlasIconButton(AtlasIcons.Overflow, AtlasStrings.OVERFLOW, { expanded = true })
-    DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
-        folded.forEach { action ->
-            DropdownMenuItem(
-                text = { Text(action.label) },
-                onClick = { expanded = false; action.onClick() },
-                leadingIcon = { Icon(action.icon, contentDescription = null) },
+    AtlasOverflowMenu(
+        entries = folded.map { action ->
+            AtlasMenuEntry(action.label, action.onClick, icon = action.icon)
+        } + items.map { item ->
+            AtlasMenuEntry(
+                label = item.label,
+                onClick = item.onClick,
+                icon = item.icon,
+                enabled = item.enabled,
+                destructive = item.destructive,
             )
-        }
-        items.forEach { item ->
-            DropdownMenuItem(
-                text = { Text(item.label) },
-                onClick = { expanded = false; item.onClick() },
-            )
-        }
-    }
+        },
+    )
 }

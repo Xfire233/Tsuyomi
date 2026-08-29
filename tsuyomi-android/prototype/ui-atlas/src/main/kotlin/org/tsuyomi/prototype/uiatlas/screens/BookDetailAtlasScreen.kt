@@ -79,8 +79,32 @@ internal fun BookDetail(context: AtlasContext, modifier: Modifier) {
     val runtime = LocalPrototypeRuntime.current
     val repository = prototypeRepository()
     val scope = rememberCoroutineScope()
-    val runScenario: (String) -> Unit = { key ->
-        scope.launch { runtime.scenarios.run(key, book.id) }
+    var scenarioMutation by remember { mutableStateOf<AtlasMutationStatus?>(null) }
+    lateinit var runScenario: (String) -> Unit
+    runScenario = { key ->
+        val action = when (key) {
+            "detail-cache" -> "缓存本书"
+            "detail-refresh" -> "刷新来源数据"
+            "detail-download-selection" -> "下载所选章节"
+            "detail-remote-write" -> "重试网站操作"
+            "detail-remote-remove" -> "从网站移除收藏"
+            "detail-remote-move" -> "移动网站收藏"
+            else -> "执行书籍操作"
+        }
+        scenarioMutation = AtlasMutationStatus(AtlasMutationPhase.WORKING, "$action…")
+        scope.launch {
+            val result = runtime.scenarios.run(key, book.id)
+            scenarioMutation = if (result.successful) {
+                AtlasMutationStatus(AtlasMutationPhase.SUCCESS, "$action 已完成。")
+            } else {
+                AtlasMutationStatus(
+                    AtlasMutationPhase.ERROR,
+                    "$action 未完成：${result.outcome}。",
+                    "重试",
+                    { runScenario(key) },
+                )
+            }
+        }
     }
 
     AtlasScaffold(
@@ -124,6 +148,7 @@ internal fun BookDetail(context: AtlasContext, modifier: Modifier) {
                     ),
                 )
             }
+            scenarioMutation?.let { AtlasMutationBanner(it) }
             if (context.showMutationBanner) {
                 AtlasMutationBanner(
                     AtlasMutationStatus(
@@ -340,8 +365,8 @@ private fun DetailContent(
                     },
                     onOpenChapter = { chapter ->
                         repository.putInt(
-                            "reader.page",
-                            chapter.number.coerceIn(1, SourceAtlasFixtures.READER_PAGE_COUNT),
+                            "reader.chapter",
+                            chapter.number.coerceIn(1, SourceAtlasFixtures.DIRECTORY_TOTAL),
                             "ChapterOpened",
                             chapter.number.toString(),
                         )

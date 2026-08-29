@@ -10,13 +10,10 @@ class DisplayEnvironmentResolver {
     fun resolve(
         preferences: DisplayPreferences,
         classification: DeviceClassification,
-        apiLevel: Int,
-        systemDark: Boolean,
-        reducedMotion: Boolean,
-        redrawEpoch: Long,
+        system: DisplaySystemState,
     ): DisplayEnvironment {
         val resolution = resolveProfile(preferences.displayPreference, classification)
-        val dynamicColorEligible = resolution.profile == DisplayProfile.STANDARD && apiLevel >= 31
+        val dynamicColorEligible = resolution.profile == DisplayProfile.STANDARD && system.apiLevel >= 31
 
         return DisplayEnvironment(
             preferences = preferences,
@@ -28,17 +25,17 @@ class DisplayEnvironmentResolver {
             effectiveDarkTheme = when (resolution.profile) {
                 DisplayProfile.EINK -> false
                 DisplayProfile.STANDARD -> when (preferences.colorSchemePreference) {
-                    ColorSchemePreference.SYSTEM -> systemDark
+                    ColorSchemePreference.SYSTEM -> system.systemDark
                     ColorSchemePreference.LIGHT -> false
                     ColorSchemePreference.DARK -> true
                 }
             },
-            motionPolicy = if (resolution.profile == DisplayProfile.EINK || reducedMotion) {
+            motionPolicy = if (resolution.profile == DisplayProfile.EINK || system.reducedMotion) {
                 MotionPolicy.INSTANT
             } else {
                 MotionPolicy.STANDARD
             },
-            redrawEpoch = redrawEpoch,
+            redrawEpoch = system.redrawEpoch,
         )
     }
 

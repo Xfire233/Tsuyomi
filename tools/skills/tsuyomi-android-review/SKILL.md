@@ -91,6 +91,12 @@ Current mode is `phase4-standard-first`:
 
 This ordering reduces routine device/profile work approximately in half. It does not claim E-ink readiness.
 
+Node execution is staged independently from display profiles:
+
+- The current Standard Atlas UI-construction stage executes `L01–L08`, `B01–B03` and `M01–M07`: 18 nodes, 16 surfaces and 84 route-state obligations.
+- `S01–S04` and `X01–X06` remain in the 28-node impact graph but are not finalizable from Atlas fixtures. They execute later in `org.tsuyomi.android` with real host state and live online services. A signed deterministic source fixture remains mandatory for replay; it supplements rather than replaces the live-service pass.
+- The isolated Atlas may retain Source/Cross-Cutting fixtures for design rehearsal and AI drafts, but cannot set their human-complete state or final verdict.
+
 ## Invariants
 
 - Gradle Wrapper owns build, compiler, lint, unit, instrumentation, screenshot tests, dependencies, and CI correctness.
@@ -105,9 +111,9 @@ This ordering reduces routine device/profile work approximately in half. It does
 
 ### R0 — Reconcile
 
-1. Select an exact previous R1 report/baseline. No baseline means all 28 nodes.
-2. Read `review-policy.json`; record active/deferred profiles and its SHA-256.
-3. Confirm `ReviewNodeCatalog.VERSION`, exact source build ID, locale, and active contracts.
+1. Select an exact previous R1 report/baseline. No baseline marks all 28 nodes affected; `review-policy.json` then partitions them into current and deferred execution stages.
+2. Read `review-policy.json`; record active/deferred profiles, active/deferred node stages and its SHA-256.
+3. Confirm `ReviewNodeCatalog.VERSION`, exact source build ID, locale, active contracts and the 18/10 node partition.
 4. Preflight the canonical active AVD before deployment: observed size, density, API, orientation, locale, font scale, and profile must match the contract. Stop on drift; repair the AVD once rather than capturing invalid evidence.
 
 ### R1 — Detect before building
@@ -136,7 +142,7 @@ Rules:
 - Contract, catalog, shared theme/scaffold, or unknown Android changes expand conservatively.
 - Workflow-only changes stop after R1: no Gradle, emulator, APK, layout, or PNG work.
 - Empty scope never upgrades pending review state.
-- `--force-full-review` means all 28 nodes, one exact-source build, and one pass per active profile. Under the current policy that is Standard only.
+- `--force-full-review` means all 28 nodes are impact-accounted. Under the current policy, the exact-source Standard Atlas build/device pass executes the 18 active `L*`/`B*`/`M*` nodes; the ten `S*`/`X*` nodes remain explicitly deferred to actual online production scenarios.
 
 ### R2 — One build, one deploy, evidence by owner
 
@@ -144,7 +150,7 @@ When R1 requires runtime evidence:
 
 1. Build once with Gradle.
 2. Deploy the resulting APK once to each active profile device with Android CLI.
-3. Account for every affected node/state obligation, but do not automatically create one PNG per obligation:
+3. Account for every affected current-stage node/state obligation, but do not automatically create one PNG per obligation:
    - deterministic static geometry/copy → existing screenshot assertion;
    - bounds, semantics, focusability, or overlap → `android layout`;
    - changed transition/persistence → Journey;
@@ -174,6 +180,7 @@ Bounded fallback:
 - If `android layout --diff` fails, retry one full `android layout`.
 - If the full layout also fails while the device remains healthy, record the CLI failure and use one UIAutomator2 hierarchy. Do not loop retries or capture a duplicate screenshot.
 - Android CLI does not currently expose prototype intent extras. Device-shell `am start` may select deterministic route/profile/state extras, but this is fixture setup only; Journeys still start from visible controls.
+- Intent extras are strings. Use `--es capture true` rather than `--ez capture true`; the Atlas parser reads string extras.
 
 ### R3 — Journeys only for changed transitions
 
@@ -189,6 +196,8 @@ Select only Journeys whose transition, persistence, input, or high-risk contract
 - `M02-settings-persistence`
 
 Each action is one interaction or one assertion, executed in order. A failure marks remaining actions `SKIPPED`; never rewrite the Journey to obtain a pass. Hash normalized interaction traces separately from PNG bytes.
+
+`S02` and every `X*` Journey are catalogued future actual-online-production work under the current node policy. Do not execute or close them from the isolated Atlas. When that stage begins, use the real production package and live online services, retain a signed deterministic fixture replay for diagnosis, and redact credentials, cookies, verification answers, private content and raw WebView payloads from evidence.
 
 ### R4 — Human handoff
 
@@ -263,12 +272,13 @@ Run `android studio check` once per IDE-assisted session. Successful compiler/li
 ## Scope selection
 
 - Workflow/docs-only → R1 only.
-- Review runtime/storage/export/live bridge → Standard build/deploy + `X06` + live submit/startup-pull/hash/build/recovery validation.
-- Product static geometry → affected screenshot assertion + affected Standard node.
-- Navigation/persistence/state transition → affected contract test + selected Journey.
+- Review runtime/storage/export/live bridge → Standard build/deploy for the active `L*`/`B*`/`M*` reviewer surface; `X06` remains deferred until the actual-online-production stage.
+- Product static geometry → affected screenshot assertion + affected current-stage Standard node.
+- Navigation/persistence/state transition → affected contract test + selected current-stage Journey.
 - Direct E-ink-only source change during freeze → allowed minimal exception from `review-policy.json`; no full matrix.
-- Full AI review during freeze → all 28 nodes and 20 surfaces/105 obligations accounted for on Standard, with evidence reused by owner rather than duplicated.
+- Full AI review during freeze → all 28 nodes impact-accounted; execute the 18 active Standard Atlas nodes across 16 surfaces/84 obligations, and report the ten `S*`/`X*` nodes as deferred actual-online work.
 - E-ink restoration → full retained E-ink graph, inventory, Journeys, adaptive matrix, and physical human review.
+- Actual-online S/X review → production package, real host controllers/storage/navigation, live online services, signed deterministic fixture replay, redacted evidence, and no Atlas verdict substitution.
 
 ## Evidence and handoff
 

@@ -47,6 +47,7 @@ import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.ListItem
 import androidx.compose.material3.ListItemDefaults
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Switch
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
@@ -847,6 +848,11 @@ private fun MoreHelpPage(
     var introductionsEnabled by rememberSaveable(runtime.persistent) { mutableStateOf(if (runtime.persistent) repository.boolean("help.introductionsEnabled", true) else true) }
     var seenVersionsReset by rememberSaveable(runtime.persistent) { mutableStateOf(if (runtime.persistent) repository.boolean("help.seenVersionsReset") else false) }
     var mutation by remember { mutableStateOf<AtlasMutationStatus?>(null) }
+    var helpQuery by rememberSaveable { mutableStateOf("") }
+    var expandedHelpId by rememberSaveable { mutableStateOf<String?>(null) }
+    val visibleHelpEntries = MoreAtlasFixtures.helpEntries.filter { entry ->
+        helpQuery.isBlank() || entry.question.contains(helpQuery, ignoreCase = true) || entry.answer.contains(helpQuery, ignoreCase = true)
+    }
     val defaultMutation = AtlasMutationStatus(
         AtlasMutationPhase.SUCCESS,
         "已重置全部功能说明的已读版本；下次进入对应功能时会再次显示。",
@@ -860,6 +866,28 @@ private fun MoreHelpPage(
         mutation = mutation ?: if (context.showMutationBanner) defaultMutation else null,
     ) {
         MoreScrollableContent {
+            MoreSectionHeader("帮助搜索")
+            OutlinedTextField(
+                value = helpQuery,
+                onValueChange = { helpQuery = it },
+                modifier = Modifier.fillMaxWidth(),
+                label = { Text("搜索帮助") },
+                singleLine = true,
+            )
+            if (visibleHelpEntries.isEmpty()) {
+                MoreInfoPanel("没有匹配的帮助", "换一个与任务、状态或数据范围有关的关键词。")
+            } else {
+                visibleHelpEntries.forEach { entry ->
+                    val expanded = expandedHelpId == entry.id
+                    MoreExpanderRow(
+                        expanded = expanded,
+                        label = entry.question,
+                        onClick = { expandedHelpId = if (expanded) null else entry.id },
+                    )
+                    if (expanded) MoreInfoPanel("答复", entry.answer)
+                }
+            }
+
             MoreSectionHeader("功能说明")
             MoreSwitchRow(
                 title = "自动显示功能说明",

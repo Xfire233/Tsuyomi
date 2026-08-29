@@ -85,6 +85,7 @@ internal fun ReaderTopChrome(
     onOpenSearch: () -> Unit,
 ) {
     AtlasTopBar(
+        modifier = Modifier.testTag("reader-top-chrome"),
         title = chapterTitle,
         onUp = onUp,
         actions = listOf(
@@ -108,7 +109,9 @@ internal fun ReaderReadingInfoBar(
     modifier: Modifier = Modifier,
 ) {
     if (!visible) return
-    val displayPosition = ReaderPosition.fromProgress(progress, position.pageCount)
+    val displayPosition = if (progress == position.progress) position else {
+        ReaderPosition.fromProgress(progress, position.pageCount)
+    }
     Surface(
         modifier = modifier
             .fillMaxWidth()

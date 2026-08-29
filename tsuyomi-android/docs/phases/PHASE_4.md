@@ -27,6 +27,14 @@ After the Standard milestone, E-ink resumes only by explicit user decision as a 
 
 This section changes blocking order only. Where the remainder of this Phase says “both profiles”, “both portrait flows”, or equivalent, read it during the freeze as “Standard now; the unchanged E-ink obligation returns in the restoration pass.”
 
+### Phase 4A review-stage decision — 2026-08-29
+
+The Standard Atlas **UI construction** milestone and actual production scenarios are separate evidence stages. The current construction closeout executes `L01–L08`, `B01–B03` and `M01–M07`: 18 nodes, 16 surfaces and 84 route-state obligations. It does not create manual design approval or production implementation authorization.
+
+`S01–S04` and `X01–X06` remain ten binding Review Graph nodes, but every one executes later in `org.tsuyomi.android` against real host controllers, storage, navigation and live online services. A signed deterministic source fixture remains mandatory for repeatable regression and diagnosis; it supplements rather than replaces the live-service pass. Evidence must redact credentials, cookies, verification answers, private reading content and raw WebView payloads. The isolated Atlas may retain rehearsal fixtures and AI drafts for these nodes but cannot mark them human-complete or assign final verdicts.
+
+E-ink remains frozen after the Standard Atlas construction closeout. Resumption still requires a later explicit user decision and the complete restoration scope in the preceding section.
+
 ## Outcome
 
 A local-first reader whose standard tasks are direct, truthful and recoverable: one book means one detail surface; local organization supports a bounded two-level folder model plus desktop-style manual arrangement; common reading workflows are default-created system nodes whose immutable rules can be hidden/rebuilt; navigation returns to exact prior context; every mutation and network job is visible. Phase 4 then adds two explicit network layers: an opt-in per-source website mirror/writeback model and a visible update-check coordinator with manual checking plus user-enabled scheduling. Neither layer hides network activity, credentials, conflicts or remote effects.
@@ -328,7 +336,8 @@ The following original requirements are retained as historical review evidence. 
 | profile | forced Standard |
 | font scale | 1.0；发现文字、布局或焦点问题时重测 2.0 |
 | app | `org.tsuyomi.android`，debug `0.2.0` |
-| fixture | `/sdcard/Download/wenku8-fixture.hxp`，仅作脱敏验收数据 |
+| deterministic replay | `/sdcard/Download/wenku8-fixture.hxp`，签名、脱敏、可重复，只用于回归和诊断 |
+| live service | 实际线上内容源和公开内容；真实网络是 `S*`/`X*` 后续验收的必需输入，但证据不得包含秘密或私有正文 |
 
 ## 手工验收流
 
@@ -336,10 +345,11 @@ The following original requirements are retained as historical review evidence. 
 2. 选择“进入内容源”，搜索 `fixture`，打开 `雾港纪事`，检查搜索结果、详情、目录与章节 `第一章 雾中的灯塔` 的可见性、触控和返回栈。
 3. 在书籍详情执行本地加入、标签/评分/集合操作；在页面中观察反馈、禁用状态、文本换行、滚动、底部导航与返回行为。
 4. 在“更多”中检查数据迁移与备份入口；取消 DocumentsUI，再次进入，确认应用没有误报成功、没有卡死或丢失当前路由。
-5. 在“设置”强制切换 Standard 与 E-ink，再切回 Standard；确认已保存主题/动态色偏好恢复，E-ink 不夸大硬件刷新能力。
+5. 在“更多 > 显示”确认 Standard 是当前 active profile，E-ink 仍明确冻结且不产生新的 routine evidence；不得把一次 profile 切换当作 E-ink readiness。
 6. 旋转到横屏、回到竖屏，并将字体缩放设为 2.0；检查文字裁切/重叠、焦点可达性、系统栏与底部导航。横屏仅为附加覆盖，不能替代本表中的手机竖屏基线。
+7. 在获得生产实现授权并进入 actual-online stage 后，安装真实线上来源、使用公开内容执行 `S01–S04` 与 `X01–X06`；再用签名 fixture 重放同一失败/恢复路径。两种证据都必须存在，且任何 secret、cookie、验证码、私有正文或原始 WebView payload 都不得进入日志、截图或导出。
 
-不要输入真实 Wenku8 凭证、验证码或私有内容；受控 WebView 的登录/验证仅检查取消、返回和错误恢复路径。
+真实线上服务验收可以使用匿名或明确授权的会话，但不得把凭证、cookie、验证码、私有内容或原始 WebView payload 写入证据。受控 fixture 继续覆盖取消、返回和错误恢复的确定性重放。
 
 ## 发现项登记与准入
 
@@ -380,9 +390,9 @@ Phase 4 的最终审阅必须把产品操作逻辑与代码正确性作为两个
 - 书架/手动集合/智能集合 → 同一书籍详情 → 查看本书来源信息或目录 → Back 返回原列表和原位置。
 - 来源不可用 → 本地书籍详情降级 → 可执行本地动作 → 来源动作禁用并解释 → Back 不切换 root。
 - Browse 根页、搜索、详情、目录、Reader 间连续 Back/Up；随后切换 Library/Browse 底部项，验证两套根栈各自恢复且精确动作不消费旧根栈。
-- 每个创建、保存、加入、移除和重试动作分别验证成功、失败、取消、重复点击、进程重建及 `font_scale = 2.0`；Standard 与 E-ink 共用同一操作语义。
+- 每个创建、保存、加入、移除和重试动作分别验证成功、失败、取消、重复点击、进程重建及 `font_scale = 2.0`。当前执行 Standard；E-ink 的相同操作语义在显式 restoration pass 中恢复验证。
 
-最终 review 记录必须包含逐步点击序列、每步预期/实际 route、Back/Up 结果、恢复的页面状态、Standard 与 E-ink portrait 截图证据，以及未通过项对应的回归层级。仅检查 composable、controller、repository 或测试覆盖率不足以通过 Phase 4 design review gate。
+最终 review 记录必须包含逐步点击序列、每步预期/实际 route、Back/Up 结果、恢复的页面状态、当前 active profile 的设备证据，以及未通过项对应的回归层级。`S*`/`X*` 还必须包含生产包真实线上服务证据和对应的签名 fixture 重放；E-ink portrait 证据返回单独 restoration pass。仅检查 composable、controller、repository 或测试覆盖率不足以通过 Phase 4 design review gate。
 
 状态：`NEW`（待复现）→ `TRIAGED`（已归类）→ `READY`（可实现）→ `FIXED`（修复和回归证明完成）→ `DECLINED`（不属于产品缺陷，说明理由）。
 
@@ -414,6 +424,7 @@ Phase 4 的最终审阅必须把产品操作逻辑与代码正确性作为两个
 | D30 | Phase 4 采用 Constitution 的 production DAG、禁止边与 prototype isolation：`shared:library-domain` 只放纯领域类型/ports；`core:library` 协调 library、search、mirror、update；`core:media` 是唯一 cover/branding 请求、验证、解码与缓存边界；`core:preferences` 拥有 UI preference schema/migration/reset。feature 只组合不可变 UiState 和 typed action，不能持有 Room entity、URL、cookie、Media internals 或 Network/Material 直接依赖。 | 4A 基础模块与 clean cutover |
 | D32 | **[CONFIRMED, AMENDED BY B041-D]** Phase 4A 使用 root-neutral `search?origin={library|browse}&selectedSourceId={sourceId?}` 单搜索栏，删除重复搜索壳。query draft inert；normal entry 隐式覆盖所有 active search-capable sources，source-card entry 可通过 route 绑定一个 active source；UI 不显示来源 selector 或 leading Search control。一次 trailing Search submit 同时启动 local FTS 与 effective scope；source jobs ≤3 concurrent、per-source =1。只显示一个 aggregate progress 和一个增量结果流。结果只按 exact `BookIdentity` 去重；同名不同 identity 保留。内部 source jobs 可独立取消/重试，但 normal per-source lanes/status prose 不常驻。恢复页面不自动重发网络；搜索历史只在提交时写入并按 D29 默认不导出。 | 4A `core:library` basic SearchCoordinator、`feature:search`、导航、Room FTS、E-ink/无障碍 |
 | D33 | **[DEFERRED BY USER — NOT IN ATLAS OR 4A]** 保留为未来隔离 spike 的研究草案：host-owned advanced `SearchIntent`、extension-declared `SearchCapabilityDescriptor v2`、公共/本地/来源专属 filter descriptors 与 `search-v2`。当前不得实现其 UI、协议依赖、fixtures 或 P1 gate；重新纳入必须重新裁决范围和 source-contract 版本。 | Future isolated search/HXP spike only |
+| D34 | **Atlas construction and actual-online validation are separate stages.** Current Standard Atlas closeout executes 18 `L*`/`B*`/`M*` nodes, 16 surfaces and 84 obligations. All `S*`/`X*` nodes execute later in the production package with live online services plus signed deterministic fixture replay. Atlas cannot finalize them. E-ink remains frozen after Standard construction closeout. | Phase 4A review sequencing, evidence and authorization |
 
 ### 4A 的基础模型、schema、传输与 UI 边界
 

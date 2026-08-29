@@ -80,6 +80,12 @@ data class MoreFeatureIntroductionFixture(
     val points: List<String>,
 )
 
+data class MoreHelpEntryFixture(
+    val id: String,
+    val question: String,
+    val answer: String,
+)
+
 data class MoreAboutFixture(
     val appName: String,
     val version: String,
@@ -294,6 +300,34 @@ object MoreAtlasFixtures {
                 "导入不会启用调度、镜像或网站写入。",
                 "取消选择器或确认不会改变任何数据。",
             ),
+        ),
+    )
+
+    val helpEntries = listOf(
+        MoreHelpEntryFixture(
+            id = "offline-reading",
+            question = "离线时还能阅读什么？",
+            answer = "已下载章节、本地书架信息、语义进度和应用内帮助继续可用。来源刷新、搜索和网站操作会显示不可用原因。",
+        ),
+        MoreHelpEntryFixture(
+            id = "reader-progress",
+            question = "阅读进度如何保存？",
+            answer = "Tsuyomi 保存章节与语义定位器。百分比、像素偏移和渲染页码只用于当前界面，不作为持久真值。",
+        ),
+        MoreHelpEntryFixture(
+            id = "library-removal",
+            question = "移出书架会删除哪些内容？",
+            answer = "只移除本地 pin 和直接手动收藏夹归属；稍后读、评分、标签、语义进度、历史和网站镜像不会被隐式删除。",
+        ),
+        MoreHelpEntryFixture(
+            id = "source-privacy",
+            question = "来源登录信息会被导出吗？",
+            answer = "不会。凭据、Cookie、验证状态、网站镜像、远程回执、缓存和设备偏好始终排除在传输数据之外。",
+        ),
+        MoreHelpEntryFixture(
+            id = "display-reset",
+            question = "重置界面设置会影响书籍吗？",
+            answer = "不会。重置只恢复显示、布局、排序和功能说明偏好；书籍、收藏夹、标签、评分、进度、历史和来源数据保持不变。",
         ),
     )
 

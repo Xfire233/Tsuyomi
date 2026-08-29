@@ -309,6 +309,7 @@ private fun RemoteRow(
             RowAction(
                 option = action,
                 label = if (entry.onShelf) "已在书架" else "加入书架",
+                anchorTag = "source-row-menu-${entry.book.id}",
                 enabled = !entry.onShelf,
                 onAction = { repository.putBoolean("book.${entry.book.id}.inLibrary", true, "RemoteBookCopied", entry.book.id) },
                 onDetails = { navigation.navigate(AtlasRoute.BOOK_DETAIL) },

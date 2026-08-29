@@ -48,7 +48,7 @@ class ReviewRepository(context: Context, private val persistent: Boolean) {
     }
 
     fun markHumanReviewed(nodeId: String) = updateActive { state ->
-        if (state.controlMode != ReviewControlMode.HUMAN) return@updateActive state
+        if (state.controlMode != ReviewControlMode.HUMAN || !canFinalizeInAtlas(nodeId)) return@updateActive state
         val current = state.progress[nodeId] ?: ReviewNodeProgress()
         state.copy(
             progress = state.progress + (
@@ -58,7 +58,7 @@ class ReviewRepository(context: Context, private val persistent: Boolean) {
     }
 
     fun setVerdict(nodeId: String, verdict: ReviewVerdict) = updateActive { state ->
-        if (state.controlMode != ReviewControlMode.HUMAN) return@updateActive state
+        if (state.controlMode != ReviewControlMode.HUMAN || !canFinalizeInAtlas(nodeId)) return@updateActive state
         val current = state.progress[nodeId] ?: ReviewNodeProgress()
         val now = Instant.now().toString()
         state.copy(
@@ -108,6 +108,9 @@ class ReviewRepository(context: Context, private val persistent: Boolean) {
     fun clearActiveComments() = updateActive { state ->
         state.copy(nodeComments = emptyMap(), wholePrototypeComment = "")
     }
+
+    private fun canFinalizeInAtlas(nodeId: String): Boolean =
+        ReviewNodeCatalog.byId[nodeId]?.evidenceStage == ReviewEvidenceStage.ATLAS_UI
 
     private fun updateProgress(nodeId: String, transform: (ReviewNodeProgress) -> ReviewNodeProgress) = updateActive { state ->
         val current = state.progress[nodeId] ?: ReviewNodeProgress()

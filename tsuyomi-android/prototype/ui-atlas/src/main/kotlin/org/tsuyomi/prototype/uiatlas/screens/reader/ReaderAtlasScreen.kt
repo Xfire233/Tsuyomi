@@ -159,9 +159,13 @@ internal fun StandardReaderAtlasScreen(
         mutableStateOf(repository.stringList("reader.bookmarks").mapNotNull(String::toIntOrNull).toSet())
     }
     var expandedImage by remember { mutableStateOf<ReaderImage?>(null) }
+    var contentActionNotice by rememberSaveable { mutableStateOf<String?>(null) }
+    var retryResolved by remember(context.state) { mutableStateOf(false) }
+    var retryWorking by remember(context.state) { mutableStateOf(false) }
+    var retryFailure by remember(context.state) { mutableStateOf<String?>(null) }
 
     val guarded = context.libraryView == AtlasLibraryView.READ_LATER
-    val reading = context.primaryState == AtlasPageState.CONTENT && !guarded
+    val reading = (context.primaryState == AtlasPageState.CONTENT || retryResolved) && !guarded
     val showChrome = !reading || context.showOfflineBanner || chromeVisible || overlay != null || expandedImage != null
     val document = remember(context.libraryView, chapterNumber) {
         ReaderAtlasFixtures.documentFor(context.libraryView, chapterNumber)
@@ -224,16 +228,16 @@ internal fun StandardReaderAtlasScreen(
         fadeOut(tween(chromeDuration)) + slideOutVertically(tween(chromeDuration)) { it / 5 }
     }
 
-    fun commitChapter(target: Int, event: String) {
+    fun commitChapter(target: Int, event: String, entryProgress: Int? = null) {
         val safeTarget = target.coerceIn(1, totalChapters)
-        val nextProgress = when {
+        val nextProgress = entryProgress ?: when {
             safeTarget == chapterNumber -> chapterProgress
             safeTarget < chapterNumber -> 100
             else -> 0
         }
         chapterNumber = safeTarget
-        chapterProgress = nextProgress
-        readerPosition = ReaderPosition.fromProgress(nextProgress, readerPosition.pageCount)
+        chapterProgress = nextProgress.coerceIn(0, 100)
+        readerPosition = ReaderPosition.fromProgress(chapterProgress, readerPosition.pageCount)
         seekPreview = null
         repository.putInt("reader.chapter", safeTarget, event, SourceAtlasFixtures.chapters[safeTarget - 1].title)
     }
@@ -242,6 +246,26 @@ internal fun StandardReaderAtlasScreen(
         chapterProgress = target.coerceIn(0, 100)
         seekPreview = null
         repository.record("LocatorCommit", "chapter=$chapterNumber;preview=$chapterProgress%", "success")
+    }
+
+    fun turnRenderedPage(direction: Int): Boolean {
+        if (settings.flow == ReaderFlow.SCROLL || seekPreview != null) return false
+        val target = readerPosition.adjacentPage(direction)
+        if (target != null) {
+            chapterProgress = target.progress
+            readerPosition = target
+            repository.record(
+                if (direction < 0) "ReaderPagePrevious" else "ReaderPageNext",
+                "chapter=$chapterNumber;page=${target.page}/${target.pageCount}",
+                "success",
+            )
+            return true
+        }
+        if (direction > 0 && chapterNumber < totalChapters && readerPosition.page >= readerPosition.pageCount) {
+            commitChapter(chapterNumber + 1, "ReaderPageBoundaryNextChapter", entryProgress = 0)
+            return true
+        }
+        return false
     }
 
     fun toggleBookmark(target: Int = chapterNumber) {
@@ -340,18 +364,8 @@ internal fun StandardReaderAtlasScreen(
                     false
                 } else {
                     when (event.key) {
-                        Key.VolumeUp -> if (chapterNumber > 1) {
-                            commitChapter(chapterNumber - 1, "ReaderVolumePrevious")
-                            true
-                        } else {
-                            false
-                        }
-                        Key.VolumeDown -> if (chapterNumber < totalChapters) {
-                            commitChapter(chapterNumber + 1, "ReaderVolumeNext")
-                            true
-                        } else {
-                            false
-                        }
+                        Key.VolumeUp -> turnRenderedPage(-1)
+                        Key.VolumeDown -> turnRenderedPage(1)
                         else -> false
                     }
                 }
@@ -361,72 +375,100 @@ internal fun StandardReaderAtlasScreen(
     ) {
         Box(Modifier.fillMaxSize()) {
             when {
-                context.primaryState == AtlasPageState.LOADING -> AtlasStateView(
+                context.primaryState == AtlasPageState.LOADING || retryWorking -> AtlasStateView(
                     kind = AtlasStateKind.LOADING,
-                    title = "正在加载章节…",
+                    title = if (retryWorking) "正在重试章节…" else "正在加载章节…",
                     modifier = Modifier.fillMaxSize(),
                 )
-                context.primaryState == AtlasPageState.ERROR -> AtlasStateView(
+                context.primaryState == AtlasPageState.ERROR && !retryResolved -> AtlasStateView(
                     kind = AtlasStateKind.ERROR,
                     title = "章节加载失败",
                     modifier = Modifier.fillMaxSize(),
-                    message = "该章节尚未下载；已下载章节仍可离线阅读。",
+                    message = retryFailure ?: "该章节尚未下载；已下载章节仍可离线阅读。",
                     actionLabel = AtlasStrings.RETRY,
-                    onAction = { scope.launch { runtime.scenarios.run("reader-load", chapterTitle) } },
+                    onAction = {
+                        retryWorking = true
+                        retryFailure = null
+                        scope.launch {
+                            val result = runtime.scenarios.run("reader-load", chapterTitle)
+                            retryWorking = false
+                            if (result.successful) retryResolved = true
+                            else retryFailure = "重试未完成：${result.outcome}。"
+                        }
+                    },
                 )
                 guarded -> ReaderVerificationRequired()
-                else -> Box(Modifier.fillMaxSize()) {
-                    Surface(
-                        modifier = Modifier
-                            .fillMaxSize()
-                            .testTag("reader-content-surface")
-                            .readerTapZones(
-                                onPrevious = { if (chapterNumber > 1) commitChapter(chapterNumber - 1, "ReaderChapterPrevious") },
-                                onCenter = { chromeVisible = !chromeVisible },
-                                onNext = { if (chapterNumber < totalChapters) commitChapter(chapterNumber + 1, "ReaderChapterNext") },
-                            ),
-                        color = readerBackground,
-                        contentColor = readerContentColor,
+                else -> Column(Modifier.fillMaxSize()) {
+                    Box(
+                        Modifier
+                            .weight(1f)
+                            .fillMaxWidth(),
                     ) {
-                        ReaderDocumentView(
-                            document = document,
-                            flow = settings.flow,
-                            textSettings = textSettings,
-                            progress = seekPreview ?: chapterProgress,
-                            seeking = seekPreview != null,
-                            onPositionChanged = { position ->
-                                readerPosition = position
-                                if (seekPreview == null && position.progress != chapterProgress) {
-                                    chapterProgress = position.progress
-                                }
-                            },
-                            onImageClick = { expandedImage = it },
-                            onLinkClick = { destination ->
-                                repository.record("ReaderLinkOpened", destination, "success")
-                            },
-                            modifier = Modifier.fillMaxSize(),
-                        )
+                        Surface(
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .testTag("reader-content-surface")
+                                .readerTapZones(
+                                    onPrevious = { turnRenderedPage(-1) },
+                                    onCenter = { chromeVisible = !chromeVisible },
+                                    onNext = { turnRenderedPage(1) },
+                                ),
+                            color = readerBackground,
+                            contentColor = readerContentColor,
+                        ) {
+                            ReaderDocumentView(
+                                document = document,
+                                flow = settings.flow,
+                                textSettings = textSettings,
+                                progress = seekPreview ?: chapterProgress,
+                                seeking = seekPreview != null,
+                                onPositionChanged = { position ->
+                                    readerPosition = position
+                                    if (seekPreview == null && position.progress != chapterProgress) {
+                                        chapterProgress = position.progress
+                                    }
+                                },
+                                actions = ReaderContentActions(
+                                    onImageClick = { expandedImage = it },
+                                    onLinkClick = { destination ->
+                                        contentActionNotice = "已打开链接：$destination"
+                                        repository.record("ReaderLinkOpened", destination, "success")
+                                    },
+                                    onAttachmentClick = { attachment ->
+                                        contentActionNotice = "已打开附件：${attachment.name}"
+                                        repository.record("ReaderAttachmentOpened", attachment.id, "success")
+                                    },
+                                    onReplyClick = { reference ->
+                                        chapterProgress = document.progressForBlock(reference.targetPostId)
+                                        seekPreview = null
+                                        repository.record("ReaderReplyOpened", reference.targetPostId, "success")
+                                        contentActionNotice = "已跳转至 ${reference.floor} · ${reference.author}"
+                                    },
+                                ),
+                                modifier = Modifier.fillMaxSize(),
+                            )
+                        }
+                        if (context.showOfflineBanner) {
+                            AtlasInfoBanner(
+                                AtlasBanner(
+                                    AtlasStrings.OFFLINE_TITLE,
+                                    "本地章节可正常阅读；来源操作已停用。",
+                                ),
+                            )
+                        }
+                        contentActionNotice?.let { notice ->
+                            AtlasInfoBanner(AtlasBanner("正文操作", notice))
+                        }
                     }
-                    if (context.showOfflineBanner) {
-                        AtlasInfoBanner(
-                            AtlasBanner(
-                                AtlasStrings.OFFLINE_TITLE,
-                                "本地章节可正常阅读；来源操作已停用。",
-                            ),
-                        )
-                    }
+                    ReaderReadingInfoBar(
+                        chapterTitle = chapterTitle,
+                        progress = seekPreview ?: chapterProgress,
+                        position = readerPosition,
+                        visible = reading && settings.progressVisible,
+                    )
                 }
             }
 
-            if (reading) {
-                ReaderReadingInfoBar(
-                    chapterTitle = chapterTitle,
-                    progress = seekPreview ?: chapterProgress,
-                    position = readerPosition,
-                    visible = settings.progressVisible,
-                    modifier = Modifier.align(Alignment.BottomCenter),
-                )
-            }
             AnimatedVisibility(
                 visible = showChrome,
                 modifier = Modifier.align(Alignment.TopCenter),
@@ -477,7 +519,7 @@ internal fun StandardReaderAtlasScreen(
             bookmarks = bookmarks,
             onDismiss = { overlay = null },
             onSelectChapter = {
-                commitChapter(it, "ReaderChapterSelected")
+                commitChapter(it, "ReaderChapterSelected", entryProgress = 0)
                 overlay = null
             },
             onToggleBookmark = ::toggleBookmark,
@@ -557,9 +599,9 @@ private fun RowHeader(title: String, onDismiss: () -> Unit) {
 
 @Composable
 private fun Modifier.readerTapZones(
-    onPrevious: () -> Unit,
+    onPrevious: () -> Boolean,
     onCenter: () -> Unit,
-    onNext: () -> Unit,
+    onNext: () -> Boolean,
 ): Modifier {
     val currentPrevious = rememberUpdatedState(onPrevious)
     val currentCenter = rememberUpdatedState(onCenter)
@@ -571,8 +613,8 @@ private fun Modifier.readerTapZones(
                 true
             }
             customActions = listOf(
-                CustomAccessibilityAction("上一章") { currentPrevious.value(); true },
-                CustomAccessibilityAction("下一章") { currentNext.value(); true },
+                CustomAccessibilityAction("上一页") { currentPrevious.value() },
+                CustomAccessibilityAction("下一页") { currentNext.value() },
             )
         }
         .pointerInput(Unit) {

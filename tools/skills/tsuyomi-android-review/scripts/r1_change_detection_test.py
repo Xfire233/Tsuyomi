@@ -2,6 +2,7 @@
 # SPDX-License-Identifier: Apache-2.0
 
 from __future__ import annotations
+import json
 
 import tempfile
 import unittest
@@ -91,6 +92,23 @@ class PhaseContractDetectionTest(unittest.TestCase):
                 self.assertEqual(expected_category, category)
                 self.assertEqual(expected_nodes, selected)
 
+
+    def test_review_export_schema_matches_catalog_version(self) -> None:
+        root = r1.find_repo_root(Path.cwd())
+        catalog_version, _ = r1.parse_catalog(root)
+        schema_path = root / "tsuyomi-android/prototype/ui-atlas/review/interactive-review-export.schema.json"
+        schema = json.loads(schema_path.read_text(encoding="utf-8"))
+
+        self.assertEqual(
+            catalog_version,
+            schema["properties"]["build"]["properties"]["reviewCatalogVersion"]["const"],
+        )
+        catalog_item = schema["properties"]["reviewCatalog"]["items"]
+        self.assertIn("evidenceStage", catalog_item["required"])
+        self.assertEqual(
+            ["atlas_ui", "actual_online_scenario"],
+            catalog_item["properties"]["evidenceStage"]["enum"],
+        )
 
 if __name__ == "__main__":
     unittest.main()

@@ -42,8 +42,6 @@ import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Checkbox
-import androidx.compose.material3.DropdownMenu
-import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.HorizontalDivider
@@ -273,8 +271,17 @@ internal fun LibraryUpdates(context: AtlasContext, modifier: Modifier) {
     val runtime = LocalPrototypeRuntime.current
     val repository = prototypeRepository()
     val coroutineScope = rememberCoroutineScope()
+    var interactiveCheck by remember { mutableStateOf<AtlasMutationStatus?>(null) }
     val runCheck: () -> Unit = {
-        coroutineScope.launch { runtime.scenarios.run("updates-check", "library/updates") }
+        interactiveCheck = AtlasMutationStatus(AtlasMutationPhase.WORKING, "正在检查更新…")
+        coroutineScope.launch {
+            val result = runtime.scenarios.run("updates-check", "library/updates")
+            interactiveCheck = if (result.successful) {
+                AtlasMutationStatus(AtlasMutationPhase.SUCCESS, "检查完成；已保留 ${LibraryAtlasFixtures.updateEntries.size} 本追更结果。")
+            } else {
+                AtlasMutationStatus(AtlasMutationPhase.ERROR, "检查未完成：${result.outcome}。可再次使用顶部检查操作。")
+            }
+        }
     }
     val updates = LibraryAtlasFixtures.updateEntries
     val excluded = LibraryAtlasFixtures.updateExclusions
@@ -323,6 +330,7 @@ internal fun LibraryUpdates(context: AtlasContext, modifier: Modifier) {
                     ),
                 )
                 if (!sessionVisible) OverlayState(context.state, mutation, unresolved)
+                interactiveCheck?.let { AtlasMutationBanner(it) }
             }
         },
         footer = if (eInk && context.primaryState == AtlasPageState.CONTENT && updates.isNotEmpty()) {
@@ -820,7 +828,6 @@ private fun TagManagerRow(
     tag: LibraryAtlasFixtures.TagFixture,
     action: (String) -> Unit,
 ) {
-    var open by remember(tag.id) { mutableStateOf(false) }
     Row(
         modifier = Modifier.fillMaxWidth().heightIn(min = 56.dp).padding(horizontal = AtlasSpacing.Md),
         verticalAlignment = Alignment.CenterVertically,
@@ -829,22 +836,14 @@ private fun TagManagerRow(
         Text(tag.name, modifier = Modifier.weight(1f).padding(start = AtlasSpacing.Md))
         Text("${tag.bookCount} 本", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
         Spacer(Modifier.size(AtlasSpacing.Sm))
-        Box {
-            AtlasIconButton(AtlasIcons.Overflow, "标签「${tag.name}」操作", { open = true })
-            DropdownMenu(open, { open = false }) {
-                DropdownMenuItem({ Text("重命名") }, {
-                    open = false
-                    action("rename")
-                })
-                DropdownMenuItem({ Text("合并到…") }, {
-                    open = false
-                    action("merge")
-                })
-                DropdownMenuItem({ Text("删除…") }, {
-                    open = false
-                    action("delete")
-                })
-            }
-        }
+        AtlasOverflowMenu(
+            contentDescription = "标签「${tag.name}」操作",
+            anchorTag = "tag-row-menu-${tag.id}",
+            entries = listOf(
+                AtlasMenuEntry("重命名", { action("rename") }, icon = AtlasIcons.Edit),
+                AtlasMenuEntry("合并到…", { action("merge") }, icon = AtlasIcons.FolderMove),
+                AtlasMenuEntry("删除…", { action("delete") }, icon = AtlasIcons.Delete, destructive = true),
+            ),
+        )
     }
 }

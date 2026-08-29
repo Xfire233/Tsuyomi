@@ -9,11 +9,11 @@ import hashlib
 import json
 import re
 from dataclasses import dataclass
-from datetime import datetime, timezone
 from pathlib import Path
 from typing import Iterable
 
-REPORT_SCHEMA = "tsuyomi-r1-change-report-v2"
+from r1_report import REPORT_SCHEMA, ReportBuildContext, build_report
+
 SUPPORTED_BASELINE_SCHEMAS = {
     REPORT_SCHEMA,
     "tsuyomi-r1-change-report-v1",
@@ -37,10 +37,6 @@ EXCLUDED_DIRECTORIES = {
     "node_modules",
     "__pycache__",
 }
-
-
-def utc_now() -> str:
-    return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
 
 
 def sha256_bytes(value: bytes) -> str:
@@ -67,6 +63,26 @@ def load_review_policy(repo_root: Path) -> tuple[dict, str]:
     }
     if set(active) & deferred_names:
         raise SystemExit("Review policy cannot activate and defer the same profile")
+    node_execution = data.get("nodeExecution")
+    if not isinstance(node_execution, dict):
+        raise SystemExit("Review policy must declare nodeExecution")
+    active_prefixes = node_execution.get("activeNodePrefixes")
+    deferred_stages = node_execution.get("deferredStages")
+    if not isinstance(active_prefixes, list) or not active_prefixes or not all(
+        isinstance(item, str) and len(item) == 1 for item in active_prefixes
+    ):
+        raise SystemExit("Review policy activeNodePrefixes is invalid")
+    if not isinstance(deferred_stages, list) or not deferred_stages:
+        raise SystemExit("Review policy deferredStages is invalid")
+    deferred_prefixes = {
+        prefix
+        for stage in deferred_stages
+        if isinstance(stage, dict)
+        for prefix in stage.get("nodePrefixes", [])
+        if isinstance(prefix, str)
+    }
+    if set(active_prefixes) & deferred_prefixes:
+        raise SystemExit("Review policy cannot activate and defer the same node prefix")
     return data, sha256_file(path)
 
 
@@ -412,104 +428,6 @@ def add_synthetic_changes(
             analysis.affected_reasons.setdefault(node_id, []).append("operator requested a complete AI review")
 
 
-def summarize_changes(
-    analysis: ChangeAnalysis,
-    node_ids: list[str],
-    force_full_review: bool,
-) -> tuple[str, list[str], bool, bool, bool]:
-    classes = {change["class"] for change in analysis.changes}
-    affected_nodes = sorted(analysis.affected_reasons)
-    build_required = force_full_review or bool(classes & {"runtime", "review-runtime", "prototype-build", "build", "unknown"})
-    device_required = force_full_review or bool(classes & {"runtime", "review-runtime", "prototype-build", "unknown"})
-    product_runtime_changed = force_full_review or bool(classes & {"runtime", "unknown"})
-    if not analysis.changes:
-        scope = "none"
-    elif classes <= {"workflow", "other"}:
-        scope = "workflow-only"
-    elif set(affected_nodes) == set(node_ids):
-        scope = "full"
-    else:
-        scope = "targeted"
-    return scope, affected_nodes, build_required, device_required, product_runtime_changed
-
-
-def build_report(
-    args: argparse.Namespace,
-    baseline: BaselineState,
-    analysis: ChangeAnalysis,
-    node_ids: list[str],
-    catalog_version: int,
-    current_files: dict[str, str],
-    current_build_id: str,
-    review_policy: dict,
-    review_policy_hash: str,
-) -> dict:
-    scope, affected_nodes, build_required, device_required, product_runtime_changed = summarize_changes(
-        analysis,
-        node_ids,
-        args.force_full_review,
-    )
-    deferred_profiles = [item["profile"] for item in review_policy["deferredProfiles"]]
-    return {
-        "schema": REPORT_SCHEMA,
-        "generatedAt": utc_now(),
-        "provisional": True,
-        "reviewAuthority": {
-            "aiMayApprove": False,
-            "reviewStateModified": False,
-            "note": "R1 scopes review work only; unchanged or empty scope never implies approval",
-        },
-        "baseline": {
-            "path": None if args.baseline is None else args.baseline.as_posix(),
-            "buildId": baseline.build_id,
-            "available": baseline.data is not None,
-        },
-        "current": {
-            "buildId": current_build_id,
-            "buildIdentityChanged": baseline.build_id is not None and baseline.build_id != current_build_id,
-            "reviewCatalogVersion": catalog_version,
-            "reviewNodeCount": len(node_ids),
-        },
-        "reviewPolicy": {
-            "path": POLICY_PATH.as_posix(),
-            "sha256": review_policy_hash,
-            "mode": review_policy["mode"],
-            "activeProfiles": review_policy["activeProfiles"],
-            "deferredProfiles": deferred_profiles,
-            "resume": review_policy["resume"],
-        },
-        "summary": {
-            "scope": scope,
-            "changedFiles": len(analysis.changes),
-            "affectedNodeCount": len(affected_nodes),
-            "affectedNodes": affected_nodes,
-            "requiresGradleBuild": build_required,
-            "requiresDevicePass": device_required,
-            "requiresDeviceProfiles": review_policy["activeProfiles"] if device_required else [],
-            "deferredProfilesAffected": deferred_profiles if device_required else [],
-            "requiresJourneySelection": product_runtime_changed and bool({"B03", "X01", "X05", "X06"} & set(affected_nodes)),
-            "changedKotlinFiles": sorted(analysis.changed_kotlin_files),
-            "androidStudioAnalyzeRecommended": False,
-        },
-        "changes": analysis.changes,
-        "affectedNodes": [
-            {"id": node_id, "reasons": sorted(set(analysis.affected_reasons[node_id]))}
-            for node_id in affected_nodes
-        ],
-        "next": {
-            "stage": (
-                "R2 affected-state review on " + ", ".join(review_policy["activeProfiles"])
-                if device_required else "build verification" if build_required else "R1 complete"
-            ),
-            "avoid": [
-                "Do not edit Review Graph progress or verdicts during R1",
-                "Do not build, deploy, capture, or start an emulator for workflow-only changes",
-                "Do not execute deferred profile matrices until the policy resume trigger",
-                "Do not run Android Studio analysis when compiler or lint already answers the question",
-            ],
-        },
-        "files": current_files,
-    }
 
 
 def write_report(repo_root: Path, output: Path, report: dict) -> Path:
@@ -532,6 +450,8 @@ def print_summary(repo_root: Path, output_path: Path, report: dict) -> None:
         "activeProfiles": policy["activeProfiles"],
         "deferredProfiles": policy["deferredProfiles"],
         "requiresGradleBuild": summary["requiresGradleBuild"],
+        "currentStageNodes": summary["currentStageNodes"],
+        "deferredNodes": summary["deferredNodes"],
         "requiresDevicePass": summary["requiresDevicePass"],
     }, ensure_ascii=False))
 
@@ -547,15 +467,22 @@ def main() -> int:
     analysis = detect_changes(baseline.files, current_files, node_ids)
     add_synthetic_changes(analysis, baseline.data is not None, args.force_full_review, node_ids)
     report = build_report(
-        args,
-        baseline,
-        analysis,
-        node_ids,
-        catalog_version,
-        current_files,
-        current_build_id,
-        review_policy,
-        review_policy_hash,
+        ReportBuildContext(
+            baseline_path=None if args.baseline is None else args.baseline.as_posix(),
+            baseline_build_id=baseline.build_id,
+            baseline_available=baseline.data is not None,
+            force_full_review=args.force_full_review,
+            changes=analysis.changes,
+            affected_reasons=analysis.affected_reasons,
+            changed_kotlin_files=analysis.changed_kotlin_files,
+            node_ids=node_ids,
+            catalog_version=catalog_version,
+            current_files=current_files,
+            current_build_id=current_build_id,
+            review_policy=review_policy,
+            review_policy_path=POLICY_PATH.as_posix(),
+            review_policy_hash=review_policy_hash,
+        ),
     )
     output_path = write_report(repo_root, args.output, report)
     print_summary(repo_root, output_path, report)
