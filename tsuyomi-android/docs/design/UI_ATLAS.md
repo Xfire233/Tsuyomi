@@ -19,6 +19,7 @@ This document proves `UI_CONSTITUTION.md` and does not define product behavior. 
 8. **Platform-modal capture adapter:** the Compose screenshot host cannot capture `ModalBottomSheet`'s platform layer. Declarative screenshot previews therefore set an Atlas-only flag that reuses the exact sheet content inside an in-tree Material 3 `BottomSheetScaffold`; interactive Standard routes still execute the real `ModalBottomSheet`. The manifest labels these frames `converged-*`, and the adapter is deleted with the prototype rather than extracted to production.
 9. **Visible viewport evidence:** canonical surface evidence uses direct API 29 AVD captures with real status/navigation bars. Declarative host stills may simulate insets/cutouts only for supplementary matrix coverage. A–H is visual-direction smoke, not full acceptance. When E-ink review is active again, every canonical E-ink frame includes real window chrome and passes full-frame grayscale.
 10. **Temporary profile execution policy:** `tools/skills/tsuyomi-android-review/review-policy.json` selects the profiles executed by routine review. During `phase4-standard-first`, Standard is active and every E-ink artifact, assertion, fixture and node obligation remains retained but deferred. No E-ink design decision, golden update or readiness claim is made until the explicit restoration pass.
+11. **Anchored menu evidence:** every overflow action in Standard uses the shared real-M3 menu wrapper. Stable per-trigger semantics prove that the intended 48dp action opened the popup; direct API 29 device evidence proves normal-room menus start below that trigger with a bounded gap and remain inside the safe viewport. Material's constrained-space clamp/flip is an allowed safety fallback only when below-anchor room is insufficient; a popup at a parent layout origin or detached from its trigger is always a failure. Value selectors use the M3 exposed-dropdown pattern rather than an action-menu imitation.
 
 ---
 
@@ -29,6 +30,7 @@ This document proves `UI_CONSTITUTION.md` and does not define product behavior. 
 - **Every RC2.1 target surface** in constitution §20 renders in the atlas (20 route/surface rows, table §2.2).
 - **Every current route** is represented via its RC2.1 successor (mapping §2.3), including removed management/directory routes through their in-place successors.
 - Removed-at-cutover routes are not rendered as standalone screens; the containing Library/Detail surface is the coverage proof.
+- **Current Standard Atlas construction closeout** executes only the 16 Library/Book/Reader/More rows (#1–10 and #15–20). The four Source rows (#11–14) remain visible fixture rehearsals but cannot be closed until their `S*` nodes run against the production package and real online services.
 
 ### 2.2 Route × state inventory (20 route/surface rows; S = states captured per route)
 
@@ -77,11 +79,15 @@ The finite artifact set is defined only by the machine-readable canonical invent
 
 ### 2.4 Review Graph coverage
 
-`ReviewNodeCatalog.kt` version 3 is the executable review-scope authority. Its 28 stable nodes cover the 20 route/surface rows above, Reader seek/settings high-risk work and six cross-cutting tasks. The table's required-state cells total 105 route-state obligations; a node may aggregate related states, but may not erase them. Version 3 makes the Standard Reader partial→full upward-drag, unchanged quick-controls tree, full-height downward-dismiss and Back-collapse state machine explicit in B03.
+`ReviewNodeCatalog.kt` version 5 is the executable review-scope authority. Its 28 stable nodes continue to cover all 20 route/surface rows, Reader high-risk work and six cross-cutting tasks. The full table still contains 105 route-state obligations; the current Standard Atlas construction stage owns 84 obligations across 16 L/B/M surfaces, while the 21 Source obligations and all six cross-cutting nodes remain reserved for actual online production scenarios.
 
-Node families are `L01–L08` Library, `B01–B03` Book/Reader, `S01–S04` Source, `M01–M07` More and `X01–X06` cross-cutting. Route entry records only `visitedAt`. AI triage, human review, approval and visual/interaction evidence remain independent. Removed routes migrate to their successor node rather than reappearing as standalone screens.
+Node families are `L01–L08` Library, `B01–B03` Book/Reader, `S01–S04` Source, `M01–M07` More and `X01–X06` cross-cutting. Version 5 makes the execution boundary explicit: `L*`/`B*`/`M*` are the 18 active Atlas UI-construction nodes; `S*`/`X*` are ten deferred actual-online-scenario nodes. Atlas fixture visits, screenshots, local scenario selectors, comments and AI drafts never create `humanReviewedAt`, `approvedAt` or a final verdict for an `S*`/`X*` node.
 
-A–H remains useful as the fastest visual-direction smoke set. It currently samples approximately seven of the 20 formal route/surface rows and therefore never satisfies the full Review Graph or 105-obligation gate.
+The actual-online stage executes in `org.tsuyomi.android` with real host controllers, storage, navigation and live online services. A signed deterministic source fixture remains mandatory for replay and regression diagnosis, but it cannot replace the required live-service pass. Evidence must never retain credentials, cookies, verification answers, private reading content or raw WebView payloads.
+
+Route entry records only `visitedAt`. AI triage, human review, approval and visual/interaction evidence remain independent. Removed routes migrate to their successor node rather than reappearing as standalone screens. B03 physical-device seek feel remains a separate human-only obligation and is not closed by the Atlas construction pass.
+
+A–H remains useful as the fastest visual-direction smoke set. It samples approximately seven of the 20 formal route/surface rows and therefore never satisfies either the 18-node/84-obligation current construction stage or the later ten-node actual-online stage.
 
 ---
 
@@ -120,7 +126,7 @@ All fixtures are code-defined data in the atlas module; names/titles are synthet
 | F8 Sources/remote | Installed and gated sources; 100-book remote library; refresh-list, copy-all, selection/target import | routes #9/#11–14; boards B/F; S5/S12/S17 |
 | F9 Branding | Synthetic valid/invalid/missing compact mark only; never used as cover fallback | routes #9/#11–14; S12/S17 |
 | F10 Covers | Procedural covers + failed/absent/stale; fixed 3:4 geometry; long-title fallback | routes #1/#9/#13; boards A/B/F; S1/S5/S12/S15 |
-| F11 Reader | Chapters with semantic anchors/ticks, tap seek, drag preview, origin history, Standard partial/full sheet anchors, E-ink full-screen complete settings sections, complete setting ranges, offline/verification | route #10; boards C/H; S6–S7/S14/S15 |
+| F11 Reader | Chapters with semantic anchors/ticks, exact selected-chapter entry, current-chapter left/right tap paging with final-page continuation into the immediate next chapter, body beneath transient command chrome with one dedicated reading-status lane, complete scroll-end visibility, tap seek, drag preview, origin history, Standard partial/full sheet anchors, E-ink full-screen complete settings sections, complete setting ranges, offline/verification | route #10; boards C/H; S5–S7/S14/S15 |
 | F12 Preferences/tutorials | Unknown schema + route-owned introductions; concise and task-specific | routes #4/#6/#8/#9/#18/#20; S11/S17 |
 | F13 Search | Exact-identity local/remote duplicate, same-title distinct identities, implicit all-active and source-bound scopes, source success/failure and aggregate progress; no selector/leading Search control and no D33 descriptors/advanced filters | route #12; board D; S10 |
 | F14 Tags | 120 local + 180 source tags, collisions and read-only ownership; compact chips omit counts and list rows show counts | route #7; board G; S13 |
@@ -137,7 +143,7 @@ Recording format: Standard scenes use 60fps/30fps as assigned by §6.1; reduced-
 | S2 † | Hide/rebuild system node; open system/collection/mirror nodes → Back | Automatic membership restrictions, direct navigation, two-level cap, focus restore, no management hub |
 | S3 † | Grid → dense → compact; nodes-first → fully mixed → manual order | Same identity rules, manual position persistence, stable anchor, page clamp and announcement |
 | S4 † | Long-press edit; Standard drag one book onto another → name/confirm; E-ink select/button equivalent; select books/nodes; swipe one Standard row | Both books atomically enter the new folder; replacement AppBar, explicit check, visible equivalent, cancel |
-| S5 † | Detail rating/tags/cache → verify full-width region, remaining-width two-line FlowRow, trailing content-width read-later, complete add-tag and shared group geometry → scroll down/up/idle FAB states → chapter filter/sort/jump → reader → Back | Tag/add/read-later all use `labelLarge`, 40dp visible height, 8dp horizontal inset, centered 48dp slots and `shapes.small`; visible border coordinates/radii match, click targets remain 48dp, no `+n`, read-later stays trailing, and caller/focus restoration remains intact |
+| S5 † | Detail rating/tags/cache → verify full-width region, remaining-width two-line FlowRow, trailing content-width read-later, complete add-tag and shared group geometry → scroll down/up/idle FAB states → chapter filter/sort/jump → open the exact selected chapter → use left/right canvas taps through the final page into the immediate next chapter → verify paged and continuous Reader content clears the persistent status strip → Reader Back | Tag/add/read-later all use `labelLarge`, 40dp visible height, 8dp horizontal inset, centered 48dp slots and `shapes.small`; visible border coordinates/radii match, click targets remain 48dp, no `+n`, read-later stays trailing, selected chapter identity is preserved, page commands never skip chapters, transient command chrome overlays without reflow, the enabled reading-status lane obscures no body content, and caller/focus restoration remains intact |
 | S6 † | **Deferred to physical device:** Standard hold/move/cancel/release/return origin; E-ink discrete target/confirm/cancel | No current Atlas still or emulator trace approves seek-preview presentation; later physical-device evidence must prove exactly one `LocatorCommit` |
 | S7 † | Standard: partial quick settings → full height → dismiss/reopen/groups/Back/scrim. E-ink: open dedicated full-screen AppBar page → scroll complete `排版 / 页面 / 导航 / 设备` inventory → Back | Standard proves four first-viewport controls, two anchors and close rules; E-ink proves opaque immediate replacement, complete controls on one route, wide two-column/compact stacked layouts, safe insets and focus order without sheet gestures or group subpages |
 | S8 † | Mirror default → explicitly create local organization → website operation | Local partition absent before creation; typed trace contains `MirrorLocalMutation` and zero `RemoteIntent` |
@@ -164,6 +170,7 @@ The route/state table and `ReviewNodeCatalog.kt` are the checked-in finite inven
 | Dimension | Inventory rule |
 |---|---|
 | Profile | Execute every assigned Standard entry now. Retain exact E-ink entries as deferred inventory; do not generate, approve or update them until the restoration trigger. Board C seek-preview remains deferred independently. |
+| Review-node stage | Execute all 18 `L*`/`B*`/`M*` nodes and their 84 route-state obligations for the current Standard Atlas construction closeout. Retain `S01–S04` and `X01–X06` as deferred actual-online-production work; no Atlas fixture, screenshot or local scenario trace may finalize those nodes. |
 | Theme | Light is canonical; dark/dynamic are supplementary assigned cases. E-ink ignores requested color theme. |
 | Window/device | Standard phone is the active reviewer device. Wide and compact E-ink geometries remain exactly enumerated deferred targets; wide Library still uses the 150dp-minimum adaptive-grid contract when restoration begins. |
 | fontScale | 1.0 canonical; 1.3 assigned archetype cases; 2.0 on every Fs2 route and every modal through explicit entries. |
@@ -227,7 +234,7 @@ atlas/<const-ver>/<review-input-set-hash>/<prototype-source-hash>/<capture-run-i
 
 ## 9. Manual reviewer contract
 
-The in-app reviewer is driven by `ReviewNodeCatalog.kt`, not by the historical A–H browser tabs. It presents all 28 stable nodes, their required states, operations, visual checks and human-only checks. A–H may remain as a fast read-only visual smoke index.
+The in-app reviewer is driven by `ReviewNodeCatalog.kt`, not by the historical A–H browser tabs. It presents all 28 stable nodes, their required states, operations, visual checks and human-only checks. A–H may remain as a fast read-only visual smoke index. Version 5 visibly marks `S*`/`X*` as actual-online-scenario work and prevents the Atlas from finalizing them.
 
 Review state is layered:
 
@@ -238,11 +245,12 @@ Review state is layered:
 
 Node comments identify `AI`, `HUMAN` or `MIXED` authorship and auto-save on debounce plus node exit. Visual and interaction evidence use separate lowercase SHA-256 fields. `AUTOMATION`, `PAUSED` and `HUMAN` control modes permit immediate same-state handoff. AI may draft and attach evidence but may not approve, update goldens or replace a human conclusion.
 
-Before the current Phase 4 Standard UX milestone, the reviewer must show:
+Before the current Phase 4 Standard Atlas UI-construction milestone, the reviewer must show:
 
-- all 20 route/surface rows and 105 route-state obligations accounted for on Standard by one evidence owner each;
+- all 18 `L*`/`B*`/`M*` nodes, 16 surfaces and 84 route-state obligations accounted for on Standard by one evidence owner each;
+- the ten `S*`/`X*` nodes explicitly deferred to actual online production scenarios, with no Atlas human-complete timestamp or final verdict;
 - exact counts for visited, AI-triaged, human-reviewed and approved nodes;
-- required Standard traces/semantics, active-profile device facts and artifact hashes;
+- required current-stage Standard traces/semantics, active-profile device facts and artifact hashes;
 - every E-ink obligation explicitly deferred against the policy SHA and frozen baseline build ID;
 - explicit unresolved human-only items, including Reader seek, TalkBack, brand judgment and high-risk copy.
 
@@ -252,7 +260,7 @@ Any failed assertion prevents approval. Empty comments are omitted. Old builds a
 
 ## 10. Extraction and deletion protocol (only after RC2.1 manual approval **and** separate implementation authorization)
 
-1. Record the §9 approval tuple: RC2.1 version, handoff/reference hashes, prototype build ID, review catalog version, full 20-surface/105-obligation evidence, node comments/progress, manifest and evidence hashes. This freezes reviewed choices but authorizes no production change.
+1. Record the §9 approval tuple: RC2.1 version, handoff/reference hashes, prototype build ID, review catalog version, the 18-node/16-surface/84-obligation Standard Atlas evidence, explicit deferred `S*`/`X*` plan, node comments/progress, manifest and evidence hashes. This freezes reviewed visual and interaction choices but authorizes no production change or actual-online completion claim.
 2. Obtain separate, explicit Phase 4 production implementation authorization. Without it, keep the Atlas fixture-only; do not edit production UI, move production fixtures/goldens or delete the prototype.
 3. Reissue the constitution as **v1.0** with approved RC2.1 outcomes incorporated and register route/component amendments.
 4. Extract only approved tokens/contracts into `core:ui` and production feature API shapes. Standard semantic components must wrap the real M3 delegates proven by the Atlas; rewrite—never copy—the namespaced prototype forks.

@@ -13,7 +13,11 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.semantics.clearAndSetSemantics
 import org.tsuyomi.prototype.uiatlas.AtlasStrings
@@ -41,6 +45,8 @@ import org.tsuyomi.prototype.uiatlas.runtime.prototypeRepository
 import org.tsuyomi.prototype.uiatlas.theme.LocalAtlasEnvironment
 
 
+private enum class ShortcutShelfPresentation { INLINE, COLLAPSED, OVERLAY_EXPANDED }
+
 @Composable
 internal fun LibraryRoot(context: AtlasContext, modifier: Modifier) {
     val navigation = LocalAtlasNavigation.current
@@ -49,6 +55,8 @@ internal fun LibraryRoot(context: AtlasContext, modifier: Modifier) {
     val coroutineScope = rememberCoroutineScope()
     val state = rememberLibraryRootState(context, runtime, repository, coroutineScope)
     val eInk = LocalAtlasEnvironment.current.eInk
+    var shortcutPresentation by rememberSaveable { mutableStateOf(ShortcutShelfPresentation.INLINE) }
+    var shortcutHeaderVisible by rememberSaveable { mutableStateOf(true) }
     val books = state.books
     val selectionBar = state.selectionBar()
 
@@ -90,10 +98,18 @@ internal fun LibraryRoot(context: AtlasContext, modifier: Modifier) {
                 state.shortcutExpanded = it
                 repository.putBoolean("library.shortcuts.expanded", it, "ShortcutExpanded")
             },
-            onLocked = {
-                if (it) state.dragCoordinator.cancel()
-                state.shortcutLocked = it
-                repository.putBoolean("library.shortcuts.locked", it, "ShortcutLocked")
+            onLocked = { locked ->
+                val wasLocked = state.shortcutLocked
+                if (locked) state.dragCoordinator.cancel()
+                state.shortcutLocked = locked
+                if (wasLocked && !locked) {
+                    shortcutPresentation = if (shortcutHeaderVisible) {
+                        ShortcutShelfPresentation.INLINE
+                    } else {
+                        ShortcutShelfPresentation.OVERLAY_EXPANDED
+                    }
+                }
+                repository.putBoolean("library.shortcuts.locked", locked, "ShortcutLocked")
             },
             onEditing = { state.shortcutEditing = it },
             onOpen = openShortcut,
@@ -189,7 +205,16 @@ internal fun LibraryRoot(context: AtlasContext, modifier: Modifier) {
                 { repository.record("LibraryEmptyAction", state.view.name, "success") },
             ) {
                 Column(Modifier.fillMaxSize()) {
-                    if (!state.standaloneNodePage) shortcutShelf()
+                    if (!state.standaloneNodePage) {
+                        when {
+                            eInk || state.shortcutLocked -> shortcutShelf()
+                            shortcutPresentation != ShortcutShelfPresentation.INLINE -> ShortcutShelfOverlay(
+                                expanded = shortcutPresentation == ShortcutShelfPresentation.OVERLAY_EXPANDED,
+                                onExpand = { shortcutPresentation = ShortcutShelfPresentation.OVERLAY_EXPANDED },
+                                shelf = shortcutShelf,
+                            )
+                        }
+                    }
                     BookSurface(
                         context = context,
                         books = shownBooks,
@@ -204,13 +229,29 @@ internal fun LibraryRoot(context: AtlasContext, modifier: Modifier) {
                         selectionConflictSignal = state.selectionConflictSignal,
                         toggle = state::toggleBook,
                         interaction = LibraryBookInteractionCapabilities(
-                            drag = !state.shortcutLocked,
+                            drag = !state.standaloneNodePage && !state.shortcutLocked,
                             reorder = state.libraryReorderEnabled,
                         ),
                         denseGrid = !eInk,
+                        continueView = state.view == AtlasLibraryView.CONTINUE,
                         dragCoordinator = state.dragCoordinator,
                         onLongPress = { state.toggleBook(it.id) },
                         onRemoveRequest = { state.pendingRemoval = LibraryRemovalRequest.Book(it) },
+                        header = if (!eInk && !state.standaloneNodePage && !state.shortcutLocked) shortcutShelf else null,
+                        onViewportChanged = { viewport ->
+                            shortcutHeaderVisible = viewport.headerVisible
+                            if (!state.shortcutLocked) {
+                                shortcutPresentation = when {
+                                    viewport.headerVisible -> ShortcutShelfPresentation.INLINE
+                                    viewport.direction == LibraryScrollDirection.FORWARD -> ShortcutShelfPresentation.COLLAPSED
+                                    viewport.direction == LibraryScrollDirection.BACKWARD &&
+                                        shortcutPresentation == ShortcutShelfPresentation.COLLAPSED -> {
+                                        ShortcutShelfPresentation.OVERLAY_EXPANDED
+                                    }
+                                    else -> shortcutPresentation
+                                }
+                            }
+                        },
                         modifier = Modifier.weight(1f),
                     )
                 }

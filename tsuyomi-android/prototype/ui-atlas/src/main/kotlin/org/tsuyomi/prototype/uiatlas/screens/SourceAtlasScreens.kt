@@ -47,8 +47,6 @@ import androidx.compose.foundation.lazy.grid.items as gridItems
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material3.DropdownMenu
-import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.BottomSheetScaffold
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -114,6 +112,9 @@ import org.tsuyomi.prototype.uiatlas.components.AtlasFeatureIntroduction
 import org.tsuyomi.prototype.uiatlas.components.AtlasCoverImage
 import org.tsuyomi.prototype.uiatlas.components.AtlasIconButton
 import org.tsuyomi.prototype.uiatlas.components.AtlasIcons
+import org.tsuyomi.prototype.uiatlas.components.AtlasMenuEntry
+import org.tsuyomi.prototype.uiatlas.components.ATLAS_MENU_ANCHOR_TAG
+import org.tsuyomi.prototype.uiatlas.components.AtlasOverflowMenu
 import org.tsuyomi.prototype.uiatlas.components.currentLayoutIcon
 import org.tsuyomi.prototype.uiatlas.components.layoutToggleContentDescription
 import org.tsuyomi.prototype.uiatlas.components.nextAtlasLayout
@@ -319,6 +320,7 @@ internal fun ReviewDialog(
 internal fun RowAction(
     option: RowActionOption,
     label: String,
+    anchorTag: String = ATLAS_MENU_ANCHOR_TAG,
     enabled: Boolean = true,
     disabledReason: String? = null,
     onAction: () -> Unit = {},
@@ -332,20 +334,14 @@ internal fun RowAction(
             style = AtlasButtonStyle.TEXT,
             enabled = enabled,
         )
-        RowActionOption.OVERFLOW -> {
-            var open by remember { mutableStateOf(false) }
-            Box {
-                AtlasIconButton(AtlasIcons.Overflow, "更多操作", { open = true })
-                DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
-                    DropdownMenuItem(
-                        text = { Text(label) },
-                        onClick = { open = false; onAction() },
-                        enabled = enabled,
-                    )
-                    DropdownMenuItem(text = { Text("查看详情") }, onClick = { open = false; onDetails() })
-                }
-            }
-        }
+        RowActionOption.OVERFLOW -> AtlasOverflowMenu(
+            anchorTag = anchorTag,
+            contentDescription = "更多操作",
+            entries = listOf(
+                AtlasMenuEntry(label = label, onClick = onAction, enabled = enabled),
+                AtlasMenuEntry(label = "查看详情", onClick = onDetails, icon = AtlasIcons.Info),
+            ),
+        )
         RowActionOption.SWIPE -> Column(horizontalAlignment = Alignment.End) {
             AtlasButton(text = label, onClick = onAction, style = AtlasButtonStyle.TEXT, enabled = enabled)
             Text(

@@ -6,6 +6,8 @@
 package org.tsuyomi.prototype.uiatlas
 
 import android.content.Intent
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.test.assert
 import androidx.compose.ui.test.click
 import androidx.compose.ui.test.hasSetTextAction
@@ -19,6 +21,9 @@ import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performImeAction
 import androidx.compose.ui.test.performTextInput
+import androidx.compose.ui.test.performScrollTo
+import androidx.compose.ui.test.performScrollToKey
+import androidx.compose.ui.test.performSemanticsAction
 import androidx.compose.ui.test.performTouchInput
 import androidx.compose.ui.test.swipeLeft
 import androidx.compose.ui.test.swipeDown
@@ -71,28 +76,38 @@ class ReaderAtlasInstrumentedTest {
         composeRule.onNodeWithText("设置").assertExists()
         composeRule.onNodeWithText("下一章").assertExists()
 
-        val firstParagraph = SourceAtlasFixtures.readerPageText(SourceAtlasFixtures.READER_DEFAULT_PAGE)
-            .substringBefore("\n\n")
-        composeRule.onNodeWithText(firstParagraph).assertExists()
+        composeRule.onNodeWithText("门楣下刻着两个极浅的字", substring = true).assertExists()
         composeRule.onNodeWithTag("reader-content-surface").performTouchInput { swipeUp() }
         composeRule.waitForIdle()
-        composeRule.onNodeWithText(firstParagraph).assertExists()
+        composeRule.onNodeWithText("门楣下刻着两个极浅的字", substring = true).assertExists()
+        val expandedHeadingBounds = composeRule.onNodeWithTag("reader-block-prose-title").fetchSemanticsNode().boundsInRoot
+        val topChromeBounds = composeRule.onNodeWithTag("reader-top-chrome").fetchSemanticsNode().boundsInRoot
+        assertTrue(expandedHeadingBounds.top < topChromeBounds.bottom)
 
         val expandedBounds = composeRule.onNodeWithTag("reader-content-surface").fetchSemanticsNode().boundsInRoot
+        val readingInfoBounds = composeRule.onNodeWithTag("reader-reading-info").fetchSemanticsNode().boundsInRoot
+        val pagedLastBlockBounds = composeRule.onNodeWithTag("reader-block-prose-paragraph-7").fetchSemanticsNode().boundsInRoot
+        assertTrue(expandedBounds.bottom <= readingInfoBounds.top)
+        assertTrue(pagedLastBlockBounds.bottom <= readingInfoBounds.top)
         composeRule.onNodeWithTag("reader-content-surface").performClick()
         composeRule.waitForIdle()
         composeRule.onNodeWithText("设置").assertDoesNotExist()
         composeRule.onNodeWithTag("reader-reading-info")
-            .assert(hasStateDescription("本章进度 6%，第 1 / 7 页"))
+            .assert(hasStateDescription("本章进度 6%，第 1 / 4 页"))
+        val hiddenHeadingBounds = composeRule.onNodeWithTag("reader-block-prose-title").fetchSemanticsNode().boundsInRoot
+        assertEquals(expandedHeadingBounds, hiddenHeadingBounds)
         val hiddenBounds = composeRule.onNodeWithTag("reader-content-surface").fetchSemanticsNode().boundsInRoot
         assertEquals(expandedBounds, hiddenBounds)
 
+        composeRule.onNodeWithTag("reader-content-surface").performTouchInput { swipeLeft() }
+        composeRule.waitUntil(5_000) {
+            composeRule.onAllNodes(
+                hasStateDescription("本章进度 33%，第 2 / 4 页"),
+            ).fetchSemanticsNodes().isNotEmpty()
+        }
+
         composeRule.onNodeWithTag("reader-content-surface").performClick()
         composeRule.onNodeWithTag("reader-chapter-progress-slider").performTouchInput { click(center) }
-        composeRule.waitUntil(5_000) {
-            composeRule.onAllNodesWithText("灯火不会替人指路，但会让归来的人知道还有一扇门没有关。")
-                .fetchSemanticsNodes().isNotEmpty()
-        }
         assertTrue(composeRule.onAllNodesWithText(SourceAtlasFixtures.chapters[11].title).fetchSemanticsNodes().isNotEmpty())
         composeRule.waitUntil(5_000) {
             stateFile.exists() && stateFile.readText().contains("LocatorCommit")
@@ -102,6 +117,68 @@ class ReaderAtlasInstrumentedTest {
         assertTrue(composeRule.onAllNodesWithText(SourceAtlasFixtures.chapters[12].title).fetchSemanticsNodes().isNotEmpty())
         composeRule.waitUntil(5_000) {
             stateFile.exists() && stateFile.readText().contains("ReaderChapterNext")
+        }
+    }
+
+    @Test
+    fun continuous_reader_scrolls_final_block_above_reading_status_lane() {
+        enableContinuousFlow()
+        composeRule.onNodeWithTag("reader-document-scroll").performScrollToKey("prose-paragraph-24")
+        composeRule.waitForIdle()
+
+        val contentBounds = composeRule.onNodeWithTag("reader-content-surface").fetchSemanticsNode().boundsInRoot
+        val statusBounds = composeRule.onNodeWithTag("reader-reading-info").fetchSemanticsNode().boundsInRoot
+        val finalBlockBounds = composeRule.onNodeWithTag("reader-block-prose-paragraph-24").fetchSemanticsNode().boundsInRoot
+        assertTrue(contentBounds.bottom <= statusBounds.top)
+        assertTrue(finalBlockBounds.bottom <= statusBounds.top)
+        composeRule.onNodeWithTag("reader-reading-info")
+            .assert(hasStateDescription("本章进度 100%，第 31 / 31 页"))
+    }
+
+    @Test
+    fun reader_side_taps_page_within_chapter_then_continue_to_next_chapter() {
+        val chapterTwelve = SourceAtlasFixtures.chapters[11].title
+        val chapterThirteen = SourceAtlasFixtures.chapters[12].title
+
+        repeat(3) {
+            tapReaderSide(0.85f)
+            composeRule.waitForIdle()
+        }
+        composeRule.onNodeWithTag("reader-reading-info")
+            .assert(hasStateDescription("本章进度 100%，第 4 / 4 页"))
+        assertTrue(composeRule.onAllNodesWithText(chapterTwelve).fetchSemanticsNodes().isNotEmpty())
+
+        tapReaderSide(0.85f)
+        composeRule.waitUntil(5_000) {
+            composeRule.onAllNodesWithText(chapterThirteen).fetchSemanticsNodes().isNotEmpty() &&
+                composeRule.onAllNodes(
+                    hasStateDescription("本章进度 0%，第 1 / 4 页"),
+                ).fetchSemanticsNodes().isNotEmpty()
+        }
+
+        tapReaderSide(0.15f)
+        composeRule.waitForIdle()
+        composeRule.onNodeWithTag("reader-reading-info")
+            .assert(hasStateDescription("本章进度 0%，第 1 / 4 页"))
+        assertTrue(composeRule.onAllNodesWithText(chapterThirteen).fetchSemanticsNodes().isNotEmpty())
+        composeRule.waitUntil(5_000) {
+            stateFile.exists() && stateFile.readText().contains("ReaderPageBoundaryNextChapter")
+        }
+    }
+
+    @Test
+    fun detail_directory_opens_the_exact_selected_chapter() {
+        relaunchRoute("BOOK_DETAIL")
+        val selected = SourceAtlasFixtures.chapters.first()
+
+        composeRule.onNodeWithText(selected.title).performScrollTo().performClick()
+        composeRule.waitUntil(5_000) {
+            composeRule.onAllNodesWithTag("reader-content-surface").fetchSemanticsNodes().isNotEmpty() &&
+                composeRule.onAllNodesWithText(selected.title).fetchSemanticsNodes().isNotEmpty()
+        }
+        composeRule.onNodeWithText(SourceAtlasFixtures.chapters[11].title).assertDoesNotExist()
+        composeRule.waitUntil(5_000) {
+            stateFile.exists() && stateFile.readText().contains("ChapterOpened")
         }
     }
 
@@ -164,6 +241,7 @@ class ReaderAtlasInstrumentedTest {
         composeRule.onNodeWithText("页面").assertExists()
         composeRule.onNodeWithText("导航").assertExists()
         composeRule.onNodeWithText("设备").assertExists()
+        composeRule.onNodeWithText("点击区域：左侧上一页 · 中间工具栏 · 右侧下一页").assertExists()
         composeRule.onNodeWithText("双页").assertDoesNotExist()
         composeRule.onNodeWithText("双页需要至少 600dp 可用宽度；偏好会保留，但当前窗口不启用。").assertDoesNotExist()
         composeRule.onNodeWithTag("reader-settings-content").performTouchInput { swipeDown() }
@@ -175,15 +253,55 @@ class ReaderAtlasInstrumentedTest {
     }
 
     @Test
-    fun standard_reader_renders_mixed_media_through_the_shared_surface() {
+    fun standard_reader_prose_fixture_reaches_a_complete_ending_in_continuous_flow() {
+        enableContinuousFlow()
+        composeRule.onNodeWithTag("reader-document-scroll").performScrollToKey("prose-paragraph-24")
+        val ending = "“信收到了吗？”来人问。许砚没有立刻回头。他先看了一眼门上的纸灯，确认火苗安稳，才把手按在木盒上回答：“收到了。路也记下了。”"
+        composeRule.onNodeWithText(ending).assertExists()
+        composeRule.onNodeWithTag("reader-document-scroll").performScrollToKey("prose-section-home")
+        composeRule.onNodeWithText("三、灯下归人").assertExists()
+    }
+
+    @Test
+    fun standard_reader_renders_and_operates_the_complete_mixed_media_document() {
         relaunchReader("continue")
-        assertTrue(composeRule.onAllNodesWithText("河图残卷").fetchSemanticsNodes().isNotEmpty())
-        composeRule.onNodeWithTag("reader-content-surface").performTouchInput { swipeLeft() }
+        enableContinuousFlow()
+        composeRule.onNodeWithTag("reader-document-scroll").performScrollToKey("mixed-conclusion-title")
+        composeRule.onNodeWithText("复原结果").assertExists()
+        composeRule.onNodeWithTag("reader-document-scroll").performScrollToKey("tide-table")
+        composeRule.onNodeWithText("卯时").assertExists()
+        composeRule.onNodeWithTag("reader-document-scroll").performScrollToKey("river-map")
         composeRule.onNodeWithContentDescription(
-            "河图残卷。泛黄纸面上绘有三条河道、山脊和一盏红色纸灯。点按查看大图",
+            "河图残卷。泛黄纸面上绘有三条河道、山脊、七码头石阶和一盏红色纸灯。点按查看大图",
         ).performClick()
         composeRule.onNodeWithContentDescription("关闭大图").assertExists()
         pressBack()
+
+        composeRule.onNodeWithTag("reader-document-scroll").performScrollToKey("attachment")
+        composeRule.onNodeWithContentDescription("打开附件 河图残卷题记.txt，UTF-8 · 2.4 KB · SHA-256 已验证 · 已下载")
+            .performClick()
+        composeRule.onNodeWithText("已打开附件：河图残卷题记.txt").assertExists()
+        composeRule.onNodeWithTag("reader-document-scroll").performScrollToKey("mixed-conclusion-1")
+        composeRule.onNodeWithContentDescription("打开链接 《南河渡口沿革》")
+            .performSemanticsAction(SemanticsActions.OnClick)
+        composeRule.waitUntil(5_000) {
+            composeRule.onAllNodesWithText("已打开链接：tsuyomi://note/south-river").fetchSemanticsNodes().isNotEmpty()
+        }
+    }
+
+    @Test
+    fun standard_reader_renders_reply_chain_and_jumps_to_stable_target_posts() {
+        relaunchReader("recent")
+        enableContinuousFlow()
+        composeRule.onNodeWithTag("reader-document-scroll").performScrollToKey("post-1122")
+        composeRule.onNodeWithText("7楼").assertExists()
+        composeRule.onNodeWithContentDescription("跳转至 6楼 南河档案室 的回复").performClick()
+        composeRule.waitUntil(5_000) {
+            composeRule.onAllNodesWithText("南河档案室").fetchSemanticsNodes().isNotEmpty() &&
+                composeRule.onAllNodesWithText("已跳转至 6楼 · 南河档案室").fetchSemanticsNodes().isNotEmpty()
+        }
+        composeRule.onNodeWithTag("reader-document-scroll").performScrollToKey("post-1122")
+        composeRule.onNodeWithText("最终灯号").assertExists()
     }
 
     @Test
@@ -199,17 +317,50 @@ class ReaderAtlasInstrumentedTest {
         composeRule.onNodeWithText("2楼").assertExists()
     }
 
-    private fun relaunchReader(view: String) {
+    private fun enableContinuousFlow() {
+        if (composeRule.onAllNodesWithText("设置").fetchSemanticsNodes().isEmpty()) {
+            composeRule.onNodeWithTag("reader-content-surface").performClick()
+            composeRule.waitForIdle()
+        }
+        composeRule.onNodeWithText("设置").performClick()
+        composeRule.onNodeWithTag("reader-quick-flow").performClick()
+        composeRule.onNodeWithText("连续滚动").assertExists()
+        pressBack()
+        composeRule.waitForIdle()
+    }
+
+    private fun tapReaderSide(horizontalFraction: Float) {
+        val surface = composeRule.onNodeWithTag("reader-content-surface")
+        val bounds = surface.fetchSemanticsNode().boundsInRoot
+        surface.performTouchInput {
+            click(Offset(bounds.width * horizontalFraction, bounds.height / 2f))
+        }
+    }
+
+    private fun relaunchRoute(route: String) {
         scenario.close()
-        scenario = ActivityScenario.launch(readerIntent(view = view, capture = true))
+        stateFile.delete()
+        scenario = ActivityScenario.launch(atlasIntent(route = route, view = "all", capture = false))
+        composeRule.waitForIdle()
+    }
+
+    private fun relaunchReader(view: String, capture: Boolean = true) {
+        scenario.close()
+        scenario = ActivityScenario.launch(readerIntent(view = view, capture = capture))
         composeRule.waitForIdle()
         composeRule.onNodeWithTag("reader-content-surface").assertExists()
     }
 
-    private fun readerIntent(view: String, capture: Boolean): Intent {
+    private fun readerIntent(view: String, capture: Boolean): Intent = atlasIntent(
+        route = "BOOK_READER",
+        view = view,
+        capture = capture,
+    )
+
+    private fun atlasIntent(route: String, view: String, capture: Boolean): Intent {
         val targetContext = InstrumentationRegistry.getInstrumentation().targetContext
         return Intent(targetContext, MainActivity::class.java)
-            .putExtra("route", "BOOK_READER")
+            .putExtra("route", route)
             .putExtra("profile", "STANDARD")
             .putExtra("capture", capture.toString())
             .putExtra("view", view)

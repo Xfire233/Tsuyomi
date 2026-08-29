@@ -49,6 +49,7 @@ object ReviewJsonExporter {
                         put("title", JsonPrimitive(node.title))
                         put("family", JsonPrimitive(node.family.name.lowercase()))
                         put("kind", JsonPrimitive(node.kind.name.lowercase()))
+                        put("evidenceStage", JsonPrimitive(node.evidenceStage.name.lowercase()))
                         node.route?.let { put("route", JsonPrimitive(it.path)) }
                         put("requiredStates", buildJsonArray {
                             node.requiredStates.sortedBy { it.ordinal }.forEach { add(JsonPrimitive(it.extraKey)) }

@@ -30,6 +30,17 @@ sealed interface PresentationSwitchCommit {
     data class Rejected(val reason: PresentationSwitchRejection) : PresentationSwitchCommit
 }
 
+/** Complete immutable input for starting one compatible presentation handoff. */
+data class PresentationSwitchRequest(
+    val transactionId: Long,
+    val targetId: String,
+    val sourceEpochs: ReaderEpochs,
+    val targetEpochs: ReaderEpochs,
+    val captures: SettledPositionCache,
+    val mountedCapture: SettledPositionSnapshot?,
+    val mountedRendererIsRebuilding: Boolean,
+)
+
 /**
  * A cancellation-aware handoff across compatible reader presentations.
  *
@@ -104,31 +115,23 @@ class PresentationSwitchTransaction private constructor(
          * different metric layout keys/epochs, but all document/session/
          * navigation identity must remain identical.
          */
-        fun begin(
-            transactionId: Long,
-            targetId: String,
-            sourceEpochs: ReaderEpochs,
-            targetEpochs: ReaderEpochs,
-            captures: SettledPositionCache,
-            mountedCapture: SettledPositionSnapshot?,
-            mountedRendererIsRebuilding: Boolean,
-        ): PresentationSwitchStart {
-            require(transactionId >= 0) { "transactionId must not be negative" }
-            require(targetId.isNotBlank()) { "targetId must not be blank" }
-            if (!areCompatiblePresentationEpochs(sourceEpochs, targetEpochs)) {
+        fun begin(request: PresentationSwitchRequest): PresentationSwitchStart {
+            require(request.transactionId >= 0) { "transactionId must not be negative" }
+            require(request.targetId.isNotBlank()) { "targetId must not be blank" }
+            if (!areCompatiblePresentationEpochs(request.sourceEpochs, request.targetEpochs)) {
                 return PresentationSwitchStart.Rejected(PresentationSwitchRejection.INCOMPATIBLE_DOCUMENT)
             }
-            val capture = captures.selectForPresentationSwitch(
-                source = sourceEpochs,
-                mountedCapture = mountedCapture,
-                mountedRendererIsRebuilding = mountedRendererIsRebuilding,
+            val capture = request.captures.selectForPresentationSwitch(
+                source = request.sourceEpochs,
+                mountedCapture = request.mountedCapture,
+                mountedRendererIsRebuilding = request.mountedRendererIsRebuilding,
             ) ?: return PresentationSwitchStart.Rejected(PresentationSwitchRejection.NO_EXACT_SETTLED_CAPTURE)
             return PresentationSwitchStart.Started(
                 PresentationSwitchTransaction(
-                    transactionId = transactionId,
-                    targetId = targetId,
-                    sourceEpochs = sourceEpochs,
-                    targetEpochs = targetEpochs,
+                    transactionId = request.transactionId,
+                    targetId = request.targetId,
+                    sourceEpochs = request.sourceEpochs,
+                    targetEpochs = request.targetEpochs,
                     capture = capture,
                 ),
             )

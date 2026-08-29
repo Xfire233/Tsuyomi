@@ -15,12 +15,38 @@
       "baselineBuildId": "3be8ea00cdac3ed7164fd170929bfb97a1c498cf63032fbbec4630ea5bd095d7"
     }
   ],
-  "phase4Milestone": "Complete and human-review all Standard UX before resuming full E-ink design and review.",
+  "phase4Milestone": "Close Standard Atlas UI construction for L/B/M before any separate human approval or production authorization; S/X remain deferred to actual online production scenarios.",
   "routineReview": {
     "buildOnce": true,
     "deployOncePerActiveDevice": true,
     "captureOnlyAffectedVisualStates": true,
     "journeysOnlyForChangedTransitions": true
+  },
+  "nodeExecution": {
+    "activeStage": "STANDARD_ATLAS_UI",
+    "activeNodePrefixes": [
+      "L",
+      "B",
+      "M"
+    ],
+    "activeNodeCount": 18,
+    "activeSurfaceCount": 16,
+    "activeRouteStateObligationCount": 84,
+    "deferredStages": [
+      {
+        "stage": "ACTUAL_ONLINE_SCENARIO",
+        "nodePrefixes": [
+          "S",
+          "X"
+        ],
+        "nodeCount": 10,
+        "status": "DEFERRED",
+        "requiredPackage": "org.tsuyomi.android",
+        "requiresLiveOnlineService": true,
+        "requiresControlledFixtureReplay": true,
+        "reason": "User requires every S01-S04 and X01-X06 node to be validated in an actual online production scenario rather than closed by Atlas fixtures."
+      }
+    ]
   },
   "directEinkChangeException": {
     "allowed": [

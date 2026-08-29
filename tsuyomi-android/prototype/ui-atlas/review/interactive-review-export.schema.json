@@ -21,7 +21,7 @@
         "designRulesSha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
         "dataSchemaVersion": {"type": "integer", "minimum": 1},
         "reviewSchemaVersion": {"const": 2},
-        "reviewCatalogVersion": {"const": 2}
+        "reviewCatalogVersion": {"const": 5}
       }
     },
     "device": {
@@ -43,12 +43,13 @@
       "items": {
         "type": "object",
         "additionalProperties": false,
-        "required": ["id", "title", "family", "kind", "requiredStates", "operations", "visualChecks", "humanOnlyChecks"],
+        "required": ["id", "title", "family", "kind", "evidenceStage", "requiredStates", "operations", "visualChecks", "humanOnlyChecks"],
         "properties": {
           "id": {"type": "string", "pattern": "^[LBMSX][0-9]{2}$"},
           "title": {"type": "string", "minLength": 1},
           "family": {"enum": ["library", "book_reader", "source", "more", "cross_cutting"]},
           "kind": {"enum": ["surface", "high_risk", "cross_cutting"]},
+          "evidenceStage": {"enum": ["atlas_ui", "actual_online_scenario"]},
           "route": {"type": "string", "minLength": 1},
           "requiredStates": {"type": "array", "items": {"type": "string"}},
           "operations": {"type": "array", "minItems": 1, "items": {"type": "string", "minLength": 1}},

@@ -117,8 +117,17 @@ internal fun LibraryMirror(context: AtlasContext, modifier: Modifier) {
     }
     val dragCoordinator = remember { LibraryDragCoordinator() }
     val coroutineScope = rememberCoroutineScope()
+    var interactiveCalibration by remember { mutableStateOf<AtlasMutationStatus?>(null) }
     val calibrate: () -> Unit = {
-        coroutineScope.launch { runtime.scenarios.run("mirror-calibration", binding.id) }
+        interactiveCalibration = AtlasMutationStatus(AtlasMutationPhase.WORKING, "正在校准网站镜像…")
+        coroutineScope.launch {
+            val result = runtime.scenarios.run("mirror-calibration", binding.id)
+            interactiveCalibration = if (result.successful) {
+                AtlasMutationStatus(AtlasMutationPhase.SUCCESS, "校准完成；网站结构快照已更新。")
+            } else {
+                AtlasMutationStatus(AtlasMutationPhase.ERROR, "校准未完成：${result.outcome}。可再次使用顶部校准操作。")
+            }
+        }
     }
     BackHandler(disableOpen) { disableOpen = false }
     val calibration = when (context.variant?.option) {
@@ -126,13 +135,14 @@ internal fun LibraryMirror(context: AtlasContext, modifier: Modifier) {
         "c" -> LibraryAtlasFixtures.CalibrationPhase.FAILED
         else -> LibraryAtlasFixtures.CalibrationPhase.WORKING
     }
-    val mutation = if (context.state == AtlasPageState.MUTATION) {
+    val capturedMutation = if (context.state == AtlasPageState.MUTATION) {
         when (calibration) {
             LibraryAtlasFixtures.CalibrationPhase.WORKING -> AtlasMutationStatus(AtlasMutationPhase.WORKING, LibraryAtlasFixtures.calibrationMessage(calibration))
             LibraryAtlasFixtures.CalibrationPhase.SUCCESS -> AtlasMutationStatus(AtlasMutationPhase.SUCCESS, LibraryAtlasFixtures.calibrationMessage(calibration))
             LibraryAtlasFixtures.CalibrationPhase.FAILED -> AtlasMutationStatus(AtlasMutationPhase.ERROR, LibraryAtlasFixtures.calibrationMessage(calibration), "重新校准", calibrate)
         }
     } else null
+    val mutation = interactiveCalibration ?: capturedMutation
     val mirrorState = if (context.state == AtlasPageState.UNRESOLVED) AtlasPageState.ERROR else context.state
     val nextDepth = depth + 1
     val nextRoute = mirrorRouteForDepth(nextDepth)

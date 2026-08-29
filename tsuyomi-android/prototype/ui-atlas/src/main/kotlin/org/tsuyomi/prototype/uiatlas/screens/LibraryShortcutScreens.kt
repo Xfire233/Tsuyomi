@@ -8,10 +8,12 @@ package org.tsuyomi.prototype.uiatlas.screens
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.expandHorizontally
+import androidx.compose.animation.expandVertically
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.scaleIn
 import androidx.compose.animation.scaleOut
+import androidx.compose.animation.shrinkVertically
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.keyframes
@@ -917,6 +919,58 @@ internal fun ShortcutShelf(
                     }
                 }
             }
+        }
+    }
+}
+
+@Composable
+internal fun ShortcutShelfOverlay(
+    expanded: Boolean,
+    onExpand: () -> Unit,
+    shelf: @Composable () -> Unit,
+) {
+    val environment = LocalAtlasEnvironment.current
+    val duration = AtlasMotion.duration(AtlasMotion.EXPAND_MS, environment)
+    if (duration == 0) {
+        if (expanded) shelf() else ShortcutShelfHandle(onExpand)
+        return
+    }
+    Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.TopCenter) {
+        AnimatedVisibility(
+            visible = expanded,
+            enter = expandVertically(tween(duration), expandFrom = Alignment.Top) + fadeIn(tween(duration)),
+            exit = shrinkVertically(tween(duration), shrinkTowards = Alignment.Top) + fadeOut(tween(duration)),
+        ) {
+            shelf()
+        }
+        AnimatedVisibility(
+            visible = !expanded,
+            enter = expandVertically(tween(duration), expandFrom = Alignment.Top) + fadeIn(tween(duration)),
+            exit = shrinkVertically(tween(duration), shrinkTowards = Alignment.Top) + fadeOut(tween(duration)),
+        ) {
+            ShortcutShelfHandle(onExpand)
+        }
+    }
+}
+
+@Composable
+private fun ShortcutShelfHandle(onExpand: () -> Unit) {
+    Surface(
+        onClick = onExpand,
+        modifier = Modifier
+            .size(48.dp)
+            .testTag("shortcut-shelf-handle")
+            .semantics {
+                contentDescription = "展开快捷书架"
+                stateDescription = "快捷书架已收起"
+                role = Role.Button
+            },
+        shape = MaterialTheme.shapes.small,
+        color = MaterialTheme.colorScheme.surfaceContainerHigh,
+        tonalElevation = 2.dp,
+    ) {
+        Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+            Icon(AtlasIcons.Expand, contentDescription = null, modifier = Modifier.size(24.dp))
         }
     }
 }

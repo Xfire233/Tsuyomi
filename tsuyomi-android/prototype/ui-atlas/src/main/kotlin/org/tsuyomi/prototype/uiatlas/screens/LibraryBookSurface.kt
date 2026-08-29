@@ -6,6 +6,8 @@
 package org.tsuyomi.prototype.uiatlas.screens
 
 import androidx.compose.foundation.gestures.Orientation
+import androidx.compose.ui.input.nestedscroll.NestedScrollConnection
+import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -14,27 +16,34 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.GridItemSpan
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
+import androidx.compose.foundation.lazy.grid.rememberLazyGridState
 import androidx.compose.foundation.lazy.items
-import androidx.compose.material3.DropdownMenu
-import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Text
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshotFlow
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.unit.dp
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlin.math.floor
 import kotlin.math.max
 import org.tsuyomi.prototype.uiatlas.components.AtlasButton
 import org.tsuyomi.prototype.uiatlas.components.AtlasButtonStyle
 import org.tsuyomi.prototype.uiatlas.components.AtlasIconButton
 import org.tsuyomi.prototype.uiatlas.components.AtlasIcons
+import org.tsuyomi.prototype.uiatlas.components.AtlasMenuEntry
+import org.tsuyomi.prototype.uiatlas.components.AtlasOverflowMenu
 import org.tsuyomi.prototype.uiatlas.components.BookGridCard
 import org.tsuyomi.prototype.uiatlas.components.BookListItemRow
 import org.tsuyomi.prototype.uiatlas.components.CompactBookListItem
@@ -55,6 +64,13 @@ import org.tsuyomi.prototype.uiatlas.theme.AtlasSpacing
 import org.tsuyomi.prototype.uiatlas.theme.LocalAtlasEnvironment
 
 
+
+internal enum class LibraryScrollDirection { NONE, FORWARD, BACKWARD }
+
+internal data class LibraryViewportSnapshot(
+    val headerVisible: Boolean,
+    val direction: LibraryScrollDirection,
+)
 @Composable
 internal fun BookSurface(
     context: AtlasContext,
@@ -75,6 +91,7 @@ internal fun BookSurface(
     onLongPress: ((AtlasBook) -> Unit)? = null,
     onRemoveRequest: ((AtlasBook) -> Unit)? = null,
     header: (@Composable () -> Unit)? = null,
+    onViewportChanged: ((LibraryViewportSnapshot) -> Unit)? = null,
 ) {
     val eInk = LocalAtlasEnvironment.current.eInk
     val navigation = LocalAtlasNavigation.current
@@ -91,13 +108,7 @@ internal fun BookSurface(
         if (selectionActive) toggle(book.id) else navigation.navigate(AtlasRoute.BOOK_DETAIL)
     }
     val trailing: @Composable (AtlasBook) -> Unit = { book ->
-        if (continueView) {
-            if (context.isVariant('B', "b")) RowActionMenu(book, onRemoveRequest)
-            else AtlasButton("继续", {
-                repository.record("ContinueReading", book.id, "success")
-                navigation.navigate(AtlasRoute.BOOK_READER)
-            }, style = AtlasButtonStyle.TEXT)
-        }
+        if (continueView) RowActionMenu(book, onRemoveRequest)
     }
     val itemModifier: @Composable (AtlasBook) -> Modifier = { book ->
         val dragModifier = dragCoordinator?.let { coordinator ->
@@ -173,11 +184,27 @@ internal fun BookSurface(
                 books.forEach { row(it) }
             }
         } else {
+            val listState = rememberLazyListState()
             val visualCount = books.size + if (gapIndex != null) 1 else 0
+            ReportLibraryViewport(
+                observationKey = listState,
+                headerPresent = header != null,
+                atStart = { !listState.canScrollBackward },
+                position = { listState.firstVisibleItemIndex to listState.firstVisibleItemScrollOffset },
+                onViewportChanged = onViewportChanged,
+            )
+            val listGestureConnection = rememberLibraryGestureConnection(
+                observationKey = listState,
+                headerPresent = header != null,
+                atStart = { !listState.canScrollBackward },
+                position = { listState.firstVisibleItemIndex to listState.firstVisibleItemScrollOffset },
+                onViewportChanged = onViewportChanged,
+            )
             LazyColumn(
-                modifier.then(if (dragCoordinator != null) Modifier.libraryContentDropTarget(dragCoordinator, reorderEnabled) else Modifier).testTag("library-book-surface"),
+                state = listState,
+                modifier = modifier.nestedScroll(listGestureConnection).then(if (dragCoordinator != null) Modifier.libraryContentDropTarget(dragCoordinator, reorderEnabled) else Modifier).testTag("library-book-surface"),
             ) {
-                header?.let { headerContent -> item { headerContent() } }
+                header?.let { headerContent -> item(key = "library-header") { headerContent() } }
                 items(
                     count = visualCount,
                     key = { visualIndex ->
@@ -219,14 +246,30 @@ internal fun BookSurface(
     } else {
         val spacing = if (denseGrid) AtlasSpacing.Sm else AtlasSpacing.Md
         val visualCount = books.size + if (gapIndex != null) 1 else 0
+        val gridState = rememberLazyGridState()
+        ReportLibraryViewport(
+            observationKey = gridState,
+            headerPresent = header != null,
+            atStart = { !gridState.canScrollBackward },
+            position = { gridState.firstVisibleItemIndex to gridState.firstVisibleItemScrollOffset },
+            onViewportChanged = onViewportChanged,
+        )
+        val gridGestureConnection = rememberLibraryGestureConnection(
+            observationKey = gridState,
+            headerPresent = header != null,
+            atStart = { !gridState.canScrollBackward },
+            position = { gridState.firstVisibleItemIndex to gridState.firstVisibleItemScrollOffset },
+            onViewportChanged = onViewportChanged,
+        )
         LazyVerticalGrid(
             columns = if (denseGrid) GridCells.Fixed(3) else GridCells.Adaptive(120.dp),
-            modifier = modifier.then(if (dragCoordinator != null) Modifier.libraryContentDropTarget(dragCoordinator, reorderEnabled) else Modifier).testTag("library-book-surface"),
+            state = gridState,
+            modifier = modifier.nestedScroll(gridGestureConnection).then(if (dragCoordinator != null) Modifier.libraryContentDropTarget(dragCoordinator, reorderEnabled) else Modifier).testTag("library-book-surface"),
             contentPadding = androidx.compose.foundation.layout.PaddingValues(spacing),
             horizontalArrangement = Arrangement.spacedBy(AtlasSpacing.Sm),
             verticalArrangement = Arrangement.spacedBy(AtlasSpacing.Sm),
         ) {
-            header?.let { headerContent -> item(span = { GridItemSpan(maxLineSpan) }) { headerContent() } }
+            header?.let { headerContent -> item(key = "library-header", span = { GridItemSpan(maxLineSpan) }) { headerContent() } }
             items(
                 count = visualCount,
                 key = { visualIndex ->
@@ -248,25 +291,83 @@ internal fun BookSurface(
 }
 
 @Composable
-private fun RowActionMenu(book: AtlasBook, onRemoveRequest: ((AtlasBook) -> Unit)?) {
-    val navigation = LocalAtlasNavigation.current
-    val repository = prototypeRepository()
-    var open by remember(book.id) { mutableStateOf(false) }
-    Box {
-        AtlasIconButton(AtlasIcons.Overflow, "${book.title} 操作", { open = true })
-        DropdownMenu(open, { open = false }) {
-            DropdownMenuItem({ Text("继续阅读") }, {
-                open = false
-                repository.record("ContinueReading", book.id, "success")
-                navigation.navigate(AtlasRoute.BOOK_READER)
-            })
-            DropdownMenuItem({ Text("查看详情") }, { open = false; navigation.navigate(AtlasRoute.BOOK_DETAIL) })
-            onRemoveRequest?.let { request ->
-                DropdownMenuItem({ Text("移出书架…") }, {
-                    open = false
-                    request(book)
-                })
+private fun rememberLibraryGestureConnection(
+    observationKey: Any,
+    headerPresent: Boolean,
+    atStart: () -> Boolean,
+    position: () -> Pair<Int, Int>,
+    onViewportChanged: ((LibraryViewportSnapshot) -> Unit)?,
+): NestedScrollConnection {
+    val currentObserver = rememberUpdatedState(onViewportChanged)
+    return remember(observationKey, headerPresent) {
+        object : NestedScrollConnection {
+            override fun onPreScroll(available: Offset, source: androidx.compose.ui.input.nestedscroll.NestedScrollSource): Offset {
+                val direction = when {
+                    available.y < 0f -> LibraryScrollDirection.FORWARD
+                    available.y > 0f -> LibraryScrollDirection.BACKWARD
+                    else -> LibraryScrollDirection.NONE
+                }
+                if (direction != LibraryScrollDirection.NONE) {
+                    val current = position()
+                    val headerVisible = if (headerPresent) current.first == 0 else atStart()
+                    currentObserver.value?.invoke(LibraryViewportSnapshot(headerVisible, direction))
+                }
+                return Offset.Zero
             }
         }
     }
+}
+
+@Composable
+private fun ReportLibraryViewport(
+    observationKey: Any,
+    headerPresent: Boolean,
+    atStart: () -> Boolean,
+    position: () -> Pair<Int, Int>,
+    onViewportChanged: ((LibraryViewportSnapshot) -> Unit)?,
+) {
+    val currentObserver = rememberUpdatedState(onViewportChanged)
+    LaunchedEffect(observationKey, headerPresent) {
+        var previous = position()
+        fun headerVisible(current: Pair<Int, Int>): Boolean =
+            if (headerPresent) current.first == 0 else atStart()
+        currentObserver.value?.invoke(LibraryViewportSnapshot(headerVisible(previous), LibraryScrollDirection.NONE))
+        snapshotFlow(position)
+            .distinctUntilChanged()
+            .collect { current ->
+                val comparison = when {
+                    current.first != previous.first -> current.first.compareTo(previous.first)
+                    else -> current.second.compareTo(previous.second)
+                }
+                val direction = when {
+                    comparison > 0 -> LibraryScrollDirection.FORWARD
+                    comparison < 0 -> LibraryScrollDirection.BACKWARD
+                    else -> LibraryScrollDirection.NONE
+                }
+                currentObserver.value?.invoke(LibraryViewportSnapshot(headerVisible(current), direction))
+                previous = current
+            }
+    }
+}
+
+@Composable
+private fun RowActionMenu(book: AtlasBook, onRemoveRequest: ((AtlasBook) -> Unit)?) {
+    val navigation = LocalAtlasNavigation.current
+    val repository = prototypeRepository()
+    AtlasOverflowMenu(
+        contentDescription = "${book.title} 操作",
+        entries = buildList {
+            add(
+                AtlasMenuEntry("继续阅读", {
+                    repository.record("ContinueReading", book.id, "success")
+                    navigation.navigate(AtlasRoute.BOOK_READER)
+                }, icon = AtlasIcons.Document),
+            )
+            add(AtlasMenuEntry("查看详情", { navigation.navigate(AtlasRoute.BOOK_DETAIL) }, icon = AtlasIcons.Info))
+            onRemoveRequest?.let { request ->
+                add(AtlasMenuEntry("移出书架…", { request(book) }, icon = AtlasIcons.Delete, destructive = true))
+            }
+        },
+        anchorTag = "book-row-menu-${book.id}",
+    )
 }

@@ -47,6 +47,14 @@ data class DeviceClassification(
     val deviceLabel: String?,
 )
 
+/** Ephemeral platform state sampled together for one display-environment resolution. */
+data class DisplaySystemState(
+    val apiLevel: Int,
+    val systemDark: Boolean,
+    val reducedMotion: Boolean,
+    val redrawEpoch: Long,
+)
+
 /** Motion behavior that semantic UI components must use for a composition snapshot. */
 enum class MotionPolicy {
     STANDARD,

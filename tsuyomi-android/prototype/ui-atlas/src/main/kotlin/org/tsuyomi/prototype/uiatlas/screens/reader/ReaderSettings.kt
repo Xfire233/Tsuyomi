@@ -438,7 +438,7 @@ private fun ReaderExpandedSettings(
             }
         }
         ReaderSettingsSection("导航") {
-            Text("点击区域：左侧上一章 · 中间工具栏 · 右侧下一章", style = MaterialTheme.typography.bodyMedium)
+            Text("点击区域：左侧上一页 · 中间工具栏 · 右侧下一页", style = MaterialTheme.typography.bodyMedium)
             ReaderSwitchSetting("音量键翻页", "屏幕按钮始终保留为可见等价路径。", state.volumePaging) {
                 onAction(ReaderSettingsAction.VolumePaging(it))
             }

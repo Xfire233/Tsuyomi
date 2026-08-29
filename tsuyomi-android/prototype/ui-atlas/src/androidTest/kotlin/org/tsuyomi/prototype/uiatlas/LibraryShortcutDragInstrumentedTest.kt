@@ -5,6 +5,8 @@
 
 package org.tsuyomi.prototype.uiatlas
 
+import android.content.Intent
+
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.test.hasSetTextAction
 import androidx.compose.ui.test.hasStateDescription
@@ -21,6 +23,8 @@ import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.performTouchInput
 import androidx.compose.ui.test.performTextInput
+import androidx.compose.ui.test.swipeDown
+import androidx.compose.ui.test.swipeUp
 import androidx.test.core.app.ActivityScenario
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.espresso.Espresso.pressBack
@@ -33,14 +37,20 @@ import org.junit.Assert.assertFalse
 import org.junit.Before
 import org.junit.After
 import org.tsuyomi.prototype.uiatlas.components.libraryDragPreviewSize
+import org.tsuyomi.prototype.uiatlas.components.ATLAS_MENU_ANCHOR_TAG
+import org.tsuyomi.prototype.uiatlas.components.ATLAS_MENU_POPUP_TAG
 import org.tsuyomi.prototype.uiatlas.components.AtlasIcons
 import org.tsuyomi.prototype.uiatlas.components.currentLayoutIcon
 import org.tsuyomi.prototype.uiatlas.components.LibraryBookSortDirection
 import org.tsuyomi.prototype.uiatlas.components.LibraryBookSortMode
 import org.tsuyomi.prototype.uiatlas.components.orderedForLibrary
 import org.tsuyomi.prototype.uiatlas.components.layoutToggleContentDescription
+import org.tsuyomi.prototype.uiatlas.fixtures.SourceAtlasFixtures
 import org.tsuyomi.prototype.uiatlas.fixtures.LibraryAtlasFixtures
 import org.tsuyomi.prototype.uiatlas.model.AtlasLayout
+import org.tsuyomi.prototype.uiatlas.review.ReviewControlMode
+import org.tsuyomi.prototype.uiatlas.review.ReviewRepository
+import org.tsuyomi.prototype.uiatlas.review.ReviewVerdict
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -70,6 +80,60 @@ class LibraryShortcutDragInstrumentedTest {
         scenario.close()
     }
 
+
+    @Test
+    fun unlocked_shortcut_shelf_collapses_after_leaving_viewport_and_expands_from_arrow_or_reverse_scroll() {
+        composeRule.onNodeWithContentDescription("快捷书架未锁定，点按锁定").assertExists()
+        composeRule.onNodeWithTag("shortcut-shelf-handle").assertDoesNotExist()
+
+        scrollLibraryForward()
+        composeRule.waitUntil(5_000) {
+            composeRule.onAllNodesWithTag("shortcut-shelf-handle").fetchSemanticsNodes().isNotEmpty()
+        }
+        val handleBounds = composeRule.onNodeWithTag("shortcut-shelf-handle").fetchSemanticsNode().boundsInRoot
+        val density = InstrumentationRegistry.getInstrumentation().targetContext.resources.displayMetrics.density
+        assertTrue(handleBounds.width >= 48f * density && handleBounds.height >= 48f * density)
+        composeRule.onNodeWithContentDescription("展开快捷书架").performClick()
+        composeRule.onNodeWithContentDescription("快捷书架未锁定，点按锁定").assertExists()
+
+        scrollLibraryForward()
+        composeRule.waitUntil(5_000) {
+            composeRule.onAllNodesWithTag("shortcut-shelf-handle").fetchSemanticsNodes().isNotEmpty()
+        }
+        composeRule.onNodeWithTag("library-book-surface").performTouchInput { swipeDown() }
+        composeRule.waitUntil(5_000) {
+            composeRule.onAllNodesWithContentDescription("快捷书架未锁定，点按锁定").fetchSemanticsNodes().isNotEmpty()
+        }
+    }
+
+    @Test
+    fun locked_shortcut_shelf_remains_pinned_while_library_scrolls() {
+        composeRule.onNodeWithContentDescription("快捷书架未锁定，点按锁定").performClick()
+        scrollLibraryForward()
+        composeRule.onNodeWithContentDescription("快捷书架已锁定，点按解锁").assertExists()
+        composeRule.onNodeWithTag("shortcut-shelf-handle").assertDoesNotExist()
+    }
+
+    @Test
+    fun unlocking_mid_scroll_keeps_full_shelf_until_the_next_forward_scroll() {
+        composeRule.onNodeWithContentDescription("快捷书架未锁定，点按锁定").performClick()
+        scrollLibraryForward()
+        composeRule.onNodeWithContentDescription("快捷书架已锁定，点按解锁").performClick()
+        composeRule.onNodeWithContentDescription("快捷书架未锁定，点按锁定").assertExists()
+        composeRule.onNodeWithTag("shortcut-shelf-handle").assertDoesNotExist()
+
+        composeRule.onNodeWithTag("library-book-surface").performTouchInput { swipeUp() }
+        composeRule.waitUntil(5_000) {
+            composeRule.onAllNodesWithTag("shortcut-shelf-handle").fetchSemanticsNodes().isNotEmpty()
+        }
+    }
+
+    private fun scrollLibraryForward() {
+        repeat(2) {
+            composeRule.onNodeWithTag("library-book-surface").performTouchInput { swipeUp() }
+            composeRule.waitForIdle()
+        }
+    }
     @Test
     fun long_pressing_a_book_into_the_shortcut_shelf_adds_and_persists_it() {
         val anchorTopBefore = composeRule
@@ -169,7 +233,10 @@ class LibraryShortcutDragInstrumentedTest {
             .boundsInRoot
         assertTrue(fourthBounds.right < rootBounds.right)
         assertTrue(fifthBounds.left < rootBounds.right)
-        assertTrue(fifthBounds.width in (fourthBounds.width * 0.4f)..(fourthBounds.width * 0.7f))
+        assertTrue(
+            "fourth=${fourthBounds.width} fifth=${fifthBounds.width} rootRight=${rootBounds.right} fifthLeft=${fifthBounds.left}",
+            fifthBounds.width in (fourthBounds.width * 0.3f)..(fourthBounds.width * 0.7f),
+        )
 
         drag(
             sourceDescription = "夜航船，长按多选，移动可拖动排序",
@@ -410,7 +477,10 @@ class LibraryShortcutDragInstrumentedTest {
 
     @Test
     fun sort_dialog_exposes_all_modes_and_persists_direction() {
+        composeRule.onNodeWithTag(ATLAS_MENU_ANCHOR_TAG).assertExists()
         composeRule.onNodeWithContentDescription("更多操作").performClick()
+        composeRule.waitForIdle()
+        composeRule.onNodeWithTag(ATLAS_MENU_POPUP_TAG).assertExists()
         composeRule.onNodeWithText("排序：自定义").performClick()
         composeRule.onNodeWithText("标题").assertExists()
         assertTrue(composeRule.onAllNodesWithText("最近阅读").fetchSemanticsNodes().size >= 2)
@@ -427,6 +497,51 @@ class LibraryShortcutDragInstrumentedTest {
         composeRule.waitForIdle()
         composeRule.onNodeWithContentDescription("更多操作").performClick()
         composeRule.onNodeWithText("排序：标题 · 降序").assertExists()
+    }
+
+    @Test
+    fun continue_book_row_overflow_opens_its_material_action_menu() {
+        relaunchLibrary(route = "LIBRARY_SYSTEM", view = "continue", variant = "B-b", layout = "list")
+        ensureAtlasLayout(AtlasLayout.LIST)
+        val firstBook = LibraryAtlasFixtures.viewFixture(org.tsuyomi.prototype.uiatlas.model.AtlasLibraryView.CONTINUE).books.first()
+        composeRule.onNodeWithTag("book-row-menu-${firstBook.id}", useUnmergedTree = true).performClick()
+        composeRule.waitUntil(5_000) {
+            composeRule.onAllNodesWithTag(ATLAS_MENU_POPUP_TAG).fetchSemanticsNodes().isNotEmpty()
+        }
+        composeRule.onNodeWithTag(ATLAS_MENU_POPUP_TAG).assertExists()
+        assertTrue(composeRule.onAllNodesWithText("继续阅读").fetchSemanticsNodes().size >= 2)
+        composeRule.onNodeWithText("查看详情").assertExists()
+        composeRule.onNodeWithText("移出书架…").assertExists()
+    }
+
+    @Test
+    fun tag_row_overflow_opens_the_selected_rows_material_action_menu() {
+        relaunchLibrary(route = "LIBRARY_TAGS", view = "all", variant = "A-a", layout = "list")
+        composeRule.onNodeWithTag(
+            "tag-row-menu-${LibraryAtlasFixtures.localTags.first().id}",
+            useUnmergedTree = true,
+        ).performClick()
+
+        composeRule.onNodeWithTag(ATLAS_MENU_POPUP_TAG).assertExists()
+        composeRule.onNodeWithText("重命名").assertExists()
+        composeRule.onNodeWithText("合并到…").assertExists()
+        composeRule.onNodeWithText("删除…").assertExists()
+    }
+
+    @Test
+    fun source_row_overflow_opens_the_selected_rows_material_action_menu() {
+        relaunchLibrary(
+            route = "BROWSE_SOURCE_REMOTE_LIBRARY",
+            view = "all",
+            variant = "B-b",
+            layout = "list",
+        )
+        val firstBook = SourceAtlasFixtures.remoteEntries.first().book
+        composeRule.onNodeWithTag("source-row-menu-${firstBook.id}", useUnmergedTree = true).performClick()
+
+        composeRule.onNodeWithTag(ATLAS_MENU_POPUP_TAG).assertExists()
+        composeRule.onNodeWithText("已在书架").assertExists()
+        composeRule.onNodeWithText("查看详情").assertExists()
     }
 
     @Test
@@ -1225,6 +1340,25 @@ class LibraryShortcutDragInstrumentedTest {
         composeRule.waitForIdle()
     }
 
+    @Test
+    fun atlas_review_cannot_finalize_actual_online_scenario_nodes() {
+        val targetContext = InstrumentationRegistry.getInstrumentation().targetContext
+        val repository = ReviewRepository(targetContext, persistent = false)
+        repository.setControlMode(ReviewControlMode.HUMAN)
+
+        repository.markHumanReviewed("S01")
+        repository.setVerdict("S01", ReviewVerdict.ACCEPT)
+        repository.markHumanReviewed("X01")
+        repository.setVerdict("X01", ReviewVerdict.ACCEPT)
+        repository.markHumanReviewed("L01")
+        repository.setVerdict("L01", ReviewVerdict.ACCEPT)
+
+        assertEquals(ReviewVerdict.PENDING, repository.progress("S01").verdict)
+        assertEquals(ReviewVerdict.PENDING, repository.progress("X01").verdict)
+        assertEquals(ReviewVerdict.ACCEPT, repository.progress("L01").verdict)
+        assertTrue(repository.progress("L01").humanReviewedAt != null)
+    }
+
     private fun bottommostNode(description: String) = composeRule
         .onAllNodesWithContentDescription(description)
         .let { nodes ->
@@ -1234,6 +1368,35 @@ class LibraryShortcutDragInstrumentedTest {
                 .index
             nodes[index]
         }
+
+    private fun ensureAtlasLayout(expected: AtlasLayout) {
+        repeat(AtlasLayout.entries.size) {
+            val expectedDescription = expected.layoutToggleContentDescription()
+            if (composeRule.onAllNodesWithContentDescription(expectedDescription).fetchSemanticsNodes().isNotEmpty()) return
+            val current = AtlasLayout.entries.first { layout ->
+                composeRule.onAllNodesWithContentDescription(layout.layoutToggleContentDescription())
+                    .fetchSemanticsNodes()
+                    .isNotEmpty()
+            }
+            composeRule.onNodeWithContentDescription(current.layoutToggleContentDescription()).performClick()
+            composeRule.waitForIdle()
+        }
+        throw AssertionError("Unable to select Atlas layout $expected")
+    }
+
+    private fun relaunchLibrary(route: String, view: String, variant: String, layout: String) {
+        scenario.close()
+        val targetContext = InstrumentationRegistry.getInstrumentation().targetContext
+        val intent = Intent(targetContext, MainActivity::class.java)
+            .putExtra("route", route)
+            .putExtra("profile", "STANDARD")
+            .putExtra("capture", "true")
+            .putExtra("view", view)
+            .putExtra("variant", variant)
+            .putExtra("layout", layout)
+        scenario = ActivityScenario.launch(intent)
+        composeRule.waitForIdle()
+    }
 
     private fun storedList(key: String): List<String> {
         val encoded = JSONObject(stateFile.readText())

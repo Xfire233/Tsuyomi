@@ -8,7 +8,6 @@ package org.tsuyomi.prototype.uiatlas.screens.reader
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -51,9 +50,11 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.TextStyle
@@ -92,6 +93,14 @@ internal data class ReaderTextSettings(
     )
 }
 
+@Immutable
+internal data class ReaderContentActions(
+    val onImageClick: (ReaderImage) -> Unit,
+    val onLinkClick: (String) -> Unit,
+    val onAttachmentClick: (ReaderAttachment) -> Unit,
+    val onReplyClick: (ReaderReplyReference) -> Unit,
+)
+
 @Composable
 internal fun ReaderDocumentView(
     document: ReaderDocument,
@@ -100,8 +109,7 @@ internal fun ReaderDocumentView(
     progress: Int,
     seeking: Boolean,
     onPositionChanged: (ReaderPosition) -> Unit,
-    onImageClick: (ReaderImage) -> Unit,
-    onLinkClick: (String) -> Unit,
+    actions: ReaderContentActions,
     modifier: Modifier = Modifier,
 ) {
     BoxWithConstraints(modifier.fillMaxSize()) {
@@ -113,8 +121,7 @@ internal fun ReaderDocumentView(
                 progress,
                 seeking,
                 onPositionChanged,
-                onImageClick,
-                onLinkClick,
+                actions,
             )
 
             ReaderFlow.PAGED -> ReaderPagedSurface(
@@ -123,8 +130,7 @@ internal fun ReaderDocumentView(
                 progress,
                 seeking,
                 onPositionChanged,
-                onImageClick,
-                onLinkClick,
+                actions,
             )
 
             ReaderFlow.DUAL -> ReaderDualPageSurface(
@@ -133,8 +139,7 @@ internal fun ReaderDocumentView(
                 progress,
                 seeking,
                 onPositionChanged,
-                onImageClick,
-                onLinkClick,
+                actions,
             )
         }
     }
@@ -147,8 +152,7 @@ private fun ReaderScrollSurface(
     progress: Int,
     seeking: Boolean,
     onPositionChanged: (ReaderPosition) -> Unit,
-    onImageClick: (ReaderImage) -> Unit,
-    onLinkClick: (String) -> Unit,
+    actions: ReaderContentActions,
 ) {
     val pageCount = document.blocks.size.coerceAtLeast(1)
     val targetIndex = progressToPageIndex(progress, pageCount)
@@ -162,11 +166,17 @@ private fun ReaderScrollSurface(
         currentOnPositionChanged.value(ReaderPosition(progress.coerceIn(0, 100), targetIndex + 1, pageCount))
     }
     LaunchedEffect(listState, seeking, pageCount) {
-        snapshotFlow { listState.isScrollInProgress to listState.firstVisibleItemIndex }
+        snapshotFlow {
+            Triple(listState.isScrollInProgress, listState.firstVisibleItemIndex, listState.canScrollForward)
+        }
             .distinctUntilChanged()
-            .collect { (scrolling, firstVisibleItemIndex) ->
-                if (scrolling && !seeking) {
-                    currentOnPositionChanged.value(positionForPageIndex(firstVisibleItemIndex, pageCount))
+            .collect { (scrolling, firstVisibleItemIndex, canScrollForward) ->
+                if (!seeking && (scrolling || !canScrollForward)) {
+                    currentOnPositionChanged.value(
+                        if (!canScrollForward) ReaderPosition(100, pageCount, pageCount) else {
+                            positionForPageIndex(firstVisibleItemIndex, pageCount)
+                        },
+                    )
                 }
             }
     }
@@ -174,12 +184,12 @@ private fun ReaderScrollSurface(
     Box(Modifier.fillMaxSize(), contentAlignment = Alignment.TopCenter) {
         LazyColumn(
             state = listState,
-            modifier = Modifier.fillMaxHeight().widthIn(max = 840.dp).fillMaxWidth(),
+            modifier = Modifier.fillMaxHeight().widthIn(max = 840.dp).fillMaxWidth().testTag("reader-document-scroll"),
             contentPadding = readerContentPadding(textSettings),
             verticalArrangement = Arrangement.spacedBy((textSettings.paragraphSpacing * 16f).dp),
         ) {
             items(document.blocks, key = ReaderBlock::id) { block ->
-                ReaderBlockView(block, textSettings, onImageClick, onLinkClick)
+                ReaderBlockView(block, textSettings, actions)
             }
         }
     }
@@ -192,8 +202,7 @@ private fun ReaderPagedSurface(
     progress: Int,
     seeking: Boolean,
     onPositionChanged: (ReaderPosition) -> Unit,
-    onImageClick: (ReaderImage) -> Unit,
-    onLinkClick: (String) -> Unit,
+    actions: ReaderContentActions,
 ) {
     val pages = remember(document.id) { document.toReaderPages() }
     val targetPage = progressToPageIndex(progress, pages.size)
@@ -222,7 +231,7 @@ private fun ReaderPagedSurface(
         modifier = Modifier.fillMaxSize(),
         key = { index -> pages[index].firstOrNull()?.id ?: "page-$index" },
     ) { pageIndex ->
-        ReaderStaticPage(pages[pageIndex], textSettings, onImageClick, onLinkClick)
+        ReaderStaticPage(pages[pageIndex], textSettings, actions)
     }
 }
 
@@ -233,8 +242,7 @@ private fun ReaderDualPageSurface(
     progress: Int,
     seeking: Boolean,
     onPositionChanged: (ReaderPosition) -> Unit,
-    onImageClick: (ReaderImage) -> Unit,
-    onLinkClick: (String) -> Unit,
+    actions: ReaderContentActions,
 ) {
     val pages = remember(document.id) { document.toReaderPages() }
     val spreads = remember(pages) { pages.chunked(2) }
@@ -245,7 +253,7 @@ private fun ReaderDualPageSurface(
     LaunchedEffect(document.id, targetSpread, progress) {
         if (pagerState.currentPage != targetSpread) pagerState.scrollToPage(targetSpread)
         val firstPage = (targetSpread * 2).coerceAtMost(pages.lastIndex)
-        currentOnPositionChanged.value(ReaderPosition(progress.coerceIn(0, 100), firstPage + 1, pages.size))
+        currentOnPositionChanged.value(ReaderPosition(progress.coerceIn(0, 100), firstPage + 1, pages.size, pageStep = 2))
     }
     LaunchedEffect(pagerState, seeking, spreads.size) {
         var userPaging = false
@@ -258,7 +266,7 @@ private fun ReaderDualPageSurface(
                     val settledProgress = if (spreads.size == 1) 0 else {
                         (settledSpread * 100f / (spreads.size - 1)).roundToInt()
                     }
-                    currentOnPositionChanged.value(ReaderPosition(settledProgress, firstPage + 1, pages.size))
+                    currentOnPositionChanged.value(ReaderPosition(settledProgress, firstPage + 1, pages.size, pageStep = 2))
                     userPaging = false
                 }
             }
@@ -273,8 +281,7 @@ private fun ReaderDualPageSurface(
                 ReaderStaticPage(
                     blocks = blocks,
                     textSettings = textSettings,
-                    onImageClick = onImageClick,
-                    onLinkClick = onLinkClick,
+                    actions = actions,
                     modifier = Modifier.weight(1f),
                 )
                 if (pageIndex == 0 && spreads[spreadIndex].size > 1) {
@@ -289,8 +296,7 @@ private fun ReaderDualPageSurface(
 private fun ReaderStaticPage(
     blocks: List<ReaderBlock>,
     textSettings: ReaderTextSettings,
-    onImageClick: (ReaderImage) -> Unit,
-    onLinkClick: (String) -> Unit,
+    actions: ReaderContentActions,
     modifier: Modifier = Modifier,
 ) {
     Box(modifier.fillMaxSize(), contentAlignment = Alignment.TopCenter) {
@@ -303,7 +309,7 @@ private fun ReaderStaticPage(
                 .padding(readerContentPadding(textSettings)),
             verticalArrangement = Arrangement.spacedBy((textSettings.paragraphSpacing * 16f).dp),
         ) {
-            blocks.forEach { block -> ReaderBlockView(block, textSettings, onImageClick, onLinkClick) }
+            blocks.forEach { block -> ReaderBlockView(block, textSettings, actions) }
         }
     }
 }
@@ -311,17 +317,40 @@ private fun ReaderStaticPage(
 private fun ReaderDocument.toReaderPages(): List<List<ReaderBlock>> {
     if (blocks.isEmpty()) return listOf(emptyList())
     return buildList {
-        var index = 0
-        while (index < blocks.size) {
-            val block = blocks[index]
-            if (block is ReaderHeading && index + 1 < blocks.size) {
-                add(listOf(block, blocks[index + 1]))
-                index += 2
-            } else {
-                add(listOf(block))
-                index += 1
-            }
+        var current = mutableListOf<ReaderBlock>()
+        var currentWeight = 0
+
+        fun flush() {
+            if (current.isNotEmpty()) add(current)
+            current = mutableListOf()
+            currentWeight = 0
         }
+
+        blocks.forEach { block ->
+            val weight = block.readerPageWeight()
+            if (weight >= 5 && current.isNotEmpty()) flush()
+            if (block is ReaderHeading && currentWeight >= 7) flush()
+            if (current.isNotEmpty() && currentWeight + weight > 7) flush()
+            current += block
+            currentWeight += weight
+            if (weight >= 5) flush()
+        }
+        flush()
+    }
+}
+
+private fun ReaderBlock.readerPageWeight(): Int = when (this) {
+    is ReaderImage, is ReaderTableBlock, is ReaderPost -> 5
+    is ReaderListBlock -> 2
+    is ReaderHeading, is ReaderDivider -> 0
+    else -> 1
+}
+
+internal fun ReaderDocument.progressForBlock(blockId: String): Int {
+    val pages = toReaderPages()
+    val pageIndex = pages.indexOfFirst { page -> page.any { it.id == blockId } }
+    return if (pageIndex < 0 || pages.size <= 1) 0 else {
+        (pageIndex * 100f / (pages.size - 1)).roundToInt()
     }
 }
 
@@ -350,23 +379,28 @@ private fun readerContentPadding(settings: ReaderTextSettings) = PaddingValues(
 private fun ReaderBlockView(
     block: ReaderBlock,
     textSettings: ReaderTextSettings,
-    onImageClick: (ReaderImage) -> Unit,
-    onLinkClick: (String) -> Unit,
+    actions: ReaderContentActions,
     paragraphIndent: Boolean = true,
 ) {
     key(block.id) {
-        when (block) {
-            is ReaderHeading -> ReaderHeadingView(block)
-            is ReaderParagraph -> ReaderRichText(block.content, textSettings, onLinkClick, paragraphIndent)
-            is ReaderImage -> ReaderImageView(block, onImageClick)
-            is ReaderQuote -> ReaderQuoteView(block, textSettings, onLinkClick)
-            is ReaderDivider -> HorizontalDivider()
-            is ReaderListBlock -> ReaderListView(block, textSettings, onLinkClick)
-            is ReaderCodeBlock -> ReaderCodeView(block)
-            is ReaderTableBlock -> ReaderTableView(block)
-            is ReaderReplyReference -> ReaderReplyReferenceView(block)
-            is ReaderAttachment -> ReaderAttachmentView(block)
-            is ReaderPost -> ReaderPostView(block, textSettings, onImageClick, onLinkClick)
+        Box(
+            Modifier
+                .fillMaxWidth()
+                .testTag("reader-block-${block.id}"),
+        ) {
+            when (block) {
+                is ReaderHeading -> ReaderHeadingView(block)
+                is ReaderParagraph -> ReaderRichText(block.content, textSettings, actions.onLinkClick, paragraphIndent)
+                is ReaderImage -> ReaderImageView(block, actions.onImageClick)
+                is ReaderQuote -> ReaderQuoteView(block, textSettings, actions.onLinkClick)
+                is ReaderDivider -> HorizontalDivider()
+                is ReaderListBlock -> ReaderListView(block, textSettings, actions.onLinkClick)
+                is ReaderCodeBlock -> ReaderCodeView(block)
+                is ReaderTableBlock -> ReaderTableView(block)
+                is ReaderReplyReference -> ReaderReplyReferenceView(block, actions.onReplyClick)
+                is ReaderAttachment -> ReaderAttachmentView(block, actions.onAttachmentClick)
+                is ReaderPost -> ReaderPostView(block, textSettings, actions)
+            }
         }
     }
 }
@@ -397,13 +431,19 @@ private fun ReaderRichText(
             style = textSettings.applyTo(MaterialTheme.typography.bodyLarge, indent),
         )
         content.filterIsInstance<ReaderInline.Link>().forEach { link ->
-            Text(
-                text = link.destination,
-                modifier = Modifier.clickable { onLinkClick(link.destination) },
-                style = MaterialTheme.typography.labelMedium,
-                color = MaterialTheme.colorScheme.primary,
-                textDecoration = TextDecoration.Underline,
-            )
+            Surface(
+                onClick = { onLinkClick(link.destination) },
+                modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp).semantics { contentDescription = "打开链接 ${link.text}" },
+                color = Color.Transparent,
+            ) {
+                Text(
+                    text = link.destination,
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.padding(vertical = AtlasSpacing.Sm),
+                    textDecoration = TextDecoration.Underline,
+                )
+            }
         }
     }
 }
@@ -588,9 +628,12 @@ private fun ReaderTableRow(cells: List<String>, header: Boolean) {
 }
 
 @Composable
-private fun ReaderReplyReferenceView(block: ReaderReplyReference) {
+private fun ReaderReplyReferenceView(block: ReaderReplyReference, onClick: (ReaderReplyReference) -> Unit) {
     Surface(
-        modifier = Modifier.fillMaxWidth(),
+        onClick = { onClick(block) },
+        modifier = Modifier.fillMaxWidth().semantics {
+            contentDescription = "跳转至 ${block.floor} ${block.author} 的回复"
+        },
         shape = MaterialTheme.shapes.small,
         color = MaterialTheme.colorScheme.surfaceVariant,
     ) {
@@ -602,9 +645,12 @@ private fun ReaderReplyReferenceView(block: ReaderReplyReference) {
 }
 
 @Composable
-private fun ReaderAttachmentView(block: ReaderAttachment) {
+private fun ReaderAttachmentView(block: ReaderAttachment, onClick: (ReaderAttachment) -> Unit) {
     Surface(
-        modifier = Modifier.fillMaxWidth(),
+        onClick = { onClick(block) },
+        modifier = Modifier.fillMaxWidth().semantics {
+            contentDescription = "打开附件 ${block.name}，${block.meta}"
+        },
         shape = MaterialTheme.shapes.small,
         tonalElevation = 1.dp,
     ) {
@@ -626,8 +672,7 @@ private fun ReaderAttachmentView(block: ReaderAttachment) {
 private fun ReaderPostView(
     block: ReaderPost,
     textSettings: ReaderTextSettings,
-    onImageClick: (ReaderImage) -> Unit,
-    onLinkClick: (String) -> Unit,
+    actions: ReaderContentActions,
 ) {
     Surface(
         modifier = Modifier.fillMaxWidth(),
@@ -661,7 +706,7 @@ private fun ReaderPostView(
             }
             HorizontalDivider()
             block.blocks.forEach { child ->
-                ReaderBlockView(child, textSettings, onImageClick, onLinkClick, paragraphIndent = false)
+                ReaderBlockView(child, textSettings, actions, paragraphIndent = false)
             }
         }
     }

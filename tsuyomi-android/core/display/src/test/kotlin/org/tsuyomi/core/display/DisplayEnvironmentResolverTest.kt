@@ -96,9 +96,11 @@ class DisplayEnvironmentResolverTest {
     ): DisplayEnvironment = resolver.resolve(
         preferences = preferences,
         classification = classification,
-        apiLevel = apiLevel,
-        systemDark = false,
-        reducedMotion = reducedMotion,
-        redrawEpoch = 0,
+        system = DisplaySystemState(
+            apiLevel = apiLevel,
+            systemDark = false,
+            reducedMotion = reducedMotion,
+            redrawEpoch = 0,
+        ),
     )
 }

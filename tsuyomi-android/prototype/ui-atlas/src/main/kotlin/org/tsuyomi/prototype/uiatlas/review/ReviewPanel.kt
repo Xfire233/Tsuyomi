@@ -20,8 +20,6 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
-import androidx.compose.material3.DropdownMenu
-import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.HorizontalDivider
@@ -50,6 +48,7 @@ import java.time.Instant
 import kotlinx.coroutines.delay
 import org.tsuyomi.prototype.uiatlas.BuildConfig
 import org.tsuyomi.prototype.uiatlas.components.AtlasButton
+import org.tsuyomi.prototype.uiatlas.components.AtlasDropdownSelector
 import org.tsuyomi.prototype.uiatlas.components.AtlasButtonStyle
 import org.tsuyomi.prototype.uiatlas.components.AtlasTopBar
 import org.tsuyomi.prototype.uiatlas.model.AtlasContext
@@ -110,7 +109,7 @@ private fun ReviewPanelContent(
     val selectedRoute = selectedNode.route?.path ?: "global"
     val progress = active.progress[selectedNodeId] ?: ReviewNodeProgress()
     val humanControlsEnabled = active.controlMode == ReviewControlMode.HUMAN
-    var nodeMenuExpanded by remember { mutableStateOf(false) }
+    val actualOnlineScenario = selectedNode.evidenceStage == ReviewEvidenceStage.ACTUAL_ONLINE_SCENARIO
     var pageComment by rememberSaveable(BuildConfig.PROTOTYPE_BUILD_ID) { mutableStateOf("") }
     var authorName by rememberSaveable(BuildConfig.PROTOTYPE_BUILD_ID) { mutableStateOf(ReviewCommentAuthor.AI.name) }
     var visualEvidenceHash by rememberSaveable(BuildConfig.PROTOTYPE_BUILD_ID) { mutableStateOf("") }
@@ -158,7 +157,6 @@ private fun ReviewPanelContent(
     fun selectNode(node: ReviewNode) {
         persistCurrentNode()
         selectedNodeId = node.id
-        nodeMenuExpanded = false
     }
 
     LaunchedEffect(resolvedNode.id) {
@@ -204,9 +202,11 @@ private fun ReviewPanelContent(
         }
     }
 
+    val panelScrollState = rememberScrollState()
+
     Column(
         modifier
-            .verticalScroll(rememberScrollState())
+            .verticalScroll(panelScrollState)
             .padding(horizontal = AtlasSpacing.Md)
             .padding(bottom = AtlasSpacing.Xl),
         verticalArrangement = Arrangement.spacedBy(AtlasSpacing.Md),
@@ -218,6 +218,33 @@ private fun ReviewPanelContent(
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
 
+        Text("当前审阅节点", style = MaterialTheme.typography.titleMedium)
+        AtlasDropdownSelector(
+            value = "${selectedNode.id} · ${selectedNode.title}",
+            options = ReviewNodeCatalog.nodes.map { node -> "${node.id} · ${node.title}" },
+            onSelect = { index -> selectNode(ReviewNodeCatalog.nodes[index]) },
+            modifier = Modifier.fillMaxWidth(),
+        )
+        Text(
+            "$selectedRoute · ${context.profile.name.lowercase()} · ${context.theme.name.lowercase()} · ${context.state.name.lowercase()}",
+            style = MaterialTheme.typography.bodySmall,
+        )
+        Text(
+            if (actualOnlineScenario) {
+                "验证阶段：真实线上生产场景。Atlas 只保留评论和 AI 草稿，不能记录人工完成或最终 verdict。"
+            } else {
+                "验证阶段：Standard Atlas UI 构建。"
+            },
+            style = MaterialTheme.typography.bodySmall,
+            color = if (actualOnlineScenario) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary,
+        )
+        if (selectedNode.requiredStates.isNotEmpty()) {
+            Text(
+                "必审状态：${selectedNode.requiredStates.sortedBy { it.ordinal }.joinToString { it.extraKey }}",
+                style = MaterialTheme.typography.bodySmall,
+            )
+        }
+
         Text("控制权", style = MaterialTheme.typography.titleMedium)
         Text("当前：${controlModeLabel(active.controlMode)}", style = MaterialTheme.typography.bodySmall)
         FlowRow(horizontalArrangement = Arrangement.spacedBy(AtlasSpacing.Sm)) {
@@ -228,29 +255,6 @@ private fun ReviewPanelContent(
                     label = { Text(controlModeLabel(mode)) },
                 )
             }
-        }
-
-        Text("当前审阅节点", style = MaterialTheme.typography.titleMedium)
-        OutlinedButton(onClick = { nodeMenuExpanded = true }, modifier = Modifier.fillMaxWidth()) {
-            Text("${selectedNode.id} · ${selectedNode.title}")
-        }
-        DropdownMenu(expanded = nodeMenuExpanded, onDismissRequest = { nodeMenuExpanded = false }) {
-            ReviewNodeCatalog.nodes.forEach { node ->
-                DropdownMenuItem(
-                    text = { Text("${node.id} · ${node.title}") },
-                    onClick = { selectNode(node) },
-                )
-            }
-        }
-        Text(
-            "$selectedRoute · ${context.profile.name.lowercase()} · ${context.theme.name.lowercase()} · ${context.state.name.lowercase()}",
-            style = MaterialTheme.typography.bodySmall,
-        )
-        if (selectedNode.requiredStates.isNotEmpty()) {
-            Text(
-                "必审状态：${selectedNode.requiredStates.sortedBy { it.ordinal }.joinToString { it.extraKey }}",
-                style = MaterialTheme.typography.bodySmall,
-            )
         }
         ReviewChecklist("操作", selectedNode.operations)
         ReviewChecklist("视觉确认", selectedNode.visualChecks)
@@ -309,7 +313,7 @@ private fun ReviewPanelContent(
                 { runtime.reviews.markHumanReviewed(selectedNode.id) },
                 modifier = Modifier.weight(1f),
                 style = AtlasButtonStyle.SECONDARY,
-                enabled = humanControlsEnabled,
+                enabled = humanControlsEnabled && !actualOnlineScenario,
             )
         }
         Text(
@@ -322,7 +326,7 @@ private fun ReviewPanelContent(
                     selected = progress.verdict == verdict,
                     onClick = { runtime.reviews.setVerdict(selectedNode.id, verdict) },
                     label = { Text(verdictLabel(verdict)) },
-                    enabled = humanControlsEnabled,
+                    enabled = humanControlsEnabled && !actualOnlineScenario,
                 )
             }
         }
@@ -331,7 +335,11 @@ private fun ReviewPanelContent(
             val selectedScenario = runtime.scenarios.selected(actionKey)
             Text("可重复模拟", style = MaterialTheme.typography.titleMedium)
             Text(
-                "为下一次「${scenarioActionLabel(actionKey)}」预选本地结果；不会访问网络。",
+                if (actualOnlineScenario) {
+                    "这里只预演「${scenarioActionLabel(actionKey)}」的本地 fixture；真实线上服务验收必须在生产包中执行。"
+                } else {
+                    "为下一次「${scenarioActionLabel(actionKey)}」预选本地结果；不会访问网络。"
+                },
                 style = MaterialTheme.typography.bodySmall,
             )
             FlowRow(horizontalArrangement = Arrangement.spacedBy(AtlasSpacing.Sm)) {
@@ -363,6 +371,10 @@ private fun ReviewPanelContent(
         Text(
             "已访问 $visited / ${ReviewNodeCatalog.nodes.size} · AI 草稿 $aiTriaged · 人工 $humanReviewed · 批准 $approved",
             style = MaterialTheme.typography.bodyMedium,
+        )
+        Text(
+            "当前构建阶段 18 个 L/B/M 节点 · 后续真实线上场景 10 个 S/X 节点",
+            style = MaterialTheme.typography.bodySmall,
         )
         Text("当前 build：${BuildConfig.PROTOTYPE_BUILD_ID.take(16)}", style = MaterialTheme.typography.bodySmall)
         if (runtime.reviews.staleBuildIds().isNotEmpty()) {
