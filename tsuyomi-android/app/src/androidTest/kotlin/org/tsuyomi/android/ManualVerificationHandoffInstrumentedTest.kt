@@ -85,20 +85,7 @@ class ManualVerificationHandoffInstrumentedTest {
         val searchHtml = targetContext.assets.open("search.html").bufferedReader().use { it.readText() }
         val searchUrl =
             "https://www.wenku8.net/modules/article/search.php?searchtype=articlename&searchkey=login&page=1"
-        composeRule.runOnUiThread {
-            requireNotNull(findWebView(composeRule.activity.window.decorView)).loadDataWithBaseURL(
-                searchUrl,
-                searchHtml,
-                "text/html",
-                "utf-8",
-                null,
-            )
-        }
-        composeRule.waitUntil(timeoutMillis = 15_000) {
-            composeRule.runOnUiThread {
-                findWebView(composeRule.activity.window.decorView)?.progress == 100
-            }
-        }
+        loadAndAwaitVerifiedPage(searchUrl, searchHtml)
         composeRule.onNodeWithText("使用当前页面").performClick()
         waitForText("雾港纪事")
         assertEquals(1, Phase2SourceGateway.searchRequestCount())
@@ -138,20 +125,7 @@ class ManualVerificationHandoffInstrumentedTest {
         waitForText("使用当前页面")
         val detailHtml = targetContext.assets.open("detail.html").bufferedReader().use { it.readText() }
         val detailUrl = "https://www.wenku8.net/book/1234.htm"
-        composeRule.runOnUiThread {
-            requireNotNull(findWebView(composeRule.activity.window.decorView)).loadDataWithBaseURL(
-                detailUrl,
-                detailHtml,
-                "text/html",
-                "utf-8",
-                null,
-            )
-        }
-        composeRule.waitUntil(timeoutMillis = 15_000) {
-            composeRule.runOnUiThread {
-                findWebView(composeRule.activity.window.decorView)?.progress == 100
-            }
-        }
+        loadAndAwaitVerifiedPage(detailUrl, detailHtml)
         composeRule.onNodeWithText("使用当前页面").performClick()
         waitForText("简介")
         assertEquals(1, Phase2SourceGateway.detailRequestCount())
@@ -189,20 +163,7 @@ class ManualVerificationHandoffInstrumentedTest {
         waitForText("使用当前页面")
         val chapterHtml = targetContext.assets.open("chapter.html").bufferedReader().use { it.readText() }
         val chapterUrl = "https://www.wenku8.net/modules/article/reader.php?aid=1234&cid=10001"
-        composeRule.runOnUiThread {
-            requireNotNull(findWebView(composeRule.activity.window.decorView)).loadDataWithBaseURL(
-                chapterUrl,
-                chapterHtml,
-                "text/html",
-                "utf-8",
-                null,
-            )
-        }
-        composeRule.waitUntil(timeoutMillis = 15_000) {
-            composeRule.runOnUiThread {
-                findWebView(composeRule.activity.window.decorView)?.progress == 100
-            }
-        }
+        loadAndAwaitVerifiedPage(chapterUrl, chapterHtml)
         composeRule.onNodeWithText("使用当前页面").performClick()
         waitForText("第一章 雾中的灯塔")
         assertEquals(1, Phase2SourceGateway.chapterRequestCount())
@@ -693,6 +654,24 @@ class ManualVerificationHandoffInstrumentedTest {
             findWebView(view.getChildAt(index))
         }
         else -> null
+    }
+
+    private fun loadAndAwaitVerifiedPage(url: String, html: String) {
+        composeRule.runOnUiThread {
+            requireNotNull(findWebView(composeRule.activity.window.decorView)).loadDataWithBaseURL(
+                url,
+                html,
+                "text/html",
+                "utf-8",
+                url,
+            )
+        }
+        composeRule.waitUntil(timeoutMillis = 15_000) {
+            composeRule.runOnUiThread {
+                val webView = findWebView(composeRule.activity.window.decorView)
+                webView != null && webView.url == url && webView.progress == 100
+            }
+        }
     }
 
     private fun waitForText(text: String) {

@@ -469,15 +469,12 @@ private fun NavGraphBuilder.readerRoute(
         LaunchedEffect(reader, packageInfo?.packageSha256) {
             packageInfo?.let { reader.restore(it) }
         }
-        LaunchedEffect(reader.currentChapter?.chapterId) {
-            if (verifiedChapterSequence == 0L && reader.currentChapter != null && reader.document == null && reader.failure == null) {
-                reader.load()
-            }
-        }
-        LaunchedEffect(verifiedChapterSequence) {
+        LaunchedEffect(reader.currentChapter?.chapterId, verifiedChapterSequence) {
             if (verifiedChapterSequence > 0L) {
                 reader.acceptVerifiedChapterResult()
                 entry.savedStateHandle[VerifiedChapterResultSequenceKey] = 0L
+            } else if (reader.currentChapter != null && reader.document == null && reader.failure == null) {
+                reader.load()
             }
         }
         ReaderScreen(
