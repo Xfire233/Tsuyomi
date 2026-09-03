@@ -4,10 +4,12 @@
  */
 package org.tsuyomi.android
 
+import androidx.compose.runtime.snapshotFlow
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import java.util.concurrent.atomic.AtomicInteger
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeout
@@ -84,9 +86,10 @@ internal class SourceHomeControllerInstrumentedTest {
                 assertTrue(replacing?.replacing == true)
             }
             withTimeout(5_000) {
-                while ((controller.state as? SourceHomeViewState.Content)
-                        ?.activePageState?.replacementFailure == null
-                ) delay(10)
+                snapshotFlow {
+                    (controller.state as? SourceHomeViewState.Content)
+                        ?.activePageState?.replacementFailure
+                }.first { it != null }
             }
             val failed = (controller.state as SourceHomeViewState.Content).activePageState
             assertNotNull(failed?.page)
@@ -123,7 +126,8 @@ internal class SourceHomeControllerInstrumentedTest {
                 controller.openFeature(feature, load)
             }
             withTimeout(5_000) {
-                while ((controller.state as? SourceHomeViewState.Content)?.title != feature.title) delay(10)
+                snapshotFlow { (controller.state as? SourceHomeViewState.Content)?.title }
+                    .first { it == feature.title }
             }
             val featureState = controller.state as SourceHomeViewState.Content
             assertTrue(featureState.featureOpen)
@@ -149,7 +153,8 @@ internal class SourceHomeControllerInstrumentedTest {
 
     private suspend fun awaitContent(controller: SourceHomeController) {
         withTimeout(5_000) {
-            while ((controller.state as? SourceHomeViewState.Content)?.activePage == null) delay(10)
+            snapshotFlow { (controller.state as? SourceHomeViewState.Content)?.activePage }
+                .first { it != null }
         }
     }
 
