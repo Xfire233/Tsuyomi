@@ -393,7 +393,15 @@ class LibraryProductionJourneyInstrumentedTest {
                 "Unexpected shelf destination: ${dropHints.map { "U+%04X".format(it.code) }}; shelf=$shelfBounds source=$firstBounds",
                 dropHints.contains("放到快捷书架"),
             )
-            composeRule.mainClock.advanceTimeBy(1_000)
+            composeRule.waitUntil(timeoutMillis = 5_000) {
+                runCatching {
+                    val gapNodes = composeRule.onAllNodesWithTag(
+                        "library-shortcut-insertion-gap",
+                        useUnmergedTree = true,
+                    ).fetchSemanticsNodes()
+                    gapNodes.isNotEmpty() && gapNodes.first().boundsInRoot.width > tileBounds.width * 0.5f
+                }.getOrDefault(false)
+            }
             val gapBounds = composeRule.onNodeWithTag(
                 "library-shortcut-insertion-gap",
                 useUnmergedTree = true,
@@ -407,10 +415,11 @@ class LibraryProductionJourneyInstrumentedTest {
             first.performTouchInput {
                 moveTo(collectionAfter.center - firstBounds.topLeft, delayMillis = 100)
             }
-            composeRule.mainClock.advanceTimeBy(500)
             composeRule.waitUntil(timeoutMillis = 5_000) {
-                composeRule.onNodeWithTag("library-shortcut-$collectionShortcutId")
-                    .fetchSemanticsNode().config[SemanticsProperties.StateDescription] == "当前拖放目标"
+                runCatching {
+                    composeRule.onNodeWithTag("library-shortcut-$collectionShortcutId")
+                        .fetchSemanticsNode().config[SemanticsProperties.StateDescription] == "当前拖放目标"
+                }.getOrDefault(false)
             }
             assertTrue(
                 composeRule.onAllNodesWithTag("library-shortcut-insertion-gap").fetchSemanticsNodes().isEmpty(),
@@ -420,10 +429,11 @@ class LibraryProductionJourneyInstrumentedTest {
             first.performTouchInput {
                 moveTo(continueBounds.center - firstBounds.topLeft, delayMillis = 100)
             }
-            composeRule.mainClock.advanceTimeBy(500)
             composeRule.waitUntil(timeoutMillis = 5_000) {
-                composeRule.onNodeWithTag("library-shortcut-$collectionShortcutId")
-                    .fetchSemanticsNode().config[SemanticsProperties.StateDescription] == "快捷书架随内容滚动，可拖动"
+                runCatching {
+                    composeRule.onNodeWithTag("library-shortcut-$collectionShortcutId")
+                        .fetchSemanticsNode().config[SemanticsProperties.StateDescription] == "快捷书架随内容滚动，可拖动"
+                }.getOrDefault(false)
             }
             first.performTouchInput { up() }
         } finally {
