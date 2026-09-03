@@ -73,7 +73,56 @@ class Phase3MigrationInstrumentedTest {
         }
     }
 
+    @Test
+    fun read_later_defaults_false_when_migrating_existing_library_entries() {
+        helper.createDatabase(READ_LATER_DATABASE, 2).use { db ->
+            db.execSQL(
+                "INSERT INTO books(source_id,remote_book_id,title,authors_json,remote_tags_json,has_unread_update,added_at_epoch_second,added_at_nano,metadata_updated_at_epoch_second,metadata_updated_at_nano) " +
+                    "VALUES ('fixture.source','book-42','旧书名','[]','[]',0,10,1,20,2)",
+            )
+            db.execSQL("INSERT INTO library_entries VALUES ('fixture.source','book-42',10,1,NULL)")
+        }
+
+        helper.runMigrationsAndValidate(READ_LATER_DATABASE, 3, true, MIGRATION_2_3).use { db ->
+            db.query(
+                "SELECT read_later FROM library_entries WHERE source_id='fixture.source' AND remote_book_id='book-42'",
+            ).use { cursor ->
+                cursor.moveToFirst()
+                assertEquals(0, cursor.getInt(0))
+            }
+        }
+    }
+
+    @Test
+    fun library_display_order_backfills_existing_row_order() {
+        helper.createDatabase(LIBRARY_ORDER_DATABASE, 3).use { db ->
+            db.execSQL(
+                "INSERT INTO books(source_id,remote_book_id,title,authors_json,remote_tags_json,has_unread_update,added_at_epoch_second,added_at_nano,metadata_updated_at_epoch_second,metadata_updated_at_nano) " +
+                    "VALUES ('fixture.source','book-b','第二本','[]','[]',0,20,0,20,0)",
+            )
+            db.execSQL(
+                "INSERT INTO books(source_id,remote_book_id,title,authors_json,remote_tags_json,has_unread_update,added_at_epoch_second,added_at_nano,metadata_updated_at_epoch_second,metadata_updated_at_nano) " +
+                    "VALUES ('fixture.source','book-a','第一本','[]','[]',0,10,0,10,0)",
+            )
+            db.execSQL("INSERT INTO library_entries VALUES ('fixture.source','book-b',20,0,NULL,0)")
+            db.execSQL("INSERT INTO library_entries VALUES ('fixture.source','book-a',10,0,NULL,0)")
+        }
+
+        helper.runMigrationsAndValidate(LIBRARY_ORDER_DATABASE, 4, true, MIGRATION_3_4).use { db ->
+            db.query("SELECT remote_book_id, display_order FROM library_entries ORDER BY display_order").use { cursor ->
+                cursor.moveToFirst()
+                assertEquals("book-b", cursor.getString(0))
+                assertEquals(0, cursor.getInt(1))
+                cursor.moveToNext()
+                assertEquals("book-a", cursor.getString(0))
+                assertEquals(1, cursor.getInt(1))
+            }
+        }
+    }
+
     private companion object {
         const val DATABASE = "phase3-migration"
+        const val READ_LATER_DATABASE = "phase4a-read-later-migration"
+        const val LIBRARY_ORDER_DATABASE = "phase4a-library-order-migration"
     }
 }

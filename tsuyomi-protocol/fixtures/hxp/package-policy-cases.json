@@ -41,6 +41,14 @@
       "expected": "rejected-key-rotation"
     },
     {
+      "name": "new source Home permission requires a grant",
+      "active": { "version": "1.0.0", "keyId": "key-a", "capabilities": { "origins": ["https://a.example"], "webLogin": false, "home": false, "writes": [], "storageQuota": 1024 } },
+      "candidate": { "version": "1.1.0", "keyId": "key-a", "capabilities": { "origins": ["https://a.example"], "webLogin": false, "home": true, "writes": [], "storageQuota": 1024 } },
+      "revokedKeyIds": [],
+      "rotationVerified": false,
+      "expected": "requires-grant"
+    },
+    {
       "name": "repository rollback is rejected",
       "active": { "version": "1.1.0", "keyId": "key-a", "capabilities": { "origins": ["https://a.example"], "webLogin": false, "writes": [], "storageQuota": 1024 } },
       "candidate": { "version": "1.0.0", "keyId": "key-a", "capabilities": { "origins": ["https://a.example"], "webLogin": false, "writes": [], "storageQuota": 1024 } },

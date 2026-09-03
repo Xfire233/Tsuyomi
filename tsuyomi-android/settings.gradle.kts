@@ -36,6 +36,7 @@ include(":core:database")
 include(":core:preferences")
 include(":core:network")
 include(":core:files")
+include(":core:media")
 include(":core:security")
 include(":core:webview")
 

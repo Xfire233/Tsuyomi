@@ -36,6 +36,7 @@ import org.tsuyomi.core.display.MotionPolicy
 object TsuyomiMotion {
     const val SELECTION_DURATION_MS = 200
     const val SWITCH_DURATION_MS = 150
+    const val EXPAND_DURATION_MS = 220
     val Easing = EaseOut
 }
 

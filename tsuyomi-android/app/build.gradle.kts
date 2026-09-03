@@ -15,6 +15,18 @@ android {
         versionCode = 2
         versionName = "0.2.0"
     }
+    buildTypes {
+        getByName("debug") {
+            applicationIdSuffix = ".fixture"
+            versionNameSuffix = "-fixture"
+        }
+        create("online") {
+            initWith(getByName("release"))
+            isDebuggable = true
+            signingConfig = signingConfigs.getByName("debug")
+            matchingFallbacks += "release"
+        }
+    }
     buildFeatures {
         buildConfig = true
     }
@@ -27,6 +39,7 @@ dependencies {
     implementation(project(":core:ui"))
     implementation(project(":core:preferences"))
     implementation(project(":core:network"))
+    implementation(project(":core:media"))
     implementation(project(":core:security"))
     implementation(project(":core:webview"))
     implementation(project(":feature:library"))
@@ -43,6 +56,7 @@ dependencies {
     implementation(project(":core:files"))
     implementation(project(":source:extension-manager"))
     debugImplementation(project(":source:extension-testkit"))
+    "onlineImplementation"(project(":source:extension-testkit"))
     implementation(project(":shared:locator"))
     implementation(project(":shared:model"))
     implementation(libs.androidx.activity.compose)
@@ -50,6 +64,7 @@ dependencies {
     implementation(libs.androidx.lifecycle.runtime.compose)
     implementation(libs.androidx.datastore.preferences)
     implementation(libs.kotlinx.coroutines.android)
+    implementation(libs.kotlinx.serialization.json)
     implementation(libs.androidx.room.runtime)
     implementation(libs.androidx.room.ktx)
     implementation(libs.androidx.compose.ui)

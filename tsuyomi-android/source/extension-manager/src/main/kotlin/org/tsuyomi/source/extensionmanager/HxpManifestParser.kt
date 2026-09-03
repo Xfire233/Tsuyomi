@@ -134,7 +134,7 @@ internal object HxpManifestParser {
     }
 
     private fun parseCapabilities(value: JsonObject): HxpCapabilities {
-        value.requireKeys(setOf("network", "cookies", "webLogin", "remoteLibrary", "storage"))
+        value.requireKeys(setOf("network", "cookies", "webLogin", "remoteLibrary", "storage"), setOf("home"))
         val network = value.obj("network").also {
             it.requireKeys(setOf("origins", "maxConcurrentRequests", "requestTimeoutMs", "maxResponseBytes"))
         }
@@ -158,6 +158,9 @@ internal object HxpManifestParser {
         val webLoginOrigins = webLogin.originSet("origins")
         if (!webLoginEnabled && webLoginOrigins.isNotEmpty()) fail(HxpVerificationError.CAPABILITY_POLICY_VIOLATION)
         if (!networkOrigins.containsAll(webLoginOrigins)) fail(HxpVerificationError.CAPABILITY_POLICY_VIOLATION)
+        val homeEnabled = value["home"]?.asObject()?.also {
+            it.requireKeys(setOf("enabled"))
+        }?.bool("enabled") ?: false
 
         val remoteLibrary = value.obj("remoteLibrary").also {
             it.requireKeys(setOf("read", "writeOperations"), setOf("policies"))
@@ -173,6 +176,7 @@ internal object HxpManifestParser {
             network = networkCapability,
             cookies = HxpCookieCapability(sourceScoped = cookieMode == "sourceScoped", origins = cookieOrigins),
             webLogin = HxpWebLoginCapability(enabled = webLoginEnabled, origins = webLoginOrigins),
+            home = HxpHomeCapability(enabled = homeEnabled),
             remoteLibrary = HxpRemoteLibraryCapability(read = read, writeOperations = writes, policies = policies),
             storageQuotaBytes = storage.int("quotaBytes").inRange(0, 10_485_760),
         )

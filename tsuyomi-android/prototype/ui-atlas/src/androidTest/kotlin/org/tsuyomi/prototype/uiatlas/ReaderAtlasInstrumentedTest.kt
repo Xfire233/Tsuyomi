@@ -232,7 +232,7 @@ class ReaderAtlasInstrumentedTest {
     fun standard_reader_settings_expand_and_dismiss_without_exposing_unsupported_options() {
         composeRule.onNodeWithText("设置").performClick()
         composeRule.onNodeWithText("作用范围").assertDoesNotExist()
-        composeRule.onNodeWithTag("reader-settings-content").performTouchInput { swipeUp() }
+        composeRule.onNodeWithText("全部设置").performClick()
         composeRule.waitUntil(5_000) {
             composeRule.onAllNodesWithTag("reader-settings-expanded-content").fetchSemanticsNodes().isNotEmpty()
         }

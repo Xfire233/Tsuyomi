@@ -7,4 +7,5 @@ plugins {
 
 dependencies {
     implementation(project(":shared:model"))
+    testImplementation(libs.junit)
 }

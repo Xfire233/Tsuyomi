@@ -45,7 +45,7 @@ import org.tsuyomi.core.database.room.SourceRemotePolicyEntity
         SmartRuleEntity::class,
         SubscriptionDraftEntity::class,
     ],
-    version = 2,
+    version = 4,
     exportSchema = true,
 )
 @TypeConverters(RoomConverters::class)
@@ -86,5 +86,20 @@ val MIGRATION_1_2 = object : Migration(1, 2) {
         db.execSQL("CREATE TABLE IF NOT EXISTS browsing_history (source_id TEXT NOT NULL, remote_book_id TEXT NOT NULL, last_viewed_at_epoch_second INTEGER NOT NULL, last_viewed_at_nano INTEGER NOT NULL, PRIMARY KEY(source_id, remote_book_id), FOREIGN KEY(source_id, remote_book_id) REFERENCES books(source_id, remote_book_id) ON UPDATE NO ACTION ON DELETE CASCADE)")
         db.execSQL("CREATE TABLE IF NOT EXISTS import_sessions (id TEXT NOT NULL, kind TEXT NOT NULL, plan_digest TEXT NOT NULL, normalized_plan_path TEXT NOT NULL, status TEXT NOT NULL, source_created_at_epoch_second INTEGER NOT NULL, started_at_epoch_second INTEGER NOT NULL, completed_at_epoch_second INTEGER, preference_patch_json TEXT NOT NULL, summary_json TEXT, PRIMARY KEY(id))")
         db.execSQL("CREATE TABLE IF NOT EXISTS import_warnings (session_id TEXT NOT NULL, ordinal INTEGER NOT NULL, safe_code TEXT NOT NULL, safe_record_ref TEXT, field_name TEXT, severity TEXT NOT NULL, PRIMARY KEY(session_id, ordinal), FOREIGN KEY(session_id) REFERENCES import_sessions(id) ON UPDATE NO ACTION ON DELETE CASCADE)")
+    }
+}
+
+val MIGRATION_2_3 = object : Migration(2, 3) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        db.execSQL("ALTER TABLE library_entries ADD COLUMN read_later INTEGER NOT NULL DEFAULT 0")
+    }
+}
+
+val MIGRATION_3_4 = object : Migration(3, 4) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        db.execSQL(
+            "ALTER TABLE library_entries ADD COLUMN display_order INTEGER NOT NULL DEFAULT 2147483647",
+        )
+        db.execSQL("UPDATE library_entries SET display_order = rowid - 1")
     }
 }

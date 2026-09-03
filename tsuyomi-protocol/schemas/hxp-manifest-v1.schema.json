@@ -88,6 +88,14 @@
             "origins": { "type": "array", "uniqueItems": true, "items": { "$ref": "#/$defs/httpsOrigin" } }
           }
         },
+        "home": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["enabled"],
+          "properties": {
+            "enabled": { "type": "boolean" }
+          }
+        },
         "remoteLibrary": {
           "type": "object",
           "additionalProperties": false,

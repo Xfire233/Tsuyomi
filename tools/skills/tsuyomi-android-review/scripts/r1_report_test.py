@@ -22,9 +22,9 @@ class ReportBuilderTest(unittest.TestCase):
         self.assertEqual("workflow-only", report["summary"]["scope"])
         self.assertFalse(report["summary"]["requiresGradleBuild"])
         self.assertFalse(report["summary"]["requiresDevicePass"])
-        self.assertEqual("actual online scenario review deferred", report["next"]["stage"])
-        self.assertEqual([], report["summary"]["currentStageNodes"])
-        self.assertEqual(["X06"], report["summary"]["deferredNodes"])
+        self.assertEqual("R1 complete", report["next"]["stage"])
+        self.assertEqual(["X06"], report["summary"]["currentStageNodes"])
+        self.assertEqual([], report["summary"]["deferredNodes"])
 
     def test_runtime_reader_change_selects_build_device_and_journey(self) -> None:
         report = build_report(
@@ -42,7 +42,7 @@ class ReportBuilderTest(unittest.TestCase):
         self.assertEqual(["EINK"], report["summary"]["deferredProfilesAffected"])
         self.assertEqual(["Reader.kt"], report["summary"]["changedKotlinFiles"])
 
-    def test_source_runtime_change_defers_atlas_build_and_device_work(self) -> None:
+    def test_source_runtime_change_requires_production_build_and_device_work(self) -> None:
         report = build_report(
             self.context(
                 changes=[{"class": "runtime"}],
@@ -51,11 +51,11 @@ class ReportBuilderTest(unittest.TestCase):
             ),
         )
 
-        self.assertFalse(report["summary"]["requiresGradleBuild"])
-        self.assertFalse(report["summary"]["requiresDevicePass"])
-        self.assertEqual([], report["summary"]["currentStageNodes"])
-        self.assertEqual(["S01"], report["summary"]["deferredNodes"])
-        self.assertEqual("actual online scenario review deferred", report["next"]["stage"])
+        self.assertTrue(report["summary"]["requiresGradleBuild"])
+        self.assertTrue(report["summary"]["requiresDevicePass"])
+        self.assertEqual(["S01"], report["summary"]["currentStageNodes"])
+        self.assertEqual([], report["summary"]["deferredNodes"])
+        self.assertEqual("R2 current-stage review on STANDARD", report["next"]["stage"])
 
     @staticmethod
     def context(
@@ -77,16 +77,15 @@ class ReportBuilderTest(unittest.TestCase):
             current_files={"Reader.kt": "sha256"},
             current_build_id="current-build",
             review_policy={
-                "mode": "phase4-standard-first",
+                "mode": "phase4a-production-standard-first",
                 "activeProfiles": ["STANDARD"],
                 "deferredProfiles": [{"profile": "EINK"}],
                 "resume": {"trigger": "explicit"},
                 "nodeExecution": {
-                    "activeStage": "STANDARD_ATLAS_UI",
-                    "activeNodePrefixes": ["L", "B", "M"],
-                    "deferredStages": [
-                        {"stage": "ACTUAL_ONLINE_SCENARIO", "nodePrefixes": ["S", "X"]},
-                    ],
+                    "activeStage": "PHASE4A_PRODUCTION_IMPLEMENTATION",
+                    "activeNodePrefixes": ["L", "B", "M", "S", "X"],
+                    "actualOnlineRequirements": {"nodePrefixes": ["S", "X"]},
+                    "deferredStages": [],
                 },
             },
             review_policy_path="tools/skills/tsuyomi-android-review/review-policy.json",

@@ -57,6 +57,7 @@ internal fun LibraryRoot(context: AtlasContext, modifier: Modifier) {
     val eInk = LocalAtlasEnvironment.current.eInk
     var shortcutPresentation by rememberSaveable { mutableStateOf(ShortcutShelfPresentation.INLINE) }
     var shortcutHeaderVisible by rememberSaveable { mutableStateOf(true) }
+    var keepUnlockedShelfPinned by rememberSaveable { mutableStateOf(false) }
     val books = state.books
     val selectionBar = state.selectionBar()
 
@@ -99,16 +100,17 @@ internal fun LibraryRoot(context: AtlasContext, modifier: Modifier) {
                 repository.putBoolean("library.shortcuts.expanded", it, "ShortcutExpanded")
             },
             onLocked = { locked ->
-                val wasLocked = state.shortcutLocked
-                if (locked) state.dragCoordinator.cancel()
-                state.shortcutLocked = locked
-                if (wasLocked && !locked) {
+                if (locked) {
+                    keepUnlockedShelfPinned = false
+                } else {
+                    keepUnlockedShelfPinned = !shortcutHeaderVisible
                     shortcutPresentation = if (shortcutHeaderVisible) {
                         ShortcutShelfPresentation.INLINE
                     } else {
                         ShortcutShelfPresentation.OVERLAY_EXPANDED
                     }
                 }
+                state.shortcutLocked = locked
                 repository.putBoolean("library.shortcuts.locked", locked, "ShortcutLocked")
             },
             onEditing = { state.shortcutEditing = it },
@@ -206,54 +208,69 @@ internal fun LibraryRoot(context: AtlasContext, modifier: Modifier) {
             ) {
                 Column(Modifier.fillMaxSize()) {
                     if (!state.standaloneNodePage) {
-                        when {
-                            eInk || state.shortcutLocked -> shortcutShelf()
-                            shortcutPresentation != ShortcutShelfPresentation.INLINE -> ShortcutShelfOverlay(
+                        ShortcutShelfPinned(
+                            visible = eInk || state.shortcutLocked || keepUnlockedShelfPinned,
+                            shelf = shortcutShelf,
+                        )
+                    }
+                    Box(Modifier.weight(1f)) {
+                        BookSurface(
+                            context = context,
+                            books = shownBooks,
+                            layout = state.layout,
+                            selected = if (state.selectionKind == LibrarySelectionKind.BOOK) {
+                                state.selectedBookIds
+                            } else {
+                                emptySet()
+                            },
+                            selectionActive = state.selectionKind == LibrarySelectionKind.BOOK,
+                            selectionConflictTarget = state.selectionConflictTarget,
+                            selectionConflictSignal = state.selectionConflictSignal,
+                            toggle = state::toggleBook,
+                            interaction = LibraryBookInteractionCapabilities(
+                                drag = !state.standaloneNodePage,
+                                reorder = state.libraryReorderEnabled,
+                            ),
+                            denseGrid = !eInk,
+                            continueView = state.view == AtlasLibraryView.CONTINUE,
+                            dragCoordinator = state.dragCoordinator,
+                            onLongPress = { state.toggleBook(it.id) },
+                            onRemoveRequest = { state.pendingRemoval = LibraryRemovalRequest.Book(it) },
+                            header = if (!eInk && !state.standaloneNodePage &&
+                                !state.shortcutLocked && !keepUnlockedShelfPinned
+                            ) shortcutShelf else null,
+                            onViewportChanged = { viewport ->
+                                shortcutHeaderVisible = viewport.headerVisible
+                                if (keepUnlockedShelfPinned) {
+                                    if (viewport.direction == LibraryScrollDirection.FORWARD) {
+                                        keepUnlockedShelfPinned = false
+                                        shortcutPresentation = ShortcutShelfPresentation.COLLAPSED
+                                    }
+                                } else if (!state.shortcutLocked) {
+                                    shortcutPresentation = when {
+                                        viewport.headerVisible -> ShortcutShelfPresentation.INLINE
+                                        viewport.direction == LibraryScrollDirection.FORWARD -> ShortcutShelfPresentation.COLLAPSED
+                                        viewport.direction == LibraryScrollDirection.BACKWARD &&
+                                            shortcutPresentation == ShortcutShelfPresentation.COLLAPSED -> {
+                                            ShortcutShelfPresentation.OVERLAY_EXPANDED
+                                        }
+                                        else -> shortcutPresentation
+                                    }
+                                }
+                            },
+                            modifier = Modifier.fillMaxSize(),
+                        )
+                        if (!eInk && !state.standaloneNodePage && !state.shortcutLocked &&
+                            !keepUnlockedShelfPinned && shortcutPresentation != ShortcutShelfPresentation.INLINE
+                        ) {
+                            ShortcutShelfOverlay(
                                 expanded = shortcutPresentation == ShortcutShelfPresentation.OVERLAY_EXPANDED,
+                                coordinator = state.dragCoordinator,
                                 onExpand = { shortcutPresentation = ShortcutShelfPresentation.OVERLAY_EXPANDED },
                                 shelf = shortcutShelf,
                             )
                         }
                     }
-                    BookSurface(
-                        context = context,
-                        books = shownBooks,
-                        layout = state.layout,
-                        selected = if (state.selectionKind == LibrarySelectionKind.BOOK) {
-                            state.selectedBookIds
-                        } else {
-                            emptySet()
-                        },
-                        selectionActive = state.selectionKind == LibrarySelectionKind.BOOK,
-                        selectionConflictTarget = state.selectionConflictTarget,
-                        selectionConflictSignal = state.selectionConflictSignal,
-                        toggle = state::toggleBook,
-                        interaction = LibraryBookInteractionCapabilities(
-                            drag = !state.standaloneNodePage && !state.shortcutLocked,
-                            reorder = state.libraryReorderEnabled,
-                        ),
-                        denseGrid = !eInk,
-                        continueView = state.view == AtlasLibraryView.CONTINUE,
-                        dragCoordinator = state.dragCoordinator,
-                        onLongPress = { state.toggleBook(it.id) },
-                        onRemoveRequest = { state.pendingRemoval = LibraryRemovalRequest.Book(it) },
-                        header = if (!eInk && !state.standaloneNodePage && !state.shortcutLocked) shortcutShelf else null,
-                        onViewportChanged = { viewport ->
-                            shortcutHeaderVisible = viewport.headerVisible
-                            if (!state.shortcutLocked) {
-                                shortcutPresentation = when {
-                                    viewport.headerVisible -> ShortcutShelfPresentation.INLINE
-                                    viewport.direction == LibraryScrollDirection.FORWARD -> ShortcutShelfPresentation.COLLAPSED
-                                    viewport.direction == LibraryScrollDirection.BACKWARD &&
-                                        shortcutPresentation == ShortcutShelfPresentation.COLLAPSED -> {
-                                        ShortcutShelfPresentation.OVERLAY_EXPANDED
-                                    }
-                                    else -> shortcutPresentation
-                                }
-                            }
-                        },
-                        modifier = Modifier.weight(1f),
-                    )
                 }
             }
         }

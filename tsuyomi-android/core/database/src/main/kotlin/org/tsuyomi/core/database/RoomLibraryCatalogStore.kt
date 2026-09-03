@@ -50,6 +50,10 @@ internal class RoomLibraryCatalogStore(
     suspend fun libraryEntries(): List<LibraryEntry> = entriesFor(
         dao.libraryBooks().map { BookIdentityRow(it.sourceId, it.remoteBookId) },
     )
+    suspend fun libraryEntry(identity: BookIdentity): LibraryEntry? = entriesFor(
+        listOf(BookIdentityRow(identity.sourceId, identity.remoteBookId)),
+    ).singleOrNull()
+
 
     suspend fun entriesFor(identities: List<BookIdentityRow>): List<LibraryEntry> = identities.mapNotNull { identity ->
         val book = dao.book(identity.sourceId, identity.remoteBookId) ?: return@mapNotNull null
@@ -62,6 +66,7 @@ internal class RoomLibraryCatalogStore(
             book = book.toDomain(),
             libraryAddedAt = Instant.ofEpochSecond(entry.addedAtEpochSecond, entry.addedAtNano.toLong()),
             rating = entry.rating,
+            readLater = entry.readLater,
             progress = dao.progress(identity.sourceId, identity.remoteBookId)?.toDomainOrNull(),
             localTags = tags,
             sourceAvailable = availability,
@@ -78,6 +83,7 @@ internal class RoomLibraryCatalogStore(
                 book.addedAt.epochSecond,
                 book.addedAt.nano,
                 null,
+                false,
             ),
         ) != -1L
     }
@@ -85,9 +91,31 @@ internal class RoomLibraryCatalogStore(
     suspend fun removeFromLibrary(identity: BookIdentity): Boolean =
         dao.deleteLibraryEntry(identity.sourceId, identity.remoteBookId) != 0
 
+    suspend fun removeFromLibrary(identities: Set<BookIdentity>): Int = database.withTransaction {
+        identities.count { identity ->
+            dao.deleteLibraryEntry(identity.sourceId, identity.remoteBookId) != 0
+        }
+    }
+
+    suspend fun reorderLibrary(identities: List<BookIdentity>) = database.withTransaction {
+        val current = dao.libraryBooks().map { BookIdentity(it.sourceId, it.remoteBookId) }
+        require(identities.size == current.size && identities.toSet() == current.toSet()) {
+            "Library reorder must contain every current entry exactly once"
+        }
+        identities.forEachIndexed { index, identity ->
+            check(dao.updateLibraryDisplayOrder(identity.sourceId, identity.remoteBookId, index) == 1)
+        }
+    }
+
     suspend fun setRating(identity: BookIdentity, rating: Int?) {
         require(rating == null || rating in 1..5)
         check(dao.updateRating(identity.sourceId, identity.remoteBookId, rating) == 1) { "Book is not in library" }
+    }
+
+    suspend fun setReadLater(identity: BookIdentity, readLater: Boolean) {
+        check(dao.updateReadLater(identity.sourceId, identity.remoteBookId, readLater) == 1) {
+            "Book is not in library"
+        }
     }
 
     suspend fun setLocalTags(identity: BookIdentity, tags: Collection<String>) = database.withTransaction {

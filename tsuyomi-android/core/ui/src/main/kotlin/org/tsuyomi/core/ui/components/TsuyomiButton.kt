@@ -14,10 +14,13 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.AssistChip
+import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
@@ -32,6 +35,8 @@ import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.unit.dp
 import org.tsuyomi.core.display.DisplayProfile
 import org.tsuyomi.core.display.LocalDisplayEnvironment
@@ -189,4 +194,58 @@ fun TsuyomiIconButton(
             tint = tint,
         )
     }
+}
+
+/** Standard Material selection chip with an explicit 48dp visual and touch boundary. */
+@Composable
+fun TsuyomiToggleChip(
+    text: String,
+    selected: Boolean,
+    stateDescription: String,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+    enabled: Boolean = true,
+) {
+    FilterChip(
+        selected = selected,
+        onClick = onClick,
+        enabled = enabled,
+        modifier = modifier
+            .heightIn(min = 48.dp)
+            .semantics { this.stateDescription = stateDescription },
+        label = {
+            Text(
+                text = text,
+                modifier = Modifier.fillMaxWidth(),
+                textAlign = TextAlign.Center,
+                maxLines = 1,
+            )
+        },
+    )
+}
+
+/** Standard Material action chip for a bounded compact action that is not a selection state. */
+@Composable
+fun TsuyomiActionChip(
+    text: String,
+    stateDescription: String,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+    enabled: Boolean = true,
+) {
+    AssistChip(
+        onClick = onClick,
+        enabled = enabled,
+        modifier = modifier
+            .heightIn(min = 48.dp)
+            .semantics { this.stateDescription = stateDescription },
+        label = {
+            Text(
+                text = text,
+                modifier = Modifier.fillMaxWidth(),
+                textAlign = TextAlign.Center,
+                maxLines = 1,
+            )
+        },
+    )
 }

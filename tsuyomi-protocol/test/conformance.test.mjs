@@ -95,6 +95,7 @@ const compareSemver = (left, right) => {
 const hasCapabilityExpansion = (active, candidate) =>
   candidate.origins.some((origin) => !active.origins.includes(origin)) ||
   (!active.webLogin && candidate.webLogin) ||
+  (!active.home && candidate.home) ||
   candidate.writes.some((operation) => !active.writes.includes(operation)) ||
   candidate.storageQuota > active.storageQuota;
 
@@ -152,6 +153,17 @@ test('HXP host API rejects a request body on GET and a semantic key on POST', as
   assert.equal(validate(request), false);
   delete request.utf8Body;
   request.method = 'POST';
+  assert.equal(validate(request), false);
+});
+
+test('HXP host API requires query and queryEncoding together', async () => {
+  const ajv = createAjv();
+  const validate = ajv.compile(await loadJson('../schemas/hxp-host-api-v1.schema.json'));
+  const request = await loadJson('../fixtures/hxp/valid-network-request.json');
+  delete request.queryEncoding;
+  assert.equal(validate(request), false);
+  request.queryEncoding = 'gb18030';
+  delete request.query;
   assert.equal(validate(request), false);
 });
 

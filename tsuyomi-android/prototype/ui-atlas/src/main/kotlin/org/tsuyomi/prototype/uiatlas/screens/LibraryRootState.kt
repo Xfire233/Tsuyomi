@@ -122,7 +122,7 @@ internal class LibraryRootStateHolder(
         get() = shortcutBookCatalog.associateBy(AtlasBook::id)
 
     val libraryReorderEnabled: Boolean
-        get() = view == AtlasLibraryView.ALL && sortMode == LibraryBookSortMode.CUSTOM && !shortcutLocked
+        get() = view == AtlasLibraryView.ALL && sortMode == LibraryBookSortMode.CUSTOM
 
     init {
         bindDragCoordinator()
@@ -356,7 +356,6 @@ internal class LibraryRootStateHolder(
     }
 
     private fun handleDrop(payload: String, destination: LibraryDropDestination): Boolean {
-        if (shortcutLocked) return false
         val bookIds = payloadBookIds(payload)
         return when (destination) {
             LibraryDropDestination.Remove -> handleRemoveDrop(payload, bookIds)

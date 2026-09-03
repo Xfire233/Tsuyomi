@@ -22,6 +22,21 @@
           "propertyNames": { "type": "string", "minLength": 1, "maxLength": 128 },
           "additionalProperties": { "type": "string", "maxLength": 8192 }
         },
+        "query": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 64,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["name", "value"],
+            "properties": {
+              "name": { "type": "string", "minLength": 1, "maxLength": 256 },
+              "value": { "type": "string", "maxLength": 2048 }
+            }
+          }
+        },
+        "queryEncoding": { "enum": ["utf-8", "gb18030", "big5-hkscs"] },
         "form": {
           "type": "object",
           "maxProperties": 64,
@@ -47,7 +62,12 @@
             }
           }
         },
-        { "properties": { "form": {}, "utf8Body": {} }, "not": { "required": ["form", "utf8Body"] } }
+        { "properties": { "form": {}, "utf8Body": {} }, "not": { "required": ["form", "utf8Body"] } },
+        {
+          "if": { "properties": { "query": {} }, "required": ["query"] },
+          "then": { "properties": { "queryEncoding": {} }, "required": ["queryEncoding"] },
+          "else": { "properties": { "queryEncoding": {} }, "not": { "required": ["queryEncoding"] } }
+        }
       ]
     },
     "networkResponse": {

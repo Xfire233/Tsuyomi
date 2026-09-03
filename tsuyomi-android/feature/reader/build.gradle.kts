@@ -13,6 +13,7 @@ android {
 dependencies {
     implementation(project(":core:display"))
     implementation(project(":core:ui"))
+    implementation(project(":core:media"))
     implementation(project(":reader:ui"))
     implementation(project(":shared:locator"))
     implementation(project(":shared:backup"))

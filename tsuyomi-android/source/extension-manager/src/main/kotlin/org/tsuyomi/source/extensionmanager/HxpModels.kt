@@ -67,6 +67,7 @@ data class HxpNetworkCapability(
 
 data class HxpCookieCapability(val sourceScoped: Boolean, val origins: Set<HttpsOrigin>)
 data class HxpWebLoginCapability(val enabled: Boolean, val origins: Set<HttpsOrigin>)
+data class HxpHomeCapability(val enabled: Boolean)
 
 enum class RemoteOperation { READ, ADD }
 
@@ -105,6 +106,7 @@ data class HxpCapabilities(
     val network: HxpNetworkCapability,
     val cookies: HxpCookieCapability,
     val webLogin: HxpWebLoginCapability,
+    val home: HxpHomeCapability,
     val remoteLibrary: HxpRemoteLibraryCapability,
     val storageQuotaBytes: Int,
 )

@@ -25,12 +25,12 @@ internal class SourceSessionOwnerInstrumentedTest : SourceFlowInstrumentedTestFi
             if (candidate.packageSha256 == packageInfo.packageSha256) firstSession else FakeSession()
         }
         try {
-            assertEquals(RemoteLibraryPullResult.Success(1, 1), controller.pullRemoteLibrary(packageInfo, SOURCE_FLOW_TEST_TIME))
-            assertEquals(1, controller.remoteLibrary.books.size)
+            val pull = controller.pullRemoteLibrary(packageInfo) as RemoteLibraryPullResult.Success
+            assertEquals(1, pull.books.size)
+            controller.selectBook(pull.books.single())
 
             controller.open(packageInfo.withPackageSha256(alternateSha(packageInfo.packageSha256)))
 
-            assertTrue(controller.remoteLibrary.books.isEmpty())
             assertEquals(null, controller.selectedBook)
             assertEquals(null, controller.remoteLibrary.selectedBookReconciliation)
         } finally {
@@ -50,8 +50,8 @@ internal class SourceSessionOwnerInstrumentedTest : SourceFlowInstrumentedTestFi
             if (candidate.packageSha256 == packageInfo.packageSha256) firstSession else error("replacement-open-failed")
         }
         try {
-            assertEquals(RemoteLibraryPullResult.Success(1, 1), controller.pullRemoteLibrary(packageInfo, SOURCE_FLOW_TEST_TIME))
-            controller.selectBook(summary(sourceId, "5002", "旧来源"))
+            val pull = controller.pullRemoteLibrary(packageInfo) as RemoteLibraryPullResult.Success
+            controller.selectBook(pull.books.single())
 
             try {
                 controller.open(replacement)
@@ -60,7 +60,6 @@ internal class SourceSessionOwnerInstrumentedTest : SourceFlowInstrumentedTestFi
                 assertEquals("replacement-open-failed", error.message)
             }
 
-            assertTrue(controller.remoteLibrary.books.isEmpty())
             assertEquals(null, controller.selectedBook)
             assertEquals(null, controller.remoteLibrary.selectedBookReconciliation)
         } finally {

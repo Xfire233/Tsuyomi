@@ -100,15 +100,27 @@ class LibraryShortcutDragInstrumentedTest {
         composeRule.waitUntil(5_000) {
             composeRule.onAllNodesWithTag("shortcut-shelf-handle").fetchSemanticsNodes().isNotEmpty()
         }
-        composeRule.onNodeWithTag("library-book-surface").performTouchInput { swipeDown() }
+        composeRule.onNodeWithTag("library-book-surface").performTouchInput {
+            down(center)
+            moveBy(Offset(0f, 180f), delayMillis = 200)
+            up()
+        }
         composeRule.waitUntil(5_000) {
             composeRule.onAllNodesWithContentDescription("快捷书架未锁定，点按锁定").fetchSemanticsNodes().isNotEmpty()
         }
     }
 
     @Test
-    fun locked_shortcut_shelf_remains_pinned_while_library_scrolls() {
+    fun locked_shortcut_shelf_remains_pinned_and_accepts_book_drops_while_library_scrolls() {
         composeRule.onNodeWithContentDescription("快捷书架未锁定，点按锁定").performClick()
+        drag(
+            sourceDescription = "山中邮差，长按多选，移动可拖动至快捷书架",
+            targetText = "快捷书架",
+            preHoldNudge = Offset.Zero,
+        )
+        composeRule.waitUntil(5_000) {
+            stateFile.exists() && stateFile.readText().contains("ShortcutBookDropped")
+        }
         scrollLibraryForward()
         composeRule.onNodeWithContentDescription("快捷书架已锁定，点按解锁").assertExists()
         composeRule.onNodeWithTag("shortcut-shelf-handle").assertDoesNotExist()
@@ -122,7 +134,18 @@ class LibraryShortcutDragInstrumentedTest {
         composeRule.onNodeWithContentDescription("快捷书架未锁定，点按锁定").assertExists()
         composeRule.onNodeWithTag("shortcut-shelf-handle").assertDoesNotExist()
 
-        composeRule.onNodeWithTag("library-book-surface").performTouchInput { swipeUp() }
+        composeRule.onNodeWithTag("library-book-surface").performTouchInput {
+            down(center)
+            moveBy(Offset(0f, 900f), delayMillis = 300)
+            up()
+        }
+        composeRule.onNodeWithTag("shortcut-shelf-handle").assertDoesNotExist()
+        composeRule.onNodeWithContentDescription("快捷书架未锁定，点按锁定").assertExists()
+        composeRule.onNodeWithTag("library-book-surface").performTouchInput {
+            down(center)
+            moveBy(Offset(0f, -240f), delayMillis = 200)
+            up()
+        }
         composeRule.waitUntil(5_000) {
             composeRule.onAllNodesWithTag("shortcut-shelf-handle").fetchSemanticsNodes().isNotEmpty()
         }
@@ -398,13 +421,13 @@ class LibraryShortcutDragInstrumentedTest {
         composeRule.onNodeWithContentDescription("查看全部快捷书架").performClick()
         composeRule.onNodeWithContentDescription("源·松镜像，长按多选，移动可拖动排序").performClick()
         composeRule.onNodeWithText("收藏夹（3）").assertExists()
-        val rootFolder = composeRule.onNodeWithContentDescription("默认收藏夹").fetchSemanticsNode().boundsInRoot
+        val rootFolder = composeRule.onNodeWithContentDescription("默认收藏夹，长按多选，移动可拖动排序").fetchSemanticsNode().boundsInRoot
         assertStandardCoverRatio(rootFolder.width, rootFolder.height)
 
-        composeRule.onNodeWithContentDescription("默认收藏夹").performClick()
+        composeRule.onNodeWithContentDescription("默认收藏夹，长按多选，移动可拖动排序").performClick()
         composeRule.onNodeWithText("默认收藏夹").assertExists()
         composeRule.onNodeWithText("收藏夹（2）").assertExists()
-        composeRule.onNodeWithContentDescription("武侠").performClick()
+        composeRule.onNodeWithContentDescription("武侠，长按多选，移动可拖动排序").performClick()
         composeRule.onNodeWithText("武侠").assertExists()
         composeRule.onNodeWithText("纸灯巷的守夜人").assertExists()
 
@@ -557,10 +580,14 @@ class LibraryShortcutDragInstrumentedTest {
     @Test
     fun stationary_long_press_enters_selection_at_timeout_before_release() {
         val book = composeRule.onNodeWithContentDescription("山中邮差，长按多选，移动可拖动至快捷书架")
-        book.performTouchInput { down(center) }
-        composeRule.mainClock.advanceTimeBy(600)
-        composeRule.waitForIdle()
-
+        book.performTouchInput {
+            down(center)
+            advanceEventTime(600)
+            up()
+        }
+        composeRule.waitUntil(timeoutMillis = 5_000) {
+            composeRule.onAllNodesWithContentDescription("已选择").fetchSemanticsNodes().isNotEmpty()
+        }
         composeRule.onNodeWithContentDescription("已选择").assertExists()
         composeRule.onNodeWithContentDescription("用所选新建收藏夹").assertExists()
         composeRule.onNodeWithContentDescription("移入收藏夹").assertExists()
@@ -597,7 +624,7 @@ class LibraryShortcutDragInstrumentedTest {
     fun locked_shortcuts_and_collection_children_enter_selection_without_item_menus() {
         composeRule.onNodeWithContentDescription("快捷书架未锁定，点按锁定").performClick()
         composeRule.onNodeWithContentDescription("查看全部快捷书架").performClick()
-        composeRule.onAllNodesWithContentDescription("حكاية المقهى القديم 老咖啡馆的故事")[0].performTouchInput {
+        composeRule.onAllNodesWithContentDescription("حكاية المقهى القديم 老咖啡馆的故事，长按多选，移动可拖动排序")[0].performTouchInput {
             longClick()
         }
         composeRule.onNodeWithContentDescription("移出快捷书架").assertExists()
@@ -605,7 +632,7 @@ class LibraryShortcutDragInstrumentedTest {
         composeRule.onNodeWithContentDescription("退出选择").performClick()
         pressBack()
 
-        composeRule.onNodeWithContentDescription("夜航船").performClick()
+        composeRule.onNodeWithContentDescription("夜航船，长按多选，移动可拖动排序").performClick()
         composeRule.onNodeWithContentDescription("志怪选，长按多选，移动可拖动排序").performTouchInput {
             longClick()
         }

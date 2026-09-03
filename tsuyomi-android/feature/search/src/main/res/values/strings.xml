@@ -1,13 +1,22 @@
 <!-- SPDX-FileCopyrightText: 2026 Tsuyomi Contributors -->
 <!-- SPDX-License-Identifier: Apache-2.0 -->
 <resources>
-    <string name="search_query_label">搜索书名</string>
+    <string name="search_query_label">搜索</string>
+    <string name="search_submit_description">提交搜索</string>
+    <string name="search_query_count">%1$d / 100</string>
     <string name="search_action">搜索</string>
-    <string name="search_idle_title">搜索已安装内容源</string>
-    <string name="search_idle_message">输入书名后开始搜索。网络、Cookie 与缓存均由 Tsuyomi 管理。</string>
+    <string name="search_idle_title">输入关键词后搜索</string>
     <string name="search_loading_title">正在搜索</string>
-    <string name="search_empty_title">没有找到结果</string>
-    <string name="search_empty_message">可检查关键词后重试。</string>
+    <string name="search_empty_title">没有找到「%1$s」</string>
+    <string name="search_empty_message">可调整关键词后重新搜索。</string>
+    <string name="search_topbar_title">搜索</string>
+    <string name="search_layout_list">切换布局；当前为列表</string>
+    <string name="search_layout_compact">切换布局；当前为紧凑列表</string>
+    <string name="search_layout_grid">切换布局；当前为网格</string>
+    <string name="search_source_label">来源：%1$s</string>
+    <string name="search_eink_query_label">搜索书名</string>
+    <string name="search_eink_idle_title">搜索已安装内容源</string>
+    <string name="search_eink_idle_message">输入书名后开始搜索。网络、Cookie 与缓存均由 Tsuyomi 管理。</string>
     <string name="search_author">作者：%1$s</string>
     <string name="search_failure_title">来源请求未完成</string>
     <string name="search_diagnostic_id">诊断编号：%1$s</string>

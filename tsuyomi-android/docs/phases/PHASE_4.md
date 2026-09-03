@@ -2,20 +2,20 @@
 <!-- SPDX-License-Identifier: Apache-2.0 -->
 
 # Phase 4 plan — foundational UX and remaining authorized writeback
-> Terminology supersession: this work scope was formerly named Gate 4. It is now Phase 4; manual design approval and production implementation authorization remain separate gates/checkpoints.
+> Terminology supersession: this work scope was formerly named Gate 4. It is now Phase 4. The prior Standard Atlas manual-approval prerequisite was explicitly abandoned by the user on 2026-08-29; Phase 4A production implementation was explicitly authorized the same day.
 
 
 ## Status and review input
 
-- Planner status: **FIXTURE REVISION REQUIRED — pending a fresh Standard manual Atlas review; E-ink design/review is frozen.**
-- Implementation authorization: **NOT GRANTED — production feature work is blocked**.
+- Planner status: **PHASE 4A PRODUCTION IMPLEMENTATION ACTIVE — Standard Atlas manual review abandoned; production defects are corrected during production verification; E-ink remains frozen.**
+- Implementation authorization: **GRANTED FOR PHASE 4A ON 2026-08-29**. Phase 4B, Phase 4C, E-ink restoration, release and tag actions remain separately controlled.
 - Product-visible authority: `UI_CONSTITUTION.md` Active constraint spine. `DESIGN_DIRECTION_HANDOFF.md` is review provenance/history; this Phase document owns scope, sequencing and risk boundaries; authorization is decided by the separate checkpoints below. D1–D18 remain historical unless the active spine expressly retains their product-visible consequence.
-- Product baseline: `org.tsuyomi.android` `0.2.0` / versionCode `2`; Host API `1.1.0`; HXP manifest v1; Room schema `2`
+- Product baseline: `org.tsuyomi.android` `0.2.0` / versionCode `2`; Host API `1.1.0`; HXP manifest v1; Room schema `3` (`read_later` added by the Phase 4A Library slice).
 - Phase 3 baseline: `d3e335a11565ae79e15d374062db637f3f9979d9`; dual-portrait evidence rule: `26bad358ab2ef4afac01b63b30e6c6c3e6de9c1c`
 - UI impact: **YES** — every root and task path, book details, Reader entry, library/collections/history, source and remote-library surfaces, transfer, settings, shared UI semantics and goldens.
 - Security-sensitive impact: **YES** — Phase 4B adds separately signed/capability-gated remote remove/move and remote target selection. Phase 4A must preserve the existing host-only credential, direct-action, reconciliation, redirect and cookie boundaries.
 
-Phase 4 has three ordered work partitions. **Phase 4A is foundational UX**: it repairs the current page model and every confirmed task-flow gap before remote writes are expanded. **Phase 4B is the original roadmap scope**: remaining authorized remote writeback. **Phase 4C is the independent update inbox/schedule scope.** Production implementation does not begin until the UI Constitution/atlas manual approval gate, independent Designer and Adviser reviews, all applicable P1 closure, and separate explicit user implementation authorization checkpoint are complete. A scope, protocol, route, persistence or risk-model change invalidates the affected approval.
+Phase 4 has three ordered work partitions. **Phase 4A is foundational UX**: it repairs the current page model and every confirmed task-flow gap before remote writes are expanded. **Phase 4B is the original roadmap scope**: remaining authorized remote writeback. **Phase 4C is the independent update inbox/schedule scope.** Phase 4A production implementation is now authorized; applicable P1 closure, independent implementation review and production verification remain merge/acceptance requirements. Phase 4B and Phase 4C do not inherit this authorization.
 
 ### Temporary Phase 4 profile sequencing decision — 2026-08-20
 
@@ -34,6 +34,35 @@ The Standard Atlas **UI construction** milestone and actual production scenarios
 `S01–S04` and `X01–X06` remain ten binding Review Graph nodes, but every one executes later in `org.tsuyomi.android` against real host controllers, storage, navigation and live online services. A signed deterministic source fixture remains mandatory for repeatable regression and diagnosis; it supplements rather than replaces the live-service pass. Evidence must redact credentials, cookies, verification answers, private reading content and raw WebView payloads. The isolated Atlas may retain rehearsal fixtures and AI drafts for these nodes but cannot mark them human-complete or assign final verdicts.
 
 E-ink remains frozen after the Standard Atlas construction closeout. Resumption still requires a later explicit user decision and the complete restoration scope in the preceding section.
+
+### Phase 4A production-authorization supersession — 2026-08-29
+
+The user explicitly abandoned further Standard Atlas review and accepted correcting remaining UI problems during production implementation. This supersedes the former requirement that a fresh manifest-bound Atlas manual approval tuple exist before Phase 4A production work begins. The completed exact-source Atlas automation closeout remains non-approval reference evidence.
+
+The user explicitly authorized Phase 4A production implementation. The authorization covers only the clean-cutover 4A scope in this document. It does not approve the UI, close any Review Graph verdict, authorize Phase 4B/4C, resume E-ink, or authorize release/tag operations. All 28 Review Graph nodes become production-stage obligations; `S*`/`X*` still require `org.tsuyomi.android`, real host state, live online services and signed deterministic fixture replay.
+
+### Phase 4A direct Atlas production takeover — 2026-08-29
+
+The user rejected the incremental production reimplementation after observing that it restored a pre-Atlas/interim Library composition. This supersedes the former “Atlas as comparison input” rule and the first Library slice description below it.
+
+The completed Atlas presentation is now the canonical production UI source for every Phase 4A surface. Implementation promotes that source directly into production ownership and preserves its visible composition, component choices, route grammar and action placement. Work is limited to replacing Atlas fixture/review/runtime seams with real domain models, host controllers, Room/DataStore, navigation, source execution and deterministic sanitized fixtures. A second production redraw, wrapper UI or “Atlas-inspired” approximation is forbidden; superseded production UI files are deleted as each surface is promoted.
+
+This decision does not authorize shipping fake Atlas data, review controls or prototype persistence. It also does not authorize Phase 4B/4C, resume E-ink, close human verdicts, release, tag, commit or push. Security, credential, storage, semantic-progress and source sandbox invariants remain binding. If one prevents exact source promotion, that conflict is recorded and reconciled before a visible divergence is introduced.
+
+The first corrected takeover surface is Library. Its AppBar, shortcut shelf, three-column cover grid, menus, selection grammar and dedicated child routes come from the Atlas implementation itself. Production Room entries, collections, read-later state, refresh jobs and navigation replace Atlas fixtures behind those views. `LibraryProductionJourneyInstrumentedTest` remains the highest observable production seam and must reject restoration of the interim mixed-node-card screen.
+
+The user-confirmed “near Hikari” depth benchmark remains inside the already authorized Phase 4A scope. Primary acceptance uses production-route Journeys through real route owners, storage and navigation on API 29; `S*`/`X*` additionally retain live-service plus signed-fixture evidence.
+
+### Phase 4A Wenku8 usable-reader milestone — 2026-08-30
+
+The user prioritized one basic usable Wenku8 production reader before continuing the remaining broad Atlas cutover. The binding end-to-end path is: install the signed acceptance source, complete explicit controlled WebView login when required, submit one root-neutral search, open the one canonical identity-addressed Detail with integrated directory, open an exact chapter, read and cross only to the immediate adjacent chapter, pin the book locally, restart the process, and resume the same semantic locator from Library. This milestone promotes Atlas `S01–S04` and `B01–B03` presentation directly and closes the loop through the already-promoted `L01`; fake books, state-only source routes and a second Detail/Reader implementation are forbidden.
+
+Implementation order is security-first. Raw live responses are non-durable until classification and parser/DTO validation succeed; login, challenge, HTTP-error and parser-rejected pages never become normal content cache. Durable offline state contains only validated normalized metadata, directory and opened `ReaderDocument` projections with explicit current/stale-offline provenance. Live probing uses one predeclared public query/book, concurrency one, a bounded request count, no catalogue crawl, no automatic challenge loop, and redacted evidence. The same observable path must pass signed sanitized fixture replay.
+
+The ordinary `加入书架` command is unconditionally local-only. It never invokes website ADD even when an older grant or setting exists. Website favourites are included as a separate read-only `S03` surface: refresh and copy selected/all to local require direct foreground actions and produce zero website writes. Existing or future website ADD remains a separately labelled, separately confirmed remote operation and is outside this milestone. Login completion, cancellation and Back return to the exact paused task and perform no automatic retry, import, favourites pull, refresh or write; retry is explicit, and the accepted ADR 0017 bounded verified-page path remains the fallback when exact cookie-plus-user-agent replay is still challenged.
+
+Real covers are included through the host-owned validated media boundary; raw cover URLs and fetch/decode/cache implementation do not enter feature or `core:ui` ownership. If the active verified Wenku8 session expires during live validation, implementation pauses at the controlled WebView and asks the user to complete login again; credentials and private content never enter chat or evidence. The acceptance-signed Wenku8 package is the milestone install identity because production publisher keys remain an explicit non-goal. Emulator/API 29 evidence proves the implementation slice; any contract-mandated final physical-device qualitative or actual-online evidence remains explicitly open rather than inferred.
+
 
 ## Outcome
 
@@ -272,9 +301,9 @@ The retained `Tsuyomi_EInk_API29` (`1264×1680`, 240dpi), compact E-ink, graysca
 
 | Review | Verdict | Blocking amendments |
 |---|---|---|
-| Product / UX | **SUPERSEDED — original APPROVE WITH CHANGES verdict closed by the Foundation Amendment and UI Constitution RC evidence** | Its route/history/rule/cross-root/local-removal/post-login/action-placement requirements are restated as binding D19–D30 plus the D31 closure contract and 4A acceptance gates below. It is not implementation authorization. |
-| Architecture / security | **SUPERSEDED — original REJECT verdict closed only at the planning/RC level** | Its foundation debts and mandatory implementation-time acceptance gates are recorded below. Production remains blocked pending atlas manual review and explicit implementation authorization. |
-The reviewer reports are retained only in the private planning record; this public plan carries their evidence-backed requirements. This legacy narrative is **[SUPERSEDED FOR IMPLEMENTATION ORDER BY THE FOUNDATION AMENDMENT]**: D19–D30, D31 and the P1/atlas gates control. Historical labels never authorize implementation.
+| Product / UX | **SUPERSEDED — production correction active** | The former Atlas approval dependency is superseded by the 2026-08-29 user decision. D19–D34 and the active UI Constitution remain binding production inputs; issues are corrected and verified on production surfaces. |
+| Architecture / security | **IMPLEMENTATION-TIME REVIEW ACTIVE** | Foundation debts and mandatory acceptance gates below remain binding. Phase 4A is authorized, but each affected P1 must close before its implementation slice is merged or accepted. |
+The retained reviewer reports remain provenance only. The current implementation order is controlled by D19–D34, the P1 gates, the active UI Constitution and the explicit Phase 4A authorization above.
 
 ### Confirmed additional findings
 
@@ -403,9 +432,9 @@ Phase 4 的最终审阅必须把产品操作逻辑与代码正确性作为两个
 ### 适用性、证据状态与历史处理
 本节是 Phase 4 的后续计划，但 `DESIGN_DIRECTION_HANDOFF.md` §1.2 的显式用户裁决优先。被替代的历史决定仍保留并以 **[SUPERSEDED]** 或 **[DEFERRED]** 标记，不能再产生实施依赖。D19、D21、D24、D26–D30 及 D31 的非搜索安全合同继续有效；D20/D22/D25/D32 已按 Library/Search 决定修订；D33 是延期的研究草案。
 
-- 已完成的基础证据：UI Constitution 已完成全量 review/protocol 冲突归并；旧 Atlas 捕获全部是历史或 rejected evidence。
-- 未完成的人工证据：用户尚未批准基于新裁决重做的完整 Atlas 页面、录屏、语义日志或 evidence ledger。
-- **绝对阻断：**在 fresh atlas 人工审阅完成并取得显式用户实现授权前，4A、4B、4C 的任何生产功能实现均不得开始；不得以编译、旧截图、自动选择、设计审阅或本计划替代该授权。
+- Completed reference evidence: the exact-source Standard Atlas automation closeout accounts for 18 `L*`/`B*`/`M*` nodes, 16 surfaces and 84 obligations; it is not human approval.
+- Superseded manual evidence: the user abandoned further Standard Atlas review on 2026-08-29. Missing Atlas human verdicts do not block the authorized Phase 4A production implementation and must not be fabricated or marked approved.
+- **Active boundary:** Phase 4A production work may proceed. Phase 4B, Phase 4C and E-ink restoration remain blocked pending separate explicit authorization. Production acceptance still requires applicable P1 proof, all 28 production-stage Review Graph obligations, and live-service plus signed-fixture evidence for `S*`/`X*`.
 ### D19–D32：经冲突归并的 Foundation 决定；D31：非搜索 source-contract 闭合；D33：延期历史草案
 
 | ID | 已确认决定 | 约束范围 |
@@ -419,7 +448,7 @@ Phase 4 的最终审阅必须把产品操作逻辑与代码正确性作为两个
 | D25 | `追更` SystemNode 的显示/隐藏/重建与更新调度完全独立。隐藏只影响 Library presentation；调度只有在 Updates 设置中经显式用户动作才启用、禁用或变更，默认关闭。重建节点不会重启调度。 | 4C Library presentation、设置、调度 |
 | D26 | 更新工作由独立 `UpdateCoordinator` 管理，镜像校准由独立 `MirrorCoordinator` 管理；可共享受限 source lane、计数进度与取消原语，但禁止抽象为通用 sync engine。Updates 对每个有 active local origin 或 enabled mirror origin 的 `BookIdentity` 去重；仅冻结镜像的书默认不检查，排除项、休眠/未验证来源和 partial outcome 必须可见。update anchors、session/item 报告是持久本地状态，保留至明确数据擦除；隐藏视图不改变它们，且按 D29 永不传输。 | 4B/4C 并发、范围与保留 |
 | D27 | 首次进入镜像设置、追更、智能规则、网站写入、数据导入/导出时，显示一次 `FeatureIntroduction(featureId, tutorialVersion)`；它只说明任务、网络/隐私影响和开始入口。关闭、禁用、重放介绍均不授予 capability、不启动网络任务、不改变确认设置。 | 4A–4C onboarding、无障碍 |
-| D28 | `Tsuyomi UI Constitution v1.0-RC2.1` 是 Phase 4 UI 结构、状态、无障碍、E-ink、模块边界、动画和品牌安全的候选权威。任何生产 UI 实现前，必须完成基于 §1.2 裁决的 fixture-only Atlas 捕获与用户手工审阅/签署。 | 全部 UI 计划、强制 atlas gate |
+| D28 | **[SUPERSEDED 2026-08-29 FOR PHASE 4A ENTRY]** `Tsuyomi UI Constitution v1.0-RC2.1` remains the active product-visible contract, but the user abandoned the planned fixture-only Atlas manual signature and authorized Phase 4A production implementation with later production correction. The Atlas closeout remains non-approval reference evidence. | Phase 4A entry governance; does not alter production acceptance or E-ink restoration requirements |
 | D29 | **[SUPERSEDES D14]** 语义进度（定位器及相关时间）保持版本化、默认可移植的 host 数据；浏览/搜索历史单独处理，默认不导出，只有 export review 的明确选择才包含。镜像绑定/节点、更新 session/调度、远程尝试/target/receipt、凭证、来源状态、CoverRef transport locator 与二进制缓存永不传输。导入不得启用调度、镜像或写回。 | 4A/4C transfer、隐私、兼容 |
 | D30 | Phase 4 采用 Constitution 的 production DAG、禁止边与 prototype isolation：`shared:library-domain` 只放纯领域类型/ports；`core:library` 协调 library、search、mirror、update；`core:media` 是唯一 cover/branding 请求、验证、解码与缓存边界；`core:preferences` 拥有 UI preference schema/migration/reset。feature 只组合不可变 UiState 和 typed action，不能持有 Room entity、URL、cookie、Media internals 或 Network/Material 直接依赖。 | 4A 基础模块与 clean cutover |
 | D32 | **[CONFIRMED, AMENDED BY B041-D]** Phase 4A 使用 root-neutral `search?origin={library|browse}&selectedSourceId={sourceId?}` 单搜索栏，删除重复搜索壳。query draft inert；normal entry 隐式覆盖所有 active search-capable sources，source-card entry 可通过 route 绑定一个 active source；UI 不显示来源 selector 或 leading Search control。一次 trailing Search submit 同时启动 local FTS 与 effective scope；source jobs ≤3 concurrent、per-source =1。只显示一个 aggregate progress 和一个增量结果流。结果只按 exact `BookIdentity` 去重；同名不同 identity 保留。内部 source jobs 可独立取消/重试，但 normal per-source lanes/status prose 不常驻。恢复页面不自动重发网络；搜索历史只在提交时写入并按 D29 默认不导出。 | 4A `core:library` basic SearchCoordinator、`feature:search`、导航、Room FTS、E-ink/无障碍 |
@@ -438,7 +467,7 @@ Phase 4 的最终审阅必须把产品操作逻辑与代码正确性作为两个
 
 **持久 UI preference。** `core:preferences` 拥有单一 UI preference schema、逐版 deterministic migrator、unknown-newer payload 的 byte-for-byte 只读保留与唯一的“更多 > 显示 > 重置界面设置”。未知较新 schema 时所有 preference 写入被阻止并解释；内存 effective defaults 不可覆盖原 payload。迁移/重置绝不触碰领域、来源、调度、镜像或远程操作数据。
 
-### 4A、4B、4C 的有序执行计划（尚未获准执行）
+### 4A、4B、4C 的有序执行计划（4A 已获准；4B/4C 未获准）
 
 | 阶段 | 仅在前置阻断解除后可实施的 clean-cutover 工作 | 不可违反的完成条件 |
 |---|---|---|
@@ -479,21 +508,21 @@ HXP manifest v2 / Host API 1.2 base envelope、parser/dispatcher negotiation 仅
 
 另有 UI Constitution 的实现门：production build 必须静态拒绝未经 `core:ui` 的 Material interactive control、`feature → core:database`、对 `core:media.internal` 的 import、`core:ui` 的 network/Room/NavController/DataStore 依赖、以及任何 prototype namespace/symbol/dependency。每个受影响 feature 必须遵守 immutable UiState + one typed UiAction sink；Standard/E-ink 共享状态树，不能以 feature `eInk` boolean 分叉。
 
-### UI Constitution、atlas 人工审阅与提取
+### UI Constitution、废止的 Atlas 人工前置与生产提取
 
-`Tsuyomi UI Constitution v1.0-RC` 与 `Tsuyomi UI Prototype Atlas — Executable Specification v1.0-RC` 是本计划的 UI gate 输入。Atlas 必须保持临时、自包含、fixture-only：不得依赖 production 模块、Room、DataStore、network、真实 source package/branding/credentials/cookies 或 release graph；production 也不得依赖 atlas。它渲染完整 route pages、确定性 fixtures、Standard/E-ink、窗口、字体、locale、TalkBack/DPAD 和 A–K 对照变体，而非 component gallery。
+`Tsuyomi UI Constitution` 是唯一 active product-visible UI contract。`:prototype:ui-atlas` 继续保持临时、自包含、fixture-only，production 不得依赖它。2026-08-29 的用户决定废止了 Phase 4A 开工前的 Atlas 人工签署要求，但没有把 Atlas automation、AI triage 或既有截图升级为人工批准。
 
-**自动与人工审批边界：**Constitution §18 的 auto-selection 仅用于让 atlas 可比较地编译/渲染；它从不选择最终设计，更不构成用户批准。唯一能选定或推翻自动默认值的是 atlas 手工审阅表中的逐项 named yes/no、备注、A–K 选择、constitution conformance、research binding、`manifest.sha256` 与签署日期。该人工 approval tuple 必须绑定 constitution version、research hash、atlas commit、manifest hash、A–K 每项 evidence path 与决策表。
+Phase 4A production implementation 已获明确授权。实施必须在 production 模块中重写合同，不复制 prototype namespace；Standard semantic components 使用 real Material 3；每个变更以 production composables、production strings、真实 host state、schema/route/process-recreation tests 和设备证据验证。发现问题直接在 production 修正，不回开已放弃的 Atlas review。
 
-完整人工批准只会冻结 approval tuple 和允许保留 approval evidence；它**不允许**修改 production 模块、移动 production fixture/golden 或删除 atlas。取得人工批准后，仍必须先获得用户对 Phase 4 production implementation 的单独、明确授权。只有该授权到位，才允许在一个 clean extraction change set 中：(1) 把已批准的 tokens/contracts 重写进生产 `core:ui`/feature API；(2) 移动已批准且已脱敏的 fixtures/goldens；(3) 从 production composables 重新生成 goldens；(4) 彻底删除 `:prototype:ui-atlas`、settings inclusion、未迁移 fixture、component forks 与所有 `Legacy`/`V2`/compat alias；(5) 运行 prototype-leak/DAG/forbidden-import static checks；(6) 用 approval tuple 与 implementation authorization 共同关闭 UI-P0-B。人工 atlas 审批本身永远不是该授权。
+Atlas 可在 cutover 未完成期间作为非 shipping 对照输入保留。Phase 4A 完成前必须：(1) 将仍采用的 fixture 脱敏并迁入 owner production test source；(2) 从 production composables 重新生成 goldens；(3) 删除 `:prototype:ui-atlas`、settings inclusion、未迁移 fixture、component forks 与所有 `Legacy`/`V2`/compat alias；(4) 通过 prototype-leak、DAG、forbidden-import static checks。
 
-### 自动验收、人工批准与最终实现阻断清单
+### 自动验收、显式授权与生产实现边界
 
 | 类别 | 可自动验证 | 必须人工/显式确认 | 对生产实现的效果 |
 |---|---|---|---|
-| Foundation contracts | schema/migration、ports/DAG、static forbidden edges、source/transport adversarial tests、transfer allowlist、route/recreation、P1 proof | 不适用 | 未全部通过即阻断相应 4A–4C 实现/合并。 |
-| UI Constitution conformance | screenshot/golden、semantics、fontScale、profile/window/locale matrix、deterministic fixture hash | 用户核对完整 page/state/recording、无障碍与 E-ink 体验 | 自动通过不能代替 atlas 人工 gate。 |
-| Atlas variants | 完整 A–K renders、capture manifest/hash、initial device capture 可重复性 | 用户逐项选择或否决 layout、row/grid、motion、state art、selection、E-ink reader、source identity、typeface 等方案，并为 A–K 每项登记 evidence path | 未签署或缺证据的选择保持候选，绝不可实现为“用户已批准”。 |
-| Production authorization | 不适用 | 用户在 atlas gate 关闭后单独授权实施；之后独立 Designer/Adviser 对最终 head 复审 | 未授权时任何 production feature code 仍被阻断。 |
+| Foundation contracts | schema/migration、ports/DAG、static forbidden edges、source/transport adversarial tests、transfer allowlist、route/recreation、P1 proof | 不适用 | 未全部通过即阻断对应实现 slice 的合并/接受。 |
+| UI Constitution conformance | production screenshot/golden、semantics、fontScale、Standard profile/window/locale matrix、deterministic fixture hash | 生产使用体验和高风险文案可在实现过程中纠正；不伪造 Atlas human approval | Phase 4A 可实现，但不能以旧 Atlas 证明 production acceptance。 |
+| `S*`/`X*` actual-online | 签名、脱敏、确定性 fixture replay | 真实 production package、真实 host state、live online service；无 secret/private payload evidence | 两种证据缺一均不得 finalize 对应节点。 |
+| Production authorization | 当前 Phase 4A 已明确授权 | Phase 4B、Phase 4C、E-ink、release/tag 各自另行授权 | 不得跨越当前 4A 范围。 |
 
-本 Amendment 不授予 PR、commit、merge 或 production code 的权限；它只使 Phase 4 的后续审阅、原型验证和未来 clean cutover 有同一份无矛盾的基础契约。
+本节记录的 2026-08-29 用户决定授权 Phase 4A production code。它不授权 commit、push、PR、merge、release 或 tag；这些操作仍按当前会话中的明确指令执行。

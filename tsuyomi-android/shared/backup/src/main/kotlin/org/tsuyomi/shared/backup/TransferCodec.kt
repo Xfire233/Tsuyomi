@@ -185,8 +185,20 @@ object TransferCodec {
         val canonicalUrl = value.string("canonicalUrl")?.also(::requireUri)
         val coverUrl = value.string("coverUrl")?.also(::requireUri)
         TransferBook(
-            identity, title, authors, canonicalUrl, coverUrl, status, remoteTags, localTags, shelfIds,
-            rating, value.instant("addedAt"), updatedAt, value.obj("progress")?.let(::parseProgress),
+            identity = identity,
+            title = title,
+            authors = authors,
+            canonicalUrl = canonicalUrl,
+            coverUrl = coverUrl,
+            status = status,
+            remoteTags = remoteTags,
+            localTags = localTags,
+            shelfIds = shelfIds,
+            rating = rating,
+            readLater = value.primitive("readLater")?.booleanOrNull ?: false,
+            addedAt = value.instant("addedAt"),
+            updatedAt = updatedAt,
+            progress = value.obj("progress")?.let(::parseProgress),
         )
     }.getOrNull()
 
@@ -246,6 +258,7 @@ object TransferCodec {
         putStringSet("localTags", book.localTags)
         putStringSet("shelfIds", book.shelfIds)
         book.rating?.let { put("rating", it) }
+        if (book.readLater) put("readLater", true)
         book.addedAt?.let { put("addedAt", it.toString()) }
         put("updatedAt", book.updatedAt.toString())
         book.progress?.let { put("progress", progressJson(it)) }
@@ -277,7 +290,7 @@ object TransferCodec {
 
     private val SOURCE_ID = Regex("^[a-z0-9](?:[a-z0-9.-]{0,126}[a-z0-9])?$")
     private val STATUSES = setOf("unknown", "ongoing", "completed", "hiatus", "cancelled")
-    private val BOOK_FIELDS = setOf("identity", "title", "authors", "canonicalUrl", "coverUrl", "status", "remoteTags", "localTags", "shelfIds", "rating", "addedAt", "updatedAt", "progress")
+    private val BOOK_FIELDS = setOf("identity", "title", "authors", "canonicalUrl", "coverUrl", "status", "remoteTags", "localTags", "shelfIds", "rating", "readLater", "addedAt", "updatedAt", "progress")
     private val PROGRESS_FIELDS = setOf("chapterId", "textAnchor", "characterOffset", "chapterProgress", "bookProgress", "updatedAt")
 }
 

@@ -34,11 +34,11 @@ This file records direct runtime/build/test dependencies and the public projects
 
 ## Research and migration references
 
-The projects below informed migration requirements, architecture, or product design. Tsuyomi does not distribute their source files, assets, fonts, logos, binaries, or modified versions.
+The projects below informed migration requirements, architecture, or product design. Except for the explicitly identified MIT-licensed Wenku8 Home taxonomy adaptation, Tsuyomi does not distribute their source files, assets, fonts, logos, binaries, or modified versions.
 
 | Project | Upstream copyright / license | Research boundary | Material distributed by Tsuyomi |
 |---|---|---|---|
-| [15dd/hikari_novel_flutter](https://github.com/15dd/hikari_novel_flutter) | Copyright © 2026 15dd; MIT | Original Hikari behavior and legacy-format background | None |
+| [15dd/hikari_novel_flutter](https://github.com/15dd/hikari_novel_flutter) | Copyright © 2026 15dd; MIT | Fixed reference `9e126bade357573ca5973087aafa9353de20fdce`: Wenku8 category/ranking routes and filter taxonomy | Category Tag labels plus `tags.php` / `toplist.php` filter mapping adapted into the signed TypeScript Home DTO producer; Compose layout remains an independent host implementation |
 | [Xfire233/hikari_novel_flutter_plus](https://github.com/Xfire233/hikari_novel_flutter_plus) | Retains the Hikari MIT notice; fork contributors retain copyright in their contributions | Fixed migration reference `a1feba6d1dd8dbbdd2b5ae042e44f2ec54d26bef` | None; behavior/specification and sanitized-fixture reference only |
 | [EnableAria/Esjzone](https://github.com/EnableAria/Esjzone) | Copyright © 2025 EnableAria; MIT | ESJZone compatibility research | None |
 | [prprbell/YamiboReaderPro](https://github.com/prprbell/YamiboReaderPro) | © prprbell; AGPL-3.0 | Public Yamibo/forum behavior research | None; no AGPL code is copied, translated, linked, or adapted |

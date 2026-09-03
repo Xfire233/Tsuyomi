@@ -58,6 +58,7 @@ data class HostHttpRequest(
     val url: URI,
     val method: NetworkMethod,
     val headers: Map<String, String>,
+    val decode: DecodeMode,
     val body: ByteArray?,
     val referrer: URI?,
     val timeoutMs: Int,
@@ -70,6 +71,9 @@ data class HostHttpResponse(
     val headers: Map<String, String>,
     val bytes: ByteArray,
 )
+
+/** Opaque image response for host-owned media display; never exposed to extension code. */
+data class HostMediaResponse(val bytes: ByteArray, val contentType: String)
 
 /** Host-only transport. It never exposes an HTTP response, cookies, or streams to extension code. */
 fun interface HostHttpTransport {
@@ -112,6 +116,51 @@ class HostNetworkGateway(
     fun importSourceCookies(grant: SourceNetworkGrant, origin: HttpsOrigin, rawCookie: String) {
         require(grant.allowsCookies(origin)) { "Cookie origin is not granted" }
         cookieJar.seed(grant, URI(origin.canonical), rawCookie)
+    }
+
+    /**
+     * Fetches one display image through the same source/version cookie and verified-identity transport
+     * as source documents. Callers provide only a manifest-granted HTTPS URL and canonical referrer.
+     */
+    suspend fun fetchMedia(grant: SourceNetworkGrant, url: String, referrerUrl: String?): HostMediaResponse {
+        var current = parseAllowedUri(url, grant)
+        val referrer = referrerUrl?.let { parseAllowedUri(it, grant) }
+        repeat(MAX_REDIRECTS + 1) { redirectCount ->
+            val response = try {
+                transport.execute(
+                    HostHttpRequest(
+                        url = current,
+                        method = NetworkMethod.GET,
+                        headers = mapOf("Accept" to "image/jpeg,image/png;q=0.9") + cookieJar.requestHeader(grant, current),
+                        decode = DecodeMode.AUTO,
+                        body = null,
+                        referrer = referrer,
+                        timeoutMs = grant.requestTimeoutMs,
+                        maxResponseBytes = grant.maxResponseBytes,
+                    ),
+                )
+            } catch (error: HostNetworkException) {
+                throw error
+            } catch (_: Throwable) {
+                throw HostNetworkException(HostNetworkError.TRANSPORT)
+            }
+            if (response.finalUrl != current) throw HostNetworkException(HostNetworkError.REDIRECT_DISALLOWED)
+            cookieJar.store(grant, current, response.headers)
+            if (response.status in 300..399) {
+                if (redirectCount == MAX_REDIRECTS) throw HostNetworkException(HostNetworkError.REDIRECT_LIMIT)
+                val location = response.headers.entries.firstOrNull { it.key.equals("location", ignoreCase = true) }?.value
+                    ?: throw HostNetworkException(HostNetworkError.REDIRECT_DISALLOWED)
+                current = parseAllowedUri(current.resolve(location).toString(), grant)
+                return@repeat
+            }
+            if (response.status !in 200..299) throw HostNetworkException(HostNetworkError.TRANSPORT)
+            if (response.bytes.size > grant.maxResponseBytes) throw HostNetworkException(HostNetworkError.RESPONSE_LIMIT)
+            val contentType = response.headers.entries.firstOrNull { it.key.equals("content-type", ignoreCase = true) }
+                ?.value?.substringBefore(';')?.trim()?.lowercase().orEmpty()
+            if (contentType !in setOf("image/jpeg", "image/png")) throw HostNetworkException(HostNetworkError.DECODE)
+            return HostMediaResponse(response.bytes, contentType)
+        }
+        throw HostNetworkException(HostNetworkError.REDIRECT_LIMIT)
     }
     private val locks = ConcurrentHashMap<String, Mutex>()
 
@@ -166,7 +215,9 @@ class HostNetworkGateway(
                 },
                 diagnosticId = UUID.randomUUID().toString(),
             )
-            if (cacheKey != null && request.method != NetworkMethod.POST) cache.put(cacheKey, value)
+            if (cacheKey != null && request.method != NetworkMethod.POST && request.cache == NetworkCacheMode.DEFAULT) {
+                cache.put(cacheKey, value)
+            }
             value
         }
     }
@@ -242,6 +293,7 @@ class HostNetworkGateway(
                         url = url,
                         method = method,
                         headers = headers + cookieJar.requestHeader(grant, url),
+                        decode = request.decode,
                         body = currentBody,
                         referrer = currentReferrer,
                         timeoutMs = grant.requestTimeoutMs,

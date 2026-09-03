@@ -32,6 +32,7 @@ import org.junit.Test
 import org.junit.runner.RunWith
 import org.tsuyomi.prototype.uiatlas.review.ReviewJsonExporter
 import org.tsuyomi.prototype.uiatlas.review.ReviewRepository
+import org.tsuyomi.prototype.uiatlas.review.ReviewNodeCatalog
 
 @RunWith(AndroidJUnit4::class)
 class AtlasCloseoutInstrumentedTest {
@@ -217,7 +218,7 @@ class AtlasCloseoutInstrumentedTest {
         val build = root.getValue("build").jsonObject
         val catalog = root.getValue("reviewCatalog").jsonArray
 
-        assertEquals(5, build.getValue("reviewCatalogVersion").jsonPrimitive.int)
+        assertEquals(ReviewNodeCatalog.VERSION, build.getValue("reviewCatalogVersion").jsonPrimitive.int)
         assertEquals(28, catalog.size)
         assertEquals(
             "atlas_ui",

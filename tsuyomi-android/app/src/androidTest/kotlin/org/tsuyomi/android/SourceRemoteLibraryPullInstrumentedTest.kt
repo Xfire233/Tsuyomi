@@ -19,14 +19,16 @@ import org.tsuyomi.shared.sourcecontract.RemoteLibraryPage
 @RunWith(AndroidJUnit4::class)
 internal class SourceRemoteLibraryPullInstrumentedTest : SourceFlowInstrumentedTestFixture() {
     @Test
-    fun signedFixturePullAndDirectAddCompleteEndToEnd() = runBlocking {
+    fun signedFixturePullCopiesLocallyOnlyAfterExplicitCommand() = runBlocking {
         val packageInfo = installFixture()
         val sourceId = packageInfo.manifest.sourceId.value
         putCredential(sourceId)
         val controller = controller()
         try {
-            val pull = controller.pullRemoteLibrary(packageInfo, SOURCE_FLOW_TEST_TIME)
-            assertEquals(RemoteLibraryPullResult.Success(total = 2, newlyAdded = 2), pull)
+            val pull = controller.pullRemoteLibrary(packageInfo) as RemoteLibraryPullResult.Success
+            assertEquals(setOf("1234", "5678"), pull.books.map { it.identity.remoteBookId }.toSet())
+            assertTrue(library.libraryEntries().isEmpty())
+            assertEquals(RemoteLibraryCopyResult(total = 2, added = 2), controller.copyRemoteLibraryToLocal(pull.books))
             assertEquals(setOf("1234", "5678"), library.libraryEntries().map { it.book.identity.remoteBookId }.toSet())
 
             val policy = requireNotNull(library.sourceRemotePolicy(sourceId))
@@ -34,7 +36,7 @@ internal class SourceRemoteLibraryPullInstrumentedTest : SourceFlowInstrumentedT
             val selected = summary(sourceId, "9999", "远程直加测试")
             controller.selectBook(selected)
 
-            assertEquals(RemoteAddUiResult.Confirmed, controller.addSelectedBook(SOURCE_FLOW_TEST_TIME.plusSeconds(1)))
+            assertEquals(RemoteAddUiResult.Confirmed, controller.addSelectedBookToWebsite(SOURCE_FLOW_TEST_TIME.plusSeconds(1)))
             val entry = requireNotNull(library.libraryEntries().firstOrNull { it.book.identity == selected.identity })
             assertEquals(RemoteReconciliationState.CONFIRMED, entry.reconciliation)
         } finally {
@@ -63,7 +65,7 @@ internal class SourceRemoteLibraryPullInstrumentedTest : SourceFlowInstrumentedT
             if (candidate.packageSha256 == packageInfo.packageSha256) firstSession else replacementSession
         }
         try {
-            val pull = async { controller.pullRemoteLibrary(packageInfo, SOURCE_FLOW_TEST_TIME) }
+            val pull = async { controller.pullRemoteLibrary(packageInfo) }
             withTimeout(5_000) { secondPageStarted.await() }
             controller.open(packageInfo.withPackageSha256(alternateSha(packageInfo.packageSha256)))
             releaseSecondPage.complete(Unit)
@@ -95,7 +97,7 @@ internal class SourceRemoteLibraryPullInstrumentedTest : SourceFlowInstrumentedT
         )
         val controller = controller { session }
         try {
-            val pull = async { controller.pullRemoteLibrary(packageInfo, SOURCE_FLOW_TEST_TIME) }
+            val pull = async { controller.pullRemoteLibrary(packageInfo) }
             withTimeout(5_000) { secondPageStarted.await() }
             val availability = requireNotNull(library.sourceAvailability(sourceId))
             library.setSourceAvailability(sourceId, availability.verifiedVersion, false, availability.generation + 1)
@@ -108,4 +110,80 @@ internal class SourceRemoteLibraryPullInstrumentedTest : SourceFlowInstrumentedT
             controller.close()
         }
     }
+    @Test
+    fun duplicateCursorIsRejectedWithoutLocalWrites() = runBlocking {
+        val packageInfo = installFixture()
+        val controller = controller {
+            FakeSession(listRemote = { RemoteLibraryPage(emptyList(), "duplicate", false) })
+        }
+        try {
+            controller.open(packageInfo)
+            assertEquals(RemoteLibraryPullResult.Failure("duplicate-cursor"), controller.pullRemoteLibrary(packageInfo))
+            assertTrue(library.libraryEntries().isEmpty())
+        } finally {
+            controller.close()
+        }
+    }
+
+    @Test
+    fun pageLimitIsRejectedWithoutLocalWrites() = runBlocking {
+        val packageInfo = installFixture()
+        var page = 0
+        val controller = controller {
+            FakeSession(listRemote = { RemoteLibraryPage(emptyList(), "page-${++page}", false) })
+        }
+        try {
+            controller.open(packageInfo)
+            assertEquals(RemoteLibraryPullResult.Failure("page-limit"), controller.pullRemoteLibrary(packageInfo))
+            assertEquals(100, page)
+            assertTrue(library.libraryEntries().isEmpty())
+        } finally {
+            controller.close()
+        }
+    }
+
+    @Test
+    fun recordLimitIsRejectedWithoutLocalWrites() = runBlocking {
+        val packageInfo = installFixture()
+        val sourceId = packageInfo.manifest.sourceId.value
+        var page = 0
+        val controller = controller {
+            FakeSession(
+                listRemote = {
+                    page++
+                    val start = (page - 1) * 100 + 1
+                    val count = if (page == 51) 1 else 100
+                    val records = (start until start + count).map { summary(sourceId, it.toString(), "收藏 $it") }
+                    RemoteLibraryPage(records, if (page == 51) null else "records-$page", page == 51)
+                },
+            )
+        }
+        try {
+            controller.open(packageInfo)
+            assertEquals(RemoteLibraryPullResult.Failure("record-limit"), controller.pullRemoteLibrary(packageInfo))
+            assertTrue(library.libraryEntries().isEmpty())
+        } finally {
+            controller.close()
+        }
+    }
+
+    @Test
+    fun aggregateLimitIsRejectedWithoutLocalWrites() = runBlocking {
+        val packageInfo = installFixture()
+        val sourceId = packageInfo.manifest.sourceId.value
+        val oversized = summary(sourceId, "oversized", "超大收藏").copy(
+            canonicalUrl = "https://www.wenku8.net/book/" + "a".repeat(8 * 1024 * 1024),
+        )
+        val controller = controller {
+            FakeSession(listRemote = { RemoteLibraryPage(listOf(oversized), null, true) })
+        }
+        try {
+            controller.open(packageInfo)
+            assertEquals(RemoteLibraryPullResult.Failure("aggregate-limit"), controller.pullRemoteLibrary(packageInfo))
+            assertTrue(library.libraryEntries().isEmpty())
+        } finally {
+            controller.close()
+        }
+    }
+
 }

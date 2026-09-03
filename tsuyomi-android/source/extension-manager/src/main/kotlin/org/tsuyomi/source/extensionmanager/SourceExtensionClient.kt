@@ -5,6 +5,10 @@
 package org.tsuyomi.source.extensionmanager
 
 import java.io.Closeable
+import java.net.URI
+import java.net.URLEncoder
+import java.nio.charset.Charset
+import java.nio.charset.StandardCharsets
 import java.util.UUID
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
@@ -38,6 +42,11 @@ import org.tsuyomi.shared.sourcecontract.SourceBookSummary
 import org.tsuyomi.shared.sourcecontract.RemoteLibraryAddOutcome
 import org.tsuyomi.shared.sourcecontract.RemoteLibraryAddResult
 import org.tsuyomi.shared.sourcecontract.RemoteLibraryPage
+import org.tsuyomi.shared.sourcecontract.SourceHomeFilter
+import org.tsuyomi.shared.sourcecontract.SourceHomeFeature
+import org.tsuyomi.shared.sourcecontract.SourceHomeFilterOption
+import org.tsuyomi.shared.sourcecontract.SourceHomePage
+import org.tsuyomi.shared.sourcecontract.SourceHomeSection
 import org.tsuyomi.shared.sourcecontract.SourceChapter
 import org.tsuyomi.shared.sourcecontract.SourceDiagnostic
 import org.tsuyomi.shared.sourcecontract.SourceDirectory
@@ -77,22 +86,74 @@ class SourceExtensionClient private constructor(
         remoteAddPolicy = manifest.capabilities.remoteLibrary.policies[RemoteOperation.ADD]?.toNetworkPolicy(),
     )
 
+    suspend fun searchRequestUrl(query: String, page: Int = 1): String =
+        requestUrl("buildSearchRequest", arrayOf<Any?>(query, page), "search-network")
+
+    suspend fun detailRequestUrl(remoteBookId: String): String =
+        requestUrl("buildDetailRequest", arrayOf<Any?>(remoteBookId), "detail-network")
+
+    suspend fun directoryRequestUrl(remoteBookId: String): String =
+        requestUrl("buildDirectoryRequest", arrayOf<Any?>(remoteBookId), "directory-network")
+    suspend fun chapterRequestUrl(chapter: SourceChapter, remoteBookId: String): String =
+        requestUrl(
+            "buildChapterRequest",
+            arrayOf<Any?>(chapter.url, remoteBookId, chapter.chapterId),
+            "chapter-network",
+        )
+
+
     suspend fun search(query: String, page: Int = 1, offlineOnly: Boolean = false): List<SourceBookSummary> {
         val response = invokeNetwork("buildSearchRequest", arrayOf<Any?>(query, page), "search-network", offlineOnly)
-        classify(response, "search-classify")
-        val root = call("parseSearch", arrayOf<Any?>(response.text.orEmpty()), "search-parse").jsonObject
+        classify(response, "search-classify", "search")
+        val root = call(
+            "parseSearch",
+            arrayOf<Any?>(response.text.orEmpty(), response.finalUrl),
+            "search-parse",
+        ).jsonObject
         return root.requiredArray("items").map { parseSummary(it.jsonObject) }
     }
+    suspend fun home(
+        selectedFilters: Map<String, String> = emptyMap(),
+        cursor: String? = null,
+    ): SourceHomePage {
+        if (!manifest.capabilities.home.enabled) {
+            fail(SourceErrorCode.MALFORMED_SOURCE_RESPONSE, "home", "home-not-granted")
+        }
+        if (selectedFilters.size > 16 || selectedFilters.any { (key, value) ->
+                !key.matches(Regex("^[A-Za-z0-9._-]{1,64}$")) ||
+                    !value.matches(Regex("^[A-Za-z0-9._-]{1,64}$"))
+            }
+        ) {
+            fail(SourceErrorCode.MALFORMED_SOURCE_RESPONSE, "home", "invalid-home-filters")
+        }
+        val arguments = arrayOf<Any?>(cursor, selectedFilters)
+        val response = invokeNetwork("buildHomeRequest", arguments, "home-network", offlineOnly = false)
+        classify(response, "home-classify", "home")
+        return try {
+            parseHomePage(
+                call(
+                    "parseHome",
+                    arrayOf<Any?>(response.text.orEmpty(), cursor, selectedFilters),
+                    "home-parse",
+                ).jsonObject,
+            )
+        } catch (error: SourceException) {
+            throw error
+        } catch (_: Throwable) {
+            fail(SourceErrorCode.MALFORMED_SOURCE_RESPONSE, "home-parse", "invalid-home-page")
+        }
+    }
+
 
     suspend fun detail(remoteBookId: String, offlineOnly: Boolean = false): SourceBookDetail {
         val response = invokeNetwork("buildDetailRequest", arrayOf<Any?>(remoteBookId), "detail-network", offlineOnly)
-        classify(response, "detail-classify")
+        classify(response, "detail-classify", "detail", remoteBookId)
         return parseDetail(call("parseDetail", arrayOf<Any?>(response.text.orEmpty(), remoteBookId), "detail-parse").jsonObject)
     }
 
     suspend fun directory(remoteBookId: String, offlineOnly: Boolean = false): SourceDirectory {
         val response = invokeNetwork("buildDirectoryRequest", arrayOf<Any?>(remoteBookId), "directory-network", offlineOnly)
-        classify(response, "directory-classify")
+        classify(response, "directory-classify", "directory", remoteBookId)
         val root = call("parseDirectory", arrayOf<Any?>(response.text.orEmpty(), remoteBookId), "directory-parse").jsonObject
         val identity = BookIdentity(root.requiredString("sourceId"), root.requiredString("remoteBookId"))
         val chapters = root.requiredArray("chapters").map { chapter ->
@@ -101,6 +162,7 @@ class SourceExtensionClient private constructor(
                 chapterId = value.requiredString("chapterId"),
                 title = value.requiredString("title"),
                 url = value.requiredString("url"),
+                volumeTitle = value.optionalString("volumeTitle"),
             )
         }
         return SourceDirectory(identity, chapters)
@@ -116,7 +178,7 @@ class SourceExtensionClient private constructor(
             "chapter-network",
             offlineOnly,
         )
-        classify(response, "chapter-classify")
+        classify(response, "chapter-classify", "chapter", remoteBookId, chapter.chapterId)
         return parseDocument(
             call(
                 "parseChapter",
@@ -136,7 +198,7 @@ class SourceExtensionClient private constructor(
             offlineOnly = false,
             operationContext = remoteLibraryReadContext(policy.toNetworkPolicy(), cursor),
         )
-        classify(response, "remote-library-read-classify")
+        classify(response, "remote-library-read-classify", "remote-library")
         val root = call("parseRemoteLibrary", arrayOf<Any?>(response.text.orEmpty()), "remote-library-read-parse").jsonObject
         val items = root.requiredArray("items").map { parseSummary(it.jsonObject) }
         val nextCursor = root.optionalString("nextCursor")
@@ -180,15 +242,7 @@ class SourceExtensionClient private constructor(
         offlineOnly: Boolean,
         operationContext: SourceOperationContext? = null,
     ): SourceNetworkResponse {
-        val request = try {
-            parseRequest(call(function, arguments, "$stage-request").jsonObject).let { built ->
-                if (offlineOnly) built.copy(cache = NetworkCacheMode.OFFLINE_ONLY) else built
-            }
-        } catch (error: SourceException) {
-            throw error
-        } catch (_: Throwable) {
-            fail(SourceErrorCode.EXTENSION_RUNTIME_FAILURE, "$stage-request", "invalid-request-dto")
-        }
+        val request = buildNetworkRequest(function, arguments, stage, offlineOnly)
         return try {
             gateway.request(grant, request, operationContext)
         } catch (error: HostNetworkException) {
@@ -196,11 +250,46 @@ class SourceExtensionClient private constructor(
         }
     }
 
-    private suspend fun classify(response: SourceNetworkResponse, stage: String) {
-        when (call("classifyPage", arrayOf<Any?>(response.text.orEmpty()), stage).jsonPrimitive.content) {
+    private suspend fun requestUrl(
+        function: String,
+        arguments: Array<out Any?>,
+        stage: String,
+    ): String {
+        val request = buildNetworkRequest(function, arguments, stage, offlineOnly = false)
+        if (request.method != NetworkMethod.GET || request.form != null || request.utf8Body != null) {
+            fail(SourceErrorCode.MALFORMED_SOURCE_RESPONSE, "$stage-request", "verified-page-request-not-get")
+        }
+        return request.url
+    }
+
+    private suspend fun buildNetworkRequest(
+        function: String,
+        arguments: Array<out Any?>,
+        stage: String,
+        offlineOnly: Boolean,
+    ): SourceNetworkRequest = try {
+        parseRequest(call(function, arguments, "$stage-request").jsonObject).let { built ->
+            if (offlineOnly) built.copy(cache = NetworkCacheMode.OFFLINE_ONLY) else built
+        }
+    } catch (error: SourceException) {
+        throw error
+    } catch (_: Throwable) {
+        fail(SourceErrorCode.EXTENSION_RUNTIME_FAILURE, "$stage-request", "invalid-request-dto")
+    }
+
+    private suspend fun classify(
+        response: SourceNetworkResponse,
+        stage: String,
+        operation: String = "generic",
+        remoteBookId: String? = null,
+        chapterId: String? = null,
+    ) {
+        val arguments = listOf<Any?>(response.text.orEmpty(), response.finalUrl, operation, remoteBookId, chapterId).toTypedArray()
+        when (call("classifyPage", arguments, stage).jsonPrimitive.content) {
             "ok" -> Unit
             "session-required" -> fail(SourceErrorCode.SESSION_REQUIRED, stage, "session-required")
             "verification-required" -> fail(SourceErrorCode.VERIFICATION_REQUIRED, stage, "verification-required")
+            "malformed" -> fail(SourceErrorCode.MALFORMED_SOURCE_RESPONSE, stage, "wrong-page")
             else -> fail(SourceErrorCode.MALFORMED_SOURCE_RESPONSE, stage, "invalid-page-classification")
         }
     }
@@ -250,17 +339,55 @@ class SourceExtensionClient private constructor(
 }
 
 
-private fun parseRequest(value: JsonObject): SourceNetworkRequest = SourceNetworkRequest(
-    url = value.requiredString("url"),
-    method = NetworkMethod.valueOf(value.requiredString("method")),
-    headers = value["headers"]?.jsonObject?.mapValues { it.value.jsonPrimitive.content } ?: emptyMap(),
-    form = value["form"]?.takeUnless { it is JsonNull }?.jsonObject?.mapValues { it.value.jsonPrimitive.content },
-    utf8Body = value.optionalString("utf8Body"),
-    decode = DecodeMode.entries.single { it.wireValue == value.requiredString("decode") },
-    cache = NetworkCacheMode.entries.single { it.wireValue == value.requiredString("cache") },
-    semanticCacheKey = value.optionalString("semanticCacheKey"),
-    referrerUrl = value.optionalString("referrerUrl"),
-)
+private fun parseRequest(value: JsonObject): SourceNetworkRequest {
+    val baseUrl = value.requiredString("url")
+    val query = value["query"]
+        ?.takeUnless { it is JsonNull }
+        ?.jsonArray
+        ?.map { parameter ->
+            parameter.jsonObject.let { it.requiredString("name") to it.requiredString("value") }
+        }
+    val queryEncoding = value.optionalString("queryEncoding")
+        ?.let { wireValue -> DecodeMode.entries.single { it.wireValue == wireValue } }
+    require((query == null) == (queryEncoding == null)) { "Query and query encoding must be specified together" }
+    val url = if (query == null) {
+        baseUrl
+    } else {
+        encodeUrlQuery(baseUrl, query, requireNotNull(queryEncoding))
+    }
+    return SourceNetworkRequest(
+        url = url,
+        method = NetworkMethod.valueOf(value.requiredString("method")),
+        headers = value["headers"]?.jsonObject?.mapValues { it.value.jsonPrimitive.content } ?: emptyMap(),
+        form = value["form"]?.takeUnless { it is JsonNull }?.jsonObject?.mapValues { it.value.jsonPrimitive.content },
+        utf8Body = value.optionalString("utf8Body"),
+        decode = DecodeMode.entries.single { it.wireValue == value.requiredString("decode") },
+        cache = NetworkCacheMode.entries.single { it.wireValue == value.requiredString("cache") },
+        semanticCacheKey = value.optionalString("semanticCacheKey"),
+        referrerUrl = value.optionalString("referrerUrl"),
+    )
+}
+
+internal fun encodeUrlQuery(
+    baseUrl: String,
+    query: List<Pair<String, String>>,
+    encoding: DecodeMode,
+): String {
+    require(query.isNotEmpty() && query.size <= 64) { "Query is invalid" }
+    val uri = URI(baseUrl)
+    require(uri.rawQuery == null && uri.rawFragment == null) { "Structured query requires a query-free URL" }
+    val charset = when (encoding) {
+        DecodeMode.AUTO -> throw IllegalArgumentException("Query encoding must be explicit")
+        DecodeMode.UTF8 -> StandardCharsets.UTF_8
+        DecodeMode.GB18030 -> Charset.forName("GB18030")
+        DecodeMode.BIG5_HKSCS -> Charset.forName("Big5-HKSCS")
+    }
+    val encoded = query.joinToString("&") { (name, value) ->
+        require(name.isNotEmpty() && name.length <= 256 && value.length <= 2048) { "Query parameter is invalid" }
+        "${URLEncoder.encode(name, charset.name())}=${URLEncoder.encode(value, charset.name())}"
+    }
+    return "${uri.toASCIIString()}?$encoded"
+}
 
 private fun parseSummary(value: JsonObject): SourceBookSummary = SourceBookSummary(
     identity = BookIdentity(value.requiredString("sourceId"), value.requiredString("remoteBookId")),
@@ -276,6 +403,52 @@ private fun parseDetail(value: JsonObject): SourceBookDetail = SourceBookDetail(
     tags = value.requiredArray("tags").map { it.jsonPrimitive.content },
     status = value.optionalString("status"),
 )
+private fun parseHomePage(value: JsonObject): SourceHomePage = SourceHomePage(
+    schemaVersion = value["schemaVersion"]?.jsonPrimitive?.int
+        ?: throw IllegalArgumentException("Missing home schema version"),
+    title = value.requiredString("title"),
+    filters = value.requiredArray("filters").map { element ->
+        val filter = element.jsonObject
+        SourceHomeFilter(
+            id = filter.requiredString("id"),
+            label = filter.requiredString("label"),
+            options = filter.requiredArray("options").map { optionElement ->
+                val option = optionElement.jsonObject
+                SourceHomeFilterOption(
+                    value = option.requiredString("value"),
+                    label = option.requiredString("label"),
+                )
+            },
+        )
+    },
+    selectedFilters = value.requiredObject("selectedFilters").mapValues { it.value.jsonPrimitive.content },
+    sections = value.requiredArray("sections").map { element ->
+        val section = element.jsonObject
+        SourceHomeSection(
+            id = section.requiredString("id"),
+            title = section.requiredString("title"),
+            items = section.requiredArray("items").map { parseSummary(it.jsonObject) },
+        )
+    },
+    features = value["features"]
+        ?.takeUnless { it is JsonNull }
+        ?.jsonArray
+        ?.map { element ->
+            val feature = element.jsonObject
+            SourceHomeFeature(
+                id = feature.requiredString("id"),
+                title = feature.requiredString("title"),
+                supportingText = feature.optionalString("supportingText"),
+                selectedFilters = feature.requiredObject("selectedFilters")
+                    .mapValues { it.value.jsonPrimitive.content },
+            )
+        }
+        .orEmpty(),
+    nextCursor = value.optionalString("nextCursor"),
+    complete = value["complete"]?.jsonPrimitive?.booleanOrNull
+        ?: throw IllegalArgumentException("Missing home completion state"),
+)
+
 
 private fun parseDocument(value: JsonObject): ReaderDocument = ReaderDocument(
     sourceId = value.requiredString("sourceId"),
@@ -334,6 +507,10 @@ private fun jsonValue(value: Any?): JsonElement = when (value) {
     is Int -> JsonPrimitive(value)
     is Long -> JsonPrimitive(value)
     is Boolean -> JsonPrimitive(value)
+    is Map<*, *> -> JsonObject(value.entries.associate { (key, item) ->
+        require(key is String && item is String) { "Unsupported host map argument" }
+        key to JsonPrimitive(item)
+    })
     else -> throw IllegalArgumentException("Unsupported host argument")
 }
 

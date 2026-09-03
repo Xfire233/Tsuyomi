@@ -3,8 +3,11 @@
 <resources>
     <string name="coreui_navigate_up">返回</string>
     <string name="coreui_close">关闭</string>
+    <string name="coreui_more_actions">更多操作</string>
     <string name="coreui_retry">重试</string>
     <string name="coreui_loading">正在加载…</string>
+    <string name="coreui_image">图片</string>
+    <string name="coreui_retry_image">重试图片</string>
     <string name="coreui_state_selected">已选择</string>
     <string name="coreui_state_not_selected">未选择</string>
     <string name="coreui_state_disabled">不可用</string>

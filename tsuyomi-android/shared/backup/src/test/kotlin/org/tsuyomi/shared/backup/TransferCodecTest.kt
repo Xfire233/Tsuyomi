@@ -28,6 +28,29 @@ class TransferCodecTest {
     }
 
     @Test
+    fun read_later_round_trips_and_defaults_false_when_absent() {
+        val instant = Instant.parse("2026-08-08T00:00:00Z")
+        val marked = TransferSnapshot(
+            instant,
+            listOf(
+                TransferBook(
+                    BookIdentity("org.tsuyomi.wenku8", "later"),
+                    "稍后再读",
+                    readLater = true,
+                    updatedAt = instant,
+                ),
+            ),
+            emptyList(),
+        )
+        val roundTrip = assertIs<ImportParseResult.Ready>(TransferCodec.parse(TransferCodec.encode(marked)))
+        assertTrue(roundTrip.plan.books.single().readLater)
+
+        val legacy = """{"format":"tsuyomi-transfer","version":1,"createdAt":"2026-08-08T00:00:00Z","library":[{"identity":{"sourceId":"org.tsuyomi.wenku8","remoteBookId":"legacy"},"title":"旧备份","updatedAt":"2026-08-08T00:00:00Z"}],"shelves":[]}""".encodeToByteArray()
+        val legacyPlan = assertIs<ImportParseResult.Ready>(TransferCodec.parse(legacy)).plan
+        assertEquals(false, legacyPlan.books.single().readLater)
+    }
+
+    @Test
     fun duplicate_identity_is_fatal_before_mutation() {
         val bytes = """{"format":"tsuyomi-transfer","version":1,"createdAt":"2026-08-08T00:00:00Z","library":[{"identity":{"sourceId":"org.tsuyomi.wenku8","remoteBookId":"1"},"title":"A","updatedAt":"2026-08-08T00:00:00Z"},{"identity":{"sourceId":"org.tsuyomi.wenku8","remoteBookId":"1"},"title":"B","updatedAt":"2026-08-08T00:00:00Z"}],"shelves":[]}""".encodeToByteArray()
         assertEquals("duplicate-book-identity", assertIs<ImportParseResult.Fatal>(TransferCodec.parse(bytes)).safeCode)

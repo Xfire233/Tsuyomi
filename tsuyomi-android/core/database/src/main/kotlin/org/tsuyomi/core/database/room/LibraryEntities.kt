@@ -163,6 +163,8 @@ internal data class LibraryEntryEntity(
     @ColumnInfo(name = "added_at_epoch_second") val addedAtEpochSecond: Long,
     @ColumnInfo(name = "added_at_nano") val addedAtNano: Int,
     val rating: Int?,
+    @ColumnInfo(name = "read_later", defaultValue = "0") val readLater: Boolean = false,
+    @ColumnInfo(name = "display_order", defaultValue = "2147483647") val displayOrder: Int = Int.MAX_VALUE,
 )
 
 @Entity(

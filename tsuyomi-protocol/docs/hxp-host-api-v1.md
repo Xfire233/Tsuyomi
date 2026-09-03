@@ -22,6 +22,8 @@ type NetworkRequest = {
   url: string; // absolute HTTPS URL; origin must be manifest capabilities.network.origins
   method: "GET" | "HEAD" | "POST";
   headers?: Record<string, string>; // allowlisted end-to-end headers only
+  query?: Array<{ name: string; value: string }>; // ordered host-serialized URL query; duplicates allowed
+  queryEncoding?: "utf-8" | "gb18030" | "big5-hkscs"; // required exactly when query is present
   form?: Record<string, string>; // POST only, UTF-8 application/x-www-form-urlencoded
   utf8Body?: string; // POST only; mutually exclusive with form
   referrerUrl?: string; // optional HTTPS URL in the same manifest allowlist
@@ -31,7 +33,7 @@ type NetworkRequest = {
 };
 ```
 
-`form` keys/values and `utf8Body` are bounded by the manifest request/CPU ceilings and a host hard cap of 64 KiB before encoding. Hosts must reject NUL header names/values and invalid UTF-8. Hosts supply and protect `User-Agent`, `Cookie`, `Host`, `Origin`, `Referer`, `Content-Length`, connection, proxy, `Sec-*`, and `Set-Cookie` headers; extensions cannot set or observe them. `referrerUrl` is validated and serialized by the host, or rejected.
+`query` and `queryEncoding` are mutually required. The host encodes each bounded key/value with `application/x-www-form-urlencoded` rules in declaration order, appends the result to a query-free, fragment-free `url`, then applies normal origin and request-length validation. This permits signed extensions to describe legacy GET forms without embedding source-specific charset tables in the isolated runtime. `form` keys/values and `utf8Body` are bounded by the manifest request/CPU ceilings and a host hard cap of 64 KiB before encoding. Hosts must reject NUL header names/values and invalid UTF-8. Hosts supply and protect `User-Agent`, `Cookie`, `Host`, `Origin`, `Referer`, `Content-Length`, connection, proxy, `Sec-*`, and `Set-Cookie` headers; extensions cannot set or observe them. `referrerUrl` is validated and serialized by the host, or rejected.
 
 The host follows at most five redirects. Each redirect must resolve to a declared HTTPS origin; otherwise the request fails with `NETWORK_REDIRECT_DISALLOWED`. POST redirect behavior follows the HTTP method rules but a resulting non-idempotent request is never cached. `semanticCacheKey` is namespaced by extension ID and active extension version; it exists only to unify source-declared equivalent GET/HEAD aliases.
 
@@ -92,6 +94,14 @@ type HostApiError = {
 Failure text is host-localized for users. Diagnostic detail is redacted: it contains no cookie, authorization, request body, raw HTML, secret query value, or JavaScript stack trace. HTTP error statuses remain `NetworkResponse` so the extension can parse a documented source error page safely.
 
 `SESSION_REQUIRED` and `VERIFICATION_REQUIRED` do not open a browser. The feature layer can offer a direct user action to start the manifest-approved controlled WebView flow. Completion, cache refresh, imports, and login checks are read-only.
+
+## Optional source Home projection v1
+
+An extension with signed `capabilities.home.enabled: true` may export `buildHomeRequest(cursor, selectedFilters)` and `parseHome(html, cursor, selectedFilters)`. The host calls these entry points only after an explicit user load, filter-apply, or next-page action. Route entry, restoration, login return, and process recreation perform no implicit Home request.
+
+`parseHome` returns a platform-neutral `SourceHomePage` with `schemaVersion: 1`, one bounded title, at most 16 named filters, at most 16 named sections, at most four optional typed feature destinations, and at most 100 normalized book summaries across the page. Filter, section, and feature IDs use `[A-Za-z0-9._-]`; selected filter values must name declared options. A feature destination contains only bounded display text plus an opaque normalized filter selection that the host may explicitly load and cache; it cannot carry a URL, layout instruction, executable action, or browser state. An incomplete page carries one opaque bounded `nextCursor`. Book summaries use stable source/book identity, title, optional author/cover reference, and canonical Detail URL. Raw HTML, arbitrary URLs, layout instructions, executable UI, cookies, tokens, and browser state are invalid projection fields.
+
+The host owns Material layout, current filter selection, paging commands, cover admission, restoration, local actions, and navigation to canonical Detail. A source Home is read-only: its network request cannot imply website mutation, and the capability does not authorize remote-library writes.
 
 ## WebView and credentials
 

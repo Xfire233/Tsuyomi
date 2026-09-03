@@ -23,9 +23,13 @@ class RoomLibraryRepository(database: TsuyomiDatabase) {
     suspend fun saveBook(book: LibraryBook) = catalog.saveBook(book)
     suspend fun book(identity: BookIdentity): LibraryBook? = catalog.book(identity)
     suspend fun libraryEntries(): List<LibraryEntry> = catalog.libraryEntries()
+    suspend fun libraryEntry(identity: BookIdentity): LibraryEntry? = catalog.libraryEntry(identity)
     suspend fun addToLibrary(book: LibraryBook): Boolean = catalog.addToLibrary(book)
     suspend fun removeFromLibrary(identity: BookIdentity): Boolean = catalog.removeFromLibrary(identity)
+    suspend fun removeFromLibrary(identities: Set<BookIdentity>): Int = catalog.removeFromLibrary(identities)
+    suspend fun reorderLibrary(identities: List<BookIdentity>) = catalog.reorderLibrary(identities)
     suspend fun setRating(identity: BookIdentity, rating: Int?) = catalog.setRating(identity, rating)
+    suspend fun setReadLater(identity: BookIdentity, readLater: Boolean) = catalog.setReadLater(identity, readLater)
     suspend fun setLocalTags(identity: BookIdentity, tags: Collection<String>) = catalog.setLocalTags(identity, tags)
 
     suspend fun setSourceAvailability(sourceId: String, version: String?, available: Boolean, generation: Long) =
@@ -65,6 +69,16 @@ class RoomLibraryRepository(database: TsuyomiDatabase) {
         collections.addManualMembership(collectionId, identity)
     suspend fun removeManualMembership(collectionId: String, identity: BookIdentity): Boolean =
         collections.removeManualMembership(collectionId, identity)
+    suspend fun createManualCollectionWithMemberships(
+        collection: LibraryCollection,
+        identities: Set<BookIdentity>,
+    ) = collections.createManualCollectionWithMemberships(collection, identities)
+    suspend fun addManualMemberships(collectionId: String, identities: Set<BookIdentity>): Int =
+        collections.addManualMemberships(collectionId, identities)
+    suspend fun removeManualMemberships(collectionId: String, identities: Set<BookIdentity>): Int =
+        collections.removeManualMemberships(collectionId, identities)
+    suspend fun reorderManualMemberships(collectionId: String, identities: List<BookIdentity>) =
+        collections.reorderManualMemberships(collectionId, identities)
 
     suspend fun saveProgress(incoming: ReadingProgress): ProgressWriteResult = progress.saveProgress(incoming)
     suspend fun progress(identity: BookIdentity): ReadingProgress? = progress.progress(identity)

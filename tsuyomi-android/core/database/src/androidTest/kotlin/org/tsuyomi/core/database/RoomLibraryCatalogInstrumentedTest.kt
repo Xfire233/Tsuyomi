@@ -60,6 +60,31 @@ class RoomLibraryCatalogInstrumentedTest {
     }
 
     @Test
+    fun readLaterIsExplicitDurableLibraryEntryState() = runBlocking {
+        val identity = BookIdentity("fixture.source", "read-later")
+        repository.addToLibrary(
+            LibraryBook(identity, "稍后阅读", addedAt = Instant.EPOCH, metadataUpdatedAt = Instant.EPOCH),
+        )
+
+        assertFalse(repository.libraryEntries().single().readLater)
+        repository.setReadLater(identity, true)
+        assertTrue(repository.libraryEntries().single().readLater)
+
+        repository.saveBook(
+            LibraryBook(
+                identity,
+                "更新后的书名",
+                addedAt = Instant.EPOCH,
+                metadataUpdatedAt = Instant.EPOCH.plusSeconds(1),
+            ),
+        )
+        assertTrue(repository.libraryEntries().single().readLater)
+
+        repository.setReadLater(identity, false)
+        assertFalse(repository.libraryEntries().single().readLater)
+    }
+
+    @Test
     fun manualMembershipAppendUsesNextFreeOrderAfterDeletion() = runBlocking {
         val identities = (1..4).map { BookIdentity("fixture.source", "ordered-$it") }
         identities.forEach { identity ->
@@ -73,6 +98,49 @@ class RoomLibraryCatalogInstrumentedTest {
 
         assertEquals(listOf(0L, 2L, 3L), database.libraryDao().manualMemberships("ordered").map { it.displayOrder })
         assertEquals(listOf(identities[0], identities[2], identities[3]), repository.collectionEntries("ordered").map { it.book.identity })
+    }
+
+    @Test
+    fun selectionBatchMutationsPersistLibraryAndManualCollectionOrder() = runBlocking {
+        val identities = (1..4).map { BookIdentity("fixture.source", "batch-$it") }
+        identities.forEachIndexed { index, identity ->
+            repository.addToLibrary(
+                LibraryBook(
+                    identity,
+                    identity.remoteBookId,
+                    addedAt = Instant.EPOCH.plusSeconds(index.toLong()),
+                    metadataUpdatedAt = Instant.EPOCH,
+                ),
+            )
+        }
+
+        val reversed = identities.asReversed()
+        repository.reorderLibrary(reversed)
+        assertEquals(reversed, repository.libraryEntries().map { it.book.identity })
+
+        repository.createManualCollectionWithMemberships(
+            LibraryCollection("batch-collection", CollectionKind.MANUAL, "批量", null, 0),
+            linkedSetOf(identities[0], identities[1], identities[2]),
+        )
+        assertEquals(
+            identities.take(3),
+            repository.collectionEntries("batch-collection").map { it.book.identity },
+        )
+
+        repository.reorderManualMemberships(
+            "batch-collection",
+            listOf(identities[2], identities[0], identities[1]),
+        )
+        repository.removeManualMemberships("batch-collection", setOf(identities[0]))
+        repository.addManualMemberships("batch-collection", setOf(identities[3]))
+        assertEquals(
+            listOf(identities[2], identities[1], identities[3]),
+            repository.collectionEntries("batch-collection").map { it.book.identity },
+        )
+        assertEquals(
+            listOf(0L, 1L, 2L),
+            database.libraryDao().manualMemberships("batch-collection").map { it.displayOrder },
+        )
     }
 
     @Test

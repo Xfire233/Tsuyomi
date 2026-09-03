@@ -5,89 +5,46 @@
 
 package org.tsuyomi.android
 
-import android.content.res.Resources
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.Stable
-import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.platform.LocalResources
-import androidx.compose.ui.res.stringResource
 import androidx.navigation.NavBackStackEntry
 import androidx.navigation.NavHostController
-import java.time.Instant
 import kotlinx.coroutines.launch
 import org.tsuyomi.core.database.LibraryEntry
-import org.tsuyomi.core.database.RemoteReconciliationState
+import org.tsuyomi.core.webview.CapturedVerifiedPage
 import org.tsuyomi.source.extensionmanager.RemoteOperation
+import org.tsuyomi.shared.sourcecontract.SourceDiagnostic
+import org.tsuyomi.shared.sourcecontract.SourceBookSummary
+import org.tsuyomi.shared.model.BookIdentity
 
-@Stable
-internal class SourceRouteUiState {
-    var remoteLibraryLoading by mutableStateOf(false)
-        private set
-    var postLoginImportPromptVisible by mutableStateOf(false)
-        private set
-    var writebackConfirmationVisible by mutableStateOf(false)
-        private set
-    var remoteLibraryMessage by mutableStateOf<String?>(null)
-        private set
-    var remoteWritebackEnabled by mutableStateOf(false)
-        private set
-    var remoteWritebackAvailable by mutableStateOf(false)
-        private set
 
-    fun beginRemotePull() {
-        remoteLibraryLoading = true
-    }
+internal const val VerifiedSearchResultSequenceKey = "source.search.verified-page-sequence"
+internal const val VerifiedDetailResultSequenceKey = "source.detail.verified-page-sequence"
+internal const val VerifiedDirectoryResultSequenceKey = "source.directory.verified-page-sequence"
+internal const val VerifiedChapterResultSequenceKey = "source.chapter.verified-page-sequence"
+internal const val ResumeSourceIdKey = "source.resume.source-id"
+internal const val ResumeRemoteBookIdKey = "source.resume.remote-book-id"
 
-    fun finishRemotePull(message: String) {
-        remoteLibraryMessage = message
-        remoteLibraryLoading = false
-    }
 
-    fun clearRemoteLibraryMessage() {
-        remoteLibraryMessage = null
-    }
 
-    fun showPostLoginImportPrompt() {
-        postLoginImportPromptVisible = true
-    }
-
-    fun dismissPostLoginImportPrompt() {
-        postLoginImportPromptVisible = false
-    }
-
-    fun showWritebackConfirmation() {
-        writebackConfirmationVisible = true
-    }
-
-    fun dismissWritebackConfirmation() {
-        writebackConfirmationVisible = false
-    }
-
-    fun updateWriteback(enabled: Boolean, available: Boolean, message: String? = remoteLibraryMessage) {
-        remoteWritebackEnabled = enabled
-        remoteWritebackAvailable = available
-        remoteLibraryMessage = message
-    }
-}
+data class VerifiedPageUseResult(
+    val accepted: Boolean,
+    val diagnostic: SourceDiagnostic? = null,
+)
 
 @Stable
 internal class SourceRouteOwner(
     val installer: SourceInstallController,
     val flow: SourceFlowController,
-    val ui: SourceRouteUiState,
-    private val resources: Resources,
     private val navController: NavHostController,
     private val requestImportAction: () -> Unit,
     private val onLibraryChanged: suspend () -> Unit,
@@ -95,19 +52,25 @@ internal class SourceRouteOwner(
     val remoteLibraryAvailable: Boolean
         get() = installer.activePackage?.manifest?.capabilities?.remoteLibrary?.policies
             ?.containsKey(RemoteOperation.READ) == true
+    val sourceHomeAvailable: Boolean
+        get() = installer.activePackage?.manifest?.capabilities?.home?.enabled == true
 
-    val localRemoteSync = LocalRemoteSyncActions(
-        sourceRevision = installer.activePackage?.packageSha256,
-        canRetry = ::canRetryLocalRemote,
-        retry = ::retryLocalRemote,
-        openSource = { navController.selectRoot(Routes.Browse) },
-    )
 
     fun requestImport() {
         requestImportAction()
     }
+    fun navigateToSourceHome() {
+        navController.navigate(Routes.SourceHome)
+    }
     fun navigateToRemoteLibrary() {
         navController.navigate(Routes.RemoteLibrary)
+    }
+    fun navigateToVerification() {
+        navController.navigate(Routes.Verification)
+    }
+
+    suspend fun refreshInstalledSources() {
+        installer.refreshInstalled()
     }
 
 
@@ -117,61 +80,72 @@ internal class SourceRouteOwner(
             navController.navigate(Routes.Search)
         }
     }
+    suspend fun refreshSourceHome() {
+        val packageInfo = installer.activePackage ?: return
+        flow.home.refresh { filters, cursor ->
+            flow.open(packageInfo)
+            flow.loadHome(filters, cursor)
+        }
+    }
+    suspend fun openLibraryDetail(entry: LibraryEntry): Boolean {
+        val packageInfo = installer.activePackage
+            ?.takeIf { it.manifest.sourceId.value == entry.book.identity.sourceId }
+            ?: return false
+        flow.open(packageInfo)
+        val preparedFromCache = flow.prepareDetail(entry.book.identity)
+        if (!preparedFromCache) {
+            val canonicalUrl = entry.book.canonicalUrl ?: return false
+            flow.prepareBook(
+                SourceBookSummary(
+                    identity = entry.book.identity,
+                    title = entry.book.title,
+                    author = entry.book.author,
+                    coverUrl = entry.book.coverUrl,
+                    canonicalUrl = canonicalUrl,
+                ),
+            )
+        } else {
+            onLibraryChanged()
+        }
+        navController.navigate(Routes.Detail)
+        return true
+    }
+
+    suspend fun resumeReading(entry: LibraryEntry): Boolean {
+        val packageInfo = installer.activePackage
+            ?.takeIf { it.manifest.sourceId.value == entry.book.identity.sourceId }
+            ?: return false
+        navController.navigate(Routes.Browse) { launchSingleTop = true }
+        navController.getBackStackEntry(Routes.Browse).savedStateHandle.apply {
+            this[ResumeSourceIdKey] = packageInfo.manifest.sourceId.value
+            this[ResumeRemoteBookIdKey] = entry.book.identity.remoteBookId
+        }
+        return true
+    }
+    suspend fun prepareScheduledResume(identity: BookIdentity): Boolean {
+        val packageInfo = installer.activePackage
+            ?.takeIf { it.manifest.sourceId.value == identity.sourceId }
+            ?: return false
+        flow.open(packageInfo)
+        return flow.prepareResume(identity)
+    }
+
+    suspend fun prepareScheduledDetail(identity: BookIdentity): Boolean {
+        val packageInfo = installer.activePackage
+            ?.takeIf { it.manifest.sourceId.value == identity.sourceId }
+            ?: return false
+        flow.open(packageInfo)
+        return flow.prepareDetail(identity)
+    }
+
 
     suspend fun openRemoteLibrary() {
         installer.activePackage?.let { packageInfo ->
             flow.open(packageInfo)
-            refreshRemotePolicy()
-            ui.clearRemoteLibraryMessage()
             navController.navigate(Routes.RemoteLibrary)
         }
     }
 
-    suspend fun pullRemoteLibrary() {
-        val packageInfo = installer.activePackage ?: return
-        ui.beginRemotePull()
-        val message = when (val result = flow.pullRemoteLibrary(packageInfo, Instant.now())) {
-            is RemoteLibraryPullResult.Success -> resources.getString(R.string.remote_pull_success, result.total, result.newlyAdded)
-            RemoteLibraryPullResult.LoginRequired -> {
-                navController.navigate(Routes.Verification)
-                resources.getString(R.string.remote_pull_login_required)
-            }
-            RemoteLibraryPullResult.VerificationRequired -> {
-                navController.navigate(Routes.Verification)
-                resources.getString(R.string.remote_pull_verification_required)
-            }
-            RemoteLibraryPullResult.Cancelled -> resources.getString(R.string.remote_pull_cancelled)
-            is RemoteLibraryPullResult.Failure -> resources.getString(R.string.remote_pull_failed, result.safeCode)
-        }
-        ui.finishRemotePull(message)
-        onLibraryChanged()
-    }
-
-    fun requestWritebackChange(enabled: Boolean) {
-        if (enabled) ui.showWritebackConfirmation()
-    }
-
-    suspend fun disableWriteback() {
-        installer.setRemoteAddWritebackEnabled(false)
-        ui.updateWriteback(
-            enabled = false,
-            available = installer.remoteAddCredentialReady(),
-            message = resources.getString(R.string.remote_writeback_disabled),
-        )
-    }
-
-    suspend fun enableWriteback() {
-        val updated = installer.setRemoteAddWritebackEnabled(true)
-        val actualPolicy = installer.remotePolicy()
-        val enabled = updated || actualPolicy?.addWritebackEnabled == true
-        ui.updateWriteback(
-            enabled = enabled,
-            available = installer.remoteAddCredentialReady(),
-            message = resources.getString(
-                if (enabled) R.string.remote_writeback_enabled else R.string.remote_writeback_disabled,
-            ),
-        )
-    }
 
     suspend fun retrySelectedBookRemoteAdd() {
         flow.retrySelectedBookRemoteAdd()
@@ -187,44 +161,89 @@ internal class SourceRouteOwner(
         flow.removeSelectedBook()
         onLibraryChanged()
     }
+    suspend fun notifyLibraryChanged() {
+        onLibraryChanged()
+    }
 
     suspend fun completeVerification() {
         flow.reopenWithStoredCredentials()
-        refreshRemotePolicy()
-        if (installer.consumeFirstRemoteImportPrompt()) ui.showPostLoginImportPrompt()
         navController.navigateUp()
     }
 
-    suspend fun refreshRemotePolicy() {
-        val policy = installer.remotePolicy()
-        ui.updateWriteback(
-            enabled = policy?.addWritebackEnabled == true,
-            available = installer.remoteAddCredentialReady(),
+    suspend fun completeVerifiedPage() {
+        flow.reopenAfterVerifiedPage()
+        navController.navigateUp()
+    }
+
+    suspend fun searchVerifiedPageRequestUrl(): String? = flow.searchVerifiedPageRequestUrl()
+
+    suspend fun useSearchVerifiedPage(snapshot: CapturedVerifiedPage): VerifiedPageUseResult {
+        val previous = navController.previousBackStackEntry
+            ?.takeIf { it.destination.route == Routes.Search }
+            ?: return VerifiedPageUseResult(accepted = false)
+        val accepted = flow.searchVerifiedPage(snapshot)
+        if (accepted) {
+            previous.savedStateHandle[VerifiedSearchResultSequenceKey] =
+                (previous.savedStateHandle[VerifiedSearchResultSequenceKey] ?: 0L) + 1L
+        }
+        return VerifiedPageUseResult(
+            accepted = accepted,
+            diagnostic = (flow.searchState as? org.tsuyomi.feature.search.SearchResultState.Failure)?.diagnostic,
+        )
+    }
+    suspend fun detailVerifiedPageRequestUrl(): String? = flow.detailVerifiedPageRequestUrl()
+
+    suspend fun useDetailVerifiedPage(snapshot: CapturedVerifiedPage): VerifiedPageUseResult {
+        val previous = navController.previousBackStackEntry
+            ?.takeIf { it.destination.route == Routes.Detail }
+            ?: return VerifiedPageUseResult(accepted = false)
+        val accepted = flow.detailVerifiedPage(snapshot)
+        if (accepted) {
+            previous.savedStateHandle[VerifiedDetailResultSequenceKey] =
+                (previous.savedStateHandle[VerifiedDetailResultSequenceKey] ?: 0L) + 1L
+        }
+        return VerifiedPageUseResult(
+            accepted = accepted,
+            diagnostic = (flow.detailState as? org.tsuyomi.feature.book.SourceBookState.Failure)?.diagnostic,
         )
     }
 
-    private suspend fun canRetryLocalRemote(entry: LibraryEntry?): Boolean {
-        val current = entry ?: return false
-        if (current.reconciliation !in setOf(RemoteReconciliationState.UNRESOLVED, RemoteReconciliationState.CANCELLED)) {
-            return false
+    suspend fun directoryVerifiedPageRequestUrl(): String? = flow.directoryVerifiedPageRequestUrl()
+
+    suspend fun useDirectoryVerifiedPage(snapshot: CapturedVerifiedPage): VerifiedPageUseResult {
+        val previous = navController.previousBackStackEntry
+            ?.takeIf { it.destination.route == Routes.Detail }
+            ?: return VerifiedPageUseResult(accepted = false)
+        val accepted = flow.directoryVerifiedPage(snapshot)
+        if (accepted) {
+            previous.savedStateHandle[VerifiedDirectoryResultSequenceKey] =
+                (previous.savedStateHandle[VerifiedDirectoryResultSequenceKey] ?: 0L) + 1L
         }
-        val packageInfo = installer.activePackage
-        val remotePolicy = installer.remotePolicy()
-        return current.sourceAvailable &&
-            packageInfo?.manifest?.sourceId?.value == current.book.identity.sourceId &&
-            remotePolicy?.addWritebackEnabled == true &&
-            installer.remoteAddCredentialReady()
+        return VerifiedPageUseResult(
+            accepted = accepted,
+            diagnostic = (flow.directoryState as? org.tsuyomi.feature.book.SourceBookState.Failure)?.diagnostic,
+        )
+    }
+    suspend fun chapterVerifiedPageRequestUrl(): String? = flow.chapterVerifiedPageRequestUrl()
+
+    suspend fun useChapterVerifiedPage(snapshot: CapturedVerifiedPage): VerifiedPageUseResult {
+        val previous = navController.previousBackStackEntry
+            ?.takeIf { it.destination.route == Routes.Reader }
+            ?: return VerifiedPageUseResult(accepted = false)
+        val accepted = flow.chapterVerifiedPage(snapshot)
+        if (accepted) {
+            previous.savedStateHandle[VerifiedChapterResultSequenceKey] =
+                (previous.savedStateHandle[VerifiedChapterResultSequenceKey] ?: 0L) + 1L
+        }
+        return VerifiedPageUseResult(
+            accepted = accepted,
+            diagnostic = flow.chapterVerifiedPageDiagnostic(),
+        )
     }
 
-    private suspend fun retryLocalRemote(entry: LibraryEntry): RemoteAddUiResult {
-        val packageInfo = installer.activePackage
-        return if (packageInfo?.manifest?.sourceId?.value == entry.book.identity.sourceId) {
-            flow.open(packageInfo)
-            flow.remoteLibrary.retryLocalBook(entry.book)
-        } else {
-            RemoteAddUiResult.Failure("remote-add-source-not-open")
-        }
-    }
+
+
+
 }
 
 @Composable
@@ -236,12 +255,10 @@ internal fun rememberSourceRouteOwner(
     onLibraryChanged: suspend () -> Unit,
 ): SourceRouteOwner {
     val context = LocalContext.current
-    val resources = LocalResources.current
     val scope = rememberCoroutineScope()
     val installer = remember {
         SourceInstallController(context.applicationContext, application.libraryRepository)
     }
-    val ui = remember { SourceRouteUiState() }
     val extensionPicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         uri?.let { document -> scope.launch { installer.prepare(document, context.contentResolver) } }
     }
@@ -249,7 +266,14 @@ internal fun rememberSourceRouteOwner(
 
     val ownsSourceFlow = routeOwnsSourceFlow(currentRoute)
     val sourceFlowEntry = remember(currentEntry) {
-        if (ownsSourceFlow) navController.getBackStackEntry(Routes.Browse) else null
+        when {
+            rootRouteFor(currentRoute) == Routes.Library ->
+                runCatching { navController.getBackStackEntry(Routes.Library) }.getOrNull()
+            ownsSourceFlow ->
+                runCatching { navController.getBackStackEntry(Routes.Browse) }.getOrNull()
+                    ?: runCatching { navController.getBackStackEntry(Routes.Library) }.getOrNull()
+            else -> null
+        }
     }
     val flow = remember(sourceFlowEntry) {
         SourceFlowController(
@@ -262,67 +286,15 @@ internal fun rememberSourceRouteOwner(
         onDispose(flow::close)
     }
 
-    val owner = SourceRouteOwner(
-        installer = installer,
-        flow = flow,
-        ui = ui,
-        resources = resources,
-        navController = navController,
-        requestImportAction = { extensionPicker.launch(arrayOf("application/zip", "application/octet-stream")) },
-        onLibraryChanged = onLibraryChanged,
-    )
-    LaunchedEffect(installer.activePackage, currentRoute) {
-        val packageInfo = installer.activePackage ?: return@LaunchedEffect
-        restorationTargetForRoute(currentRoute)?.let { flow.restoreFor(it, packageInfo) }
-        if (currentRoute == Routes.RemoteLibrary) owner.refreshRemotePolicy()
+    val currentOnLibraryChanged by rememberUpdatedState(onLibraryChanged)
+    val owner = remember(installer, flow, navController) {
+        SourceRouteOwner(
+            installer = installer,
+            flow = flow,
+            navController = navController,
+            requestImportAction = { extensionPicker.launch(arrayOf("application/zip", "application/octet-stream")) },
+            onLibraryChanged = { currentOnLibraryChanged() },
+        )
     }
     return owner
-}
-
-@Composable
-internal fun SourceRouteDialogs(owner: SourceRouteOwner, currentRoute: String) {
-    val scope = rememberCoroutineScope()
-    if (owner.ui.postLoginImportPromptVisible) {
-        AlertDialog(
-            onDismissRequest = owner.ui::dismissPostLoginImportPrompt,
-            title = { Text(stringResource(R.string.post_login_import_title)) },
-            text = { Text(stringResource(R.string.post_login_import_message)) },
-            confirmButton = {
-                TextButton(
-                    onClick = {
-                        owner.ui.dismissPostLoginImportPrompt()
-                        if (currentRoute != Routes.RemoteLibrary) owner.navigateToRemoteLibrary()
-                        scope.launch { owner.pullRemoteLibrary() }
-                    },
-                ) { Text(stringResource(R.string.post_login_import_confirm)) }
-            },
-            dismissButton = {
-                TextButton(onClick = owner.ui::dismissPostLoginImportPrompt) {
-                    Text(stringResource(R.string.post_login_import_later))
-                }
-            },
-        )
-    }
-    if (owner.ui.writebackConfirmationVisible) {
-        val sourceName = owner.installer.activePackage?.manifest?.displayName
-            ?: owner.installer.activePackage?.manifest?.sourceId?.value.orEmpty()
-        AlertDialog(
-            onDismissRequest = owner.ui::dismissWritebackConfirmation,
-            title = { Text(stringResource(R.string.remote_writeback_confirm_title, sourceName)) },
-            text = { Text(stringResource(R.string.remote_writeback_confirm_message)) },
-            confirmButton = {
-                TextButton(
-                    onClick = {
-                        owner.ui.dismissWritebackConfirmation()
-                        scope.launch { owner.enableWriteback() }
-                    },
-                ) { Text(stringResource(R.string.remote_writeback_confirm_enable)) }
-            },
-            dismissButton = {
-                TextButton(onClick = owner.ui::dismissWritebackConfirmation) {
-                    Text(stringResource(R.string.remote_writeback_confirm_cancel))
-                }
-            },
-        )
-    }
 }

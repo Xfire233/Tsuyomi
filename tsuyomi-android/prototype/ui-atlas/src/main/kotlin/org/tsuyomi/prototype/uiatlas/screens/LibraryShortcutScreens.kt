@@ -381,7 +381,7 @@ private fun ShortcutTile(
             else -> onOpen(item)
         }
     }
-    val dragGestureEnabled = !locked && (!selectionMode || selected)
+    val dragGestureEnabled = !selectionMode || selected
     Surface(
         modifier = modifier
             .selectionShake(if (conflictTargetKey == selectionKey) conflictSignal else 0)
@@ -422,7 +422,6 @@ private fun ShortcutTile(
             .semantics(mergeDescendants = true) {
                 contentDescription = when {
                     active -> "${item.label}，当前视图，返回全部书籍"
-                    locked -> item.label
                     else -> "${item.label}，长按多选，移动可拖动排序"
                 }
                 if (selected) stateDescription = "已选择"
@@ -924,15 +923,36 @@ internal fun ShortcutShelf(
 }
 
 @Composable
+internal fun ShortcutShelfPinned(
+    visible: Boolean,
+    shelf: @Composable () -> Unit,
+) {
+    val environment = LocalAtlasEnvironment.current
+    val duration = AtlasMotion.duration(AtlasMotion.EXPAND_MS, environment)
+    if (duration == 0) {
+        if (visible) shelf()
+        return
+    }
+    AnimatedVisibility(
+        visible = visible,
+        enter = expandVertically(tween(duration), expandFrom = Alignment.Top) + fadeIn(tween(duration)),
+        exit = shrinkVertically(tween(duration), shrinkTowards = Alignment.Top) + fadeOut(tween(duration)),
+    ) {
+        shelf()
+    }
+}
+
+@Composable
 internal fun ShortcutShelfOverlay(
     expanded: Boolean,
+    coordinator: LibraryDragCoordinator,
     onExpand: () -> Unit,
     shelf: @Composable () -> Unit,
 ) {
     val environment = LocalAtlasEnvironment.current
     val duration = AtlasMotion.duration(AtlasMotion.EXPAND_MS, environment)
     if (duration == 0) {
-        if (expanded) shelf() else ShortcutShelfHandle(onExpand)
+        if (expanded) shelf() else ShortcutShelfHandle(coordinator, onExpand)
         return
     }
     Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.TopCenter) {
@@ -948,17 +968,18 @@ internal fun ShortcutShelfOverlay(
             enter = expandVertically(tween(duration), expandFrom = Alignment.Top) + fadeIn(tween(duration)),
             exit = shrinkVertically(tween(duration), shrinkTowards = Alignment.Top) + fadeOut(tween(duration)),
         ) {
-            ShortcutShelfHandle(onExpand)
+            ShortcutShelfHandle(coordinator, onExpand)
         }
     }
 }
 
 @Composable
-private fun ShortcutShelfHandle(onExpand: () -> Unit) {
+private fun ShortcutShelfHandle(coordinator: LibraryDragCoordinator, onExpand: () -> Unit) {
     Surface(
         onClick = onExpand,
         modifier = Modifier
             .size(48.dp)
+            .libraryShelfDropTarget(coordinator, onHover = onExpand)
             .testTag("shortcut-shelf-handle")
             .semantics {
                 contentDescription = "展开快捷书架"

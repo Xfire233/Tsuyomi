@@ -56,6 +56,21 @@ class HostNetworkGatewayPolicyTest {
     }
 
     @Test
+    fun validate_mode_never_admits_raw_response_before_caller_validation() = runBlocking {
+        val transport = RecordingTransport()
+        val gateway = HostNetworkGateway(transport)
+        val validate = request(cache = NetworkCacheMode.VALIDATE, semanticCacheKey = "detail:1234")
+
+        assertEquals(NetworkCacheState.VALIDATED, gateway.request(grant, validate).cacheState)
+        val offlineFailure = assertHostFailure {
+            gateway.request(grant, validate.copy(cache = NetworkCacheMode.OFFLINE_ONLY))
+        }
+
+        assertEquals(HostNetworkError.OFFLINE_MISS, offlineFailure.error)
+        assertEquals(1, transport.requests.size)
+    }
+
+    @Test
     fun redirect_to_an_undeclared_origin_is_rejected_before_following_it() = runBlocking {
         val transport = HostHttpTransport { request ->
             HostHttpResponse(
@@ -189,5 +204,29 @@ class HostNetworkGatewayPolicyTest {
         assertEquals(HostNetworkError.BODY_LIMIT, bodyFailure.error)
     }
 
+
+    @Test
+    fun media_uses_only_granted_origin_referrer_and_source_scoped_cookie() = runBlocking {
+        val sourceOrigin = HttpsOrigin("https://www.wenku8.net")
+        val coverOrigin = HttpsOrigin("https://pic.wenku8.com")
+        val mediaGrant = grant.copy(origins = setOf(sourceOrigin, coverOrigin), cookieOrigins = setOf(sourceOrigin))
+        val requests = mutableListOf<HostHttpRequest>()
+        val gateway = HostNetworkGateway(HostHttpTransport { request ->
+            requests += request
+            HostHttpResponse(200, request.url, mapOf("content-type" to "image/jpeg"), byteArrayOf(1, 2, 3))
+        })
+        gateway.importSourceCookies(mediaGrant, sourceOrigin, "session=verified")
+
+        val response = gateway.fetchMedia(
+            grant = mediaGrant,
+            url = "https://pic.wenku8.com/files/article/image/12/1234/1234.jpg",
+            referrerUrl = "https://www.wenku8.net/book/1234.htm",
+        )
+
+        assertEquals("image/jpeg", response.contentType)
+        assertEquals(3, response.bytes.size)
+        assertEquals(URI("https://www.wenku8.net/book/1234.htm"), requests.single().referrer)
+        assertEquals(null, requests.single().headers["cookie"])
+    }
 
 }

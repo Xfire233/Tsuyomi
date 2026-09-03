@@ -21,7 +21,7 @@
         "designRulesSha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
         "dataSchemaVersion": {"type": "integer", "minimum": 1},
         "reviewSchemaVersion": {"const": 2},
-        "reviewCatalogVersion": {"const": 5}
+        "reviewCatalogVersion": {"const": 6}
       }
     },
     "device": {

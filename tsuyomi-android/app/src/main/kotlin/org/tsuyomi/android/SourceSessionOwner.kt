@@ -6,11 +6,13 @@ package org.tsuyomi.android
 
 import java.io.Closeable
 import org.tsuyomi.core.network.DirectActionTokenRegistry
+import org.tsuyomi.core.webview.CapturedVerifiedPage
 import org.tsuyomi.shared.sourcecontract.ReaderDocument
 import org.tsuyomi.shared.sourcecontract.RemoteLibraryAddResult
 import org.tsuyomi.shared.sourcecontract.RemoteLibraryPage
 import org.tsuyomi.shared.sourcecontract.SourceBookDetail
 import org.tsuyomi.shared.sourcecontract.SourceBookSummary
+import org.tsuyomi.shared.sourcecontract.SourceHomePage
 import org.tsuyomi.shared.sourcecontract.SourceChapter
 import org.tsuyomi.shared.sourcecontract.SourceDirectory
 import org.tsuyomi.source.extensionmanager.SourceExtensionClient
@@ -18,8 +20,34 @@ import org.tsuyomi.source.extensionmanager.VerifiedHxpPackage
 
 internal interface SourceFlowSession : Closeable {
     suspend fun search(query: String, page: Int = 1, offlineOnly: Boolean = false): List<SourceBookSummary>
+    suspend fun searchRequestUrl(query: String, page: Int = 1): String =
+        error("Search request inspection is unavailable")
+    suspend fun searchVerifiedPage(
+        query: String,
+        snapshot: CapturedVerifiedPage,
+        page: Int = 1,
+    ): List<SourceBookSummary> = error("Verified-page search is unavailable")
+    suspend fun home(selectedFilters: Map<String, String>, cursor: String?): SourceHomePage =
+        error("Source Home is unavailable")
     suspend fun detail(remoteBookId: String, offlineOnly: Boolean = false): SourceBookDetail
+    suspend fun detailRequestUrl(remoteBookId: String): String = error("Detail request inspection is unavailable")
+    suspend fun detailVerifiedPage(
+        remoteBookId: String,
+        snapshot: CapturedVerifiedPage,
+    ): SourceBookDetail = error("Verified-page detail is unavailable")
     suspend fun directory(remoteBookId: String, offlineOnly: Boolean = false): SourceDirectory
+    suspend fun directoryRequestUrl(remoteBookId: String): String = error("Directory request inspection is unavailable")
+    suspend fun directoryVerifiedPage(
+        remoteBookId: String,
+        snapshot: CapturedVerifiedPage,
+    ): SourceDirectory = error("Verified-page directory is unavailable")
+    suspend fun chapterRequestUrl(chapter: SourceChapter, remoteBookId: String): String =
+        error("Chapter request inspection is unavailable")
+    suspend fun chapterVerifiedPage(
+        chapter: SourceChapter,
+        remoteBookId: String,
+        snapshot: CapturedVerifiedPage,
+    ): ReaderDocument = error("Verified-page chapter is unavailable")
     suspend fun chapter(chapter: SourceChapter, remoteBookId: String, offlineOnly: Boolean = false): ReaderDocument
     suspend fun listRemoteLibrary(cursor: String?): RemoteLibraryPage
     suspend fun addRemoteLibrary(remoteBookId: String, directActionToken: String): RemoteLibraryAddResult
@@ -27,10 +55,36 @@ internal interface SourceFlowSession : Closeable {
 
 private class ExtensionSourceFlowSession(
     private val delegate: SourceExtensionClient,
+    private val verifiedPageClient: suspend (CapturedVerifiedPage) -> SourceExtensionClient,
 ) : SourceFlowSession {
     override suspend fun search(query: String, page: Int, offlineOnly: Boolean) = delegate.search(query, page, offlineOnly)
+    override suspend fun searchRequestUrl(query: String, page: Int) = delegate.searchRequestUrl(query, page)
+    override suspend fun searchVerifiedPage(
+        query: String,
+        snapshot: CapturedVerifiedPage,
+        page: Int,
+    ): List<SourceBookSummary> = verifiedPageClient(snapshot).use { client ->
+        client.search(query, page, offlineOnly = false)
+    }
+    override suspend fun home(selectedFilters: Map<String, String>, cursor: String?) =
+        delegate.home(selectedFilters, cursor)
     override suspend fun detail(remoteBookId: String, offlineOnly: Boolean) = delegate.detail(remoteBookId, offlineOnly)
+    override suspend fun detailRequestUrl(remoteBookId: String) = delegate.detailRequestUrl(remoteBookId)
+    override suspend fun detailVerifiedPage(remoteBookId: String, snapshot: CapturedVerifiedPage) =
+        verifiedPageClient(snapshot).use { client -> client.detail(remoteBookId, offlineOnly = false) }
     override suspend fun directory(remoteBookId: String, offlineOnly: Boolean) = delegate.directory(remoteBookId, offlineOnly)
+    override suspend fun directoryRequestUrl(remoteBookId: String) = delegate.directoryRequestUrl(remoteBookId)
+    override suspend fun directoryVerifiedPage(remoteBookId: String, snapshot: CapturedVerifiedPage) =
+        verifiedPageClient(snapshot).use { client -> client.directory(remoteBookId, offlineOnly = false) }
+    override suspend fun chapterRequestUrl(chapter: SourceChapter, remoteBookId: String) =
+        delegate.chapterRequestUrl(chapter, remoteBookId)
+    override suspend fun chapterVerifiedPage(
+        chapter: SourceChapter,
+        remoteBookId: String,
+        snapshot: CapturedVerifiedPage,
+    ) = verifiedPageClient(snapshot).use { client ->
+        client.chapter(chapter, remoteBookId, offlineOnly = false)
+    }
     override suspend fun chapter(chapter: SourceChapter, remoteBookId: String, offlineOnly: Boolean) =
         delegate.chapter(chapter, remoteBookId, offlineOnly)
     override suspend fun listRemoteLibrary(cursor: String?) = delegate.listRemoteLibrary(cursor)
@@ -158,10 +212,21 @@ internal class SourceSessionOwner(
             directActionTokens: DirectActionTokenRegistry,
         ): suspend (VerifiedHxpPackage) -> SourceFlowSession = { packageInfo ->
             ExtensionSourceFlowSession(
-                SourceExtensionClient.open(
+                delegate = SourceExtensionClient.open(
                     packageInfo,
                     Phase2SourceGateway.create(context, packageInfo, directActionTokens),
                 ),
+                verifiedPageClient = { snapshot ->
+                    SourceExtensionClient.open(
+                        packageInfo,
+                        Phase2SourceGateway.createVerifiedPage(
+                            context = context,
+                            packageInfo = packageInfo,
+                            snapshot = snapshot,
+                            directActionTokens = directActionTokens,
+                        ),
+                    )
+                },
             )
         }
     }

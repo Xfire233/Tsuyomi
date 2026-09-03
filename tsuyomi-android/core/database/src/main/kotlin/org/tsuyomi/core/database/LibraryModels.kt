@@ -52,6 +52,7 @@ data class LibraryEntry(
     val libraryAddedAt: Instant,
     val rating: Int?,
     val localTags: Set<String>,
+    val readLater: Boolean = false,
     val sourceAvailable: Boolean,
     val reconciliation: RemoteReconciliationState?,
     val progress: ReadingProgress? = null,

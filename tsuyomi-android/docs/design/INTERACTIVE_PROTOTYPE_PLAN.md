@@ -296,7 +296,7 @@ Only scenarios valid for that action are shown. Scenario selection is debug meta
 
 ### 9.1 Review node identity and context
 
-`ReviewNodeCatalog.kt` is the single source of truth for review scope. Catalog version 5 contains 28 stable nodes covering all 20 route/surface rows, Reader high-risk work and cross-cutting tasks. `L01–L08`, `B01–B03` and `M01–M07` are the 18 active Standard Atlas UI-construction nodes. `S01–S04` and `X01–X06` remain ten deferred actual-online-scenario nodes and cannot be finalized from Atlas fixtures. Route changes resolve to a node; they do not imply that the node was reviewed.
+`ReviewNodeCatalog.kt` is the single source of truth for the historical prototype review scope. Catalog version 5 contains 28 stable nodes covering all 20 route/surface rows, Reader high-risk work and cross-cutting tasks. The completed Standard Atlas construction closeout accounted for 18 `L*`/`B*`/`M*` nodes; `S01–S04` and `X01–X06` were intentionally non-finalizable in Atlas. The user abandoned further Atlas review on 2026-08-29, so production Review Graph execution now follows `review-policy.json` and this in-app reviewer remains non-approval provenance.
 
 Opening or editing the reviewer captures read-only context metadata:
 
@@ -442,9 +442,9 @@ Acceptance: each smoke path has a complete touch path, visible working/outcome s
 
 ### Phase 4 — Full Review Graph behavior
 
-Complete all 20 route/surface rows and every successor obligation in the fixture implementation, including History, collections, rule editor, mirror, Browse, verification, Display/Data/Report/Help/About and error/offline/modal variants. Resolve the current Standard construction stage through the 18 active `L*`/`B*`/`M*` nodes in `ReviewNodeCatalog`; retain all `S*`/`X*` fixture surfaces without treating them as actual-online acceptance.
+The fixture implementation retains all 20 route/surface rows and successor obligations, including History, collections, rule editor, mirror, Browse, verification, Display/Data/Report/Help/About and error/offline/modal variants. The completed Standard construction closeout accounted for the 18 `L*`/`B*`/`M*` nodes without treating any `S*`/`X*` fixture surface as actual-online acceptance.
 
-Acceptance: all 20 inventory rows remain reachable and all 105 route-state obligations remain represented. The current Standard Atlas construction closeout actively executes 16 L/B/M surfaces and 84 obligations; every visible primary/secondary action in that scope either performs its documented simulation or is disabled with an actionable reason. The 21 Source obligations and six cross-cutting nodes remain deferred to the actual-online production stage. The active review profile and node execution stage are selected by `review-policy.json`.
+Historical acceptance: all 20 inventory rows and 105 route-state obligations remained represented; the Standard Atlas closeout executed 16 L/B/M surfaces and 84 obligations. The user later abandoned further Atlas review and authorized production implementation. Current active execution is the 28-node production stage selected by `review-policy.json`.
 
 ### Phase 5 — Motion/profile pass
 
@@ -469,9 +469,9 @@ Acceptance: comments survive restart, v1 route comments migrate to successor nod
 
 ### Phase 7 — Self-review and APK delivery
 
-Execute the current runbook in `SKILL.md`; do not duplicate it here. During the current `phase4-standard-first` Atlas construction stage, a complete AI review impact-accounts all 28 nodes but executes the 18 active `L*`/`B*`/`M*` nodes across 16 surfaces and 84 obligations on Standard, reusing the designated evidence owner for each obligation.
+The completed Atlas delivery followed the archived construction runbook in `SKILL.md`: all 28 nodes were impact-accounted, while 18 `L*`/`B*`/`M*` nodes across 16 surfaces and 84 obligations executed on Standard.
 
-The delivery binds one exact APK to build ID, R1 report, AI `PENDING` draft, selected current-stage Journey traces, review export/recovery state, permission check and installed-APK byte comparison. `S*`/`X*` actual-online evidence and all E-ink artifacts remain deferred and absent from routine completion counts until their explicit stages begin.
+The archived delivery binds one exact APK to its build ID, R1 report, AI `PENDING` draft, selected Journey traces, review export/recovery state, permission check and installed-APK byte comparison. It remains non-approval provenance. Production `S*`/`X*` evidence and all later E-ink artifacts are generated outside the Atlas.
 
 Deliverables:
 
@@ -496,7 +496,7 @@ The plan was counter-reviewed against local-first execution, truthful mutation s
 | `IP-06` | **AI advisory, human authority.** | AI may operate the APK, attach evidence and write a pending draft. Only a human verdict may set `humanReviewedAt` or `approvedAt`; automation can be paused and handed off in the same state. |
 | `IP-07` | **Phase 4 Standard-first review freeze.** | Until the Phase 4 Standard UX milestone is complete and the user explicitly resumes E-ink work, routine design/review executes only Standard. All E-ink implementation, contracts, fixtures, node obligations and inventory remain intact and deferred. Restoration reconciles every accumulated change since the frozen build ID and runs the complete retained E-ink design/review scope; no E-ink readiness is implied during the freeze. |
 | `IP-08` | **ADB live human-review bridge.** | Manual SAF/share transfer is fallback, not the routine same-host path. Explicit in-app submission writes a current-build JSON payload plus a monotonic metadata-only signal in private no-backup storage. A host watcher validates policy, schema, build identity and SHA-256 before emitting an OMP event; it never infers approval or installs onto the human-review AVD without the batch-ready signal. |
-| `IP-09` | **Atlas construction and actual-online evidence are separate stages.** | Current Standard Atlas construction closes 18 `L*`/`B*`/`M*` nodes, 16 surfaces and 84 obligations. Every `S*`/`X*` node executes later in the production package with live online services and real host state. Signed deterministic fixtures remain mandatory replay seams but never substitute for the live pass; evidence excludes credentials, cookies, verification answers, private content and raw WebView payloads. Atlas cannot set human completion or final verdicts for those ten nodes. |
+| `IP-09` | **Atlas construction and actual-online evidence are separate stages.** | The completed Standard Atlas construction accounted for 18 `L*`/`B*`/`M*` nodes, 16 surfaces and 84 obligations. Every `S*`/`X*` node executes in the production package with live online services and real host state. Signed deterministic fixtures remain mandatory replay seams but never substitute for the live pass; evidence excludes credentials, cookies, verification answers, private content and raw WebView payloads. The abandoned Atlas review cannot set production completion or final verdicts. |
 
 Resolved cross-cutting safeguards:
 

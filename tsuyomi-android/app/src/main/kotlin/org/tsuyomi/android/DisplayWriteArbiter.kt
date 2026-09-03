@@ -8,6 +8,7 @@ package org.tsuyomi.android
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.Stable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.listSaver
@@ -31,7 +32,7 @@ internal class DisplayWriteArbiter private constructor(
     private var generations by mutableStateOf(initialGenerations)
     private var failures by mutableStateOf(initialFailures)
 
-    var failureSequence by mutableStateOf(initialFailureSequence)
+    var failureSequence by mutableIntStateOf(initialFailureSequence)
         private set
 
     val retryKey: String?
