@@ -287,10 +287,10 @@ class ManualVerificationHandoffInstrumentedTest {
         waitForText("稍后再读")
         composeRule.onNodeWithText("稍后再读").performClick()
         waitForText("已在书架")
-        composeRule.onNodeWithTag("detail-read-later-action").assert(hasStateDescription("已稍后再读"))
+        waitForStateDescription("detail-read-later-action", "已稍后再读")
         waitForText("已完成：更新稍后再读")
         composeRule.onNodeWithText("稍后再读").performClick()
-        composeRule.onNodeWithTag("detail-read-later-action").assert(hasStateDescription("未稍后再读"))
+        waitForStateDescription("detail-read-later-action", "未稍后再读")
         composeRule.onNodeWithTag("book-detail-scroll").performScrollToIndex(3)
         waitForText("全文目录")
         waitForText("第一章 雾中的灯塔")
@@ -704,6 +704,14 @@ class ManualVerificationHandoffInstrumentedTest {
     private fun waitForTextGone(text: String) {
         composeRule.waitUntil(timeoutMillis = 15_000) {
             composeRule.onAllNodesWithText(text).fetchSemanticsNodes().isEmpty()
+        }
+    }
+
+    private fun waitForStateDescription(tag: String, stateDescription: String) {
+        composeRule.waitUntil(timeoutMillis = 15_000) {
+            runCatching {
+                composeRule.onNodeWithTag(tag).assert(hasStateDescription(stateDescription))
+            }.isSuccess
         }
     }
 
