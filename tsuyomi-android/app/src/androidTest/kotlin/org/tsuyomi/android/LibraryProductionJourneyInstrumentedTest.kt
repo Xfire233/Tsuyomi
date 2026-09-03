@@ -435,8 +435,12 @@ class LibraryProductionJourneyInstrumentedTest {
                         .fetchSemanticsNode().config[SemanticsProperties.StateDescription] == "快捷书架随内容滚动，可拖动"
                 }.getOrDefault(false)
             }
-            first.performTouchInput { up() }
+            first.performTouchInput {
+                moveTo(firstBounds.center - firstBounds.topLeft, delayMillis = 100)
+                up()
+            }
         } finally {
+            composeRule.waitForIdle()
             runBlocking {
                 repository.deleteCollection(behaviorCollectionId)
                 libraryPreferences.updateShortcutOrder(originalPreferences.shortcutOrder)
