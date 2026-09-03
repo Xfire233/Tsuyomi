@@ -86,6 +86,7 @@ class ExtensionInstaller(
         candidate.capabilities.webLogin.origins
             .filterNot { it in activeCapabilities?.webLogin?.origins.orEmpty() }
             .forEach { add("web-login-origin:${it.canonical}") }
+        if (candidate.capabilities.home.enabled && activeCapabilities?.home?.enabled != true) add("source-home:read")
         if (candidate.capabilities.remoteLibrary.read && activeCapabilities?.remoteLibrary?.read != true) {
             add("remote-library:read")
         }

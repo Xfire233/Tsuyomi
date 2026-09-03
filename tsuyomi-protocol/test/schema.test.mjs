@@ -57,6 +57,18 @@ test('hxp manifest v1 rejects undeclared remote-library operations', async () =>
   assert.equal(validate(manifest), false);
 });
 
+test('hxp manifest v1 keeps source Home optional and rejects source-controlled layout', async () => {
+  const ajv = createAjv();
+  const validate = ajv.compile(await loadJson('../schemas/hxp-manifest-v1.schema.json'));
+  const withoutHome = await loadJson('../fixtures/hxp/valid-minimal-manifest.json');
+  delete withoutHome.capabilities.home;
+  assert.equal(validate(withoutHome), true, ajv.errorsText(validate.errors));
+
+  const injectedLayout = await loadJson('../fixtures/hxp/valid-minimal-manifest.json');
+  injectedLayout.capabilities.home.layout = 'source-controlled';
+  assert.equal(validate(injectedLayout), false);
+});
+
 test('hxp manifest v1 requires signed policies for remote read and add', async () => {
   const ajv = createAjv();
   const validate = ajv.compile(await loadJson('../schemas/hxp-manifest-v1.schema.json'));

@@ -15,15 +15,15 @@ import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import org.tsuyomi.core.database.LibraryBook
+import org.tsuyomi.core.database.LibraryEntry
 import org.tsuyomi.core.database.RemoteAddRequest
-import org.tsuyomi.core.database.RemoteLibraryMergeRequest
 import org.tsuyomi.core.database.RemoteReconciliationState
 import org.tsuyomi.core.database.RoomLibraryRepository
 import org.tsuyomi.core.database.SourceAvailability
 import org.tsuyomi.core.database.SourceRemotePolicy
 import org.tsuyomi.core.network.DirectActionBinding
 import org.tsuyomi.core.security.SourceCredentialPartition
-import org.tsuyomi.core.security.SourceCredentialStore
+import org.tsuyomi.core.security.VerifiedBrowserSessionStore
 import org.tsuyomi.shared.model.BookIdentity
 import org.tsuyomi.shared.sourcecontract.HttpsOrigin
 import org.tsuyomi.shared.sourcecontract.RemoteLibraryAddOutcome
@@ -39,11 +39,11 @@ internal class SourceRemoteLibraryCoordinator(
     private val library: RoomLibraryRepository,
     private val sessionOwner: SourceSessionOwner,
 ) {
-    private val credentialStore = SourceCredentialStore(context)
+    private val credentialStore = VerifiedBrowserSessionStore(context)
     private val remoteAddMutex = Mutex()
     private var selectedIdentity: BookIdentity? = null
 
-    var books: List<SourceBookSummary> by mutableStateOf(emptyList())
+    var selectedLibraryEntry: LibraryEntry? by mutableStateOf(null)
         private set
     var selectedBookInLibrary: Boolean by mutableStateOf(false)
         private set
@@ -53,8 +53,8 @@ internal class SourceRemoteLibraryCoordinator(
         private set
 
     fun reset() {
-        books = emptyList()
         selectedIdentity = null
+        selectedLibraryEntry = null
         selectedBookInLibrary = false
         selectedBookReconciliation = null
         selectedBookAddWritesRemote = false
@@ -62,6 +62,7 @@ internal class SourceRemoteLibraryCoordinator(
 
     fun beginSelection(identity: BookIdentity) {
         selectedIdentity = identity
+        selectedLibraryEntry = null
         selectedBookInLibrary = false
         selectedBookReconciliation = null
         selectedBookAddWritesRemote = false
@@ -75,15 +76,16 @@ internal class SourceRemoteLibraryCoordinator(
         val addWritesRemote = library.sourceRemotePolicy(summary.identity.sourceId)?.addWritebackEnabled == true &&
             availability?.available == true && activePackage != null && addPolicy != null &&
             remoteAddCredentialReady(activePackage, addPolicy.origin)
-        val entry = library.libraryEntries().firstOrNull { it.book.identity == summary.identity }
+        val entry = library.libraryEntry(summary.identity)
         if (selectedIdentity == summary.identity) {
+            selectedLibraryEntry = entry
             selectedBookAddWritesRemote = addWritesRemote
             selectedBookInLibrary = entry != null
             selectedBookReconciliation = entry?.reconciliation
         }
     }
 
-    suspend fun pull(packageInfo: VerifiedHxpPackage, importedAt: Instant): RemoteLibraryPullResult {
+    suspend fun pull(packageInfo: VerifiedHxpPackage): RemoteLibraryPullResult {
         val active = sessionOwner.active()
             ?: return RemoteLibraryPullResult.Failure("source-not-open")
         if (active.packageInfo.packageSha256 != packageInfo.packageSha256) {
@@ -105,7 +107,6 @@ internal class SourceRemoteLibraryCoordinator(
             active.ownerGeneration,
         )
         val seenCursors = hashSetOf<String>()
-        val importedBooks = linkedMapOf<BookIdentity, LibraryBook>()
         val summaries = linkedMapOf<BookIdentity, SourceBookSummary>()
         var cursor: String? = null
         var aggregateBytes = 0L
@@ -127,30 +128,14 @@ internal class SourceRemoteLibraryCoordinator(
                     return RemoteLibraryPullResult.Failure("aggregate-limit")
                 }
                 summaries.putIfAbsent(item.identity, item)
-                importedBooks.putIfAbsent(item.identity, item.toLibraryBook(importedAt))
-                if (importedBooks.size > MAX_REMOTE_LIBRARY_RECORDS) {
+                if (summaries.size > MAX_REMOTE_LIBRARY_RECORDS) {
                     return RemoteLibraryPullResult.Failure("record-limit")
                 }
             }
             if (page.complete) {
                 if (page.nextCursor != null) return RemoteLibraryPullResult.Failure("complete-with-cursor")
                 if (!leaseStillValid(sourceId, lease)) return RemoteLibraryPullResult.Failure("source-changed")
-                val added = try {
-                    library.mergeRemoteLibrary(
-                        RemoteLibraryMergeRequest(
-                            sourceId = sourceId,
-                            books = importedBooks.values.toList(),
-                            expectedVersion = lease.packageVersion,
-                            expectedCapabilityFingerprint = lease.capabilitySetFingerprint,
-                            expectedGeneration = lease.sourceGeneration,
-                            importedAt = importedAt,
-                        ),
-                    )
-                } catch (_: IllegalStateException) {
-                    return RemoteLibraryPullResult.Failure("source-changed")
-                }
-                books = summaries.values.toList()
-                return RemoteLibraryPullResult.Success(importedBooks.size, added)
+                return RemoteLibraryPullResult.Success(summaries.values.toList())
             }
             val next = page.nextCursor ?: return RemoteLibraryPullResult.Failure("incomplete-page")
             if (!seenCursors.add(next)) return RemoteLibraryPullResult.Failure("duplicate-cursor")
@@ -160,11 +145,56 @@ internal class SourceRemoteLibraryCoordinator(
         return RemoteLibraryPullResult.Failure("page-limit")
     }
 
-    suspend fun addBook(summary: SourceBookSummary?, importedAt: Instant = Instant.now()): RemoteAddUiResult =
+    suspend fun copyToLocal(
+        summaries: Collection<SourceBookSummary>,
+        importedAt: Instant = Instant.now(),
+    ): RemoteLibraryCopyResult {
+        var added = 0
+        summaries.distinctBy(SourceBookSummary::identity).forEach { summary ->
+            if (library.addToLibrary(summary.toLibraryBook(importedAt))) added++
+        }
+        return RemoteLibraryCopyResult(total = summaries.distinctBy(SourceBookSummary::identity).size, added = added)
+    }
+
+    suspend fun addLocalBook(summary: SourceBookSummary?, importedAt: Instant = Instant.now()): RemoteAddUiResult =
         remoteAddMutex.withLock {
             val selected = summary?.takeIf { selectedIdentity == it.identity }
                 ?: return@withLock RemoteAddUiResult.Failure("book-not-selected")
-            addBookLocked(selected, importedAt)
+            if (selectedBookInLibrary) return@withLock RemoteAddUiResult.Failure("book-already-added")
+            library.addToLibrary(selected.toLibraryBook(importedAt))
+            if (selectedIdentity == selected.identity) {
+                selectedLibraryEntry = library.libraryEntry(selected.identity)
+                selectedBookInLibrary = true
+                selectedBookReconciliation = null
+            }
+            RemoteAddUiResult.LocalOnly
+        }
+
+    suspend fun toggleReadLater(summary: SourceBookSummary?, importedAt: Instant = Instant.now()): Boolean =
+        remoteAddMutex.withLock {
+            val selected = summary?.takeIf { selectedIdentity == it.identity }
+                ?: error("Book is not selected")
+            val current = library.libraryEntry(selected.identity)
+            val next = !(current?.readLater ?: false)
+            if (current == null) {
+                library.addToLibrary(selected.toLibraryBook(importedAt))
+            }
+            library.setReadLater(selected.identity, next)
+            val updated = requireNotNull(library.libraryEntry(selected.identity)) { "Book is not in library" }
+            if (selectedIdentity == selected.identity) {
+                selectedLibraryEntry = updated
+                selectedBookInLibrary = true
+                selectedBookReconciliation = updated.reconciliation
+            }
+            next
+        }
+
+    suspend fun addBookToWebsite(summary: SourceBookSummary?, importedAt: Instant = Instant.now()): RemoteAddUiResult =
+        remoteAddMutex.withLock {
+            val selected = summary?.takeIf { selectedIdentity == it.identity }
+                ?: return@withLock RemoteAddUiResult.Failure("book-not-selected")
+            if (selectedBookInLibrary) return@withLock RemoteAddUiResult.Failure("book-already-added")
+            addBookToWebsiteLocked(selected, importedAt)
         }
 
     suspend fun retryBook(summary: SourceBookSummary?, importedAt: Instant = Instant.now()): RemoteAddUiResult =
@@ -199,6 +229,7 @@ internal class SourceRemoteLibraryCoordinator(
         val identity = summary?.identity ?: return false
         val removed = library.removeFromLibrary(identity)
         if (removed && selectedIdentity == identity) {
+            selectedLibraryEntry = null
             selectedBookInLibrary = false
             selectedBookReconciliation = null
             selectedBookAddWritesRemote = false
@@ -236,8 +267,7 @@ internal class SourceRemoteLibraryCoordinator(
         return executeRemoteAdd(summary, existing, packageInfo, policy, availability, addPolicy, importedAt)
     }
 
-    private suspend fun addBookLocked(summary: SourceBookSummary, importedAt: Instant): RemoteAddUiResult {
-        if (selectedBookInLibrary) return RemoteAddUiResult.Failure("book-already-added")
+    private suspend fun addBookToWebsiteLocked(summary: SourceBookSummary, importedAt: Instant): RemoteAddUiResult {
         val packageInfo = sessionOwner.active()?.packageInfo
             ?: return RemoteAddUiResult.Failure("source-not-open")
         val book = summary.toLibraryBook(importedAt)
@@ -251,12 +281,8 @@ internal class SourceRemoteLibraryCoordinator(
             if (policy?.addWritebackEnabled == true && !credentialReady) {
                 library.setAddWritebackEnabled(summary.identity.sourceId, policy.capabilitySetFingerprint, false)
             }
-            library.addToLibrary(book)
-            if (selectedIdentity == summary.identity) {
-                selectedBookAddWritesRemote = false
-                selectedBookInLibrary = true
-            }
-            return RemoteAddUiResult.LocalOnly
+            if (selectedIdentity == summary.identity) selectedBookAddWritesRemote = false
+            return RemoteAddUiResult.Failure("remote-add-not-authorized")
         }
         return executeRemoteAdd(summary, book, packageInfo, policy, availability, addPolicy, importedAt)
     }
@@ -282,6 +308,7 @@ internal class SourceRemoteLibraryCoordinator(
             ),
         )
         if (selectedIdentity == summary.identity) {
+            selectedLibraryEntry = library.libraryEntry(summary.identity)
             selectedBookInLibrary = true
             selectedBookReconciliation = RemoteReconciliationState.PENDING_USER_ACTION
         }
@@ -431,12 +458,14 @@ internal class SourceRemoteLibraryCoordinator(
 }
 
 sealed interface RemoteLibraryPullResult {
-    data class Success(val total: Int, val newlyAdded: Int) : RemoteLibraryPullResult
+    data class Success(val books: List<SourceBookSummary>) : RemoteLibraryPullResult
     data class Failure(val safeCode: String) : RemoteLibraryPullResult
     data object LoginRequired : RemoteLibraryPullResult
     data object VerificationRequired : RemoteLibraryPullResult
     data object Cancelled : RemoteLibraryPullResult
 }
+
+data class RemoteLibraryCopyResult(val total: Int, val added: Int)
 
 sealed interface RemoteAddUiResult {
     data object LocalOnly : RemoteAddUiResult

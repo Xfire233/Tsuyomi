@@ -5,6 +5,7 @@
 
 package org.tsuyomi.core.ui.components
 
+import androidx.compose.foundation.layout.Box
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.compositionLocalOf
@@ -92,9 +93,9 @@ fun AppScaffold(
         Layout(
             modifier = modifier.tsuyomiModalBackground(),
             content = {
-                topBar()
-                navigation(layout)
-                content()
+                Box { topBar() }
+                Box { navigation(layout) }
+                Box { content() }
             },
         ) { measurables, constraints ->
             val topBarPlaceable = measurables[0].measure(constraints.copy(minWidth = 0, minHeight = 0))

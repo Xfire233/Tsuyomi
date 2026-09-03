@@ -20,7 +20,7 @@ import org.tsuyomi.core.files.StorageQuota
 import org.tsuyomi.core.files.StorageRoot
 import org.tsuyomi.core.files.StorageRoots
 import org.tsuyomi.core.security.SourceCredentialPartition
-import org.tsuyomi.core.security.SourceCredentialStore
+import org.tsuyomi.core.security.VerifiedBrowserSessionStore
 import org.tsuyomi.feature.browse.BrowseInstallFailure
 import org.tsuyomi.feature.browse.BrowseResourceLimit
 import org.tsuyomi.feature.browse.BrowseResourceLimitIncrease
@@ -41,7 +41,7 @@ class SourceInstallController(
     private val context: Context,
     private val libraryRepository: RoomLibraryRepository,
 ) {
-    private val credentialStore = SourceCredentialStore(context)
+    private val credentialStore = VerifiedBrowserSessionStore(context)
     private val stagingDirectory = File(context.cacheDir, "hxp-staging")
     private val store = InstalledExtensionStore(
         QuotaFileStore(
@@ -78,12 +78,16 @@ class SourceInstallController(
             } ?: return@forEach
             activePackage = restored
             synchronizeVerifiedPackage(restored, preserveWriteback = true)
-            state = BrowseUiState.Installed(
-                sourceName = restored.manifest.displayName,
-                version = restored.manifest.version.original,
-            )
+            showInstalled(restored)
             return
         }
+    }
+
+    suspend fun refreshInstalled() {
+        activePackage = null
+        prepared = null
+        state = BrowseUiState.Empty
+        restoreInstalled()
     }
     suspend fun prepare(uri: Uri, resolver: ContentResolver) {
         val displayName = uri.lastPathSegment?.takeLast(96)?.ifBlank { "extension.hxp" } ?: "extension.hxp"
@@ -126,10 +130,7 @@ class SourceInstallController(
             activePackage = candidate.candidate
             synchronizeVerifiedPackage(candidate.candidate, preserveWriteback = !candidate.isDowngrade)
             prepared = null
-            state = BrowseUiState.Installed(
-                sourceName = candidate.candidate.manifest.displayName,
-                version = candidate.candidate.manifest.version.original,
-            )
+            showInstalled(candidate.candidate)
         } catch (_: ExtensionInstallException) {
             resetToFailure(BrowseInstallFailure.INSTALL)
         }
@@ -137,11 +138,11 @@ class SourceInstallController(
 
     fun dismissApproval() {
         prepared = null
-        state = BrowseUiState.Empty
+        resetToInstalledOrEmpty()
     }
 
     fun dismissFailure() {
-        state = BrowseUiState.Empty
+        resetToInstalledOrEmpty()
     }
     suspend fun remotePolicy(): SourceRemotePolicy? {
         val packageInfo = activePackage ?: return null
@@ -161,14 +162,6 @@ class SourceInstallController(
             credentialStore.getSnapshot(SourceCredentialPartition(packageInfo.manifest.sourceId.value, addPolicy.origin)) != null
         }.getOrDefault(false)
     }
-    suspend fun consumeFirstRemoteImportPrompt(): Boolean {
-        val packageInfo = activePackage ?: return false
-        if (packageInfo.manifest.capabilities.remoteLibrary.policies[RemoteOperation.READ] == null) return false
-        return libraryRepository.dismissFirstRemoteImportPrompt(
-            packageInfo.manifest.sourceId.value,
-            installer.remoteCapabilitySetFingerprint(packageInfo),
-        )
-    }
 
 
     suspend fun setRemoteAddWritebackEnabled(enabled: Boolean): Boolean {
@@ -185,6 +178,17 @@ class SourceInstallController(
     private fun resetToFailure(reason: BrowseInstallFailure) {
         prepared = null
         state = BrowseUiState.Failure(reason)
+    }
+
+    private fun resetToInstalledOrEmpty() {
+        activePackage?.let(::showInstalled) ?: run { state = BrowseUiState.Empty }
+    }
+
+    private fun showInstalled(packageInfo: VerifiedHxpPackage) {
+        state = BrowseUiState.Installed(
+            sourceName = packageInfo.manifest.displayName,
+            version = packageInfo.manifest.version.original,
+        )
     }
 
 

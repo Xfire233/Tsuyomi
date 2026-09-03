@@ -58,7 +58,7 @@ internal interface LibraryDao {
     @Query("SELECT * FROM books WHERE source_id = :sourceId AND remote_book_id = :remoteBookId")
     suspend fun book(sourceId: String, remoteBookId: String): BookEntity?
 
-    @Query("SELECT books.* FROM books INNER JOIN library_entries USING(source_id, remote_book_id) ORDER BY library_entries.added_at_epoch_second DESC, books.title COLLATE NOCASE, books.source_id, books.remote_book_id")
+    @Query("SELECT books.* FROM books INNER JOIN library_entries USING(source_id, remote_book_id) ORDER BY library_entries.display_order, library_entries.added_at_epoch_second DESC, books.title COLLATE NOCASE, books.source_id, books.remote_book_id")
     suspend fun libraryBooks(): List<BookEntity>
 
     @Query("SELECT * FROM books ORDER BY source_id, remote_book_id")
@@ -90,6 +90,12 @@ internal interface LibraryDao {
 
     @Query("UPDATE library_entries SET rating = :rating WHERE source_id = :sourceId AND remote_book_id = :remoteBookId")
     suspend fun updateRating(sourceId: String, remoteBookId: String, rating: Int?): Int
+
+    @Query("UPDATE library_entries SET read_later = :readLater WHERE source_id = :sourceId AND remote_book_id = :remoteBookId")
+    suspend fun updateReadLater(sourceId: String, remoteBookId: String, readLater: Boolean): Int
+
+    @Query("UPDATE library_entries SET display_order = :displayOrder WHERE source_id = :sourceId AND remote_book_id = :remoteBookId")
+    suspend fun updateLibraryDisplayOrder(sourceId: String, remoteBookId: String, displayOrder: Int): Int
 
     @Query("SELECT * FROM local_book_tags WHERE source_id = :sourceId AND remote_book_id = :remoteBookId ORDER BY normalized_tag")
     suspend fun localTags(sourceId: String, remoteBookId: String): List<LocalBookTagEntity>
@@ -186,6 +192,14 @@ internal interface LibraryDao {
         """,
     )
     suspend fun deleteManualMembership(collectionId: String, sourceId: String, remoteBookId: String): Int
+
+    @Query("UPDATE manual_collection_memberships SET display_order = :displayOrder WHERE collection_id = :collectionId AND source_id = :sourceId AND remote_book_id = :remoteBookId")
+    suspend fun updateManualMembershipDisplayOrder(
+        collectionId: String,
+        sourceId: String,
+        remoteBookId: String,
+        displayOrder: Long,
+    ): Int
     @Query("SELECT * FROM smart_rules WHERE collection_id = :collectionId")
     suspend fun smartRule(collectionId: String): SmartRuleEntity?
 

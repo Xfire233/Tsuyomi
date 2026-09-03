@@ -39,6 +39,9 @@
       "enabled": true,
       "origins": ["https://www.wenku8.net"]
     },
+    "home": {
+      "enabled": true
+    },
     "remoteLibrary": {
       "read": true,
       "writeOperations": ["add", "remove", "move"],

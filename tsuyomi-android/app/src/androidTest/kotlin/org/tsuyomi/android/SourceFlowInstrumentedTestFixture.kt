@@ -15,7 +15,8 @@ import org.tsuyomi.core.database.RoomLibraryRepository
 import org.tsuyomi.core.database.TsuyomiDatabase
 import org.tsuyomi.core.network.DirectActionTokenRegistry
 import org.tsuyomi.core.security.SourceCredentialPartition
-import org.tsuyomi.core.security.SourceCredentialStore
+import org.tsuyomi.core.security.VerifiedBrowserSession
+import org.tsuyomi.core.security.VerifiedBrowserSessionStore
 import org.tsuyomi.feature.browse.BrowseUiState
 import org.tsuyomi.shared.model.BookIdentity
 import org.tsuyomi.shared.sourcecontract.HttpsOrigin
@@ -106,9 +107,9 @@ internal abstract class SourceFlowInstrumentedTestFixture {
     )
 
     protected fun putCredential(sourceId: String) {
-        SourceCredentialStore(context).put(
+        VerifiedBrowserSessionStore(context).put(
             SourceCredentialPartition(sourceId, HttpsOrigin("https://www.wenku8.net")),
-            "fixture_session=accepted".encodeToByteArray(),
+            VerifiedBrowserSession("fixture_session=accepted", "fixture-webview-agent/1"),
         )
     }
 
@@ -126,12 +127,15 @@ internal abstract class SourceFlowInstrumentedTestFixture {
     }
 
     protected class FakeSession(
+        private val searchResult: suspend (String, Boolean) -> List<SourceBookSummary> = { _, _ -> error("Unexpected search") },
         private val listRemote: suspend (String?) -> RemoteLibraryPage = { error("Unexpected remote list") },
         private val detail: suspend (SourceBookSummary) -> SourceBookDetail = { SourceBookDetail(it, null, emptyList(), null) },
+        private val directoryResult: suspend (String) -> SourceDirectory = { error("Unexpected directory") },
+        private val chapterResult: suspend (SourceChapter, String) -> ReaderDocument = { _, _ -> error("Unexpected chapter") },
         private val addRemote: suspend (String, String) -> RemoteLibraryAddResult = { _, _ -> error("Unexpected remote add") },
     ) : SourceFlowSession {
         override suspend fun search(query: String, page: Int, offlineOnly: Boolean): List<SourceBookSummary> =
-            error("Unexpected search")
+            searchResult(query, offlineOnly)
 
         override suspend fun detail(remoteBookId: String, offlineOnly: Boolean): SourceBookDetail = detail(
             SourceBookSummary(
@@ -144,13 +148,13 @@ internal abstract class SourceFlowInstrumentedTestFixture {
         )
 
         override suspend fun directory(remoteBookId: String, offlineOnly: Boolean): SourceDirectory =
-            error("Unexpected directory")
+            directoryResult(remoteBookId)
 
         override suspend fun chapter(
             chapter: SourceChapter,
             remoteBookId: String,
             offlineOnly: Boolean,
-        ): ReaderDocument = error("Unexpected chapter")
+        ): ReaderDocument = chapterResult(chapter, remoteBookId)
 
         override suspend fun listRemoteLibrary(cursor: String?): RemoteLibraryPage = listRemote(cursor)
 
@@ -165,6 +169,7 @@ internal abstract class SourceFlowInstrumentedTestFixture {
         File(context.cacheDir, "hxp-staging").deleteRecursively()
         File(context.cacheDir, "source-network-cache").deleteRecursively()
         File(context.noBackupFilesDir, "source-credentials").deleteRecursively()
+        File(context.noBackupFilesDir, "normalized-source-content").deleteRecursively()
         File(context.cacheDir, "wenku8-fixture.hxp").delete()
     }
 }

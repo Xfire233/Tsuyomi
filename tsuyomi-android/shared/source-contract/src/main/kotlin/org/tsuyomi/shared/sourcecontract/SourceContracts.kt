@@ -159,6 +159,91 @@ data class SourceBookSummary(
     }
 }
 
+data class SourceHomeFilterOption(
+    val value: String,
+    val label: String,
+) {
+    init {
+        require(value.matches(Regex("^[A-Za-z0-9._-]{1,64}$"))) { "Invalid home filter option" }
+        require(label.codePointCount(0, label.length) in 1..128) { "Invalid home filter label" }
+    }
+}
+
+data class SourceHomeFilter(
+    val id: String,
+    val label: String,
+    val options: List<SourceHomeFilterOption>,
+) {
+    init {
+        require(id.matches(Regex("^[A-Za-z0-9._-]{1,64}$"))) { "Invalid home filter ID" }
+        require(label.codePointCount(0, label.length) in 1..128) { "Invalid home filter label" }
+        require(options.isNotEmpty() && options.size <= 32) { "Invalid home filter options" }
+        require(options.map { it.value }.distinct().size == options.size) { "Duplicate home filter option" }
+    }
+}
+
+data class SourceHomeFeature(
+    val id: String,
+    val title: String,
+    val supportingText: String?,
+    val selectedFilters: Map<String, String>,
+) {
+    init {
+        require(id.matches(Regex("^[A-Za-z0-9._-]{1,64}$"))) { "Invalid home feature ID" }
+        require(title.codePointCount(0, title.length) in 1..256) { "Invalid home feature title" }
+        supportingText?.let {
+            require(it.codePointCount(0, it.length) in 1..256) { "Invalid home feature supporting text" }
+        }
+        require(selectedFilters.isNotEmpty() && selectedFilters.size <= 16) { "Invalid home feature selection" }
+        require(selectedFilters.all { (key, value) ->
+            key.matches(Regex("^[A-Za-z0-9._-]{1,64}$")) &&
+                value.matches(Regex("^[A-Za-z0-9._-]{1,64}$"))
+        }) { "Invalid home feature selection" }
+    }
+}
+
+data class SourceHomeSection(
+    val id: String,
+    val title: String,
+    val items: List<SourceBookSummary>,
+) {
+    init {
+        require(id.matches(Regex("^[A-Za-z0-9._-]{1,64}$"))) { "Invalid home section ID" }
+        require(title.codePointCount(0, title.length) in 1..256) { "Invalid home section title" }
+        require(items.isNotEmpty() && items.size <= 100) { "Invalid home section items" }
+    }
+}
+
+data class SourceHomePage(
+    val title: String,
+    val schemaVersion: Int,
+    val filters: List<SourceHomeFilter>,
+    val selectedFilters: Map<String, String>,
+    val sections: List<SourceHomeSection>,
+    val features: List<SourceHomeFeature> = emptyList(),
+    val nextCursor: String?,
+    val complete: Boolean,
+) {
+    init {
+        require(title.codePointCount(0, title.length) in 1..256) { "Invalid source home title" }
+        require(schemaVersion == 1) { "Unsupported source home schema version" }
+        require(filters.size <= 16 && filters.map { it.id }.distinct().size == filters.size) { "Invalid source home filters" }
+        require(selectedFilters.size <= filters.size) { "Invalid selected home filters" }
+        selectedFilters.forEach { (id, value) ->
+            val filter = filters.singleOrNull { it.id == id } ?: error("Unknown selected home filter")
+            require(filter.options.any { it.value == value }) { "Invalid selected home filter option" }
+        }
+        require(sections.isNotEmpty() && sections.size <= 16) { "Invalid source home sections" }
+        require(sections.map { it.id }.distinct().size == sections.size) { "Duplicate source home section" }
+        require(features.size <= 4 && features.map { it.id }.distinct().size == features.size) {
+            "Invalid source home features"
+        }
+        require(sections.sumOf { it.items.size } <= 100) { "Source home page is too large" }
+        require(nextCursor == null || nextCursor.matches(Regex("^[A-Za-z0-9._-]{1,128}$"))) { "Invalid source home cursor" }
+        require(complete || nextCursor != null) { "Incomplete source home page requires a cursor" }
+    }
+}
+
 data class RemoteLibraryPage(
     val items: List<SourceBookSummary>,
     val nextCursor: String?,
@@ -194,10 +279,14 @@ data class SourceChapter(
     val chapterId: String,
     val title: String,
     val url: String,
+    val volumeTitle: String? = null,
 ) {
     init {
         require(chapterId.codePointCount(0, chapterId.length) in 1..256) { "Invalid chapter ID" }
         require(title.codePointCount(0, title.length) in 1..512) { "Invalid chapter title" }
+        volumeTitle?.let {
+            require(it.isNotBlank() && it.codePointCount(0, it.length) <= 512) { "Invalid volume title" }
+        }
     }
 }
 

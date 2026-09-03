@@ -12,6 +12,7 @@ android {
 
 dependencies {
     implementation(project(":core:ui"))
+    implementation(project(":core:media"))
     implementation(project(":shared:source-contract"))
     implementation(project(":shared:model"))
     implementation(libs.androidx.compose.foundation)

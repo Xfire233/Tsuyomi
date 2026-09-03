@@ -50,6 +50,7 @@ internal fun signedFixture(
     remoteLibrary: JsonObject = JsonObject(
         mapOf("read" to JsonPrimitive(false), "writeOperations" to JsonArray(emptyList())),
     ),
+    home: JsonObject? = null,
 ): SignedFixture {
     val privateKey = Ed25519PrivateKeyParameters(ByteArray(32) { (it + 1).toByte() }, 0)
     val publisher = PublisherKey(
@@ -59,7 +60,7 @@ internal fun signedFixture(
     )
     val files = JsonObject(mapOf(ENTRY_PATH to JsonPrimitive(sha256(ENTRY_BYTES))))
     val contentDigest = sha256(JsonCanonicalizer(files.toString()).encodedUTF8)
-    val manifest = manifest(contentDigest, files, version, limits, remoteLibrary)
+    val manifest = manifest(contentDigest, files, version, limits, remoteLibrary, home)
     val canonicalManifest = JsonCanonicalizer(manifest).encodedUTF8
     val message = ByteArrayOutputStream().use { output ->
         output.write("tsuyomi-hxp-v1\u0000".toByteArray(StandardCharsets.US_ASCII))
@@ -121,6 +122,7 @@ private fun manifest(
     version: String,
     limits: FixtureLimits,
     remoteLibrary: JsonObject,
+    home: JsonObject?,
 ): String = JsonObject(
     linkedMapOf(
         "format" to JsonPrimitive("tsuyomi-hxp"),
@@ -145,30 +147,40 @@ private fun manifest(
             ),
         ),
         "capabilities" to JsonObject(
-            mapOf(
-                "network" to JsonObject(
-                    mapOf(
-                        "origins" to JsonArray(listOf(JsonPrimitive("https://www.wenku8.net"))),
-                        "maxConcurrentRequests" to JsonPrimitive(limits.maxConcurrentRequests),
-                        "requestTimeoutMs" to JsonPrimitive(limits.requestTimeoutMs),
-                        "maxResponseBytes" to JsonPrimitive(limits.maxResponseBytes),
+            buildMap {
+                put(
+                    "network",
+                    JsonObject(
+                        mapOf(
+                            "origins" to JsonArray(listOf(JsonPrimitive("https://www.wenku8.net"))),
+                            "maxConcurrentRequests" to JsonPrimitive(limits.maxConcurrentRequests),
+                            "requestTimeoutMs" to JsonPrimitive(limits.requestTimeoutMs),
+                            "maxResponseBytes" to JsonPrimitive(limits.maxResponseBytes),
+                        ),
                     ),
-                ),
-                "cookies" to JsonObject(
-                    mapOf(
-                        "mode" to JsonPrimitive("sourceScoped"),
-                        "origins" to JsonArray(listOf(JsonPrimitive("https://www.wenku8.net"))),
+                )
+                put(
+                    "cookies",
+                    JsonObject(
+                        mapOf(
+                            "mode" to JsonPrimitive("sourceScoped"),
+                            "origins" to JsonArray(listOf(JsonPrimitive("https://www.wenku8.net"))),
+                        ),
                     ),
-                ),
-                "webLogin" to JsonObject(
-                    mapOf(
-                        "enabled" to JsonPrimitive(true),
-                        "origins" to JsonArray(listOf(JsonPrimitive("https://www.wenku8.net"))),
+                )
+                put(
+                    "webLogin",
+                    JsonObject(
+                        mapOf(
+                            "enabled" to JsonPrimitive(true),
+                            "origins" to JsonArray(listOf(JsonPrimitive("https://www.wenku8.net"))),
+                        ),
                     ),
-                ),
-                "remoteLibrary" to remoteLibrary,
-                "storage" to JsonObject(mapOf("quotaBytes" to JsonPrimitive(limits.storageQuotaBytes))),
-            ),
+                )
+                home?.let { put("home", it) }
+                put("remoteLibrary", remoteLibrary)
+                put("storage", JsonObject(mapOf("quotaBytes" to JsonPrimitive(limits.storageQuotaBytes))))
+            },
         ),
         "resourceLimits" to JsonObject(
             mapOf(

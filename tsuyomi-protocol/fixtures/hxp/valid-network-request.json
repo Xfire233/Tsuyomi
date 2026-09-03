@@ -1,8 +1,14 @@
 {
-  "url": "https://www.wenku8.net/novel/1/123/456.htm",
+  "url": "https://www.wenku8.net/modules/article/search.php",
   "method": "GET",
   "headers": { "Accept": "text/html" },
+  "query": [
+    { "name": "searchtype", "value": "articlename" },
+    { "name": "searchkey", "value": "文学少女" },
+    { "name": "page", "value": "1" }
+  ],
+  "queryEncoding": "gb18030",
   "decode": "gb18030",
   "cache": "validate",
-  "semanticCacheKey": "wenku8:chapter:123:456:gb18030"
+  "semanticCacheKey": "wenku8:search:page1:gb18030"
 }

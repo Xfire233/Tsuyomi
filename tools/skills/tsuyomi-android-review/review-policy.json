@@ -1,7 +1,7 @@
 {
   "schema": "tsuyomi-android-review-policy-v1",
-  "mode": "phase4-standard-first",
-  "effectiveFrom": "2026-08-20",
+  "mode": "phase4a-production-standard-first",
+  "effectiveFrom": "2026-08-29",
   "activeProfiles": [
     "STANDARD"
   ],
@@ -15,7 +15,7 @@
       "baselineBuildId": "3be8ea00cdac3ed7164fd170929bfb97a1c498cf63032fbbec4630ea5bd095d7"
     }
   ],
-  "phase4Milestone": "Close Standard Atlas UI construction for L/B/M before any separate human approval or production authorization; S/X remain deferred to actual online production scenarios.",
+  "phase4Milestone": "Execute the authorized Phase 4A Wenku8 usable-reader priority inside the direct Atlas production takeover. Promote Atlas S01-S04 and B01-B03 around real signed-source install/login/search/detail/directory/Reader owners, close the local Library resume loop, include host-validated covers and separately initiated read-only website favourites/copy-to-local, and forbid implicit website writes. All 28 nodes remain production-stage obligations; S/X require live online services plus signed deterministic fixture replay. E-ink remains frozen.",
   "routineReview": {
     "buildOnce": true,
     "deployOncePerActiveDevice": true,
@@ -23,30 +23,29 @@
     "journeysOnlyForChangedTransitions": true
   },
   "nodeExecution": {
-    "activeStage": "STANDARD_ATLAS_UI",
+    "activeStage": "PHASE4A_PRODUCTION_IMPLEMENTATION",
     "activeNodePrefixes": [
       "L",
       "B",
-      "M"
+      "M",
+      "S",
+      "X"
     ],
-    "activeNodeCount": 18,
-    "activeSurfaceCount": 16,
-    "activeRouteStateObligationCount": 84,
-    "deferredStages": [
-      {
-        "stage": "ACTUAL_ONLINE_SCENARIO",
-        "nodePrefixes": [
-          "S",
-          "X"
-        ],
-        "nodeCount": 10,
-        "status": "DEFERRED",
-        "requiredPackage": "org.tsuyomi.android",
-        "requiresLiveOnlineService": true,
-        "requiresControlledFixtureReplay": true,
-        "reason": "User requires every S01-S04 and X01-X06 node to be validated in an actual online production scenario rather than closed by Atlas fixtures."
-      }
-    ]
+    "activeNodeCount": 28,
+    "activeSurfaceCount": 20,
+    "activeRouteStateObligationCount": 105,
+    "actualOnlineRequirements": {
+      "nodePrefixes": [
+        "S",
+        "X"
+      ],
+      "requiredPackage": "org.tsuyomi.android",
+      "requiresLiveOnlineService": true,
+      "requiresControlledFixtureReplay": true,
+      "forbidAtlasFinalization": true,
+      "reason": "S01-S04 and X01-X06 are active only on production surfaces and require both live-service evidence and signed deterministic replay."
+    },
+    "deferredStages": []
   },
   "directEinkChangeException": {
     "allowed": [

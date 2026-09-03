@@ -115,6 +115,26 @@ class SourceCredentialStoreInstrumentedTest {
         assertNotEquals(initial.cachePartitionId, requireNotNull(store.getSnapshot(first)).cachePartitionId)
     }
 
+    @Test
+    fun verified_browser_session_round_trips_inside_one_encrypted_partition() {
+        val sessions = VerifiedBrowserSessionStore(store)
+        sessions.put(first, VerifiedBrowserSession("session=accepted", "fixture-webview-agent/1"))
+
+        val snapshot = requireNotNull(sessions.getSnapshot(first))
+
+        assertEquals("session=accepted", snapshot.session.requestCookies)
+        assertEquals("fixture-webview-agent/1", snapshot.session.userAgent)
+        assertEquals(64, snapshot.cachePartitionId.length)
+    }
+
+    @Test
+    fun untyped_legacy_payload_fails_closed_and_is_cleared() {
+        store.put(first, "session=legacy".encodeToByteArray())
+
+        assertNull(VerifiedBrowserSessionStore(store).getSnapshot(first))
+        assertNull(store.get(first))
+    }
+
 }
 
     private fun assertStorageFailure(action: () -> Unit): CredentialStorageException = try {

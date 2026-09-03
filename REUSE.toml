@@ -7,6 +7,8 @@ version = 1
 path = [
   "Tsuyomi.code-workspace",
   "tsuyomi-android/README.md",
+  "tsuyomi-android/app/src/main/res/values/strings.xml",
+  "tsuyomi-android/reader/ui/src/main/res/values/strings.xml",
   "tsuyomi-protocol/package.json",
   "tsuyomi-protocol/package-lock.json",
   "tsuyomi-protocol/schemas/*.json",

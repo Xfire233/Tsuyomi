@@ -72,7 +72,7 @@ def load_review_policy(repo_root: Path) -> tuple[dict, str]:
         isinstance(item, str) and len(item) == 1 for item in active_prefixes
     ):
         raise SystemExit("Review policy activeNodePrefixes is invalid")
-    if not isinstance(deferred_stages, list) or not deferred_stages:
+    if not isinstance(deferred_stages, list):
         raise SystemExit("Review policy deferredStages is invalid")
     deferred_prefixes = {
         prefix
@@ -83,6 +83,16 @@ def load_review_policy(repo_root: Path) -> tuple[dict, str]:
     }
     if set(active_prefixes) & deferred_prefixes:
         raise SystemExit("Review policy cannot activate and defer the same node prefix")
+    actual_online = node_execution.get("actualOnlineRequirements")
+    if not isinstance(actual_online, dict):
+        raise SystemExit("Review policy must declare actualOnlineRequirements")
+    actual_online_prefixes = actual_online.get("nodePrefixes")
+    if not isinstance(actual_online_prefixes, list) or not actual_online_prefixes or not all(
+        isinstance(item, str) and len(item) == 1 for item in actual_online_prefixes
+    ):
+        raise SystemExit("Review policy actual-online nodePrefixes is invalid")
+    if not set(actual_online_prefixes) <= set(active_prefixes):
+        raise SystemExit("Actual-online node prefixes must be active production prefixes")
     return data, sha256_file(path)
 
 

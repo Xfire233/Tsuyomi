@@ -1,6 +1,7 @@
 <!-- SPDX-FileCopyrightText: 2026 Tsuyomi Contributors -->
 <!-- SPDX-License-Identifier: Apache-2.0 -->
 <resources>
+    <string name="reader_title">阅读</string>
     <string name="reader_loading_chapter">正在加载章节</string>
     <string name="reader_chapter_failure">章节未能加载</string>
     <string name="reader_error_code">错误：%1$s</string>

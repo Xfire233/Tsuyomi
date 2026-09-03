@@ -9,7 +9,7 @@ An `.hxp` archive contains `manifest.json`, `index.mjs`, optional `assets/` and 
 
 - immutable extension ID, semantic version, display metadata, and host API compatibility range;
 - exact entry module and package-content hashes;
-- requested capabilities: network, declared HTTPS domain allowlist, scoped cookies, controlled WebView login, explicit remote-library read/write operations, and bounded isolated storage;
+- requested capabilities: network, declared HTTPS domain allowlist, scoped cookies, controlled WebView login, explicit remote-library read/write operations, optional read-only source Home, and bounded isolated storage;
 - publisher key ID, signature metadata, and update channel;
 - resource declarations: request timeout, concurrent request limit, response-size ceiling, CPU/wall-time budget, and memory budget.
 
@@ -24,6 +24,12 @@ The host enforces network destinations, cookie partitions, storage quotas, resou
 The normative Host API v1 network boundary is [`hxp-host-api-v1.md`](hxp-host-api-v1.md). It defines the only extension-facing transport request/response/error shapes; it never exposes raw cookies, an HTTP client, or a WebView.
 
 Archive integrity, publisher trust, revocation, rotation, rollback, and capability-diff rules are normative in [`hxp-package-v1.md`](hxp-package-v1.md).
+
+## Optional source Home capability
+
+`capabilities.home` is optional. When present, it contains only `{ "enabled": boolean }`; absence and `enabled: false` are equivalent. Enabling it is a capability expansion that requires explicit install/update approval.
+
+The capability permits the host to invoke the versioned normalized Home projection in [`hxp-host-api-v1.md`](hxp-host-api-v1.md). It does not grant UI injection, arbitrary navigation, background refresh, browser/WebView access, website mutation, additional origins, cookies, or storage. All requests still pass through `capabilities.network` and the host starts them only after an explicit user action.
 
 ## Signed remote-library redirects
 

@@ -82,6 +82,34 @@ class HxpArchiveVerificationTest {
     }
 
     @Test
+    fun optionalHomeCapabilityIsSignedStrictAndApprovalVisible() {
+        val enabled = signedFixture(
+            home = JsonObject(mapOf("enabled" to JsonPrimitive(true))),
+        )
+        val verifier = HxpArchiveVerifier(InMemoryPublisherKeyStore(listOf(enabled.publisher)))
+        val verified = verifier.verify(enabled.writeToTemporaryFile())
+        assertEquals(true, verified.manifest.capabilities.home.enabled)
+
+        val root = Files.createTempDirectory("hxp-home-capability").toFile()
+        val prepared = newInstaller(root, verifier).prepare(enabled.writeToTemporaryFile())
+        assertEquals(true, "source-home:read" in prepared.addedCapabilities)
+
+        val malformed = signedFixture(
+            home = JsonObject(
+                mapOf(
+                    "enabled" to JsonPrimitive(true),
+                    "layout" to JsonPrimitive("source-controlled"),
+                ),
+            ),
+        )
+        val failure = assertThrows(HxpVerificationException::class.java) {
+            HxpArchiveVerifier(InMemoryPublisherKeyStore(listOf(malformed.publisher)))
+                .verify(malformed.writeToTemporaryFile())
+        }
+        assertEquals(HxpVerificationError.INVALID_MANIFEST, failure.error)
+    }
+
+    @Test
     fun payloadMutationIsRejectedBeforeRuntimeEvaluation() {
         val fixture = signedFixture(payloadInArchive = "export const changed = true;".toByteArray())
         val error = assertThrows(HxpVerificationException::class.java) {

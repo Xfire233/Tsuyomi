@@ -55,13 +55,15 @@ fun LibraryEmptyStateScreenshots() {
                 LibraryScreen(
                     state = LibraryUiState(loading = false),
                     collections = emptyList(),
-                    selectedCollectionId = null,
-                    onCollectionChange = {},
-                    onQueryChange = {},
-                    onFilterChange = {},
+                    showNavigationNodes = true,
+                    onOpenSystemNode = {},
+                    onOpenCollection = {},
                     onOpenBook = {},
+                    onCreateCollection = {},
                     onRetry = {},
-                    onManageCollections = {},
+                    onDismissSort = {},
+                    onSelectSort = {},
+                    onSelectSortDirection = {},
                 )
             }
         }

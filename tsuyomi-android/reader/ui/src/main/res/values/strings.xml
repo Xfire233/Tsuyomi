@@ -1,12 +1,35 @@
 <!-- SPDX-FileCopyrightText: 2026 Tsuyomi Contributors -->
 <!-- SPDX-License-Identifier: Apache-2.0 -->
 <resources>
-    <string name="reader_mode_scroll">滚动</string>
-    <string name="reader_mode_paged">分页</string>
-    <string name="reader_mode_dual">双页</string>
-    <string name="reader_previous">上一段</string>
-    <string name="reader_next">下一段</string>
-    <string name="reader_position">%1$d / %2$d</string>
-    <string name="reader_image">图片</string>
-    <string name="reader_degraded_restore">原文本锚点已变化，已按最近语义位置恢复。</string>
+    <string name="reader_add_bookmark">添加书签</string>
+    <string name="reader_remove_bookmark">移除书签</string>
+    <string name="reader_search">搜索</string>
+    <string name="reader_page_progress">%1$d/%2$d 页 · %3$d%%</string>
+    <string name="reader_chapter_percent">本章 %1$d%%</string>
+    <string name="reader_page_count">%1$d/%2$d 页</string>
+    <string name="reader_page_count_seeking">%1$d/%2$d 页 · 松手定位</string>
+    <string name="reader_previous_chapter">上一章</string>
+    <string name="reader_contents">目录</string>
+    <string name="reader_expand_full_contents">展开全部 %1$d 章</string>
+    <string name="reader_settings">设置</string>
+    <string name="reader_next_chapter">下一章</string>
+    <string name="reader_no_bookmarks">还没有章节书签</string>
+    <string name="reader_bookmark">添加书签</string>
+    <string name="reader_unbookmark">移除书签</string>
+    <string name="reader_search_chapters">搜索章节</string>
+    <string name="reader_no_search_results">没有匹配章节</string>
+    <string name="reader_all_settings">全部设置</string>
+    <string name="reader_font_size">字号</string>
+    <string name="reader_line_spacing">行距</string>
+    <string name="reader_margin">边距</string>
+    <string name="reader_paragraph_spacing">段间距</string>
+    <string name="reader_lock_portrait">锁定竖屏</string>
+    <string name="reader_reading_info">阅读信息</string>
+    <string name="reader_immersive">全屏沉浸</string>
+    <string name="reader_typography_group">排版</string>
+    <string name="reader_page_group">页面</string>
+    <string name="reader_navigation_group">导航</string>
+    <string name="reader_device_group">设备</string>
+    <string name="reader_progress_info">阅读信息与进度</string>
+    <string name="reader_keep_awake">保持屏幕常亮</string>
 </resources>

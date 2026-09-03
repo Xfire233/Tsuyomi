@@ -15,6 +15,7 @@ android {
 dependencies {
     implementation(project(":core:database"))
     implementation(project(":core:ui"))
+    implementation(project(":core:media"))
     implementation(project(":shared:model"))
     implementation(project(":shared:locator"))
     implementation(libs.androidx.compose.foundation)

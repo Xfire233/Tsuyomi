@@ -22,12 +22,18 @@
 **/.fleet/
 **/.run/
 *.swp
+*.tmp
+*.bak
+*~
 .DS_Store
 Thumbs.db
+desktop.ini
+**/.exe/
 
 # Local verification outputs
 .local/
 tsuyomi-android/.local/
+.smell-check/
 tsuyomi-android/local.properties
 tsuyomi-android/build-logic/.gradle/
 tsuyomi-android/build-logic/.kotlin/
@@ -44,6 +50,9 @@ tsuyomi-android/buildinteractive-*smoke-traces/
 *.apk
 *.aab
 *.hxp
+*.mp4
+*.dump
+*.hierarchy
 
 # Credentials and signing material
 .env
@@ -65,6 +74,8 @@ id_ed25519
 **/.agents/
 **/.cursor/
 **/.windsurf/
+**/.omp/
+**/.mnemopi/
 **/AGENTS.md
 **/AGENTS.local.md
 **/*.prompt.md

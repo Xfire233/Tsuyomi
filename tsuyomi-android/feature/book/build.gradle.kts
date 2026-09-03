@@ -11,6 +11,8 @@ android {
 }
 
 dependencies {
+    implementation(project(":core:display"))
+    implementation(project(":core:media"))
     implementation(project(":core:ui"))
     implementation(project(":shared:locator"))
     implementation(project(":shared:model"))

@@ -27,6 +27,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.Immutable
 import androidx.compose.ui.Alignment
 import androidx.compose.runtime.getValue
@@ -36,6 +37,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.composed
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -253,6 +255,12 @@ private data class LibraryItemTargetBounds(
 
 private data class LibraryBookTargetBounds(val index: Int, val bounds: Rect)
 
+private data class LibraryShelfTargetBounds(
+    val bounds: Rect,
+    val allowsBookRoot: Boolean,
+    val onHover: (() -> Unit)?,
+)
+
 internal class LibraryDragCoordinator {
     var activePayload by mutableStateOf<String?>(null)
         private set
@@ -282,8 +290,9 @@ internal class LibraryDragCoordinator {
 
     private var activeCanRemove = false
     private var activeLibraryReorderSource = false
-    private var shelfBounds: Rect? = null
-    private var shelfAllowsBookRoot = true
+    private val shelfTargets = mutableMapOf<Int, LibraryShelfTargetBounds>()
+    private var nextShelfTargetId = 0
+    private var activeShelfTargetId: Int? = null
     private var libraryBounds: Rect? = null
     private var libraryReorderEnabled = false
     private var hostBounds: Rect? = null
@@ -299,9 +308,15 @@ internal class LibraryDragCoordinator {
         sourceBounds[subjectKey] = bounds
     }
 
-    fun registerShelf(bounds: Rect, allowsBookRoot: Boolean) {
-        shelfBounds = bounds
-        shelfAllowsBookRoot = allowsBookRoot
+    fun allocateShelfTargetId(): Int = nextShelfTargetId++
+
+    fun registerShelf(id: Int, bounds: Rect, allowsBookRoot: Boolean, onHover: (() -> Unit)?) {
+        shelfTargets[id] = LibraryShelfTargetBounds(bounds, allowsBookRoot, onHover)
+        updateTarget()
+    }
+
+    fun unregisterShelf(id: Int) {
+        shelfTargets.remove(id)
         updateTarget()
     }
 
@@ -335,7 +350,8 @@ internal class LibraryDragCoordinator {
     }
 
     fun clearItemRegistrations() {
-        shelfBounds = null
+        shelfTargets.clear()
+        activeShelfTargetId = null
         itemBounds.clear()
         sourceBounds.clear()
         dragTargetBounds = emptyMap()
@@ -403,6 +419,7 @@ internal class LibraryDragCoordinator {
         dragTargetBounds = emptyMap()
         dragBookBounds = emptyMap()
         isOverShelf = false
+        activeShelfTargetId = null
         isOverDelete = false
         dragDistance = 0f
     }
@@ -412,6 +429,7 @@ internal class LibraryDragCoordinator {
         isOverDelete = pointer != null && activeCanRemove && deleteBounds?.contains(pointer) == true
         if (isOverDelete) {
             isOverShelf = false
+            activeShelfTargetId = null
             folderTargetId = null
             bookTargetId = null
             rootInsertionIndex = -1
@@ -419,13 +437,25 @@ internal class LibraryDragCoordinator {
             return
         }
 
-        isOverShelf = pointer != null && shelfBounds?.contains(pointer) == true
-        if (isOverShelf && pointer != null) {
+        val shelfTarget = pointer?.let { point ->
+            shelfTargets.entries.firstOrNull { it.value.bounds.contains(point) }
+        }
+        val shelfTargetId = shelfTarget?.key
+        if (shelfTargetId == null) {
+            activeShelfTargetId = null
+        } else if (activePayload != null && activeShelfTargetId != shelfTargetId) {
+            activeShelfTargetId = shelfTargetId
+            shelfTarget.value.onHover?.invoke()
+        }
+        val activeShelfTarget = shelfTarget?.value
+        isOverShelf = activeShelfTarget != null
+        if (activeShelfTarget != null) {
+            val shelfPointer = requireNotNull(pointer)
             libraryInsertionIndex = -1
             val targets = if (dragTargetBounds.isNotEmpty()) dragTargetBounds else itemBounds
-            val hit = targets.entries.firstOrNull { (_, target) -> target.bounds.contains(pointer) }
+            val hit = targets.entries.firstOrNull { (_, target) -> target.bounds.contains(shelfPointer) }
             if (activeBookIds.isNotEmpty() && hit?.value?.kind == LibraryDropItemKind.COLLECTION &&
-                hit.value.bounds.collectionDropBounds().contains(pointer)
+                hit.value.bounds.collectionDropBounds().contains(shelfPointer)
             ) {
                 folderTargetId = hit.key
                 bookTargetId = null
@@ -433,7 +463,7 @@ internal class LibraryDragCoordinator {
                 return
             }
             if (activeBookIds.isNotEmpty() && hit?.value?.kind == LibraryDropItemKind.BOOK &&
-                hit.value.bookId !in activeBookIds && hit.value.bounds.collectionDropBounds().contains(pointer)
+                hit.value.bookId !in activeBookIds && hit.value.bounds.collectionDropBounds().contains(shelfPointer)
             ) {
                 folderTargetId = null
                 bookTargetId = hit.key
@@ -443,13 +473,13 @@ internal class LibraryDragCoordinator {
             folderTargetId = null
             bookTargetId = null
             val target = hit?.value ?: targets.values.minByOrNull { candidate ->
-                val delta = candidate.bounds.center - pointer
+                val delta = candidate.bounds.center - shelfPointer
                 delta.x * delta.x + delta.y * delta.y
             }
-            rootInsertionIndex = if (activeBookIds.isNotEmpty() && !shelfAllowsBookRoot) {
+            rootInsertionIndex = if (activeBookIds.isNotEmpty() && !activeShelfTarget.allowsBookRoot) {
                 -1
             } else {
-                target?.let { if (pointer.x < it.bounds.center.x) it.index else it.index + 1 } ?: 0
+                target?.let { if (shelfPointer.x < it.bounds.center.x) it.index else it.index + 1 } ?: 0
             }
             return
         }
@@ -620,7 +650,22 @@ internal fun Modifier.libraryDragSource(
 internal fun Modifier.libraryShelfDropTarget(
     coordinator: LibraryDragCoordinator,
     allowsBookRoot: Boolean = true,
-): Modifier = onGloballyPositioned { coordinator.registerShelf(it.boundsInWindow(), allowsBookRoot) }
+    onHover: (() -> Unit)? = null,
+): Modifier = composed {
+    val targetId = remember(coordinator) { coordinator.allocateShelfTargetId() }
+    val currentOnHover by rememberUpdatedState(onHover)
+    DisposableEffect(coordinator, targetId) {
+        onDispose { coordinator.unregisterShelf(targetId) }
+    }
+    onGloballyPositioned {
+        coordinator.registerShelf(
+            id = targetId,
+            bounds = it.boundsInWindow(),
+            allowsBookRoot = allowsBookRoot,
+            onHover = currentOnHover?.let { callback -> { callback() } },
+        )
+    }
+}
 
 internal fun Modifier.libraryContentDropTarget(
     coordinator: LibraryDragCoordinator,

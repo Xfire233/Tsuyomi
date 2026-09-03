@@ -48,7 +48,7 @@ internal class SourceRemoteLibraryAddInstrumentedTest : SourceFlowInstrumentedTe
             controller.open(packageInfo)
             controller.selectBook(selected)
 
-            val add = async { controller.addSelectedBook(SOURCE_FLOW_TEST_TIME) }
+            val add = async { controller.addSelectedBookToWebsite(SOURCE_FLOW_TEST_TIME) }
             withTimeout(5_000) { accepted.await() }
             val availability = requireNotNull(library.sourceAvailability(sourceId))
             library.setSourceAvailability(sourceId, availability.verifiedVersion, false, availability.generation + 1)
@@ -87,7 +87,7 @@ internal class SourceRemoteLibraryAddInstrumentedTest : SourceFlowInstrumentedTe
             controller.open(packageInfo)
             controller.selectBook(firstBook)
 
-            val add = async { controller.addSelectedBook(SOURCE_FLOW_TEST_TIME) }
+            val add = async { controller.addSelectedBookToWebsite(SOURCE_FLOW_TEST_TIME) }
             withTimeout(5_000) { accepted.await() }
             controller.selectBook(secondBook)
             releaseResponse.complete(Unit)
@@ -129,7 +129,7 @@ internal class SourceRemoteLibraryAddInstrumentedTest : SourceFlowInstrumentedTe
             controller.open(packageInfo)
             controller.selectBook(selected)
 
-            val add = async { controller.addSelectedBook(SOURCE_FLOW_TEST_TIME) }
+            val add = async { controller.addSelectedBookToWebsite(SOURCE_FLOW_TEST_TIME) }
             withTimeout(5_000) { transportEntered.await() }
             val availability = requireNotNull(library.sourceAvailability(sourceId))
             library.setSourceAvailability(sourceId, availability.verifiedVersion, false, availability.generation + 1)
@@ -167,7 +167,7 @@ internal class SourceRemoteLibraryAddInstrumentedTest : SourceFlowInstrumentedTe
             controller.open(packageInfo)
             controller.selectBook(selected)
 
-            val add = async { controller.addSelectedBook(SOURCE_FLOW_TEST_TIME) }
+            val add = async { controller.addSelectedBookToWebsite(SOURCE_FLOW_TEST_TIME) }
             withTimeout(5_000) { transportEntered.await() }
             assertTrue(library.setAddWritebackEnabled(sourceId, policy.capabilitySetFingerprint, false))
             releaseAcceptance.complete(Unit)
@@ -184,11 +184,11 @@ internal class SourceRemoteLibraryAddInstrumentedTest : SourceFlowInstrumentedTe
     }
 
     @Test
-    fun localOnlyFallbackClearsStaleDetailWritebackState() = runBlocking {
+    fun localAddRemainsLocalWhenWebsiteWritebackIsReady() = runBlocking {
         val packageInfo = installFixture()
         val sourceId = packageInfo.manifest.sourceId.value
         putCredential(sourceId)
-        val selected = summary(sourceId, "4004", "凭证消失")
+        val selected = summary(sourceId, "4004", "仅加入本地")
         val controller = controller { FakeSession() }
         try {
             val policy = requireNotNull(library.sourceRemotePolicy(sourceId))
@@ -197,12 +197,10 @@ internal class SourceRemoteLibraryAddInstrumentedTest : SourceFlowInstrumentedTe
             controller.selectBook(selected)
             assertTrue(controller.remoteLibrary.selectedBookAddWritesRemote)
 
-            File(context.noBackupFilesDir, "source-credentials").deleteRecursively()
-
             assertEquals(RemoteAddUiResult.LocalOnly, controller.addSelectedBook(SOURCE_FLOW_TEST_TIME))
-            assertFalse(controller.remoteLibrary.selectedBookAddWritesRemote)
+            assertTrue(controller.remoteLibrary.selectedBookInLibrary)
+            assertEquals(null, controller.remoteLibrary.selectedBookReconciliation)
             assertTrue(controller.removeSelectedBook())
-            assertFalse(controller.remoteLibrary.selectedBookAddWritesRemote)
         } finally {
             controller.close()
         }
@@ -233,9 +231,9 @@ internal class SourceRemoteLibraryAddInstrumentedTest : SourceFlowInstrumentedTe
             controller.open(packageInfo)
             controller.selectBook(selected)
 
-            val first = async { controller.addSelectedBook(SOURCE_FLOW_TEST_TIME) }
+            val first = async { controller.addSelectedBookToWebsite(SOURCE_FLOW_TEST_TIME) }
             withTimeout(5_000) { transportEntered.await() }
-            val second = async { controller.addSelectedBook(SOURCE_FLOW_TEST_TIME.plusSeconds(1)) }
+            val second = async { controller.addSelectedBookToWebsite(SOURCE_FLOW_TEST_TIME.plusSeconds(1)) }
             releaseResponse.complete(Unit)
 
             assertEquals(RemoteAddUiResult.Confirmed, first.await())
@@ -267,7 +265,7 @@ internal class SourceRemoteLibraryAddInstrumentedTest : SourceFlowInstrumentedTe
             controller.open(packageInfo)
             controller.selectBook(selected)
 
-            val add = async { controller.addSelectedBook(SOURCE_FLOW_TEST_TIME) }
+            val add = async { controller.addSelectedBookToWebsite(SOURCE_FLOW_TEST_TIME) }
             withTimeout(5_000) { transportEntered.await() }
             add.cancelAndJoin()
             withTimeout(5_000) {
@@ -310,7 +308,7 @@ internal class SourceRemoteLibraryAddInstrumentedTest : SourceFlowInstrumentedTe
             controller.open(packageInfo)
             controller.selectBook(selected)
 
-            assertEquals(RemoteAddUiResult.Unresolved, controller.addSelectedBook(SOURCE_FLOW_TEST_TIME))
+            assertEquals(RemoteAddUiResult.Unresolved, controller.addSelectedBookToWebsite(SOURCE_FLOW_TEST_TIME))
             assertEquals(RemoteReconciliationState.UNRESOLVED, controller.remoteLibrary.selectedBookReconciliation)
             File(context.noBackupFilesDir, "source-credentials").deleteRecursively()
             assertEquals(

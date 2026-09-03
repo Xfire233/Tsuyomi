@@ -230,11 +230,15 @@ class RoomTransferRepository(private val database: TsuyomiDatabase) {
                     (incoming.addedAt ?: plan.sourceCreatedAt).epochSecond,
                     (incoming.addedAt ?: plan.sourceCreatedAt).nano,
                     incoming.rating?.takeIf { it > 0.0 }?.toInt()?.coerceIn(1, 5),
+                    incoming.readLater,
                 ),
             )
             val incomingRating = incoming.rating
             if (entryInserted == -1L && accepted && incomingRating != null && incomingRating > 0.0) {
                 dao.updateRating(incoming.identity.sourceId, incoming.identity.remoteBookId, incomingRating.toInt().coerceIn(1, 5))
+            }
+            if (entryInserted == -1L && incoming.readLater) {
+                dao.updateReadLater(incoming.identity.sourceId, incoming.identity.remoteBookId, true)
             }
             val mergedTags = linkedMapOf<String, String>()
             dao.localTags(incoming.identity.sourceId, incoming.identity.remoteBookId).forEach { tag ->
@@ -347,6 +351,7 @@ class RoomTransferRepository(private val database: TsuyomiDatabase) {
                     localTags = dao.localTags(identity.sourceId, identity.remoteBookId).mapTo(sortedSetOf()) { it.displayTag },
                     shelfIds = memberships[identity].orEmpty().mapTo(sortedSetOf()) { it.collectionId },
                     rating = entry.rating?.toDouble(),
+                    readLater = entry.readLater,
                     addedAt = Instant.ofEpochSecond(entry.addedAtEpochSecond, entry.addedAtNano.toLong()),
                     updatedAt = domain.metadataUpdatedAt,
                     progress = dao.progress(identity.sourceId, identity.remoteBookId)?.let { progress ->

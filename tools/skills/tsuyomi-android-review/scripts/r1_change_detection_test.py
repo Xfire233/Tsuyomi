@@ -93,6 +93,16 @@ class PhaseContractDetectionTest(unittest.TestCase):
                 self.assertEqual(expected_nodes, selected)
 
 
+    def test_production_policy_activates_all_nodes_and_keeps_eink_deferred(self) -> None:
+        root = r1.find_repo_root(Path.cwd())
+        policy, _ = r1.load_review_policy(root)
+
+        self.assertEqual("phase4a-production-standard-first", policy["mode"])
+        self.assertEqual(["L", "B", "M", "S", "X"], policy["nodeExecution"]["activeNodePrefixes"])
+        self.assertEqual([], policy["nodeExecution"]["deferredStages"])
+        self.assertEqual(["S", "X"], policy["nodeExecution"]["actualOnlineRequirements"]["nodePrefixes"])
+        self.assertEqual(["EINK"], [item["profile"] for item in policy["deferredProfiles"]])
+
     def test_review_export_schema_matches_catalog_version(self) -> None:
         root = r1.find_repo_root(Path.cwd())
         catalog_version, _ = r1.parse_catalog(root)

@@ -16,8 +16,12 @@ local.properties
 .fleet/
 .run/
 Thumbs.db
+desktop.ini
 /.exe/
 *.swp
+*.tmp
+*.bak
+*~
 keystore.properties
 *.jks
 *.keystore
@@ -38,6 +42,13 @@ keystore.properties
 *.log
 *.trace
 *.profraw
+*.apk
+*.aab
+*.hxp
+*.mp4
+*.dump
+*.hierarchy
+.smell-check/
 
 # Local-only Phase 4 atlas evidence and browser reviewer
 # Product prototype source stays reviewable; generated pixels, reviewer UI, and exports do not.
@@ -53,6 +64,8 @@ keystore.properties
 .agents/
 .cursor/
 .windsurf/
+.omp/
+.mnemopi/
 AGENTS.md
 AGENTS.local.md
 *.prompt.md
