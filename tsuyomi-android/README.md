@@ -5,9 +5,8 @@
 
 本地优先、面向墨水屏的原生 Android 轻小说阅读器。使用 Kotlin 与 Jetpack Compose 构建，目标平台为 Android 10 及以上版本（`minSdk 29`）。
 
-> [!IMPORTANT]
-> 项目目前完成的是 Phase 1 原生应用基础设施、显示系统、数据/安全契约与 UI 基线，尚不是可日常使用的完整阅读器。Wenku8 搜索、详情、目录、章节和阅读器垂直切片属于后续 Phase。
-
+> [!NOTE]
+> 项目目前已完成 **Phase 0 到 Phase 3** 的基础设施、数据与契约，以及 **Phase 4A (Standard UI/UX 生产级交互切片)**。已实现 Wenku8 在线搜索、详情、目录、章节正文阅读、双排/单排排版、语义进度持久化、书架拖拽与快捷栏交互、数据导入导出迁移。墨水屏全局适配（E-ink）处于临时冻结状态，待 Standard 阶段闭环后开展专项恢复。
 ## 项目目标
 
 - **本地优先**：不要求 Tsuyomi 账号，不依赖 Google Play Services，不接入遥测、远程 feature flag 或自动崩溃上报。
@@ -17,20 +16,60 @@
 - **语义阅读进度**：持久化章节与文本语义位置，而不是依赖易失效的页码、像素偏移或滚动百分比。
 - **可审计发布**：面向 GitHub Releases 与 F-Droid；依赖锁、校验元数据、第三方声明、REUSE、Phase 证据和 gate 判定随代码版本化。
 
-## 当前状态
+## 当前状态与项目进度
 
-Phase 1 已建立并通过本地验证：
+项目采用阶段化递进架构，已完成的核心能力如下：
 
-- Android API 29 构建与 instrumentation 基线；
-- Standard、手动 E-ink、自动识别状态和动态颜色决策；
-- E-ink 高对比浅色、即时动效策略与应用内手动重绘；
-- Room 数据模型与事务并发不变量；
-- Android Keystore AES-GCM 来源凭据分区；
-- Reader 文档、语义 locator、布局事务与预览 witness 的 JVM 契约；
-- 真实 feature composable 的 screenshot golden；
-- Gradle dependency locking、严格校验、REUSE 与仓库制品检查。
+- **Phase 0：协议与安全基线（已完成）**：HXP 签名扩展包规范、Host API 1.1、加密安全凭据分区（Android Keystore AES-GCM）、跨平台传输/备份协议契约。
+- **Phase 1：Android 宿主骨架与全局显示模式（已完成）**：Jetpack Compose + Material 3 原生界面架构、Room 数据模型与事务不变量、Standard / E-ink 双模式配置架构与 API 29 验证基线。
+- **Phase 2：Wenku8 只读垂直阅读切片（已完成）**：QuickJS 隔离执行沙箱、受控 WebView 登录验证、搜索 → 详情 → 目录 → 章节阅读 → 语义进度保存与恢复端到端闭环。
+- **Phase 3：本地书架与迁移体系（已完成）**：多层级系统/手动/智能收藏夹、`tsuyomi-transfer` 数据导入导出、从旧版 Hikari 无凭据安全平滑迁移、远端书架只读拉取与同步。
+- **Phase 4A：Standard 交互与 UI Atlas 生产级落地（已完成）**：
+  - **书架交互全套迁移**：网格、列表、紧凑三布局长按多选，`SelectionAppBar` 批量移动/添加至收藏夹及本地删除。
+  - **书籍拖拽与归类**：书籍拖至书籍创建收藏夹、拖入现有收藏夹、根目录横向展开插入位并挤开相邻元素。
+  - **快捷栏双模式重构**：
+    - **常驻锁定模式**：快捷栏固定于 AppBar 下方，便于大量书籍拖拽归类，保持完整拖拽、插入、重排与交互能力。
+    - **内联收折模式**：跟随页面滚动，滑出视口后收折为 ≥48dp 悬浮手柄，支持点击、上滑或拖拽书籍悬停动态展开。
+  - **单次长按连续拖拽**：非多选模式下长按书籍达到平台阈值即刻拾取拖动，无需二次手势；拖拽时具备动态让位与收藏夹缩放高亮反馈。
+  - **自定义排序持久化**：Room v4 引入 `display_order`，支持书架根目录及手动收藏夹自由重排与持久化。
+  - **发现页与推荐源站化**：原生解析 Wenku8 首页推荐栏目（7 月新番、新书风云榜、本周会员推荐榜）及《这本轻小说真厉害！》专属榜单页。
+  - **界面细节与规范**：对称标签栏、200ms M3 展开收起动效、滚动方向自适应 FAB。
 
-完整证据见 [`docs/phases/PHASE_1.md`](docs/phases/PHASE_1.md)。开发阶段和未实现范围见 [`docs/architecture/DELIVERY_PHASES_0_3.md`](docs/architecture/DELIVERY_PHASES_0_3.md)。
+完整阶段规划与历史证据参见 [`docs/phases/`](docs/phases/) 与 [`docs/architecture/DELIVERY_PHASES_0_3.md`](docs/architecture/DELIVERY_PHASES_0_3.md)。
+
+## 更新日志 (Changelog)
+
+详细版本变更历史见 [`CHANGELOG.md`](CHANGELOG.md)。近期主要更新：
+
+### [Unreleased] (Phase 4A Standard UX Cutover)
+- **书架交互与 Atlas 对齐**：长按多选、SelectionAppBar、书籍拖拽归类与合集创建、Room v4 自定义排序持久化。
+- **快捷书架双模式**：常驻锁定（保持固定且全交互可用）与内联收折（悬浮把手动态展开），单次长按连续拾取。
+- **Wenku8 发现与推荐栏目**：首页三大推荐栏目、轻小说排行榜专页、对称标签栏与 200ms M3 动效。
+- **稳定性与测试**：消除 Compose 触摸输入与手势事件循环死锁，CI 全自动化测试（API 29 Instrumentation、Lint、Goldens）全绿通过。
+
+### [0.1.0] - 2026-08-09
+- Phase 1 Android 宿主骨架、全局 Standard/E-ink 配置、Room 架构与 API 29 基线。
+
+## 未来计划 (Roadmap)
+
+项目后续迭代遵循公开阶段规划与本地架构契约：
+
+- [ ] **Phase 4B: 授权远端回写与云端书架镜像**
+  - 基于 Host API 1.2 / HXP v2 写入能力子集；
+  - 提供用户显式授权的远端书架目标选择、远端移出与移入对账机制，确保网络操作完全透明可控。
+- [ ] **Phase 4C: 更新协调中心与可控计划检查**
+  - 前台显式小说更新状态汇总与未读指示；
+  - 提供用户可配置的手动检查与后台定时轻量更新检查。
+- [ ] **E-ink 墨水屏全量复苏与真机适配**
+  - 解除 E-ink 临时冻结状态，执行专项 E-ink 恢复工程；
+  - 对齐 28 个 Review 节点的墨水屏高对比度浅色样式、即时动效策略与残影重绘触发机制；
+  - 接入物理墨水屏设备实测与双设备（手机 + 墨水屏）证据矩阵。
+- [ ] **多来源扩展生态演进**
+  - 推进 ESJZone 等更多社区小说的签名 `.hxp` 来源扩展包支持；
+  - 完善扩展管理、权限隔离与防爬受控流程。
+- [ ] **本地阅读体验深化**
+  - 支持本地离线 EPUB / TXT 文档解析与统一 ReaderLocator 映射；
+  - 增强阅读器排版预设、字体支持与注音/插图渲染。
 
 ## 组件边界
 
