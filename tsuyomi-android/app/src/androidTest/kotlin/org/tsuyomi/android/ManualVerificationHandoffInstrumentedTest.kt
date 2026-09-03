@@ -73,6 +73,7 @@ class ManualVerificationHandoffInstrumentedTest {
         composeRule.onNodeWithText("浏览").performClick()
         waitForText("搜索此来源")
         composeRule.onNodeWithText("搜索此来源").performClick()
+        waitForText("输入关键词后搜索")
         composeRule.onNode(hasSetTextAction()).performTextInput("login")
         composeRule.onNode(hasSetTextAction()).performImeAction()
         waitForText("此来源需要用户手动登录。")
@@ -611,6 +612,10 @@ class ManualVerificationHandoffInstrumentedTest {
         waitForText(sourceEntryLabel)
         composeRule.onNodeWithText(sourceEntryLabel).performClick()
         val queryLabel = if (profile == DisplayPreference.EINK) "搜索书名" else "搜索"
+        waitForText(queryLabel)
+        composeRule.waitUntil(timeoutMillis = 15_000) {
+            composeRule.onAllNodes(hasSetTextAction()).fetchSemanticsNodes().isNotEmpty()
+        }
         composeRule.onNode(hasSetTextAction()).performTextInput("challenge")
         composeRule.onNode(hasSetTextAction()).performImeAction()
         waitForText("此来源要求用户手动完成安全验证。")

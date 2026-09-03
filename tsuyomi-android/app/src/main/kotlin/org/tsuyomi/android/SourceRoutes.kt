@@ -348,14 +348,7 @@ private fun NavGraphBuilder.detailRoute(
         val verifiedDirectorySequence by entry.savedStateHandle
             .getStateFlow(VerifiedDirectoryResultSequenceKey, 0L)
             .collectAsStateWithLifecycle()
-        LaunchedEffect(detail, packageInfo?.packageSha256) {
-            if (packageInfo != null) {
-                detail.restore(packageInfo)
-            } else if (detail.state !is SourceBookState.Content && detail.state !is SourceBookState.Failure) {
-                detail.loadAll()
-            }
-        }
-        LaunchedEffect(verifiedDetailSequence, verifiedDirectorySequence) {
+        LaunchedEffect(detail, packageInfo?.packageSha256, verifiedDetailSequence, verifiedDirectorySequence) {
             if (verifiedDetailSequence > 0L) {
                 detail.acceptVerifiedDetailResult()
                 detail.resumeDirectoryAfterVerifiedDetail()
@@ -364,6 +357,11 @@ private fun NavGraphBuilder.detailRoute(
             if (verifiedDirectorySequence > 0L) {
                 detail.acceptVerifiedDirectoryResult()
                 entry.savedStateHandle[VerifiedDirectoryResultSequenceKey] = 0L
+            }
+            if (verifiedDetailSequence == 0L && verifiedDirectorySequence == 0L) {
+                if (detail.state !is SourceBookState.Content && detail.state !is SourceBookState.Failure) {
+                    if (packageInfo != null) detail.restore(packageInfo) else detail.loadAll()
+                }
             }
         }
         LaunchedEffect(detail, commandSequence) {
