@@ -342,19 +342,28 @@ private fun NavGraphBuilder.detailRoute(
         }
         val commandSequence by commandSequenceFlow.collectAsStateWithLifecycle()
         val packageInfo = owner.installer.activePackage
+        val verifiedDetailSequence by entry.savedStateHandle
+            .getStateFlow(VerifiedDetailResultSequenceKey, 0L)
+            .collectAsStateWithLifecycle()
+        val verifiedDirectorySequence by entry.savedStateHandle
+            .getStateFlow(VerifiedDirectoryResultSequenceKey, 0L)
+            .collectAsStateWithLifecycle()
         LaunchedEffect(detail, packageInfo?.packageSha256) {
-            val verifiedDetailSequence =
-                entry.savedStateHandle.get<Long>(VerifiedDetailResultSequenceKey) ?: 0L
-            val verifiedDirectorySequence =
-                entry.savedStateHandle.get<Long>(VerifiedDirectoryResultSequenceKey) ?: 0L
-            if (verifiedDetailSequence > 0L || verifiedDirectorySequence > 0L) {
+            if (packageInfo != null) {
+                detail.restore(packageInfo)
+            } else if (detail.state !is SourceBookState.Content && detail.state !is SourceBookState.Failure) {
+                detail.loadAll()
+            }
+        }
+        LaunchedEffect(verifiedDetailSequence, verifiedDirectorySequence) {
+            if (verifiedDetailSequence > 0L) {
                 detail.acceptVerifiedDetailResult()
-                if (verifiedDirectorySequence > 0L) detail.acceptVerifiedDirectoryResult()
-                if (verifiedDetailSequence > 0L) detail.resumeDirectoryAfterVerifiedDetail()
+                detail.resumeDirectoryAfterVerifiedDetail()
                 entry.savedStateHandle[VerifiedDetailResultSequenceKey] = 0L
+            }
+            if (verifiedDirectorySequence > 0L) {
+                detail.acceptVerifiedDirectoryResult()
                 entry.savedStateHandle[VerifiedDirectoryResultSequenceKey] = 0L
-            } else {
-                if (packageInfo != null) detail.restore(packageInfo) else detail.loadAll()
             }
         }
         LaunchedEffect(detail, commandSequence) {
@@ -463,7 +472,9 @@ private fun NavGraphBuilder.readerRoute(
             packageInfo?.let { reader.restore(it) }
         }
         LaunchedEffect(reader.currentChapter?.chapterId) {
-            if (verifiedChapterSequence == 0L && reader.currentChapter != null && reader.document == null) reader.load()
+            if (verifiedChapterSequence == 0L && reader.currentChapter != null && reader.document == null && reader.failure == null) {
+                reader.load()
+            }
         }
         LaunchedEffect(verifiedChapterSequence) {
             if (verifiedChapterSequence > 0L) {

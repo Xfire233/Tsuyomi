@@ -10,6 +10,7 @@ import androidx.compose.runtime.Stable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.lifecycle.SavedStateHandle
 import androidx.navigation.NavBackStackEntry
@@ -172,7 +173,6 @@ internal class SourceDetailRouteOwner(
     }
 
     suspend fun resumeDirectoryAfterVerifiedDetail() {
-        if (directoryState !is SourceBookState.Loading) return
         val book = selectedBook ?: return
         directoryState = flow.requestDirectory(book)
     }
@@ -509,8 +509,9 @@ internal fun rememberSourceDetailRouteOwner(
     flow: SourceFlowController,
     sourceRouteOwner: SourceRouteOwner,
 ): SourceDetailRouteOwner {
-    val owner = remember(entry, flow, sourceRouteOwner) {
-        SourceDetailRouteOwner(flow, entry.savedStateHandle, sourceRouteOwner::notifyLibraryChanged)
+    val notifyLibraryChanged = rememberUpdatedState(sourceRouteOwner::notifyLibraryChanged)
+    val owner = remember(entry, flow) {
+        SourceDetailRouteOwner(flow, entry.savedStateHandle) { notifyLibraryChanged.value.invoke() }
     }
     DisposableEffect(owner) { onDispose(owner::dispose) }
     return owner

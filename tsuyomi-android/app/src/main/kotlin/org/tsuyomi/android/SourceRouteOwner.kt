@@ -10,6 +10,8 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.Stable
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -284,12 +286,15 @@ internal fun rememberSourceRouteOwner(
         onDispose(flow::close)
     }
 
-    val owner = SourceRouteOwner(
-        installer = installer,
-        flow = flow,
-        navController = navController,
-        requestImportAction = { extensionPicker.launch(arrayOf("application/zip", "application/octet-stream")) },
-        onLibraryChanged = onLibraryChanged,
-    )
+    val currentOnLibraryChanged by rememberUpdatedState(onLibraryChanged)
+    val owner = remember(installer, flow, navController) {
+        SourceRouteOwner(
+            installer = installer,
+            flow = flow,
+            navController = navController,
+            requestImportAction = { extensionPicker.launch(arrayOf("application/zip", "application/octet-stream")) },
+            onLibraryChanged = { currentOnLibraryChanged() },
+        )
+    }
     return owner
 }
