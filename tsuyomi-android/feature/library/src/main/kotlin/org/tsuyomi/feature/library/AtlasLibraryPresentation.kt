@@ -38,6 +38,8 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.lazy.LazyItemScope
+import androidx.compose.foundation.lazy.grid.LazyGridItemScope
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.rememberLazyGridState
@@ -74,6 +76,7 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalWindowInfo
+import androidx.compose.ui.platform.LocalInspectionMode
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
@@ -519,7 +522,7 @@ private fun ShortcutShelf(
                 },
             ) { visualIndex ->
                 if (visualIndex == gapIndex) {
-                    ShortcutInsertionGap(Modifier.animateItem())
+                    ShortcutInsertionGap(optionalAnimateItem())
                 } else {
                     val itemIndex = if (gapIndex != null && visualIndex > gapIndex) visualIndex - 1 else visualIndex
                     val shortcut = shortcuts[itemIndex]
@@ -537,7 +540,7 @@ private fun ShortcutShelf(
                         onLongPressCollection = onLongPressCollection,
                         onToggleCollectionSelection = onToggleCollectionSelection,
                         coverState = coverState,
-                        modifier = Modifier.width(ShortcutTileWidthDp.dp).animateItem(),
+                        modifier = Modifier.width(ShortcutTileWidthDp.dp).then(optionalAnimateItem()),
                     )
                 }
             }
@@ -761,7 +764,7 @@ private fun ShortcutAllPage(
                     },
                 ) { visualIndex ->
                     if (visualIndex == gapIndex) {
-                        ShortcutInsertionGap(Modifier.fillMaxWidth().animateItem(), expanded = true)
+                        ShortcutInsertionGap(Modifier.fillMaxWidth().then(optionalAnimateItem()), expanded = true)
                     } else {
                         val itemIndex = if (gapIndex != null && visualIndex > gapIndex) visualIndex - 1 else visualIndex
                         val shortcut = shortcuts[itemIndex]
@@ -779,7 +782,7 @@ private fun ShortcutAllPage(
                             onLongPressCollection = onLongPressCollection,
                             onToggleCollectionSelection = onToggleCollectionSelection,
                             coverState = coverState,
-                            modifier = Modifier.fillMaxWidth().animateItem(),
+                            modifier = Modifier.fillMaxWidth().then(optionalAnimateItem()),
                         )
                     }
                 }
@@ -851,6 +854,14 @@ private fun ShortcutInsertionGap(
         }
     }
 }
+
+@Composable
+private fun LazyItemScope.optionalAnimateItem(): Modifier =
+    if (LocalInspectionMode.current) Modifier else Modifier.animateItem()
+
+@Composable
+private fun LazyGridItemScope.optionalAnimateItem(): Modifier =
+    if (LocalInspectionMode.current) Modifier else Modifier.animateItem()
 
 @Composable
 private fun ShortcutShelfOverlay(
