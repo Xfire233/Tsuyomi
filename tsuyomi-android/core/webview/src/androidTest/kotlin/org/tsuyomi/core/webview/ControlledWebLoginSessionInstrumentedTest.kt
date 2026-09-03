@@ -5,10 +5,11 @@
 package org.tsuyomi.core.webview
 
 import android.webkit.CookieManager
+import android.webkit.WebChromeClient
+import android.webkit.WebView
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withTimeout
@@ -147,7 +148,7 @@ class ControlledWebLoginSessionInstrumentedTest {
                 null,
             )
             withTimeout(5_000) {
-                while (view.progress < 100) delay(10)
+                awaitProgress100(view)
             }
 
             val snapshot = session.captureCurrentPage(maxBytes = 4_096)
@@ -252,5 +253,25 @@ class ControlledWebLoginSessionInstrumentedTest {
     private suspend fun clearCookies() = suspendCancellableCoroutine { continuation ->
         CookieManager.getInstance().removeAllCookies { continuation.resume(Unit) }
         CookieManager.getInstance().flush()
+    }
+
+    private suspend fun awaitProgress100(view: WebView) = suspendCancellableCoroutine { continuation ->
+        if (view.progress >= 100) {
+            continuation.resume(Unit)
+            return@suspendCancellableCoroutine
+        }
+        val previousClient = view.webChromeClient
+        view.webChromeClient = object : WebChromeClient() {
+            override fun onProgressChanged(v: WebView?, newProgress: Int) {
+                super.onProgressChanged(v, newProgress)
+                if (newProgress >= 100 && continuation.isActive) {
+                    view.webChromeClient = previousClient
+                    continuation.resume(Unit)
+                }
+            }
+        }
+        continuation.invokeOnCancellation {
+            view.webChromeClient = previousClient
+        }
     }
 }

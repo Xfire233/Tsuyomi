@@ -33,7 +33,7 @@ jobs:
           else
             base="${{ github.event.before }}"
           fi
-          if [ -z "$base" ] || ! git -C "$GITHUB_WORKSPACE" cat-file -e "$base^{commit}" 2>/dev/null || ! git -C "$GITHUB_WORKSPACE" diff --quiet "$base" "$GITHUB_SHA" -- tsuyomi-android .github/workflows/android-quality.yml; then
+          if [ -z "$base" ] || ! git -C "$GITHUB_WORKSPACE" cat-file -e "$base^{commit}" 2>/dev/null || ! git -C "$GITHUB_WORKSPACE" diff --quiet "$base" "$GITHUB_SHA" -- tsuyomi-android ':!tsuyomi-android/**/*.md' ':!tsuyomi-android/*.md' .github/workflows/android-quality.yml; then
             echo "changed=true" >> "$GITHUB_OUTPUT"
           else
             echo "changed=false" >> "$GITHUB_OUTPUT"
@@ -83,7 +83,7 @@ jobs:
 
   android-api29-instrumentation:
     runs-on: ubuntu-latest
-    timeout-minutes: 35
+    timeout-minutes: 50
     steps:
       - name: Checkout
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
@@ -98,7 +98,7 @@ jobs:
           else
             base="${{ github.event.before }}"
           fi
-          if [ -z "$base" ] || ! git -C "$GITHUB_WORKSPACE" cat-file -e "$base^{commit}" 2>/dev/null || ! git -C "$GITHUB_WORKSPACE" diff --quiet "$base" "$GITHUB_SHA" -- tsuyomi-android .github/workflows/android-quality.yml; then
+          if [ -z "$base" ] || ! git -C "$GITHUB_WORKSPACE" cat-file -e "$base^{commit}" 2>/dev/null || ! git -C "$GITHUB_WORKSPACE" diff --quiet "$base" "$GITHUB_SHA" -- tsuyomi-android ':!tsuyomi-android/**/*.md' ':!tsuyomi-android/*.md' .github/workflows/android-quality.yml; then
             echo "changed=true" >> "$GITHUB_OUTPUT"
           else
             echo "changed=false" >> "$GITHUB_OUTPUT"
@@ -153,6 +153,7 @@ jobs:
         if: steps.changes.outputs.changed == 'true'
         run: >-
           ./gradlew --no-daemon --console=plain --dependency-verification strict
+          --max-workers=1
           -Ptsuyomi.prototype=true
           :app:connectedDebugAndroidTest
           :feature:settings:connectedDebugAndroidTest
