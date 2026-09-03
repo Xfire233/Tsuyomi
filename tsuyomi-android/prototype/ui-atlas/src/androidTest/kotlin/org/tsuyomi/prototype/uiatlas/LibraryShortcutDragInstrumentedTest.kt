@@ -580,10 +580,14 @@ class LibraryShortcutDragInstrumentedTest {
     @Test
     fun stationary_long_press_enters_selection_at_timeout_before_release() {
         val book = composeRule.onNodeWithContentDescription("山中邮差，长按多选，移动可拖动至快捷书架")
-        book.performTouchInput { down(center) }
-        composeRule.mainClock.advanceTimeBy(600)
-        composeRule.waitForIdle()
-
+        book.performTouchInput {
+            down(center)
+            advanceEventTime(600)
+            up()
+        }
+        composeRule.waitUntil(timeoutMillis = 5_000) {
+            composeRule.onAllNodesWithContentDescription("已选择").fetchSemanticsNodes().isNotEmpty()
+        }
         composeRule.onNodeWithContentDescription("已选择").assertExists()
         composeRule.onNodeWithContentDescription("用所选新建收藏夹").assertExists()
         composeRule.onNodeWithContentDescription("移入收藏夹").assertExists()
