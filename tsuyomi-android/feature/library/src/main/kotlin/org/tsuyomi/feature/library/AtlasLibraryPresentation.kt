@@ -522,7 +522,7 @@ private fun ShortcutShelf(
                 },
             ) { visualIndex ->
                 if (visualIndex == gapIndex) {
-                    ShortcutInsertionGap(optionalAnimateItem())
+                    ShortcutInsertionGap(Modifier.optionalAnimateItem(this))
                 } else {
                     val itemIndex = if (gapIndex != null && visualIndex > gapIndex) visualIndex - 1 else visualIndex
                     val shortcut = shortcuts[itemIndex]
@@ -540,7 +540,7 @@ private fun ShortcutShelf(
                         onLongPressCollection = onLongPressCollection,
                         onToggleCollectionSelection = onToggleCollectionSelection,
                         coverState = coverState,
-                        modifier = Modifier.width(ShortcutTileWidthDp.dp).then(optionalAnimateItem()),
+                        modifier = Modifier.width(ShortcutTileWidthDp.dp).optionalAnimateItem(this),
                     )
                 }
             }
@@ -764,7 +764,7 @@ private fun ShortcutAllPage(
                     },
                 ) { visualIndex ->
                     if (visualIndex == gapIndex) {
-                        ShortcutInsertionGap(Modifier.fillMaxWidth().then(optionalAnimateItem()), expanded = true)
+                        ShortcutInsertionGap(Modifier.fillMaxWidth().optionalAnimateItem(this), expanded = true)
                     } else {
                         val itemIndex = if (gapIndex != null && visualIndex > gapIndex) visualIndex - 1 else visualIndex
                         val shortcut = shortcuts[itemIndex]
@@ -782,7 +782,7 @@ private fun ShortcutAllPage(
                             onLongPressCollection = onLongPressCollection,
                             onToggleCollectionSelection = onToggleCollectionSelection,
                             coverState = coverState,
-                            modifier = Modifier.fillMaxWidth().then(optionalAnimateItem()),
+                            modifier = Modifier.fillMaxWidth().optionalAnimateItem(this),
                         )
                     }
                 }
@@ -856,12 +856,12 @@ private fun ShortcutInsertionGap(
 }
 
 @Composable
-private fun LazyItemScope.optionalAnimateItem(): Modifier =
-    if (LocalInspectionMode.current) Modifier else Modifier.animateItem()
+private fun Modifier.optionalAnimateItem(scope: LazyItemScope): Modifier =
+    if (LocalInspectionMode.current) this else with(scope) { this@optionalAnimateItem.animateItem() }
 
 @Composable
-private fun LazyGridItemScope.optionalAnimateItem(): Modifier =
-    if (LocalInspectionMode.current) Modifier else Modifier.animateItem()
+private fun Modifier.optionalAnimateItem(scope: LazyGridItemScope): Modifier =
+    if (LocalInspectionMode.current) this else with(scope) { this@optionalAnimateItem.animateItem() }
 
 @Composable
 private fun ShortcutShelfOverlay(
