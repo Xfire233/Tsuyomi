@@ -63,6 +63,45 @@ class VerifiedPageRedirectInstrumentedTest {
     }
 
     @Test
+    fun authorSearchUsesTheAuthorRequestForVerifiedPageParsing() = runBlocking {
+        val context = InstrumentationRegistry.getInstrumentation().targetContext
+        val fixture = File(context.cacheDir, "wenku8-author-search-${System.nanoTime()}.hxp")
+        try {
+            context.assets.open("wenku8-fixture.hxp").use { input ->
+                fixture.outputStream().use(input::copyTo)
+            }
+            val packageInfo = HxpArchiveVerifier(
+                InMemoryPublisherKeyStore(listOf(Phase2TestPublisher.key)),
+            ).verify(fixture)
+            val requestUrl =
+                "https://www.wenku8.net/modules/article/search.php?searchtype=author&searchkey=author&page=1"
+            val searchHtml = context.assets.open("search.html").bufferedReader().use { it.readText() }
+
+            val results = SourceExtensionClient.open(
+                packageInfo,
+                Phase2SourceGateway.createVerifiedPage(
+                    context = context,
+                    packageInfo = packageInfo,
+                    snapshot = CapturedVerifiedPage(
+                        requestUrl = requestUrl,
+                        pageUrl = requestUrl,
+                        html = searchHtml,
+                    ),
+                    directActionTokens = DirectActionTokenRegistry(),
+                ),
+            ).use { client ->
+                assertEquals(requestUrl, client.authorSearchRequestUrl("author"))
+                client.authorSearch("author")
+            }
+
+            assertEquals(2, results.size)
+            assertEquals("1234", results.first().identity.remoteBookId)
+        } finally {
+            fixture.delete()
+        }
+    }
+
+    @Test
     fun verifiedDetailUsesTheExactPausedGetAndSignedParser() = runBlocking {
         val context = InstrumentationRegistry.getInstrumentation().targetContext
         val fixture = File(context.cacheDir, "wenku8-detail-${System.nanoTime()}.hxp")
@@ -95,6 +134,7 @@ class VerifiedPageRedirectInstrumentedTest {
 
             assertEquals("1234", detail.summary.identity.remoteBookId)
             assertEquals("雾港纪事", detail.summary.title)
+            assertEquals("2026-02-03", detail.lastUpdatedDate)
         } finally {
             fixture.delete()
         }

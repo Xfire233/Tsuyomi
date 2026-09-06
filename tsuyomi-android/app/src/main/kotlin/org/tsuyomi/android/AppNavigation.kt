@@ -36,6 +36,8 @@ internal object Routes {
     const val VerifiedDirectoryPage = "source/verification/verified-directory-page"
     const val VerifiedChapterPage = "source/verification/verified-chapter-page"
     const val RemoteLibrary = "source/remote-library"
+    const val LibraryMirror = "library/mirror/{bindingId}"
+    const val LibraryMirrorFolder = "library/mirror/{bindingId}/folder/{targetId}"
     const val Transfer = "settings/transfer"
 
     fun librarySystem(filter: org.tsuyomi.feature.library.SystemLibraryFilter): String =
@@ -45,6 +47,10 @@ internal object Routes {
         "library/collection/${Uri.encode(collectionId)}"
 
     fun libraryTag(tag: String): String = "library/tag/${Uri.encode(tag)}"
+
+    fun libraryMirror(bindingId: String): String = "library/mirror/${Uri.encode(bindingId)}"
+    fun libraryMirrorFolder(bindingId: String, targetId: String): String =
+        "library/mirror/${Uri.encode(bindingId)}/folder/${Uri.encode(targetId)}"
 }
 
 
@@ -54,6 +60,8 @@ internal fun rootRouteFor(route: String): String = when (route) {
     Routes.LibraryCollection,
     Routes.LibraryTags,
     Routes.LibraryTagBooks,
+    Routes.LibraryMirror,
+    Routes.LibraryMirrorFolder,
     -> Routes.Library
     Routes.Display, Routes.About, Routes.Transfer -> Routes.More
     Routes.SourceHome,
@@ -78,7 +86,7 @@ internal fun restorationTargetForRoute(route: String): SourceRestorationTarget? 
     Routes.Detail -> SourceRestorationTarget.DETAIL
     Routes.Directory -> SourceRestorationTarget.DIRECTORY
     Routes.Reader -> SourceRestorationTarget.READER
-    Routes.RemoteLibrary -> SourceRestorationTarget.SEARCH
+    Routes.RemoteLibrary, Routes.LibraryMirror, Routes.LibraryMirrorFolder -> SourceRestorationTarget.SEARCH
     else -> null
 }
 
@@ -123,7 +131,7 @@ internal fun routeTitle(route: String): String = when (route) {
     Routes.VerifiedDirectoryPage,
     Routes.VerifiedChapterPage,
     -> stringResource(R.string.title_verification)
-    Routes.RemoteLibrary -> stringResource(R.string.title_remote_library)
+    Routes.RemoteLibrary, Routes.LibraryMirror, Routes.LibraryMirrorFolder -> stringResource(R.string.title_remote_library)
     else -> stringResource(R.string.app_name)
 }
 

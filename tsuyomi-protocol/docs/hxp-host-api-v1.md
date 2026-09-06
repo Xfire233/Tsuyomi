@@ -103,6 +103,12 @@ An extension with signed `capabilities.home.enabled: true` may export `buildHome
 
 The host owns Material layout, current filter selection, paging commands, cover admission, restoration, local actions, and navigation to canonical Detail. A source Home is read-only: its network request cannot imply website mutation, and the capability does not authorize remote-library writes.
 
+## Optional Detail metadata and author search
+
+`parseDetail(html, remoteBookId)` may include `lastUpdatedDate: string | null` in the normalized Detail result. A non-null value is a valid ISO calendar date (`YYYY-MM-DD`) describing the source's last content update, not a fetch timestamp or local reading event. Source adapters normalize their labelled metadata and return null when no valid date is available. The host preserves this field in its normalized Detail cache; older results without the field remain valid. Source HTML, timezone guesses and device-local clock fallbacks are not part of this value.
+
+A source may export `buildAuthorSearchRequest(author, page = 1)` alongside `buildSearchRequest(query, page = 1)`. It returns the same bounded, host-validated `NetworkRequest`; responses use the existing `parseSearch(html, finalUrl)` normalized result contract. This entry point represents author matching, never title matching. A user activating a Detail author link authorizes one read-only request bound to that source; it grants neither website writes nor background retries. Missing entry points fail visibly rather than silently falling back to title search. Manual verification, explicit retry and offline-cache lookup retain the exact applied author query and request identity. This additive entry point does not introduce advanced filter descriptors or search-v2 negotiation.
+
 ## WebView and credentials
 
 This method does not expose a WebView or cookies. A separate host-controlled UI flow may transfer user-approved declared-origin request-cookie pairs to the source credential partition. It must clear the process-global WebView cookie store before and after each serialized session, disable third-party cookies and local-file/content access, expose no JavaScript bridge/message channel, and require user interaction for every login/challenge/verification.

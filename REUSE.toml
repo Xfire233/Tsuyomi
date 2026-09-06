@@ -15,7 +15,7 @@ path = [
   "tsuyomi-protocol/fixtures/**/*.json",
   "tsuyomi-android/**/*gradle.lockfile",
   "tsuyomi-android/prototype/ui-atlas/review/*.json",
-  "tools/skills/tsuyomi-android-review/*.json",
+  ".agents/skills/tsuyomi-android-review/*.json",
   "tsuyomi-android/core/database/schemas/**",
   "tsuyomi-android/core/ui/src/screenshotTestDebug/reference/**",
   "tsuyomi-android/feature/*/src/screenshotTestDebug/reference/**",

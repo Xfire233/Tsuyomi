@@ -88,7 +88,7 @@ internal fun AtlasBookSurface(
     dragCoordinator: LibraryDragCoordinator,
     dragEnabled: Boolean,
     reorderEnabled: Boolean,
-    coverState: (LibraryEntry) -> CoverUiState,
+    coverState: @Composable (LibraryEntry) -> CoverUiState,
     onCoverVisibility: (LibraryEntry, Boolean) -> Unit,
     header: (@Composable () -> Unit)? = null,
     onViewportChanged: ((LibraryViewport) -> Unit)? = null,
@@ -331,7 +331,7 @@ internal fun AtlasBookGridCard(
     selectedBookIds: Set<BookIdentity>,
     dragCoordinator: LibraryDragCoordinator,
     dragEnabled: Boolean,
-    coverState: (LibraryEntry) -> CoverUiState,
+    coverState: @Composable (LibraryEntry) -> CoverUiState,
     onCoverVisibility: (LibraryEntry, Boolean) -> Unit,
     onOpenBook: (LibraryEntry) -> Unit,
     onLongPressBook: (BookIdentity) -> Unit,
@@ -412,7 +412,7 @@ internal fun AtlasBookListRow(
     selectedBookIds: Set<BookIdentity>,
     dragCoordinator: LibraryDragCoordinator,
     dragEnabled: Boolean,
-    coverState: (LibraryEntry) -> CoverUiState,
+    coverState: @Composable (LibraryEntry) -> CoverUiState,
     onCoverVisibility: (LibraryEntry, Boolean) -> Unit,
     onOpenBook: (LibraryEntry) -> Unit,
     onLongPressBook: (BookIdentity) -> Unit,
@@ -506,7 +506,7 @@ internal fun AtlasCompactBookRow(
 @Composable
 internal fun ProductionBookCover(
     entry: LibraryEntry,
-    coverState: (LibraryEntry) -> CoverUiState,
+    coverState: @Composable (LibraryEntry) -> CoverUiState,
     onCoverVisibility: (LibraryEntry, Boolean) -> Unit,
     modifier: Modifier,
 ) {
@@ -514,7 +514,11 @@ internal fun ProductionBookCover(
         onCoverVisibility(entry, true)
         onDispose { onCoverVisibility(entry, false) }
     }
-    CoverImage(coverState(entry), modifier)
+    CoverImage(
+        state = coverState(entry),
+        modifier = modifier,
+        unresolvedBadge = entry.reconciliation == org.tsuyomi.core.database.RemoteReconciliationState.UNRESOLVED,
+    )
 }
 
 @Composable

@@ -878,6 +878,146 @@ class LibraryProductionJourneyInstrumentedTest {
     }
 
     @Test
+    fun detail_local_destinations_replace_memberships_and_shortcut_exactly() = runBlocking {
+        val repository = (composeRule.activity.application as TsuyomiApplication).libraryRepository
+        val original = libraryPreferences.preferences.first()
+        val firstId = "fixture.detail.destination.first"
+        val secondId = "fixture.detail.destination.second"
+        val now = Instant.parse("2091-02-01T00:00:00Z")
+        try {
+            listOf(firstId, secondId).forEach { repository.deleteCollection(it) }
+            repository.removeFromLibrary(behaviorNewer)
+            repository.addToLibrary(book(behaviorNewer, "目的地替换"))
+            repository.createCollection(LibraryCollection(firstId, CollectionKind.MANUAL, "第一收藏", null, 0L, now, now))
+            repository.createCollection(LibraryCollection(secondId, CollectionKind.MANUAL, "第二收藏", null, 1L, now, now))
+            assertTrue(repository.addManualMembership(firstId, behaviorNewer))
+            libraryPreferences.updateShortcutOrder(emptyList())
+
+            val controller = LibraryFlowController(repository, libraryPreferences)
+            controller.reload("failed")
+            assertTrue(controller.applyBookDestinations(behaviorNewer, true, setOf(secondId), "failed"))
+            assertTrue(repository.collectionEntries(firstId).isEmpty())
+            assertEquals(listOf(behaviorNewer), repository.collectionEntries(secondId).map { it.book.identity })
+            assertTrue(controller.isBookShortcutPinned(behaviorNewer))
+
+            assertTrue(controller.applyBookDestinations(behaviorNewer, false, emptySet(), "failed"))
+            assertTrue(repository.collectionEntries(secondId).isEmpty())
+            assertFalse(controller.isBookShortcutPinned(behaviorNewer))
+        } finally {
+            listOf(firstId, secondId).forEach { repository.deleteCollection(it) }
+            repository.removeFromLibrary(behaviorNewer)
+            libraryPreferences.updateShortcutOrder(original.shortcutOrder)
+            libraryPreferences.updateShortcutLocked(original.shortcutLocked)
+        }
+    }
+
+    @Test
+    fun mirror_shortcuts_restore_order_independently_and_freeze_missing_targets() = runBlocking {
+        val repository = (composeRule.activity.application as TsuyomiApplication).libraryRepository
+        val original = libraryPreferences.preferences.first()
+        val sourceId = "fixture.mirror.shortcuts"
+        val rootId = org.tsuyomi.feature.library.libraryMirrorShortcutId(sourceId)
+        val now = Instant.parse("2091-01-01T00:00:00Z")
+        val folderId = org.tsuyomi.feature.library.libraryMirrorFolderShortcutId(sourceId, "favorites")
+        try {
+            libraryPreferences.clearWebsiteGroupingOverride(sourceId)
+            libraryPreferences.updateShortcutOrder(emptyList())
+            repository.saveRemoteMirrorSnapshot(
+                org.tsuyomi.core.database.RemoteMirrorReplaceRequest(
+                    sourceId = sourceId,
+                    sourceName = "测试网站",
+                    books = emptyList(),
+                    targets = listOf(
+                        org.tsuyomi.core.database.RemoteMirrorTargetSnapshot(
+                            targetId = "favorites",
+                            sourceId = sourceId,
+                            displayName = "特别收藏",
+                            parentId = null,
+                            kind = "folder",
+                            frozen = false,
+                            updatedAtEpochSecond = now.epochSecond,
+                        ),
+                    ),
+                    updatedAt = now,
+                ),
+            )
+            val simpleController = LibraryFlowController(repository, libraryPreferences)
+            simpleController.reload("failed")
+            assertFalse(simpleController.isWebsiteGroupingEnabled(sourceId))
+            libraryPreferences.updateShortcutOrder(listOf(rootId, folderId))
+            val controller = LibraryFlowController(repository, libraryPreferences)
+            controller.reload("failed")
+            val root = controller.state.mirrorShortcuts.single { it.targetId == null && it.sourceId == sourceId }
+            assertTrue(controller.isWebsiteGroupingEnabled(sourceId))
+            assertTrue(controller.isMirrorShortcutPinned(sourceId, null))
+            assertTrue(controller.isMirrorShortcutPinned(sourceId, "favorites"))
+            assertTrue(controller.moveShortcut(folderId, 0, "failed"))
+            assertTrue(controller.setWebsiteGroupingEnabled(sourceId, false, "failed"))
+            assertFalse(controller.isMirrorShortcutPinned(sourceId, "favorites"))
+            assertTrue(folderId in controller.state.shortcutOrder)
+            assertTrue(controller.setWebsiteGroupingEnabled(sourceId, true, "failed"))
+            assertTrue(controller.isMirrorShortcutPinned(sourceId, "favorites"))
+
+            repository.saveRemoteMirrorSnapshot(
+                org.tsuyomi.core.database.RemoteMirrorReplaceRequest(
+                    sourceId = sourceId,
+                    sourceName = "测试网站",
+                    books = emptyList(),
+                    targets = emptyList(),
+                    updatedAt = now.plusSeconds(1),
+                ),
+            )
+            val restored = LibraryFlowController(repository, libraryPreferences)
+            restored.reload("failed")
+            assertEquals(listOf(folderId, rootId), restored.state.shortcutOrder.filter { it == rootId || it == folderId })
+            assertTrue(restored.state.mirrorShortcuts.single { it.targetId == "favorites" }.frozen)
+            assertTrue(restored.setMirrorShortcutPinned(root, false, "failed"))
+            assertTrue(restored.isMirrorShortcutPinned(sourceId, "favorites"))
+            assertFalse(restored.isMirrorShortcutPinned(sourceId, null))
+        } finally {
+            libraryPreferences.updateShortcutOrder(original.shortcutOrder)
+            libraryPreferences.updateShortcutLocked(original.shortcutLocked)
+            original.websiteGroupingBySource[sourceId]?.let { enabled ->
+                libraryPreferences.updateWebsiteGrouping(sourceId, enabled)
+            } ?: libraryPreferences.clearWebsiteGroupingOverride(sourceId)
+        }
+    }
+
+    @Test
+    fun mirror_pin_refreshes_snapshot_created_after_controller_reload() = runBlocking {
+        val repository = (composeRule.activity.application as TsuyomiApplication).libraryRepository
+        val original = libraryPreferences.preferences.first()
+        val sourceId = "fixture.mirror.pin.refresh"
+        val now = Instant.parse("2091-01-02T00:00:00Z")
+        try {
+            libraryPreferences.updateShortcutOrder(emptyList())
+            val controller = LibraryFlowController(repository, libraryPreferences)
+            controller.reload("failed")
+            repository.saveRemoteMirrorSnapshot(
+                org.tsuyomi.core.database.RemoteMirrorReplaceRequest(
+                    sourceId = sourceId,
+                    sourceName = "测试网站",
+                    books = emptyList(),
+                    targets = emptyList(),
+                    updatedAt = now,
+                ),
+            )
+
+            assertTrue(
+                controller.setMirrorShortcutPinned(
+                    org.tsuyomi.feature.library.LibraryMirrorShortcut(sourceId, null, "测试网站", 0, false),
+                    true,
+                    "failed",
+                ),
+            )
+            assertTrue(controller.isMirrorShortcutPinned(sourceId, null))
+        } finally {
+            libraryPreferences.updateShortcutOrder(original.shortcutOrder)
+            libraryPreferences.updateShortcutLocked(original.shortcutLocked)
+        }
+    }
+
+    @Test
     fun library_controller_retains_recent_cover_state_across_visibility_gap() = runBlocking {
         val repository = (composeRule.activity.application as TsuyomiApplication).libraryRepository
         val controller = LibraryFlowController(repository, libraryPreferences)

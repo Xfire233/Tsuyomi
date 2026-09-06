@@ -96,6 +96,7 @@ private object SourceValueCodec {
             putNullableString("description", value.description)
             put("tags", buildJsonArray { value.tags.forEach { add(JsonPrimitive(it)) } })
             putNullableString("status", value.status)
+            putNullableString("lastUpdatedDate", value.lastUpdatedDate)
         },
     )
 
@@ -106,6 +107,7 @@ private object SourceValueCodec {
             description = value.nullableString("description"),
             tags = value.requiredArray("tags").map { it.jsonPrimitive.content },
             status = value.nullableString("status"),
+            lastUpdatedDate = value.nullableString("lastUpdatedDate"),
         )
     }
 

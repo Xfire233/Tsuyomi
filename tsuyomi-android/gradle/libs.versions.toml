@@ -6,6 +6,7 @@ agp = "8.13.1"
 kotlin = "2.3.0"
 ksp = "2.3.11"
 compose-bom = "2026.06.01"
+material3 = "1.5.0-alpha01"
 screenshot = "0.0.1-alpha11"
 room = "2.8.4"
 datastore = "1.2.1"
@@ -43,7 +44,7 @@ androidx-compose-bom = { module = "androidx.compose:compose-bom", version.ref = 
 androidx-compose-runtime = { module = "androidx.compose.runtime:runtime" }
 androidx-compose-ui = { module = "androidx.compose.ui:ui" }
 androidx-compose-foundation = { module = "androidx.compose.foundation:foundation" }
-androidx-compose-material3 = { module = "androidx.compose.material3:material3" }
+androidx-compose-material3 = { module = "androidx.compose.material3:material3", version.ref = "material3" }
 androidx-compose-material-icons-extended = { module = "androidx.compose.material:material-icons-extended" }
 androidx-compose-ui-tooling = { module = "androidx.compose.ui:ui-tooling" }
 androidx-compose-ui-tooling-preview = { module = "androidx.compose.ui:ui-tooling-preview" }

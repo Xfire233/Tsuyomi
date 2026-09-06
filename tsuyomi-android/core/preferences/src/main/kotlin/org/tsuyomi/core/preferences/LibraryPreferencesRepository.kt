@@ -18,6 +18,7 @@ import kotlinx.coroutines.flow.map
 data class LibraryPresentationPreferences(
     val shortcutOrder: List<String> = emptyList(),
     val shortcutLocked: Boolean = false,
+    val websiteGroupingBySource: Map<String, Boolean> = emptyMap(),
 )
 
 class LibraryPreferencesRepository(private val dataStore: DataStore<Preferences>) {
@@ -27,6 +28,7 @@ class LibraryPreferencesRepository(private val dataStore: DataStore<Preferences>
             LibraryPresentationPreferences(
                 shortcutOrder = decodeOrder(values[ShortcutOrder].orEmpty()),
                 shortcutLocked = values[ShortcutLocked] ?: false,
+                websiteGroupingBySource = decodeWebsiteGrouping(values[WebsiteGrouping].orEmpty()),
             )
         }
 
@@ -40,11 +42,30 @@ class LibraryPreferencesRepository(private val dataStore: DataStore<Preferences>
         dataStore.edit { values -> values[ShortcutLocked] = locked }
     }
 
+    suspend fun updateWebsiteGrouping(sourceId: String, enabled: Boolean) {
+        require(sourceId.isNotEmpty() && sourceId.length <= MaxShortcutIdLength - 1)
+        dataStore.edit { values ->
+            val updated = decodeWebsiteGrouping(values[WebsiteGrouping].orEmpty()).toMutableMap()
+            updated[sourceId] = enabled
+            require(updated.size <= MaxShortcutCount)
+            values[WebsiteGrouping] = encodeWebsiteGrouping(updated)
+        }
+    }
+
+    suspend fun clearWebsiteGroupingOverride(sourceId: String) {
+        dataStore.edit { values ->
+            val updated = decodeWebsiteGrouping(values[WebsiteGrouping].orEmpty()).toMutableMap()
+            updated.remove(sourceId)
+            values[WebsiteGrouping] = encodeWebsiteGrouping(updated)
+        }
+    }
+
     private companion object {
         const val MaxShortcutCount = 256
         const val MaxShortcutIdLength = 2304
         val ShortcutOrder = stringPreferencesKey("library_shortcut_order")
         val ShortcutLocked = booleanPreferencesKey("library_shortcut_locked")
+        val WebsiteGrouping = stringPreferencesKey("library_website_grouping")
     }
 }
 
@@ -72,4 +93,22 @@ private fun decodeOrder(encoded: String): List<String> {
         cursor = end
     }
     return result.takeIf { cursor == encoded.length && result.distinct().size == result.size }.orEmpty()
+}
+
+private fun encodeWebsiteGrouping(values: Map<String, Boolean>): String = encodeOrder(
+    values.entries.sortedBy { it.key }.map { (sourceId, enabled) ->
+        (if (enabled) "1" else "0") + sourceId
+    },
+)
+
+private fun decodeWebsiteGrouping(encoded: String): Map<String, Boolean> = buildMap {
+    decodeOrder(encoded).forEach { item ->
+        val enabled = when (item.firstOrNull()) {
+            '1' -> true
+            '0' -> false
+            else -> return@forEach
+        }
+        val sourceId = item.drop(1)
+        if (sourceId.isNotEmpty()) put(sourceId, enabled)
+    }
 }

@@ -95,7 +95,7 @@ python -m reuse lint
 python tools/check_repository.py
 ```
 
-贡献与质量规则见 [`CONTRIBUTING.md`](CONTRIBUTING.md)、[`tsuyomi-android/docs/process/QUALITY_GATES.md`](tsuyomi-android/docs/process/QUALITY_GATES.md) 和 [`tsuyomi-android/docs/design/OPTION_APPLICABILITY.md`](tsuyomi-android/docs/design/OPTION_APPLICABILITY.md)。
+贡献与质量规则见 [`CONTRIBUTING.md`](CONTRIBUTING.md) 和 [`tsuyomi-android/docs/process/QUALITY_GATES.md`](tsuyomi-android/docs/process/QUALITY_GATES.md)；文档职责/读取终止条件见 [`DOCUMENTATION.md`](DOCUMENTATION.md)，工具、Skill 与 MCP 调度/排除/完成条件见 [`TOOLING.md`](TOOLING.md)，功能项适用性见 [`tsuyomi-android/docs/design/OPTION_APPLICABILITY.md`](tsuyomi-android/docs/design/OPTION_APPLICABILITY.md)。
 
 ## 参考、借鉴与特别鸣谢
 

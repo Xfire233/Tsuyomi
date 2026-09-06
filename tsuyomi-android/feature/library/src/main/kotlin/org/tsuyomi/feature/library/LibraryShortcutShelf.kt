@@ -82,6 +82,11 @@ internal const val ShortcutTileWidthDp = 80
 fun libraryBookShortcutId(identity: BookIdentity): String =
     "book:${identity.sourceId.length}:${identity.sourceId}${identity.remoteBookId}"
 
+fun libraryMirrorShortcutId(sourceId: String): String = "mirror:${sourceId.length}:$sourceId"
+
+fun libraryMirrorFolderShortcutId(sourceId: String, targetId: String): String =
+    "mirror-folder:${sourceId.length}:$sourceId${targetId.length}:$targetId"
+
 internal data class ProductionShortcut(
     val id: String,
     val label: String,
@@ -89,6 +94,7 @@ internal data class ProductionShortcut(
     val filter: SystemLibraryFilter? = null,
     val collection: LibraryCollection? = null,
     val entry: LibraryEntry? = null,
+    val mirror: LibraryMirrorShortcut? = null,
 )
 
 internal enum class ShortcutShelfPresentation {
@@ -100,6 +106,7 @@ internal enum class ShortcutShelfPresentation {
 internal fun buildShortcuts(
     entries: List<LibraryEntry>,
     collections: List<LibraryCollection>,
+    mirrors: List<LibraryMirrorShortcut>,
     order: List<String>,
 ): List<ProductionShortcut> = buildList {
     val hiddenIds = order.asSequence()
@@ -134,6 +141,20 @@ internal fun buildShortcuts(
             )
         }
     }
+    mirrors.forEach { mirror ->
+        val id = mirror.targetId?.let { libraryMirrorFolderShortcutId(mirror.sourceId, it) }
+            ?: libraryMirrorShortcutId(mirror.sourceId)
+        if (id in order && id !in hiddenIds) {
+            add(
+                ProductionShortcut(
+                    id = id,
+                    label = mirror.label,
+                    icon = if (mirror.targetId == null) TsuyomiIcons.Mirror else TsuyomiIcons.Folder,
+                    mirror = mirror,
+                ),
+            )
+        }
+    }
     val orderedIds = order.toHashSet()
     entries.forEach { entry ->
         val id = libraryBookShortcutId(entry.book.identity)
@@ -155,11 +176,13 @@ internal fun openShortcut(
     onOpenSystemNode: (SystemLibraryFilter) -> Unit,
     onOpenCollection: (LibraryCollection) -> Unit,
     onOpenBook: (LibraryEntry) -> Unit,
+    onOpenMirror: (LibraryMirrorShortcut) -> Unit,
 ) {
     when {
         shortcut.filter != null -> onOpenSystemNode(shortcut.filter)
         shortcut.collection != null -> onOpenCollection(shortcut.collection)
         shortcut.entry != null -> onOpenBook(shortcut.entry)
+        shortcut.mirror != null -> onOpenMirror(shortcut.mirror)
     }
 }
 
@@ -197,7 +220,7 @@ internal fun ShortcutShelf(
     onToggleBookSelection: (BookIdentity) -> Unit,
     onLongPressCollection: (String) -> Unit,
     onToggleCollectionSelection: (String) -> Unit,
-    coverState: (LibraryEntry) -> CoverUiState,
+    coverState: @Composable (LibraryEntry) -> CoverUiState,
 ) {
     val dragActive = dragCoordinator.activePayload != null
     val dropActive = dragActive && dragCoordinator.isOverShelf
@@ -207,17 +230,30 @@ internal fun ShortcutShelf(
     val bookTarget = dragCoordinator.bookTargetIdentity?.let { targetIdentity ->
         shortcuts.firstOrNull { it.entry?.book?.identity == targetIdentity }
     }
+    val mirrorTarget = (dragCoordinator.externalDestination as? LibraryDropDestination.RemoteMirror)?.let { target ->
+        shortcuts.firstOrNull { shortcut ->
+            val mirror = shortcut.mirror
+            mirror != null && mirror.sourceId == target.sourceId && mirror.targetId == target.targetId
+        }
+    }
+    val mirrorTargetModel = mirrorTarget?.mirror
     val gapIndex = dragCoordinator.rootInsertionIndex
-        .takeIf { dropActive && collectionTarget == null && bookTarget == null && it >= 0 }
+        .takeIf { dropActive && collectionTarget == null && bookTarget == null && mirrorTarget == null && it >= 0 }
         ?.coerceIn(0, shortcuts.size)
     val batchCount = dragCoordinator.activeBookIds.size
     val dropHint = when {
+        mirrorTargetModel != null -> if (mirrorTargetModel.targetId == null) {
+            "松开以选择「${mirrorTarget.label}」的网站目标"
+        } else {
+            "松开以加入「${mirrorTarget.label}」"
+        }
+        dropActive && batchCount > 1 && shortcuts.any { it.mirror != null } -> "网站操作仅支持单本"
         collectionTarget != null -> "松开以加入「${collectionTarget.label}」"
         bookTarget != null -> "松开以和「${bookTarget.label}」新建收藏夹"
         gapIndex != null && batchCount > 1 -> "松开以新建收藏夹并放到第 ${gapIndex + 1} 位"
         gapIndex != null -> "松开以放到快捷书架第 ${gapIndex + 1} 位"
         dragActive && batchCount > 1 -> "拖到快捷书架空位新建收藏夹，或拖入现有收藏夹"
-        dragActive && dragCoordinator.activeBookIds.isNotEmpty() -> "拖到快捷书架空位、书籍或收藏夹"
+        dragActive && dragCoordinator.activeBookIds.isNotEmpty() -> "拖到快捷书架空位、书籍、收藏夹或网站镜像"
         else -> null
     }
     Column(
@@ -307,7 +343,7 @@ internal fun ShortcutTile(
     onToggleBookSelection: (BookIdentity) -> Unit,
     onLongPressCollection: (String) -> Unit,
     onToggleCollectionSelection: (String) -> Unit,
-    coverState: (LibraryEntry) -> CoverUiState,
+    coverState: @Composable (LibraryEntry) -> CoverUiState,
     modifier: Modifier = Modifier,
 ) {
     val collectionId = shortcut.collection?.takeIf { it.kind == CollectionKind.MANUAL }?.collectionId
@@ -318,7 +354,10 @@ internal fun ShortcutTile(
         else -> false
     }
     val targetActive = (collectionId != null && dragCoordinator.collectionTargetId == collectionId) ||
-        (bookIdentity != null && dragCoordinator.bookTargetShortcutId == shortcut.id)
+        (bookIdentity != null && dragCoordinator.bookTargetShortcutId == shortcut.id) ||
+        (shortcut.mirror != null && (dragCoordinator.externalDestination as? LibraryDropDestination.RemoteMirror)?.let {
+            it.sourceId == shortcut.mirror.sourceId && it.targetId == shortcut.mirror.targetId
+        } == true)
     val instant = LocalDisplayEnvironment.current.instantMotion
     val targetScale by animateFloatAsState(
         targetValue = if (targetActive) 1.05f else 1f,
@@ -326,29 +365,21 @@ internal fun ShortcutTile(
         label = "libraryShortcutTargetScale",
     )
     val targetContainer by animateColorAsState(
-        targetValue = if (targetActive || selected) {
-            MaterialTheme.colorScheme.primaryContainer
-        } else {
-            MaterialTheme.colorScheme.surfaceContainerLow
-        },
+        targetValue = if (targetActive || selected) MaterialTheme.colorScheme.primaryContainer
+        else MaterialTheme.colorScheme.surfaceContainerLow,
         animationSpec = if (instant) snap() else tween(TsuyomiMotion.SWITCH_DURATION_MS),
         label = "libraryShortcutTargetContainer",
     )
     val targetOutline by animateColorAsState(
-        targetValue = if (targetActive || selected) {
-            MaterialTheme.colorScheme.primary
-        } else {
-            MaterialTheme.colorScheme.outlineVariant
-        },
+        targetValue = if (targetActive || selected) MaterialTheme.colorScheme.primary
+        else MaterialTheme.colorScheme.outlineVariant,
         animationSpec = if (instant) snap() else tween(TsuyomiMotion.SWITCH_DURATION_MS),
         label = "libraryShortcutTargetOutline",
     )
     val tileClick = {
         when {
-            selectionKind == LibrarySelectionKind.COLLECTION && collectionId != null ->
-                onToggleCollectionSelection(collectionId)
-            selectionKind == LibrarySelectionKind.BOOK && bookIdentity != null ->
-                onToggleBookSelection(bookIdentity)
+            selectionKind == LibrarySelectionKind.COLLECTION && collectionId != null -> onToggleCollectionSelection(collectionId)
+            selectionKind == LibrarySelectionKind.BOOK && bookIdentity != null -> onToggleBookSelection(bookIdentity)
             selectionKind == null -> onOpen()
         }
     }
@@ -361,6 +392,8 @@ internal fun ShortcutTile(
     val dropKind = when {
         collectionId != null -> LibraryShortcutDropKind.COLLECTION
         bookIdentity != null -> LibraryShortcutDropKind.BOOK
+        shortcut.mirror?.targetId != null -> LibraryShortcutDropKind.REMOTE_FOLDER
+        shortcut.mirror != null -> LibraryShortcutDropKind.REMOTE_MIRROR
         else -> LibraryShortcutDropKind.ITEM
     }
     val payload = if (bookIdentity != null) {
@@ -382,6 +415,7 @@ internal fun ShortcutTile(
                 index = index,
                 kind = dropKind,
                 bookIdentity = bookIdentity,
+                mirror = shortcut.mirror,
             )
             .libraryShortcutGestures(
                 subjectKey = shortcut.id,
@@ -399,6 +433,7 @@ internal fun ShortcutTile(
                 role = Role.Button
                 contentDescription = shortcut.label
                 stateDescription = when {
+                    shortcut.mirror?.frozen == true -> "网站目标不可用，可打开修复或移出快捷书架"
                     targetActive -> "当前拖放目标"
                     locked -> "快捷书架已固定，可拖动"
                     else -> "快捷书架随内容滚动，可拖动"
@@ -418,10 +453,7 @@ internal fun ShortcutTile(
                 contentAlignment = Alignment.Center,
             ) {
                 shortcut.entry?.let { entry ->
-                    CoverImage(
-                        state = coverState(entry),
-                        modifier = Modifier.fillMaxSize(),
-                    )
+                    CoverImage(state = coverState(entry), modifier = Modifier.fillMaxSize())
                 } ?: Icon(shortcut.icon, contentDescription = null, modifier = Modifier.size(28.dp))
                 if (selected) {
                     Surface(
@@ -467,7 +499,7 @@ internal fun ShortcutAllPage(
     onToggleBookSelection: (BookIdentity) -> Unit,
     onLongPressCollection: (String) -> Unit,
     onToggleCollectionSelection: (String) -> Unit,
-    coverState: (LibraryEntry) -> CoverUiState,
+    coverState: @Composable (LibraryEntry) -> CoverUiState,
     modifier: Modifier,
 ) {
     val gridState = rememberLazyGridState()

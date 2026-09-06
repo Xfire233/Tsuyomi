@@ -41,8 +41,14 @@ class RoomLibraryRepository(database: TsuyomiDatabase) {
         remote.dismissFirstRemoteImportPrompt(sourceId, capabilityFingerprint)
     suspend fun setAddWritebackEnabled(sourceId: String, capabilityFingerprint: String, enabled: Boolean): Boolean =
         remote.setAddWritebackEnabled(sourceId, capabilityFingerprint, enabled)
+    suspend fun setRemoveWritebackEnabled(sourceId: String, capabilityFingerprint: String, enabled: Boolean): Boolean =
+        remote.setRemoveWritebackEnabled(sourceId, capabilityFingerprint, enabled)
+    suspend fun setMoveWritebackEnabled(sourceId: String, capabilityFingerprint: String, enabled: Boolean): Boolean =
+        remote.setMoveWritebackEnabled(sourceId, capabilityFingerprint, enabled)
     suspend fun saveSourceRemotePolicy(policy: SourceRemotePolicy) = remote.saveSourceRemotePolicy(policy)
-    suspend fun beginRemoteAdd(request: RemoteAddRequest): String = remote.beginRemoteAdd(request)
+    suspend fun beginRemoteAdd(request: RemoteAddRequest, retryingUnresolvedAddId: String? = null): String =
+        remote.beginRemoteAdd(request, retryingUnresolvedAddId)
+    suspend fun beginRemoteMutation(request: RemoteMutationRequest): String = remote.beginRemoteMutation(request)
     suspend fun transitionRemoteAdd(
         id: String,
         expected: RemoteReconciliationState,
@@ -50,6 +56,33 @@ class RoomLibraryRepository(database: TsuyomiDatabase) {
         now: Instant,
         diagnosticId: String? = null,
     ): Boolean = remote.transitionRemoteAdd(id, expected, next, now, diagnosticId)
+    suspend fun confirmRemoteAdd(
+        id: String,
+        identity: BookIdentity,
+        resolvesPriorUnresolved: Boolean,
+        now: Instant,
+    ): Boolean = remote.confirmRemoteAdd(id, identity, resolvesPriorUnresolved, now)
+    suspend fun transitionRemoteMutation(
+        id: String,
+        expected: RemoteReconciliationState,
+        next: RemoteReconciliationState,
+        now: Instant,
+        diagnosticId: String? = null,
+    ): Boolean = remote.transitionRemoteMutation(id, expected, next, now, diagnosticId)
+    suspend fun unresolvedReconciliations(): List<RemoteReconciliationRecord> = remote.unresolvedReconciliations()
+    suspend fun unresolvedReconciliationsForSource(sourceId: String): List<RemoteReconciliationRecord> = remote.unresolvedReconciliationsForSource(sourceId)
+    suspend fun bookReconciliation(sourceId: String, remoteBookId: String): RemoteReconciliationRecord? = remote.bookReconciliation(sourceId, remoteBookId)
+    suspend fun ensureRemoteMirrorBinding(sourceId: String, sourceName: String, now: Instant = Instant.now()) =
+        remote.ensureRemoteMirrorBinding(sourceId, sourceName, now)
+    suspend fun saveRemoteMirrorSnapshot(request: RemoteMirrorReplaceRequest) = remote.saveRemoteMirrorSnapshot(request)
+    suspend fun remoteMirrorBindings(): List<RemoteMirrorBinding> = remote.remoteMirrorBindings()
+    suspend fun remoteMirrorSnapshot(sourceId: String): RemoteMirrorSnapshot? = remote.remoteMirrorSnapshot(sourceId)
+    suspend fun updateRemoteMirrorBookTarget(identity: BookIdentity, targetId: String?, now: Instant = Instant.now()): Boolean =
+        remote.updateRemoteMirrorBookTarget(identity, targetId, now)
+    suspend fun removeRemoteMirrorBook(identity: BookIdentity): Boolean = remote.removeRemoteMirrorBook(identity)
+    suspend fun upsertRemoteMirrorBook(book: LibraryBook, targetId: String?, now: Instant = Instant.now()) =
+        remote.upsertRemoteMirrorBook(book, targetId, now)
+    suspend fun remoteMirrorTargetCount(sourceId: String, targetId: String): Int = remote.remoteMirrorTargetCount(sourceId, targetId)
 
     suspend fun collections(): List<LibraryCollection> = collections.collections()
     suspend fun collectionEntries(collectionId: String, now: Instant = Instant.now()): List<LibraryEntry> =
@@ -65,6 +98,7 @@ class RoomLibraryRepository(database: TsuyomiDatabase) {
         parentCollectionId: String?,
         displayOrder: Long,
     ) = collections.updateCollectionPresentation(collectionId, parentCollectionId, displayOrder)
+    suspend fun manualCollectionIds(identity: BookIdentity): Set<String> = collections.manualCollectionIds(identity)
     suspend fun addManualMembership(collectionId: String, identity: BookIdentity): Boolean =
         collections.addManualMembership(collectionId, identity)
     suspend fun removeManualMembership(collectionId: String, identity: BookIdentity): Boolean =

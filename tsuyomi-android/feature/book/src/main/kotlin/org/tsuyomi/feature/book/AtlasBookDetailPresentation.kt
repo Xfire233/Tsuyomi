@@ -7,16 +7,25 @@ package org.tsuyomi.feature.book
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.ColumnScope
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.ExtendedFloatingActionButton
+import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.Icon
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.Immutable
 import androidx.compose.runtime.LaunchedEffect
@@ -49,6 +58,9 @@ data class DetailLocalState(
     val readLater: Boolean = false,
     val progressChapterId: String? = null,
     val progressChapterFraction: Double? = null,
+    val reconciliation: String? = null,
+    val remoteRemoveEnabled: Boolean = false,
+    val remoteMoveEnabled: Boolean = false,
 )
 
 enum class DetailMutationOperation {
@@ -59,6 +71,10 @@ enum class DetailMutationOperation {
     SET_RATING,
     ADD_TAG,
     TOGGLE_READ_LATER,
+    REMOVE_FROM_REMOTE,
+    MOVE_REMOTE,
+    RECONCILE_RETRY,
+    RECONCILE_ACKNOWLEDGE,
 }
 
 enum class DetailMutationPhase { WORKING, SUCCESS, ERROR }
@@ -96,8 +112,8 @@ internal fun StandardAtlasBookDetailScreen(
     descending: Boolean,
     selectedChapterId: String?,
     onSetRating: (Int?) -> Unit,
+    onSearchAuthor: (String) -> Unit,
     onAddTag: (String) -> Unit,
-    onToggleReadLater: () -> Unit,
     onToggleUnreadOnly: () -> Unit,
     onToggleOrder: () -> Unit,
     onSelectChapter: (SourceChapter) -> Unit,
@@ -107,9 +123,23 @@ internal fun StandardAtlasBookDetailScreen(
     onUseOfflineCache: () -> Unit,
     onOpenVerification: () -> Unit,
     modifier: Modifier = Modifier,
+    onOpenDestinations: () -> Unit = {},
+    destinationMenuExpanded: Boolean = false,
+    onDestinationMenuExpandedChange: (Boolean) -> Unit = {},
+    destinationMenuContent: @Composable ColumnScope.(dismissMenu: () -> Unit) -> Unit = { _ -> },
+    onRemoveFromRemote: () -> Unit = {},
+    onMoveRemote: () -> Unit = {},
+    onRetryRemoteReconciliation: () -> Unit = {},
+    onAcknowledgeRemoteReconciliation: () -> Unit = {},
 ) {
     Column(modifier.fillMaxSize()) {
         mutation?.let { DetailMutationBanner(it) }
+        if (localState.reconciliation == "UNRESOLVED") {
+            UnresolvedReconciliationBanner(
+                onRetry = onRetryRemoteReconciliation,
+                onAcknowledge = onAcknowledgeRemoteReconciliation,
+            )
+        }
         when (state) {
             SourceBookState.Loading -> StateView(
                 kind = TsuyomiStateKind.LOADING,
@@ -132,13 +162,17 @@ internal fun StandardAtlasBookDetailScreen(
                 descending = descending,
                 selectedChapterId = selectedChapterId,
                 onSetRating = onSetRating,
+                onSearchAuthor = onSearchAuthor,
                 onAddTag = onAddTag,
-                onToggleReadLater = onToggleReadLater,
                 onToggleUnreadOnly = onToggleUnreadOnly,
                 onToggleOrder = onToggleOrder,
                 onSelectChapter = onSelectChapter,
                 onContinueReading = onContinueReading,
                 onAddToLibrary = onAddToLibrary,
+                onOpenDestinations = onOpenDestinations,
+                destinationMenuExpanded = destinationMenuExpanded,
+                onDestinationMenuExpandedChange = onDestinationMenuExpandedChange,
+                destinationMenuContent = destinationMenuContent,
                 onRetryDirectory = onRetry,
                 onUseOfflineCache = onUseOfflineCache,
                 onOpenVerification = onOpenVerification,
@@ -158,13 +192,17 @@ private fun DetailContent(
     descending: Boolean,
     selectedChapterId: String?,
     onSetRating: (Int?) -> Unit,
+    onSearchAuthor: (String) -> Unit,
     onAddTag: (String) -> Unit,
-    onToggleReadLater: () -> Unit,
     onToggleUnreadOnly: () -> Unit,
     onToggleOrder: () -> Unit,
     onSelectChapter: (SourceChapter) -> Unit,
     onContinueReading: (SourceChapter) -> Unit,
     onAddToLibrary: () -> Unit,
+    onOpenDestinations: () -> Unit,
+    destinationMenuExpanded: Boolean,
+    onDestinationMenuExpandedChange: (Boolean) -> Unit,
+    destinationMenuContent: @Composable ColumnScope.(dismissMenu: () -> Unit) -> Unit,
     onRetryDirectory: () -> Unit,
     onUseOfflineCache: () -> Unit,
     onOpenVerification: () -> Unit,
@@ -233,8 +271,12 @@ private fun DetailContent(
                     coverState = coverState,
                     localState = localState,
                     onSetRating = onSetRating,
+                    onSearchAuthor = onSearchAuthor,
                     onAddToLibrary = onAddToLibrary,
-                    onToggleReadLater = onToggleReadLater,
+                    onOpenDestinations = onOpenDestinations,
+                    destinationMenuExpanded = destinationMenuExpanded,
+                    onDestinationMenuExpandedChange = onDestinationMenuExpandedChange,
+                    destinationMenuContent = destinationMenuContent,
                 )
             }
             item(key = "tags") {
@@ -315,9 +357,53 @@ private fun DetailContent(
                 } else {
                     ExtendedFloatingActionButton(
                         onClick = { onContinueReading(continueChapter) },
+                        modifier = Modifier.testTag("detail-reading-fab"),
                         icon = { Icon(TsuyomiIcons.ContinueReading, contentDescription = null) },
                         text = { Text(stringResource(R.string.book_continue_reading)) },
                     )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun UnresolvedReconciliationBanner(
+    onRetry: () -> Unit,
+    onAcknowledge: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    Card(
+        modifier = modifier
+            .fillMaxWidth()
+            .padding(horizontal = 16.dp, vertical = 8.dp)
+            .testTag("book-detail-unresolved-banner"),
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.errorContainer,
+            contentColor = MaterialTheme.colorScheme.onErrorContainer,
+        ),
+    ) {
+        Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Text(
+                text = "远程书架状态不同步 (UNRESOLVED)",
+                style = MaterialTheme.typography.titleSmall,
+                color = MaterialTheme.colorScheme.error,
+            )
+            Text(
+                text = "上次远端书架操作未能在服务器成功确认。在解除状态前，该书籍的远端变更已锁定。",
+                style = MaterialTheme.typography.bodySmall,
+            )
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.End,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                TextButton(onClick = onAcknowledge) {
+                    Text("解除锁定")
+                }
+                Spacer(Modifier.width(8.dp))
+                FilledTonalButton(onClick = onRetry) {
+                    Text("重试同步")
                 }
             }
         }

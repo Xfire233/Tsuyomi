@@ -4,6 +4,7 @@
  */
 package org.tsuyomi.android
 
+import android.content.pm.ActivityInfo
 import android.net.Uri
 import android.webkit.CookieManager
 import android.view.View
@@ -14,9 +15,11 @@ import androidx.compose.ui.test.assert
 import androidx.compose.ui.test.click
 import androidx.compose.ui.test.hasSetTextAction
 import androidx.compose.ui.test.hasStateDescription
-import androidx.compose.ui.test.isToggleable
+import androidx.compose.ui.test.longClick
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsEnabled
+import androidx.compose.ui.test.assertTextContains
+import androidx.compose.ui.test.performTextReplacement
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onAllNodesWithTag
 import androidx.compose.ui.test.onNodeWithContentDescription
@@ -28,6 +31,8 @@ import androidx.compose.ui.test.performScrollToIndex
 import androidx.compose.ui.test.performTouchInput
 import androidx.compose.ui.test.swipeDown
 import androidx.compose.ui.test.performTextInput
+import androidx.core.view.ViewCompat
+import androidx.core.view.WindowInsetsCompat
 import androidx.test.espresso.Espresso.pressBack
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
@@ -96,6 +101,101 @@ class ManualVerificationHandoffInstrumentedTest {
         composeRule.onNodeWithText("第一章 雾中的灯塔").performClick()
         waitForText("设置")
         waitForText("第一章 雾中的灯塔")
+    }
+
+    @Test
+    fun standard_detail_controls_stay_inside_landscape_system_bars() {
+        cleanSessionState()
+        runBlocking {
+            (composeRule.activity.application as TsuyomiApplication).displayController
+                .setDisplayPreference(DisplayPreference.STANDARD)
+        }
+        waitForText("书架")
+        composeRule.onNodeWithText("浏览").performClick()
+        waitForText("搜索此来源")
+        composeRule.onNodeWithText("搜索此来源").performClick()
+        waitForText("输入关键词后搜索")
+        composeRule.onNode(hasSetTextAction()).performTextInput("fixture")
+        composeRule.onNode(hasSetTextAction()).performImeAction()
+        waitForText("雾港纪事")
+        composeRule.onNodeWithText("雾港纪事").performClick()
+        waitForText("上次更新：2026-02-03")
+        try {
+            composeRule.runOnUiThread {
+                composeRule.activity.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE
+            }
+            composeRule.waitUntil(5_000) {
+                composeRule.onAllNodesWithTag("book-detail-scroll").fetchSemanticsNodes()
+                    .singleOrNull()?.boundsInWindow?.let { it.width > it.height } == true
+            }
+            val (safeLeft, safeRight) = composeRule.runOnUiThread {
+                val view = composeRule.activity.window.decorView
+                val insets = requireNotNull(ViewCompat.getRootWindowInsets(view)).getInsets(
+                    WindowInsetsCompat.Type.systemBars() or WindowInsetsCompat.Type.displayCutout(),
+                )
+                insets.left.toFloat() to (view.width - insets.right).toFloat()
+            }
+            listOf("detail-rating-row", "detail-library-action", "detail-reading-fab").forEach { tag ->
+                val bounds = composeRule.onNodeWithTag(tag).assertIsDisplayed()
+                    .fetchSemanticsNode().boundsInWindow
+                assertTrue("$tag extends beneath the left system bar: $bounds", bounds.left >= safeLeft)
+                assertTrue("$tag extends beneath the right system bar: $bounds > $safeRight", bounds.right <= safeRight)
+            }
+            composeRule.onNodeWithContentDescription("更多加入选项").performClick()
+            waitForText("稍后再读")
+            pressBack()
+        } finally {
+            composeRule.runOnUiThread {
+                composeRule.activity.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
+            }
+        }
+    }
+
+    @Test
+    fun standard_detail_author_link_submits_once_and_restores_applied_results() {
+        cleanSessionState()
+        runBlocking {
+            (composeRule.activity.application as TsuyomiApplication).displayController
+                .setDisplayPreference(DisplayPreference.STANDARD)
+        }
+        waitForText("书架")
+        composeRule.onNodeWithText("浏览").performClick()
+        waitForText("搜索此来源")
+        composeRule.onNodeWithText("搜索此来源").performClick()
+        waitForText("输入关键词后搜索")
+        composeRule.onNode(hasSetTextAction()).performTextInput("fixture")
+        composeRule.onNode(hasSetTextAction()).performImeAction()
+        waitForText("雾港纪事")
+        composeRule.onNodeWithText("星环邮差").assertIsDisplayed()
+        composeRule.onNodeWithText("雾港纪事").performClick()
+        waitForText("上次更新：2026-02-03")
+        composeRule.onNodeWithText("尚未开始").assertDoesNotExist()
+        composeRule.onNodeWithText("已有阅读进度").assertDoesNotExist()
+        Phase2SourceGateway.resetOperationCounts()
+
+        composeRule.onNodeWithTag("detail-author").performClick()
+        waitForText("搜索作者")
+        waitForText("雾港纪事")
+        composeRule.onNode(hasSetTextAction()).assertTextContains("林川")
+        composeRule.onNodeWithText("星环邮差").assertDoesNotExist()
+        assertEquals(1, Phase2SourceGateway.searchRequestCount())
+
+        composeRule.onNodeWithText("雾港纪事").performClick()
+        waitForText("上次更新：2026-02-03")
+        pressBack()
+        waitForText("搜索作者")
+        composeRule.onNodeWithText("雾港纪事").assertIsDisplayed()
+        composeRule.onNodeWithText("星环邮差").assertDoesNotExist()
+        assertEquals(1, Phase2SourceGateway.searchRequestCount())
+        composeRule.activityRule.scenario.recreate()
+        waitForText("搜索作者")
+        composeRule.onNodeWithText("雾港纪事").assertIsDisplayed()
+        assertEquals(1, Phase2SourceGateway.searchRequestCount())
+        composeRule.onNode(hasSetTextAction()).performTextReplacement("fixture")
+        composeRule.onNode(hasSetTextAction()).performImeAction()
+        waitForText("星环邮差")
+        assertEquals(2, Phase2SourceGateway.searchRequestCount())
+        assertEquals(0, Phase2SourceGateway.websiteMutationCount())
     }
 
     @Test
@@ -245,13 +345,17 @@ class ManualVerificationHandoffInstrumentedTest {
         composeRule.onNodeWithText("雾港纪事").performClick()
 
         waitForText("简介")
+        composeRule.onNodeWithContentDescription("更多加入选项").performClick()
         waitForText("稍后再读")
         composeRule.onNodeWithText("稍后再读").performClick()
         waitForText("已在书架")
-        waitForStateDescription("detail-read-later-action", "已稍后再读")
         waitForText("已完成：更新稍后再读")
+        composeRule.onNodeWithContentDescription("更多加入选项").performClick()
+        waitForStateDescription("detail-read-later-action", "已稍后再读")
         composeRule.onNodeWithText("稍后再读").performClick()
+        composeRule.onNodeWithContentDescription("更多加入选项").performClick()
         waitForStateDescription("detail-read-later-action", "未稍后再读")
+        pressBack()
         composeRule.onNodeWithTag("book-detail-scroll").performScrollToIndex(3)
         waitForText("全文目录")
         waitForText("第一章 雾中的灯塔")
@@ -277,8 +381,10 @@ class ManualVerificationHandoffInstrumentedTest {
         waitForText("雾港纪事")
         composeRule.onNodeWithText("雾港纪事").performClick()
         waitForText("简介")
+        composeRule.onNodeWithContentDescription("更多加入选项").performClick()
         composeRule.onNodeWithText("稍后再读").performClick()
         waitForText("已在书架")
+        waitForText("已完成：更新稍后再读")
 
         composeRule.onNodeWithText("书架").performClick()
         waitForText("快捷书架")
@@ -423,8 +529,6 @@ class ManualVerificationHandoffInstrumentedTest {
         waitForTextGone("设置")
         pressBack()
         waitForText("简介")
-        pressBack()
-        waitForText("输入关键词后搜索")
     }
 
 
@@ -527,18 +631,21 @@ class ManualVerificationHandoffInstrumentedTest {
         composeRule.onNodeWithText("刷新列表").performClick()
         waitForText("雾港纪事")
         waitForText("星环邮差")
-        assertEquals(2, Phase2SourceGateway.remoteLibraryReadCount())
+        val readCountAfterRefresh = Phase2SourceGateway.remoteLibraryReadCount()
+        assertTrue(readCountAfterRefresh > 0)
         assertEquals(0, Phase2SourceGateway.websiteMutationCount())
 
-        composeRule.onAllNodes(isToggleable())[0].performClick()
+        composeRule.onNodeWithTag("library-book-$WENKU8_SOURCE_ID-1234").performTouchInput { longClick() }
         waitForText("已选择 1 项")
-        composeRule.onNodeWithContentDescription("复制所选").performClick()
+        composeRule.onNodeWithContentDescription("更多操作").performClick()
+        composeRule.onNodeWithText("复制所选").performClick()
         waitForText("复制网站收藏到本地书架")
         composeRule.onNodeWithText("确认复制到本地书架").performClick()
         waitForText("已复制 1 本，新增 1 本到本地书架；未向网站写入。")
         assertEquals(0, Phase2SourceGateway.websiteMutationCount())
 
-        composeRule.onNodeWithContentDescription("全部复制").performClick()
+        composeRule.onNodeWithContentDescription("更多操作").performClick()
+        composeRule.onNodeWithText("全部复制").performClick()
         waitForText("复制网站收藏到本地书架")
         composeRule.onNodeWithText("确认复制到本地书架").performClick()
         waitForText("已复制 2 本，新增 1 本到本地书架；未向网站写入。")
@@ -555,8 +662,9 @@ class ManualVerificationHandoffInstrumentedTest {
         }
 
         composeRule.activityRule.scenario.recreate()
-        waitForText("尚未读取网站收藏")
-        assertEquals(2, Phase2SourceGateway.remoteLibraryReadCount())
+        waitForText("雾港纪事")
+        waitForText("星环邮差")
+        assertEquals(readCountAfterRefresh, Phase2SourceGateway.remoteLibraryReadCount())
         assertEquals(0, Phase2SourceGateway.websiteMutationCount())
     }
 

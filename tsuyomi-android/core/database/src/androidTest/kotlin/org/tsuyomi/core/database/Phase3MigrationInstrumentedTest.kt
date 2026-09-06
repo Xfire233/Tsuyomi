@@ -9,6 +9,7 @@ import androidx.sqlite.db.framework.FrameworkSQLiteOpenHelperFactory
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -120,9 +121,66 @@ class Phase3MigrationInstrumentedTest {
         }
     }
 
+    @Test
+    fun migration_4_to_5_adds_remote_mutation_and_writeback_columns() {
+        helper.createDatabase(PHASE4B_DATABASE, 4).use { db ->
+            db.execSQL(
+                "INSERT INTO source_remote_policy(source_id,trusted_publisher_fingerprint,capability_set_fingerprint,approved_origin,add_writeback_enabled,first_import_prompt_dismissed) " +
+                    "VALUES ('fixture.source','pub-1','cap-1','https://example.com',1,0)",
+            )
+            db.execSQL(
+                "INSERT INTO remote_library_reconciliation(id,source_id,remote_book_id,package_digest,package_version,capability_set_fingerprint,registry_generation,state,created_at_epoch_second,updated_at_epoch_second,diagnostic_id) " +
+                    "VALUES ('rec-1','fixture.source','book-1','pkg-1','1.0.0','cap-1',1,'IN_FLIGHT',100,100,NULL)",
+            )
+        }
+
+        helper.runMigrationsAndValidate(PHASE4B_DATABASE, 5, true, MIGRATION_4_5).use { db ->
+            db.query("SELECT remove_writeback_enabled, move_writeback_enabled FROM source_remote_policy WHERE source_id='fixture.source'").use { cursor ->
+                cursor.moveToFirst()
+                assertEquals(0, cursor.getInt(0))
+                assertEquals(0, cursor.getInt(1))
+            }
+            db.query("SELECT operation, target_id, target_name FROM remote_library_reconciliation WHERE id='rec-1'").use { cursor ->
+                cursor.moveToFirst()
+                assertEquals("ADD", cursor.getString(0))
+                assertTrue(cursor.isNull(1))
+                assertTrue(cursor.isNull(2))
+            }
+        }
+    }
+
+    @Test
+    fun migration_5_to_6_adds_durable_remote_mirror_tables() {
+        helper.createDatabase(REMOTE_MIRROR_DATABASE, 5).close()
+
+        helper.runMigrationsAndValidate(REMOTE_MIRROR_DATABASE, 6, true, MIGRATION_5_6).use { db ->
+            db.query(
+                "SELECT name FROM sqlite_master WHERE type='table' AND name IN " +
+                    "('remote_mirror_bindings','remote_mirror_targets','remote_mirror_items') ORDER BY name",
+            ).use { cursor ->
+                assertEquals(3, cursor.count)
+            }
+            db.execSQL(
+                "INSERT INTO remote_mirror_bindings(source_id,display_name,frozen,updated_at_epoch_second) " +
+                    "VALUES ('fixture.source','示例书架',0,100)",
+            )
+            db.execSQL(
+                "INSERT INTO remote_mirror_targets(source_id,target_id,display_name,parent_id,kind,frozen,updated_at_epoch_second) " +
+                    "VALUES ('fixture.source','folder-1','收藏夹',NULL,'folder',0,100)",
+            )
+            db.query("SELECT display_name, frozen FROM remote_mirror_targets WHERE target_id='folder-1'").use { cursor ->
+                cursor.moveToFirst()
+                assertEquals("收藏夹", cursor.getString(0))
+                assertEquals(0, cursor.getInt(1))
+            }
+        }
+    }
+
     private companion object {
         const val DATABASE = "phase3-migration"
         const val READ_LATER_DATABASE = "phase4a-read-later-migration"
         const val LIBRARY_ORDER_DATABASE = "phase4a-library-order-migration"
+        const val PHASE4B_DATABASE = "phase4b-remote-writeback-migration"
+        const val REMOTE_MIRROR_DATABASE = "phase4b-remote-mirror-migration"
     }
 }

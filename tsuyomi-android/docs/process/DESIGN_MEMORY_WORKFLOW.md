@@ -66,6 +66,8 @@ Retain durable, reusable facts only. Do not store ephemeral todo state, build ou
 
 ## to-spec trigger policy
 
+`TOOLING.md` owns generic `to-spec` dispatch, exclusions, fallback and health checks. This section owns Tsuyomi's repository-specific publication triggers so they are not independently redefined in Skills, agent configuration or issue templates.
+
 The installed `to-spec` skill is explicitly authorized for this repository when:
 
 - a feature/state machine/multi-route flow is ready for later implementation;

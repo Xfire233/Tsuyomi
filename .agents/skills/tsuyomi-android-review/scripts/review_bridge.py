@@ -137,7 +137,7 @@ def parse_timestamp(value: Any, label: str) -> str:
 
 
 def load_active_profiles(root: Path) -> set[str]:
-    policy_path = root / "tools" / "skills" / "tsuyomi-android-review" / "review-policy.json"
+    policy_path = root / ".agents" / "skills" / "tsuyomi-android-review" / "review-policy.json"
     try:
         policy = json.loads(policy_path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError) as error:

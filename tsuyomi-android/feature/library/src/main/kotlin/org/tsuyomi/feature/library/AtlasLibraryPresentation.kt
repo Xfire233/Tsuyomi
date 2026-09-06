@@ -40,12 +40,13 @@ internal fun AtlasLibraryPresentation(
     onOpenSystemNode: (SystemLibraryFilter) -> Unit,
     onOpenCollection: (LibraryCollection) -> Unit,
     onOpenBook: (LibraryEntry) -> Unit,
+    onOpenMirror: (LibraryMirrorShortcut) -> Unit,
     onCreateCollection: () -> Unit,
     onRetry: () -> Unit,
     onDismissSort: () -> Unit,
     onSelectSort: (LibrarySortMode) -> Unit,
     onSelectSortDirection: (Boolean) -> Unit,
-    coverState: (LibraryEntry) -> CoverUiState,
+    coverState: @Composable (LibraryEntry) -> CoverUiState,
     onCoverVisibility: (LibraryEntry, Boolean) -> Unit,
     onLongPressBook: (BookIdentity) -> Unit,
     onToggleBookSelection: (BookIdentity) -> Unit,
@@ -99,7 +100,12 @@ internal fun AtlasLibraryPresentation(
 
     val shortcutOrder = state.shortcutOrder
     val shortcutLocked = state.shortcutLocked
-    val shortcuts = buildShortcuts(state.entries, collections, shortcutOrder)
+    val shortcuts = buildShortcuts(
+        state.entries,
+        collections,
+        state.mirrorShortcuts.filter { it.targetId == null || it.sourceId in state.websiteGroupingSourceIds },
+        shortcutOrder,
+    )
     val orderedShortcuts = orderShortcuts(shortcuts, shortcutOrder)
     var showAllShortcuts by rememberSaveable { mutableStateOf(false) }
     var shortcutPresentation by rememberSaveable { mutableStateOf(ShortcutShelfPresentation.INLINE) }
@@ -126,7 +132,7 @@ internal fun AtlasLibraryPresentation(
             },
             onCreate = onCreateCollection,
             onViewAll = { showAllShortcuts = true },
-            onOpen = { openShortcut(it, onOpenSystemNode, onOpenCollection, onOpenBook) },
+            onOpen = { openShortcut(it, onOpenSystemNode, onOpenCollection, onOpenBook, onOpenMirror) },
             selectionKind = state.selectionKind,
             selectedBookIds = state.selectedBookIds,
             selectedCollectionIds = state.selectedCollectionIds,
@@ -149,7 +155,7 @@ internal fun AtlasLibraryPresentation(
                 onDismiss = { showAllShortcuts = false },
                 onOpen = { shortcut ->
                     showAllShortcuts = false
-                    openShortcut(shortcut, onOpenSystemNode, onOpenCollection, onOpenBook)
+                    openShortcut(shortcut, onOpenSystemNode, onOpenCollection, onOpenBook, onOpenMirror)
                 },
                 dragCoordinator = dragCoordinator,
                 selectionKind = state.selectionKind,

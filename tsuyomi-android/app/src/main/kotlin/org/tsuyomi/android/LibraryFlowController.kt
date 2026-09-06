@@ -36,6 +36,9 @@ import org.tsuyomi.feature.library.LibrarySelectionDialog
 import org.tsuyomi.feature.library.LibrarySelectionKind
 import org.tsuyomi.feature.library.LibrarySortMode
 import org.tsuyomi.feature.library.libraryBookShortcutId
+import org.tsuyomi.feature.library.LibraryMirrorShortcut
+import org.tsuyomi.feature.library.libraryMirrorFolderShortcutId
+import org.tsuyomi.feature.library.libraryMirrorShortcutId
 import org.tsuyomi.feature.library.SmartConditionDraft
 import org.tsuyomi.feature.library.SmartField
 import org.tsuyomi.feature.library.SystemLibraryFilter
@@ -216,6 +219,41 @@ internal class LibraryFlowController private constructor(
             val presentationPreferences = preferencesRepository.preferences.first()
             val nextCollections = repository.collections()
             val nextRootEntries = repository.libraryEntries()
+            val mirrorShortcuts = repository.remoteMirrorBindings().flatMap { binding ->
+                val snapshot = repository.remoteMirrorSnapshot(binding.sourceId)
+                buildList {
+                    add(
+                        LibraryMirrorShortcut(
+                            sourceId = binding.sourceId,
+                            targetId = null,
+                            label = binding.displayName,
+                            count = snapshot?.books?.size ?: 0,
+                            frozen = binding.frozen,
+                        ),
+                    )
+                    snapshot?.targets?.forEach { target ->
+                        add(
+                            LibraryMirrorShortcut(
+                                sourceId = binding.sourceId,
+                                targetId = target.targetId,
+                                label = target.displayName,
+                                count = snapshot.books.count { it.targetId == target.targetId },
+                                frozen = target.frozen,
+                            ),
+                        )
+                    }
+                }
+            }
+            val websiteGroupingSourceIds = mirrorShortcuts.asSequence()
+                .map(LibraryMirrorShortcut::sourceId)
+                .distinct()
+                .filterTo(linkedSetOf()) { sourceId ->
+                    presentationPreferences.websiteGroupingBySource[sourceId] ?: mirrorShortcuts.any { mirror ->
+                        val targetId = mirror.targetId
+                        mirror.sourceId == sourceId && targetId != null &&
+                            libraryMirrorFolderShortcutId(sourceId, targetId) in presentationPreferences.shortcutOrder
+                    }
+                }
             val validSelectedId = selectedId?.takeIf { id -> nextCollections.any { it.collectionId == id } }
             val nextEntries = validSelectedId?.let { id ->
                 repository.collectionEntries(id).also { collectionEntryCache[id] = it }
@@ -224,6 +262,8 @@ internal class LibraryFlowController private constructor(
             state = state.copy(
                 shortcutOrder = presentationPreferences.shortcutOrder,
                 shortcutLocked = presentationPreferences.shortcutLocked,
+                mirrorShortcuts = mirrorShortcuts,
+                websiteGroupingSourceIds = websiteGroupingSourceIds,
             )
             rootEntries = nextRootEntries
             rootLoaded = true
@@ -362,7 +402,8 @@ internal class LibraryFlowController private constructor(
 
     suspend fun removeShortcut(id: String, failureMessage: String): Boolean = runCatching {
         val visible = visibleShortcutIds().filterNot { it == id }
-        val hidden = if (id.startsWith("book:")) hiddenShortcutIds() else hiddenShortcutIds() + id
+        val userOwned = id.startsWith("book:") || id.startsWith("mirror:") || id.startsWith("mirror-folder:")
+        val hidden = if (userOwned) hiddenShortcutIds() - id else hiddenShortcutIds() + id
         persistShortcutOrder(visible, hidden)
         clearSelection()
     }.onFailure {
@@ -371,6 +412,84 @@ internal class LibraryFlowController private constructor(
 
     suspend fun removeBookShortcut(identity: BookIdentity, failureMessage: String): Boolean =
         removeShortcut(libraryBookShortcutId(identity), failureMessage)
+
+    fun isBookShortcutPinned(identity: BookIdentity): Boolean = libraryBookShortcutId(identity) in visibleShortcutIds()
+
+    suspend fun manualCollectionIds(identity: BookIdentity): Set<String> = repository.manualCollectionIds(identity)
+
+    suspend fun applyBookDestinations(
+        identity: BookIdentity,
+        shortcutPinned: Boolean,
+        collectionIds: Set<String>,
+        failureMessage: String,
+    ): Boolean = runCatching {
+        require(repository.libraryEntry(identity) != null) { "Book must exist in the local library" }
+        val manualIds = collections.asSequence()
+            .filter { it.kind == CollectionKind.MANUAL }
+            .mapTo(hashSetOf()) { it.collectionId }
+        val currentIds = repository.manualCollectionIds(identity) intersect manualIds
+        (currentIds - collectionIds).forEach { collectionId -> repository.removeManualMembership(collectionId, identity) }
+        (collectionIds - currentIds).forEach { collectionId -> repository.addManualMembership(collectionId, identity) }
+        val shortcutId = libraryBookShortcutId(identity)
+        val visible = visibleShortcutIds().filterNot { it == shortcutId }.toMutableList()
+        if (shortcutPinned) visible += shortcutId
+        persistShortcutOrder(visible, hiddenShortcutIds() - shortcutId)
+        reload(failureMessage)
+    }.onFailure {
+        collectionMessage = failureMessage
+    }.isSuccess
+
+    fun isMirrorShortcutPinned(sourceId: String, targetId: String?): Boolean {
+        val id = targetId?.let { libraryMirrorFolderShortcutId(sourceId, it) } ?: libraryMirrorShortcutId(sourceId)
+        return id in visibleShortcutIds()
+    }
+
+    fun isWebsiteGroupingEnabled(sourceId: String): Boolean = sourceId in state.websiteGroupingSourceIds
+
+    suspend fun setWebsiteGroupingEnabled(
+        sourceId: String,
+        enabled: Boolean,
+        failureMessage: String,
+    ): Boolean = runCatching {
+        preferencesRepository.updateWebsiteGrouping(sourceId, enabled)
+        state = state.copy(
+            websiteGroupingSourceIds = if (enabled) {
+                state.websiteGroupingSourceIds + sourceId
+            } else {
+                state.websiteGroupingSourceIds - sourceId
+            },
+        )
+    }.onFailure {
+        collectionMessage = failureMessage
+    }.isSuccess
+
+    suspend fun setMirrorShortcutPinned(
+        shortcut: LibraryMirrorShortcut,
+        pinned: Boolean,
+        failureMessage: String,
+    ): Boolean = runCatching {
+        require(shortcut.targetId == null || isWebsiteGroupingEnabled(shortcut.sourceId))
+        val id = shortcut.targetId?.let { libraryMirrorFolderShortcutId(shortcut.sourceId, it) }
+            ?: libraryMirrorShortcutId(shortcut.sourceId)
+        val visible = visibleShortcutIds().filterNot { it == id }.toMutableList()
+        if (pinned) {
+            val sameSourceIndices = visible.mapIndexedNotNull { index, candidate ->
+                index.takeIf {
+                    candidate == libraryMirrorShortcutId(shortcut.sourceId) ||
+                        state.mirrorShortcuts.any { mirror ->
+                            mirror.sourceId == shortcut.sourceId && mirror.targetId?.let { targetId ->
+                                libraryMirrorFolderShortcutId(mirror.sourceId, targetId) == candidate
+                            } == true
+                        }
+                }
+            }
+            visible.add((sameSourceIndices.lastOrNull()?.plus(1) ?: visible.size), id)
+        }
+        persistShortcutOrder(visible, hiddenShortcutIds() - id)
+        reload(failureMessage)
+    }.onFailure {
+        collectionMessage = failureMessage
+    }.isSuccess
 
     fun requestShortcutCollectionCreation(
         moved: Set<BookIdentity>,
@@ -394,18 +513,35 @@ internal class LibraryFlowController private constructor(
         val available = buildList {
             addAll(SystemShortcutIds)
             addAll(collections.map { "collection:${it.collectionId}" })
+            addAll(state.mirrorShortcuts.filter { mirror ->
+                mirror.targetId == null || isWebsiteGroupingEnabled(mirror.sourceId)
+            }.map { mirror ->
+                mirror.targetId?.let { libraryMirrorFolderShortcutId(mirror.sourceId, it) }
+                    ?: libraryMirrorShortcutId(mirror.sourceId)
+            })
             state.shortcutOrder.filterTo(this) { id ->
                 id.startsWith("book:") && rootEntries.any { libraryBookShortcutId(it.book.identity) == id }
             }
-        }.distinct().filterNot(hidden::contains)
+        }.distinct().filterNot(hidden::contains).filter { id ->
+            !id.startsWith("mirror") || id in state.shortcutOrder
+        }
         val ordered = state.shortcutOrder.filter { it in available }
         return ordered + available.filterNot(ordered::contains)
     }
 
     fun shortcutIndex(id: String): Int = visibleShortcutIds().indexOf(id).coerceAtLeast(0)
 
+    private fun inactiveFolderShortcutIds(): List<String> = state.shortcutOrder.filter { candidate ->
+        state.mirrorShortcuts.any { mirror ->
+            val targetId = mirror.targetId
+            targetId != null && !isWebsiteGroupingEnabled(mirror.sourceId) &&
+                libraryMirrorFolderShortcutId(mirror.sourceId, targetId) == candidate
+        }
+    }
+
     private suspend fun persistShortcutOrder(visible: List<String>, hidden: Set<String>) {
-        setShortcutOrder(visible.distinct() + hidden.sorted().map { "$HiddenShortcutPrefix$it" })
+        val inactiveFolders = inactiveFolderShortcutIds().filterNot { it in visible || it in hidden }
+        setShortcutOrder(visible.distinct() + inactiveFolders + hidden.sorted().map { "$HiddenShortcutPrefix$it" })
     }
 
     fun selectSortDirection(descending: Boolean) {

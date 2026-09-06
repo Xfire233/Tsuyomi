@@ -103,7 +103,7 @@ def _review_authority() -> dict[str, Any]:
     return {
         "aiMayApprove": False,
         "reviewStateModified": False,
-        "note": "R1 scopes review work only; unchanged or empty scope never implies approval",
+        "note": "UI-R1 scopes review work only; unchanged or empty scope never implies approval",
     }
 
 
@@ -180,17 +180,17 @@ def _next_section(
     summary: ChangeSummary,
 ) -> dict[str, Any]:
     if summary.device_required:
-        stage = "R2 current-stage review on " + ", ".join(context.review_policy["activeProfiles"])
+        stage = "UI-R2 current-stage review on " + ", ".join(context.review_policy["activeProfiles"])
     elif summary.build_required:
         stage = "build verification"
     elif summary.deferred_nodes:
         stage = "actual online scenario review deferred"
     else:
-        stage = "R1 complete"
+        stage = "UI-R1 complete"
     return {
         "stage": stage,
         "avoid": [
-            "Do not edit Review Graph progress or verdicts during R1",
+            "Do not edit Review Graph progress or verdicts during UI-R1",
             "Do not build, deploy, capture, or start an emulator for workflow-only changes",
             "Do not execute deferred profile matrices until the policy resume trigger",
             "Do not finalize S/X nodes from the isolated Atlas; they require actual online production scenarios",

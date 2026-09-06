@@ -6,6 +6,11 @@
 package org.tsuyomi.core.ui.components
 
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.WindowInsetsSides
+import androidx.compose.foundation.layout.only
+import androidx.compose.foundation.layout.safeDrawing
+import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.compositionLocalOf
@@ -91,7 +96,8 @@ fun AppScaffold(
         LocalTsuyomiModalController provides modalController,
     ) {
         Layout(
-            modifier = modifier.tsuyomiModalBackground(),
+            modifier = modifier.tsuyomiModalBackground()
+                .windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Horizontal)),
             content = {
                 Box { topBar() }
                 Box { navigation(layout) }

@@ -27,6 +27,8 @@ All notable changes use semantic versioning. Future Phase baselines use annotate
 
 - Superseded numbered delivery `Gate` scopes with `Phase 0–5` (including 4A/4B/4C); reserved gate terminology for explicit admission, review, authorization and release checkpoints.
 - Restored Atlas resting shortcut tile dimensions (`80×116dp`), media field (`76dp`), single-line labels, and target-specific collection hover feedback.
+- Remote Library refresh now exits its working state after every terminal content, empty, login-required, verification-required, cancelled, or safe-error result instead of leaving refresh controls stuck loading.
+- Remote ADD now coalesces concurrent taps to one website write, preserves an accepted unresolved attempt when a later retry fails before acceptance, and closes the unresolved retry chain only after an explicit retry confirms `APPLIED` or `ALREADY_PRESENT`.
 
 ## [0.1.0] - 2026-08-09
 

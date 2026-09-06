@@ -129,3 +129,26 @@ test('hxp parameter-name length counts astral Unicode code points', async () => 
   oversized.capabilities.remoteLibrary.policies.add.redirects[0].parameters['😀'.repeat(257)] = { kind: 'fixed', value: 'added' };
   assert.equal(validate(oversized), false);
 });
+
+test('hxp manifest v1 validates remove and move remote operation policies', async () => {
+  const ajv = createAjv();
+  const validate = ajv.compile(await loadJson('../schemas/hxp-manifest-v1.schema.json'));
+  const manifest = await loadJson('../fixtures/hxp/valid-minimal-manifest.json');
+  manifest.capabilities.remoteLibrary.policies.remove = {
+    origin: 'https://www.wenku8.net',
+    method: 'POST',
+    path: '/modules/article/bookcase.php',
+    parameters: { action: { kind: 'fixed', value: 'remove' }, aid: { kind: 'remoteBookId' } },
+  };
+  manifest.capabilities.remoteLibrary.policies.move = {
+    origin: 'https://www.wenku8.net',
+    method: 'POST',
+    path: '/modules/article/bookcase.php',
+    parameters: {
+      action: { kind: 'fixed', value: 'move' },
+      aid: { kind: 'remoteBookId' },
+      target: { kind: 'targetId' },
+    },
+  };
+  assert.equal(validate(manifest), true, ajv.errorsText(validate.errors));
+});

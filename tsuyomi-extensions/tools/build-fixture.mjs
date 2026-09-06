@@ -28,7 +28,7 @@ const manifest = {
   format: 'tsuyomi-hxp',
   manifestVersion: 1,
   id: 'org.tsuyomi.wenku8',
-  version: '0.2.25',
+  version: '0.2.26',
   display: {
     name: 'Wenku8',
     summary: 'Wenku8 阅读与显式远程收藏来源（测试发布者）',
@@ -50,7 +50,7 @@ const manifest = {
     home: { enabled: true },
     remoteLibrary: {
       read: true,
-      writeOperations: ['add'],
+      writeOperations: ['add', 'remove', 'move'],
       policies: {
         read: {
           origin: 'https://www.wenku8.net',
@@ -71,6 +71,18 @@ const manifest = {
             },
           ],
           parameters: { action: { kind: 'fixed', value: 'add' }, aid: { kind: 'remoteBookId' } },
+        },
+        remove: {
+          origin: 'https://www.wenku8.net',
+          method: 'POST',
+          path: '/modules/article/bookcase.php',
+          parameters: { action: { kind: 'fixed', value: 'remove' }, aid: { kind: 'remoteBookId' } },
+        },
+        move: {
+          origin: 'https://www.wenku8.net',
+          method: 'POST',
+          path: '/modules/article/bookcase.php',
+          parameters: { action: { kind: 'fixed', value: 'move' }, aid: { kind: 'remoteBookId' }, target: { kind: 'targetId' } },
         },
       },
     },

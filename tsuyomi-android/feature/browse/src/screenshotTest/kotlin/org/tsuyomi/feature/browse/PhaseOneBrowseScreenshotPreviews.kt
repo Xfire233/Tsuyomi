@@ -35,6 +35,7 @@ fun BrowseEmptyEInkScreenshot() {
     BrowsePreview(DisplayProfile.EINK)
 }
 
+
 @Preview(name = "approval-resource-limit-increase", device = "spec:width=360dp,height=800dp,dpi=420", locale = "zh-rCN")
 @Composable
 fun BrowseApprovalResourceLimitPreview() {

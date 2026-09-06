@@ -80,7 +80,17 @@ class PhaseContractDetectionTest(unittest.TestCase):
                 {"L01", "L08", "B01", "X01", "X02", "X04", "X05"},
             ),
             (
-                "tools/skills/tsuyomi-android-review/scripts/review_bridge.py",
+                ".agents/skills/tsuyomi-android-review/scripts/review_bridge.py",
+                "workflow",
+                {"X06"},
+            ),
+            (
+                "TOOLING.md",
+                "workflow",
+                {"X06"},
+            ),
+            (
+                "DOCUMENTATION.md",
                 "workflow",
                 {"X06"},
             ),
@@ -93,15 +103,28 @@ class PhaseContractDetectionTest(unittest.TestCase):
                 self.assertEqual(expected_nodes, selected)
 
 
-    def test_production_policy_activates_all_nodes_and_keeps_eink_deferred(self) -> None:
+    def test_review_policy_covers_catalog_prefixes_without_overlap(self) -> None:
         root = r1.find_repo_root(Path.cwd())
         policy, _ = r1.load_review_policy(root)
+        node_ids = r1.parse_catalog(root)[1]
+        catalog_prefixes = {node_id[0] for node_id in node_ids}
+        execution = policy["nodeExecution"]
+        active_prefixes = set(execution["activeNodePrefixes"])
+        deferred_prefixes = {
+            prefix
+            for stage in execution["deferredStages"]
+            for prefix in stage["nodePrefixes"]
+        }
+        actual_online_prefixes = set(execution["actualOnlineRequirements"]["nodePrefixes"])
 
-        self.assertEqual("phase4a-production-standard-first", policy["mode"])
-        self.assertEqual(["L", "B", "M", "S", "X"], policy["nodeExecution"]["activeNodePrefixes"])
-        self.assertEqual([], policy["nodeExecution"]["deferredStages"])
-        self.assertEqual(["S", "X"], policy["nodeExecution"]["actualOnlineRequirements"]["nodePrefixes"])
-        self.assertEqual(["EINK"], [item["profile"] for item in policy["deferredProfiles"]])
+        self.assertTrue(policy["mode"])
+        self.assertEqual(set(), active_prefixes & deferred_prefixes)
+        self.assertEqual(catalog_prefixes, active_prefixes | deferred_prefixes)
+        self.assertLessEqual(actual_online_prefixes, active_prefixes)
+        self.assertEqual(
+            set(),
+            set(policy["activeProfiles"]) & {item["profile"] for item in policy["deferredProfiles"]},
+        )
 
     def test_review_export_schema_matches_catalog_version(self) -> None:
         root = r1.find_repo_root(Path.cwd())

@@ -57,7 +57,7 @@ internal fun LibraryDragVisualOverlay(
     entries: List<LibraryEntry>,
     shortcuts: List<ProductionShortcut>,
     layout: LibraryLayout,
-    coverState: (LibraryEntry) -> CoverUiState,
+    coverState: @Composable (LibraryEntry) -> CoverUiState,
     modifier: Modifier = Modifier,
 ) {
     val payload = coordinator.activePayload
@@ -156,7 +156,7 @@ internal fun dragPreviewSize(payload: LibraryDragPayload, layout: LibraryLayout)
 internal fun LibraryBookDragPreview(
     entries: List<LibraryEntry>,
     layout: LibraryLayout,
-    coverState: (LibraryEntry) -> CoverUiState,
+    coverState: @Composable (LibraryEntry) -> CoverUiState,
 ) {
     val lead = entries.firstOrNull() ?: return
     when (layout) {
@@ -211,7 +211,10 @@ internal fun LibraryBookDragPreview(
 }
 
 @Composable
-internal fun ShortcutBookDragPreview(entry: LibraryEntry, coverState: (LibraryEntry) -> CoverUiState) {
+internal fun ShortcutBookDragPreview(
+    entry: LibraryEntry,
+    coverState: @Composable (LibraryEntry) -> CoverUiState,
+) {
     Surface(
         modifier = Modifier.size(width = 84.dp, height = 116.dp),
         shape = MaterialTheme.shapes.small,
@@ -226,7 +229,10 @@ internal fun ShortcutBookDragPreview(entry: LibraryEntry, coverState: (LibraryEn
 }
 
 @Composable
-internal fun ShortcutDragPreview(shortcut: ProductionShortcut, coverState: (LibraryEntry) -> CoverUiState) {
+internal fun ShortcutDragPreview(
+    shortcut: ProductionShortcut,
+    coverState: @Composable (LibraryEntry) -> CoverUiState,
+) {
     Surface(
         modifier = Modifier.size(width = 84.dp, height = 116.dp),
         shape = MaterialTheme.shapes.small,

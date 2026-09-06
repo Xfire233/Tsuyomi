@@ -13,6 +13,8 @@ import org.tsuyomi.core.database.RoomTransferRepository
 import org.tsuyomi.core.database.MIGRATION_1_2
 import org.tsuyomi.core.database.MIGRATION_2_3
 import org.tsuyomi.core.database.MIGRATION_3_4
+import org.tsuyomi.core.database.MIGRATION_4_5
+import org.tsuyomi.core.database.MIGRATION_5_6
 import org.tsuyomi.core.database.TsuyomiDatabase
 import org.tsuyomi.core.display.DisplayController
 import org.tsuyomi.core.display.LocalDeviceClassifier
@@ -33,7 +35,7 @@ class TsuyomiApplication : Application() {
 
     private val database: TsuyomiDatabase by lazy(LazyThreadSafetyMode.SYNCHRONIZED) {
         Room.databaseBuilder(applicationContext, TsuyomiDatabase::class.java, "tsuyomi.db")
-            .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4)
+            .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6)
             .build()
     }
     val libraryRepository: RoomLibraryRepository by lazy(LazyThreadSafetyMode.SYNCHRONIZED) {

@@ -13,6 +13,8 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.lifecycle.SavedStateHandle
+import androidx.lifecycle.ViewModel
+import androidx.lifecycle.ViewModelProvider
 import androidx.navigation.NavBackStackEntry
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
@@ -31,8 +33,11 @@ import kotlinx.coroutines.flow.StateFlow
 import org.tsuyomi.feature.book.SourceBookState
 import org.tsuyomi.feature.search.SearchResultState
 import org.tsuyomi.feature.search.SearchLayout
+import org.tsuyomi.feature.library.JitWritebackPrompt
 import org.tsuyomi.shared.locator.LocatorPrecision
 import org.tsuyomi.shared.locator.ReaderLocator
+import org.tsuyomi.shared.sourcecontract.RemoteTarget
+import org.tsuyomi.source.extensionmanager.RemoteOperation
 import org.tsuyomi.shared.sourcecontract.ReaderDocument
 import org.tsuyomi.shared.sourcecontract.ReaderBlock
 import org.tsuyomi.shared.sourcecontract.SourceBookDetail
@@ -40,6 +45,8 @@ import org.tsuyomi.shared.sourcecontract.SourceBookSummary
 import org.tsuyomi.shared.sourcecontract.SourceChapter
 import org.tsuyomi.shared.sourcecontract.SourceDirectory
 import org.tsuyomi.shared.sourcecontract.SourceException
+import org.tsuyomi.shared.sourcecontract.SourceDiagnostic
+import org.tsuyomi.shared.sourcecontract.SourceErrorCode
 import org.tsuyomi.source.extensionmanager.VerifiedHxpPackage
 
 /**
@@ -51,16 +58,22 @@ import org.tsuyomi.source.extensionmanager.VerifiedHxpPackage
 internal class SourceSearchRouteOwner(
     private val flow: SourceFlowController,
     private val savedState: SavedStateHandle,
+    initialState: SearchResultState = SearchResultState.Idle,
 ) {
     var query by mutableStateOf(savedState[QueryKey] ?: "")
         private set
-    var state: SearchResultState by mutableStateOf(SearchResultState.Idle)
+    var authorSearch by mutableStateOf(savedState[AuthorSearchKey] ?: false)
+        private set
+    var state: SearchResultState by mutableStateOf(initialState)
         private set
     val layout: StateFlow<SearchLayout> = savedState.getStateFlow(LayoutKey, SearchLayout.LIST)
 
     fun updateQuery(value: String) {
         query = value.take(MaxQueryLength)
+        authorSearch = false
         savedState[QueryKey] = query
+        savedState[AuthorSearchKey] = false
+        flow.updateQuery(query)
     }
 
     fun cycleLayout() {
@@ -69,11 +82,31 @@ internal class SourceSearchRouteOwner(
 
     suspend fun restore(packageInfo: VerifiedHxpPackage) {
         flow.restoreFor(SourceRestorationTarget.SEARCH, packageInfo)
+        flow.restoreSearch(query, authorSearch)
     }
 
     suspend fun submit(offlineOnly: Boolean = false) {
+        if (authorSearch) {
+            submitAuthor(query, offlineOnly)
+            return
+        }
         flow.updateQuery(query)
+        if (query.isNotBlank()) state = SearchResultState.Loading
         flow.search(offlineOnly)
+        state = flow.searchState
+    }
+
+    suspend fun submitAuthor(author: String) {
+        submitAuthor(author, offlineOnly = false)
+    }
+
+    private suspend fun submitAuthor(author: String, offlineOnly: Boolean) {
+        query = author
+        authorSearch = true
+        savedState[QueryKey] = query
+        savedState[AuthorSearchKey] = true
+        if (author.isNotBlank()) state = SearchResultState.Loading
+        flow.authorSearch(author, offlineOnly)
         state = flow.searchState
     }
 
@@ -87,6 +120,7 @@ internal class SourceSearchRouteOwner(
 
     companion object {
         private const val QueryKey = "source.search.query"
+        private const val AuthorSearchKey = "source.search.author"
         private const val MaxQueryLength = 100
         internal const val LayoutKey = "source.search.layout"
     }
@@ -121,8 +155,15 @@ internal class SourceDetailRouteOwner(
                 readLater = entry.readLater,
                 progressChapterId = entry.progress?.locator?.document?.contentId,
                 progressChapterFraction = entry.progress?.locator?.chapterProgress,
+                reconciliation = flow.remoteLibrary.selectedBookReconciliation?.name,
+                remoteRemoveEnabled = flow.remoteLibrary.selectedBookRemoveWritesRemote,
+                remoteMoveEnabled = flow.remoteLibrary.selectedBookMoveWritesRemote,
             )
-        } ?: DetailLocalState()
+        } ?: DetailLocalState(
+            reconciliation = flow.remoteLibrary.selectedBookReconciliation?.name,
+            remoteRemoveEnabled = flow.remoteLibrary.selectedBookRemoveWritesRemote,
+            remoteMoveEnabled = flow.remoteLibrary.selectedBookMoveWritesRemote,
+        )
 
     fun toggleUnreadOnly() {
         savedState[UnreadOnlyKey] = !unreadOnly.value
@@ -213,6 +254,26 @@ internal class SourceDetailRouteOwner(
     }
 
     suspend fun selectChapter(chapter: SourceChapter) = flow.prepareChapter(chapter)
+
+    suspend fun removeSelectedBookFromWebsite() = mutate(DetailMutationOperation.REMOVE_FROM_REMOTE) {
+        val result = flow.removeSelectedBookFromWebsite()
+        if (result is RemoteMutationUiResult.Failure) error(result.safeCode)
+    }
+
+    suspend fun moveSelectedBookOnWebsite(targetId: String, targetName: String) = mutate(DetailMutationOperation.MOVE_REMOTE) {
+        val result = flow.moveSelectedBookOnWebsite(targetId, targetName)
+        if (result is RemoteMutationUiResult.Failure) error(result.safeCode)
+    }
+
+    suspend fun retryRemoteReconciliation() = mutate(DetailMutationOperation.RECONCILE_RETRY) {
+        val result = flow.retryRemoteMutation()
+        if (result is RemoteMutationUiResult.Failure) error(result.safeCode)
+    }
+
+    suspend fun acknowledgeRemoteReconciliation() = mutate(DetailMutationOperation.RECONCILE_ACKNOWLEDGE) {
+        val book = selectedBook ?: return@mutate
+        check(flow.acknowledgeUnresolved(book.identity)) { "Acknowledge failed" }
+    }
 
     fun dispose() {
         requestGeneration++
@@ -412,6 +473,39 @@ internal class SourceRemoteLibraryRouteOwner(
         private set
     var copyConfirmationVisible by mutableStateOf(false)
         private set
+    var targets by mutableStateOf<List<RemoteTarget>>(emptyList())
+        private set
+    var selectedTargetId by mutableStateOf<String?>(null)
+        private set
+    var unresolvedBookIds by mutableStateOf<Set<String>>(emptySet())
+        private set
+    var removeConfirmationBook by mutableStateOf<SourceBookSummary?>(null)
+        private set
+    var moveTargetSelectionBook by mutableStateOf<SourceBookSummary?>(null)
+        private set
+    var jitPrompt by mutableStateOf<JitWritebackPrompt?>(null)
+        private set
+    private var pendingOperationBook: SourceBookSummary? = null
+    val visibleBooks: List<SourceBookSummary>
+        get() = selectedTargetId?.let { targetId -> books.filter { it.remoteTargetId == targetId } } ?: books
+
+    suspend fun restore(sourceId: String) {
+        val snapshot = flow.remoteMirrorSnapshot(sourceId) ?: return
+        books = snapshot.books.map { item ->
+            SourceBookSummary(
+                identity = item.book.identity,
+                title = item.book.title,
+                author = item.book.author,
+                coverUrl = item.book.coverUrl,
+                canonicalUrl = item.book.canonicalUrl.orEmpty(),
+                remoteTargetId = item.targetId,
+            )
+        }
+        targets = snapshot.targets.map {
+            RemoteTarget(it.targetId, it.displayName, it.parentId, it.kind)
+        }
+        status = if (books.isEmpty()) RemoteLibraryRouteStatus.Empty else RemoteLibraryRouteStatus.Content
+    }
 
     suspend fun refresh() {
         val packageInfo = packageProvider() ?: run {
@@ -420,19 +514,27 @@ internal class SourceRemoteLibraryRouteOwner(
         }
         loading = true
         status = RemoteLibraryRouteStatus.Loading
-        status = when (val result = flow.pullRemoteLibrary(packageInfo)) {
-            is RemoteLibraryPullResult.Success -> {
-                books = result.books
-                selectedIds = selectedIds.intersect(books.mapTo(hashSetOf(), SourceBookSummary::canonicalUrl))
-                persistSelection()
-                if (books.isEmpty()) RemoteLibraryRouteStatus.Empty else RemoteLibraryRouteStatus.Content
+        try {
+            status = when (val result = flow.pullRemoteLibrary(packageInfo)) {
+                is RemoteLibraryPullResult.Success -> {
+                    val loadedTargets = runCatching { flow.listRemoteTargets() }.getOrDefault(emptyList())
+                    if (loadedTargets.isNotEmpty() || targets.isEmpty()) targets = loadedTargets
+                    books = flow.saveRemoteMirrorSnapshot(packageInfo.manifest.displayName, result.books, targets)
+                    selectedIds = selectedIds.intersect(books.mapTo(hashSetOf(), SourceBookSummary::canonicalUrl))
+                    persistSelection()
+                    unresolvedBookIds = runCatching {
+                        flow.unresolvedReconciliations().map { it.remoteBookId }.toSet()
+                    }.getOrDefault(emptySet())
+                    if (books.isEmpty()) RemoteLibraryRouteStatus.Empty else RemoteLibraryRouteStatus.Content
+                }
+                RemoteLibraryPullResult.LoginRequired -> RemoteLibraryRouteStatus.LoginRequired
+                RemoteLibraryPullResult.VerificationRequired -> RemoteLibraryRouteStatus.VerificationRequired
+                RemoteLibraryPullResult.Cancelled -> RemoteLibraryRouteStatus.Cancelled
+                is RemoteLibraryPullResult.Failure -> RemoteLibraryRouteStatus.Failure(result.safeCode)
             }
-            RemoteLibraryPullResult.LoginRequired -> RemoteLibraryRouteStatus.LoginRequired
-            RemoteLibraryPullResult.VerificationRequired -> RemoteLibraryRouteStatus.VerificationRequired
-            RemoteLibraryPullResult.Cancelled -> RemoteLibraryRouteStatus.Cancelled
-            is RemoteLibraryPullResult.Failure -> RemoteLibraryRouteStatus.Failure(result.safeCode)
+        } finally {
+            loading = false
         }
-        loading = false
     }
     fun toggleSelection(book: SourceBookSummary) {
         selectedIds = if (book.canonicalUrl in selectedIds) {
@@ -465,6 +567,92 @@ internal class SourceRemoteLibraryRouteOwner(
         return result
     }
 
+    fun selectTarget(targetId: String?) {
+        selectedTargetId = targetId
+    }
+
+    suspend fun requestRemove(book: SourceBookSummary) {
+        val packageInfo = packageProvider() ?: return
+        val policy = packageInfo.manifest.capabilities.remoteLibrary.policies[RemoteOperation.REMOVE]
+        if (policy == null) return
+        if (!flow.writebackAuthorized(book.identity.sourceId, "remove")) {
+            jitPrompt = JitWritebackPrompt(
+                operation = "remove",
+                sourceName = packageInfo.manifest.displayName,
+                bookTitle = book.title,
+            )
+            pendingOperationBook = book
+            return
+        }
+        removeConfirmationBook = book
+    }
+
+    fun dismissRemove() {
+        removeConfirmationBook = null
+    }
+
+    suspend fun confirmRemove(book: SourceBookSummary): RemoteMutationUiResult {
+        removeConfirmationBook = null
+        val result = flow.removeBookFromWebsite(book)
+        if (result is RemoteMutationUiResult.Confirmed) {
+            books = books.filterNot { it.identity == book.identity }
+            selectedIds = selectedIds - book.canonicalUrl
+            persistSelection()
+        }
+        return result
+    }
+
+    suspend fun requestMove(book: SourceBookSummary) {
+        val packageInfo = packageProvider() ?: return
+        val policy = packageInfo.manifest.capabilities.remoteLibrary.policies[RemoteOperation.MOVE]
+        if (policy == null) return
+        if (!flow.writebackAuthorized(book.identity.sourceId, "move")) {
+            jitPrompt = JitWritebackPrompt(
+                operation = "move",
+                sourceName = packageInfo.manifest.displayName,
+                bookTitle = book.title,
+            )
+            pendingOperationBook = book
+            return
+        }
+        moveTargetSelectionBook = book
+    }
+
+    fun dismissMove() {
+        moveTargetSelectionBook = null
+    }
+
+    suspend fun confirmMove(book: SourceBookSummary, targetId: String, targetName: String): RemoteMutationUiResult {
+        moveTargetSelectionBook = null
+        val result = flow.moveBookOnWebsite(book, targetId, targetName)
+        if (result is RemoteMutationUiResult.Confirmed) {
+            books = books.map { if (it.identity == book.identity) it.copy(remoteTargetId = targetId) else it }
+        }
+        return result
+    }
+
+    suspend fun confirmJitPrompt() {
+        val prompt = jitPrompt ?: return
+        val packageInfo = packageProvider() ?: return
+        val sourceId = packageInfo.manifest.sourceId.value
+        flow.authorizeWriteback(sourceId, prompt.operation, true)
+        val book = pendingOperationBook
+        jitPrompt = null
+        pendingOperationBook = null
+        if (book != null) {
+            if (prompt.operation == "remove") {
+                removeConfirmationBook = book
+            } else if (prompt.operation == "move") {
+                moveTargetSelectionBook = book
+            }
+        }
+    }
+
+    fun dismissJitPrompt() {
+        jitPrompt = null
+        pendingOperationBook = null
+    }
+
     private fun persistSelection() {
         savedState[SelectedIdsKey] = selectedIds.toList()
     }
@@ -495,12 +683,54 @@ internal fun rememberSourceRemoteLibraryRouteOwner(
     SourceRemoteLibraryRouteOwner(flow, packageProvider, entry.savedStateHandle)
 }
 
+private class SourceSearchRouteOwnerHolder(
+    flow: SourceFlowController,
+    private val savedState: SavedStateHandle,
+) : ViewModel() {
+    private var boundFlow = flow
+    private var owner = SourceSearchRouteOwner(flow, savedState)
+
+    fun forFlow(flow: SourceFlowController): SourceSearchRouteOwner {
+        if (boundFlow !== flow) {
+            // The back-stack ViewModel survives Activity recreation; the source session does not.
+            val retainedState = if (owner.state == SearchResultState.Loading) {
+                SearchResultState.Failure(
+                    SourceErrorCode.EXTENSION_CANCELLED,
+                    SourceDiagnostic("search-restored", "search-restore", "source-session-interrupted"),
+                )
+            } else owner.state
+            owner = SourceSearchRouteOwner(flow, savedState, retainedState)
+            boundFlow = flow
+        }
+        return owner
+    }
+}
+
+private class SourceSearchRouteOwnerHolderFactory(
+    private val flow: SourceFlowController,
+    private val savedState: SavedStateHandle,
+) : ViewModelProvider.Factory {
+    override fun <T : ViewModel> create(modelClass: Class<T>): T {
+        require(modelClass == SourceSearchRouteOwnerHolder::class.java)
+        @Suppress("UNCHECKED_CAST")
+        return SourceSearchRouteOwnerHolder(flow, savedState) as T
+    }
+}
+
+internal fun sourceSearchRouteOwner(
+    entry: NavBackStackEntry,
+    flow: SourceFlowController,
+): SourceSearchRouteOwner = ViewModelProvider(
+    entry,
+    SourceSearchRouteOwnerHolderFactory(flow, entry.savedStateHandle),
+).get(SourceSearchRouteOwnerHolder::class.java).forFlow(flow)
+
 @Composable
 internal fun rememberSourceSearchRouteOwner(
     entry: NavBackStackEntry,
     flow: SourceFlowController,
 ): SourceSearchRouteOwner = remember(entry, flow) {
-    SourceSearchRouteOwner(flow, entry.savedStateHandle)
+    sourceSearchRouteOwner(entry, flow)
 }
 
 @Composable

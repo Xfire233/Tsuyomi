@@ -22,7 +22,7 @@ class ReportBuilderTest(unittest.TestCase):
         self.assertEqual("workflow-only", report["summary"]["scope"])
         self.assertFalse(report["summary"]["requiresGradleBuild"])
         self.assertFalse(report["summary"]["requiresDevicePass"])
-        self.assertEqual("R1 complete", report["next"]["stage"])
+        self.assertEqual("UI-R1 complete", report["next"]["stage"])
         self.assertEqual(["X06"], report["summary"]["currentStageNodes"])
         self.assertEqual([], report["summary"]["deferredNodes"])
 
@@ -55,7 +55,7 @@ class ReportBuilderTest(unittest.TestCase):
         self.assertTrue(report["summary"]["requiresDevicePass"])
         self.assertEqual(["S01"], report["summary"]["currentStageNodes"])
         self.assertEqual([], report["summary"]["deferredNodes"])
-        self.assertEqual("R2 current-stage review on STANDARD", report["next"]["stage"])
+        self.assertEqual("UI-R2 current-stage review on STANDARD", report["next"]["stage"])
 
     @staticmethod
     def context(
@@ -88,7 +88,7 @@ class ReportBuilderTest(unittest.TestCase):
                     "deferredStages": [],
                 },
             },
-            review_policy_path="tools/skills/tsuyomi-android-review/review-policy.json",
+            review_policy_path=".agents/skills/tsuyomi-android-review/review-policy.json",
             review_policy_hash="policy-sha256",
         )
 

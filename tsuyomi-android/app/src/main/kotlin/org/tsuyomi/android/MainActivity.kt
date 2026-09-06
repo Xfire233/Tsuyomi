@@ -73,7 +73,6 @@ import org.tsuyomi.feature.book.BookDirectoryScreen
 import org.tsuyomi.feature.browse.BrowseScreen
 import org.tsuyomi.feature.browse.BrowseTopBar
 import org.tsuyomi.feature.browse.SourceHomeViewState
-import org.tsuyomi.feature.browse.RemoteLibraryScreen
 import org.tsuyomi.feature.reader.ReaderScreen
 import org.tsuyomi.feature.search.SearchLayout
 import org.tsuyomi.feature.search.SearchScreen
@@ -268,7 +267,7 @@ internal fun TsuyomiApp(
             heightDp = maxHeight.value.toInt(),
         )
         val routeOwnsChrome = environment.effectiveProfile == DisplayProfile.STANDARD &&
-            currentRoute in setOf(Routes.Reader, Routes.RemoteLibrary)
+            currentRoute in setOf(Routes.Reader, Routes.RemoteLibrary, Routes.LibraryMirror, Routes.LibraryMirrorFolder)
         Surface(
             modifier = Modifier
                 .fillMaxSize()
@@ -451,14 +450,16 @@ internal fun TsuyomiApp(
                     libraryRoutes(
                         navController = navController,
                         controller = libraryFlow,
-                        coverState = libraryFlow::coverState,
+                        coverState = { entry -> libraryFlow.coverState(entry) },
                         openBookDetail = sourceOwner::openLibraryDetail,
                         resumeReading = sourceOwner::resumeReading,
                         onCoverVisibility = libraryFlow::setCoverVisible,
+                        openRemoteDestination = sourceOwner::openRemoteDestination,
                     )
                     sourceRoutes(
                         navController = navController,
                         owner = sourceOwner,
+                        libraryFlow = libraryFlow,
                         readerPreferences = readerPreferences,
                         onReaderPreferencesChanged = { updated ->
                             scope.launch { application.readerPreferencesRepository.update(updated) }

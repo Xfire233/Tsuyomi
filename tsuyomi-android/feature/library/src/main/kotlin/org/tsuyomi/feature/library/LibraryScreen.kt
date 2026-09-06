@@ -78,6 +78,14 @@ enum class LibrarySortMode(val label: String) {
     RECENT("最近阅读"),
 }
 
+data class LibraryMirrorShortcut(
+    val sourceId: String,
+    val targetId: String?,
+    val label: String,
+    val count: Int,
+    val frozen: Boolean,
+)
+
 data class LibraryUiState(
     val entries: List<LibraryEntry> = emptyList(),
     val loading: Boolean = true,
@@ -95,6 +103,8 @@ data class LibraryUiState(
     val selectedBookIds: Set<BookIdentity> = emptySet(),
     val selectedCollectionIds: Set<String> = emptySet(),
     val selectionDialog: LibrarySelectionDialog? = null,
+    val mirrorShortcuts: List<LibraryMirrorShortcut> = emptyList(),
+    val websiteGroupingSourceIds: Set<String> = emptySet(),
 )
 fun LibraryUiState.projectedEntries(): List<LibraryEntry> {
     val filtered = entries.filter(filter::accepts)
@@ -137,12 +147,13 @@ fun LibraryScreen(
     onOpenSystemNode: (SystemLibraryFilter) -> Unit,
     onOpenCollection: (LibraryCollection) -> Unit,
     onOpenBook: (LibraryEntry) -> Unit,
+    modifier: Modifier = Modifier,
+    onOpenMirror: (LibraryMirrorShortcut) -> Unit = {},
     onCreateCollection: () -> Unit,
     onRetry: () -> Unit,
     onDismissSort: () -> Unit,
     onSelectSort: (LibrarySortMode) -> Unit,
     onSelectSortDirection: (Boolean) -> Unit,
-    modifier: Modifier = Modifier,
     onLongPressBook: (BookIdentity) -> Unit = {},
     onToggleBookSelection: (BookIdentity) -> Unit = {},
     onLongPressCollection: (String) -> Unit = {},
@@ -154,7 +165,7 @@ fun LibraryScreen(
     onCreateCollectionFromSelection: (String) -> Unit = {},
     onAddSelectionToCollection: (String) -> Unit = {},
     onRemoveSelection: () -> Unit = {},
-    coverState: (LibraryEntry) -> CoverUiState = { entry ->
+    coverState: @Composable (LibraryEntry) -> CoverUiState = { entry ->
         CoverUiState.Fallback(FallbackSpec(entry.book.title, entry.book.identity.sourceId))
     },
     onCoverVisibility: (LibraryEntry, Boolean) -> Unit = { _, _ -> },
@@ -185,6 +196,7 @@ fun LibraryScreen(
             onOpenSystemNode = onOpenSystemNode,
             onOpenCollection = onOpenCollection,
             onOpenBook = onOpenBook,
+            onOpenMirror = onOpenMirror,
             coverState = coverState,
             onCoverVisibility = onCoverVisibility,
             onCreateCollection = onCreateCollection,

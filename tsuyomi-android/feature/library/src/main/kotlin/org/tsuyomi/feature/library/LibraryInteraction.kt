@@ -72,12 +72,23 @@ sealed interface LibraryDropDestination {
     ) : LibraryDropDestination
     data class Library(val index: Int) : LibraryDropDestination
     data object Remove : LibraryDropDestination
+    data class RemoteMirror(
+        val sourceId: String,
+        val targetId: String?,
+        val targetName: String,
+    ) : LibraryDropDestination
+    data object LocalCopy : LibraryDropDestination
+    data object RemoteRemove : LibraryDropDestination
 }
 
 internal enum class LibraryShortcutDropKind {
     ITEM,
     COLLECTION,
     BOOK,
+    REMOTE_MIRROR,
+    REMOTE_FOLDER,
+    LOCAL_COPY,
+    REMOTE_REMOVE,
 }
 
 private data class LibraryShortcutTarget(
@@ -86,6 +97,7 @@ private data class LibraryShortcutTarget(
     val kind: LibraryShortcutDropKind,
     val bookIdentity: BookIdentity?,
     val bounds: Rect,
+    val mirror: LibraryMirrorShortcut?,
 )
 
 private data class LibraryCollectionTarget(
@@ -130,6 +142,8 @@ internal class LibraryDragCoordinator {
     var isOverShelf by mutableStateOf(false)
         private set
     var isOverDelete by mutableStateOf(false)
+        private set
+    var externalDestination by mutableStateOf<LibraryDropDestination?>(null)
         private set
 
     var onLongPress: (BookIdentity) -> Unit = {}
@@ -182,8 +196,9 @@ internal class LibraryDragCoordinator {
         kind: LibraryShortcutDropKind,
         bookIdentity: BookIdentity?,
         bounds: Rect,
+        mirror: LibraryMirrorShortcut?,
     ) {
-        val target = LibraryShortcutTarget(id, index, kind, bookIdentity, bounds)
+        val target = LibraryShortcutTarget(id, index, kind, bookIdentity, bounds, mirror)
         shortcutBounds[id] = target
         if (activePayload != null) dragShortcutBounds = dragShortcutBounds + (id to target)
         updateTarget()
@@ -244,6 +259,7 @@ internal class LibraryDragCoordinator {
         val payload = activePayload
         val destination = when {
             isOverDelete -> LibraryDropDestination.Remove
+            externalDestination != null -> externalDestination
             collectionTargetId != null -> LibraryDropDestination.Collection(requireNotNull(collectionTargetId))
             bookTargetIdentity != null -> LibraryDropDestination.Book(
                 identity = requireNotNull(bookTargetIdentity),
@@ -274,6 +290,7 @@ internal class LibraryDragCoordinator {
         isOverShelf = false
         activeShelfTargetId = null
         isOverDelete = false
+        externalDestination = null
         dragShortcutBounds = emptyMap()
         dragCollectionBounds = emptyMap()
         dragBookBounds = emptyMap()
@@ -305,6 +322,37 @@ internal class LibraryDragCoordinator {
             libraryInsertionIndex = -1
             val targets = if (dragShortcutBounds.isNotEmpty()) dragShortcutBounds else shortcutBounds
             val hit = targets.entries.firstOrNull { (_, target) -> target.bounds.contains(shelfPointer) }
+            if (hit?.value?.kind == LibraryShortcutDropKind.LOCAL_COPY) {
+                externalDestination = LibraryDropDestination.LocalCopy
+                collectionTargetId = null
+                bookTargetIdentity = null
+                bookTargetShortcutId = null
+                rootInsertionIndex = -1
+                return
+            }
+            if (hit?.value?.kind == LibraryShortcutDropKind.REMOTE_REMOVE) {
+                externalDestination = if (activeBookIds.size == 1) LibraryDropDestination.RemoteRemove else null
+                collectionTargetId = null
+                bookTargetIdentity = null
+                bookTargetShortcutId = null
+                rootInsertionIndex = -1
+                return
+            }
+            val mirror = hit?.value?.mirror
+            if (mirror != null) {
+                externalDestination = if (
+                    activeBookIds.size == 1 && activeBookIds.single().sourceId == mirror.sourceId
+                ) {
+                    LibraryDropDestination.RemoteMirror(mirror.sourceId, mirror.targetId, mirror.label)
+                } else {
+                    null
+                }
+                collectionTargetId = null
+                bookTargetIdentity = null
+                bookTargetShortcutId = null
+                rootInsertionIndex = -1
+                return
+            }
             if (activeBookIds.isNotEmpty() && hit?.value?.kind == LibraryShortcutDropKind.COLLECTION &&
                 hit.value.bounds.collectionDropBounds().contains(shelfPointer)
             ) {
@@ -324,6 +372,7 @@ internal class LibraryDragCoordinator {
                 return
             }
             collectionTargetId = null
+            externalDestination = null
             bookTargetIdentity = null
             bookTargetShortcutId = null
             val target = hit?.value ?: targets.values.minByOrNull { candidate ->
@@ -351,6 +400,7 @@ internal class LibraryDragCoordinator {
             return
         }
         collectionTargetId = null
+        externalDestination = null
 
         val targets = dragBookBounds.values.filter { it.identity !in activeBookIds }
         val book = pointer?.let { point ->
@@ -393,6 +443,7 @@ internal class LibraryDragCoordinator {
         bookTargetShortcutId = null
         rootInsertionIndex = -1
         libraryInsertionIndex = -1
+        externalDestination = null
     }
 }
 
@@ -627,8 +678,9 @@ internal fun Modifier.libraryShortcutDropTarget(
     index: Int,
     kind: LibraryShortcutDropKind,
     bookIdentity: BookIdentity?,
+    mirror: LibraryMirrorShortcut?,
 ): Modifier = onGloballyPositioned {
-    coordinator.registerShortcut(id, index, kind, bookIdentity, it.boundsInWindow())
+    coordinator.registerShortcut(id, index, kind, bookIdentity, it.boundsInWindow(), mirror)
 }
 
 internal fun Modifier.libraryBookDropTarget(

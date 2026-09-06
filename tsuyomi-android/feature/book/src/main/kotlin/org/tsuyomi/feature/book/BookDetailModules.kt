@@ -9,22 +9,19 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
-import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.text.InlineTextContent
-import androidx.compose.foundation.text.appendInlineContent
+import androidx.compose.foundation.layout.width
 import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.FilledTonalIconButton
 import androidx.compose.material3.Icon
@@ -43,36 +40,42 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.layout.Layout
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.stateDescription
-import androidx.compose.ui.text.Placeholder
-import androidx.compose.ui.text.PlaceholderVerticalAlign
+import androidx.compose.ui.text.LinkAnnotation
+import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.TextLinkStyles
 import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.text.withLink
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.em
+import androidx.compose.ui.unit.sp
+import androidx.compose.ui.unit.Constraints
 import androidx.compose.ui.platform.testTag
 import org.tsuyomi.core.media.api.CoverUiState
 import org.tsuyomi.core.ui.components.CoverImage
+import org.tsuyomi.core.ui.components.TsuyomiSplitButton
 import org.tsuyomi.core.ui.components.TsuyomiOverflowAction
-import org.tsuyomi.core.ui.components.TsuyomiStatusBadge
 import org.tsuyomi.core.ui.components.TsuyomiTopBar
 import org.tsuyomi.core.ui.components.TsuyomiTopBarAction
 import org.tsuyomi.core.ui.icons.TsuyomiIcons
 import org.tsuyomi.core.ui.theme.TsuyomiSpacing
+import org.tsuyomi.core.ui.theme.link
 import org.tsuyomi.shared.sourcecontract.SourceBookDetail
 import org.tsuyomi.shared.sourcecontract.SourceErrorCode
 
 private const val DETAIL_INTRODUCTION_PREVIEW_LINES = 3
-private const val PUBLICATION_STATUS_INLINE_ID = "publication-status"
-private val DetailRatingLayoutSize = 40.dp
-private val DetailRatingGlyphWidth = 20.dp
-private val DetailRatingGlyphEnvelopeOffset = (-10).dp
-private val DetailRatingIconOffset = (-2).dp
+private val DetailRatingTargetSize = 36.dp
+private val DetailRatingSlotWidth = 28.dp
+private val DetailRatingGlyphSize = 20.dp
+private val DetailTitleToggleTarget = 48.dp
+private val DetailActionHeight = 48.dp
 
 @Composable
 fun BookDetailTopBar(
@@ -117,112 +120,227 @@ internal fun DetailIdentityModule(
     coverState: CoverUiState,
     localState: DetailLocalState,
     onSetRating: (Int?) -> Unit,
+    onSearchAuthor: (String) -> Unit,
     onAddToLibrary: () -> Unit,
-    onToggleReadLater: () -> Unit,
+    onOpenDestinations: () -> Unit,
+    destinationMenuExpanded: Boolean,
+    onDestinationMenuExpandedChange: (Boolean) -> Unit,
+    destinationMenuContent: @Composable ColumnScope.(dismissMenu: () -> Unit) -> Unit,
 ) {
-    val publicationStatus = detail.status?.trim()?.takeIf { it.isNotEmpty() }
-    val title = buildAnnotatedString {
-        append(detail.summary.title)
-        publicationStatus?.let { status ->
-            append("\u00A0")
-            appendInlineContent(PUBLICATION_STATUS_INLINE_ID, status)
+    Layout(
+        modifier = Modifier.fillMaxWidth()
+            .padding(start = TsuyomiSpacing.Md, top = TsuyomiSpacing.Md, end = TsuyomiSpacing.Md, bottom = TsuyomiSpacing.Xs)
+            .testTag("detail-identity-module"),
+        content = {
+            CoverImage(
+                state = coverState,
+                modifier = Modifier.testTag("detail-cover"),
+                unresolvedBadge = localState.reconciliation == "UNRESOLVED",
+            )
+            Box(Modifier.fillMaxWidth().testTag("detail-title-block")) {
+                DetailTitle(detail.summary.title)
+            }
+            DetailAuthor(detail.summary.author, onSearchAuthor)
+            DetailSourceMetadata(detail.status, detail.lastUpdatedDate)
+            DetailRatingControl(localState, onSetRating)
+            DetailLibraryStateButton(
+                inLibrary = localState.inLibrary,
+                onAddToLibrary = onAddToLibrary,
+                onOpenDestinations = onOpenDestinations,
+                destinationMenuExpanded = destinationMenuExpanded,
+                onDestinationMenuExpandedChange = onDestinationMenuExpandedChange,
+                destinationMenuContent = destinationMenuContent,
+            )
+        },
+    ) { measurables, constraints ->
+        val width = constraints.maxWidth
+        val cover = measurables[0].measure(Constraints.fixed(135.dp.roundToPx(), 180.dp.roundToPx()))
+        val textX = cover.width + TsuyomiSpacing.Md.roundToPx()
+        val textWidth = (width - textX).coerceAtLeast(0)
+        val title = measurables[1].measure(Constraints.fixedWidth(textWidth))
+        val author = measurables[2].measure(Constraints.fixedWidth(textWidth))
+        val metadata = measurables[3].measure(Constraints.fixedWidth(textWidth))
+        val horizontalGap = TsuyomiSpacing.Xs.roundToPx()
+        val fallbackGap = TsuyomiSpacing.Sm.roundToPx()
+        val ratingFrameHeight = DetailRatingTargetSize.roundToPx()
+        val splitHeight = DetailActionHeight.roundToPx()
+        val ratingMinimum = measurables[4].maxIntrinsicWidth(ratingFrameHeight)
+        val splitMinimum = measurables[5].maxIntrinsicWidth(splitHeight)
+        val sideContentHeight = title.height + author.height + metadata.height + ratingFrameHeight + splitHeight
+        val sidePlacement = textWidth >= maxOf(ratingMinimum, splitMinimum) && sideContentHeight <= cover.height
+        val fallbackHorizontal = !sidePlacement && width >= ratingMinimum + horizontalGap + splitMinimum
+        val ratingWidth = if (sidePlacement || fallbackHorizontal) ratingMinimum else width
+        val splitWidth = if (sidePlacement || fallbackHorizontal) splitMinimum else width
+        val rating = measurables[4].measure(Constraints.fixed(ratingWidth, ratingFrameHeight))
+        val split = measurables[5].measure(Constraints.fixed(splitWidth, splitHeight))
+
+        if (sidePlacement) {
+            val blocks = listOf(1 to title, 2 to author, 3 to metadata, 4 to rating, 5 to split)
+                .filter { (_, placeable) -> placeable.height > 0 }
+            val remainingHeight = cover.height - blocks.sumOf { (_, placeable) -> placeable.height }
+            val gapCount = (blocks.size - 1).coerceAtLeast(1)
+            val baseGap = remainingHeight / gapCount
+            val extraGapCount = remainingHeight % gapCount
+            val blockY = IntArray(6)
+            var y = 0
+            blocks.forEachIndexed { index, (slot, placeable) ->
+                blockY[slot] = y
+                y += placeable.height
+                if (index < blocks.lastIndex) y += baseGap + if (index < extraGapCount) 1 else 0
+            }
+            layout(width, cover.height) {
+                cover.placeRelative(0, 0)
+                title.placeRelative(textX, blockY[1])
+                author.placeRelative(textX, blockY[2])
+                metadata.placeRelative(textX, blockY[3])
+                rating.placeRelative(textX, blockY[4])
+                split.placeRelative(textX, blockY[5])
+            }
+        } else {
+            val titleY = 0
+            val authorY = titleY + title.height
+            val metadataY = authorY + author.height
+            val identityBottom = metadataY + metadata.height
+            val actionY = maxOf(cover.height, identityBottom) + fallbackGap
+            val ratingX = 0
+            val splitX = if (fallbackHorizontal) rating.width + horizontalGap else 0
+            val ratingY = if (fallbackHorizontal) actionY + (split.height - rating.height) / 2 else actionY
+            val splitY = if (fallbackHorizontal) actionY else actionY + rating.height + fallbackGap
+            layout(width, maxOf(cover.height, identityBottom, ratingY + rating.height, splitY + split.height)) {
+                cover.placeRelative(0, 0)
+                title.placeRelative(textX, titleY)
+                author.placeRelative(textX, authorY)
+                metadata.placeRelative(textX, metadataY)
+                rating.placeRelative(ratingX, ratingY)
+                split.placeRelative(splitX, splitY)
+            }
         }
     }
-    val inlineContent = publicationStatus?.let { status ->
-        val placeholderWidth = (status.length.coerceAtLeast(3) * 0.48f + 0.56f).em
-        mapOf(
-            PUBLICATION_STATUS_INLINE_ID to InlineTextContent(
-                placeholder = Placeholder(
-                    width = placeholderWidth,
-                    height = 0.86.em,
-                    placeholderVerticalAlign = PlaceholderVerticalAlign.TextCenter,
-                ),
-            ) {
-                TsuyomiStatusBadge(
-                    text = status,
-                    modifier = Modifier.fillMaxSize().testTag("detail-publication-status"),
-                )
-            },
-        )
-    }.orEmpty()
-    Row(
-        modifier = Modifier.fillMaxWidth().padding(TsuyomiSpacing.Md).testTag("detail-identity-module"),
-        verticalAlignment = Alignment.Top,
-    ) {
-        CoverImage(
-            coverState,
-            Modifier.size(width = 135.dp, height = 180.dp).testTag("detail-cover"),
-        )
-        Column(Modifier.weight(1f).padding(start = TsuyomiSpacing.Md)) {
-            Text(
-                text = title,
-                inlineContent = inlineContent,
-                modifier = Modifier.fillMaxWidth().testTag("detail-title-flow"),
-                style = MaterialTheme.typography.headlineSmall,
+}
+
+@Composable
+private fun DetailAuthor(author: String?, onSearchAuthor: (String) -> Unit) {
+    val metadataStyle = MaterialTheme.typography.bodyMedium.copy(lineHeight = 21.sp)
+    val metadataLineHeight = with(LocalDensity.current) { metadataStyle.lineHeight.toDp() }
+    Box(Modifier.fillMaxWidth().testTag("detail-author-row")) {
+        author?.takeIf(String::isNotBlank)?.let { value ->
+            val linkStyles = TextLinkStyles(
+                style = SpanStyle(color = MaterialTheme.colorScheme.link),
             )
-            detail.summary.author?.let {
-                Text(
-                    it,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            }
+            val searchLabel = stringResource(R.string.book_search_author, value)
             Text(
-                text = if (localState.progressChapterId == null) {
-                    stringResource(R.string.book_not_started)
-                } else {
-                    stringResource(R.string.book_progress_saved)
-                },
-                modifier = Modifier.padding(top = TsuyomiSpacing.Sm),
-                maxLines = 1,
-                style = MaterialTheme.typography.labelLarge,
-            )
-            Row(
-                modifier = Modifier.padding(top = TsuyomiSpacing.Xs).testTag("detail-rating-row"),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                repeat(5) { index ->
-                    val value = index + 1
-                    val selected = value <= (localState.rating ?: 0)
-                    IconButton(
-                        onClick = { onSetRating(if (localState.rating == value) null else value) },
-                        enabled = localState.inLibrary,
-                        modifier = Modifier
-                            .size(DetailRatingLayoutSize)
-                            .semantics { this.selected = selected }
-                            .testTag("detail-rating-star-$value-touch"),
-                    ) {
-                        Box(
-                            Modifier
-                                .size(width = DetailRatingGlyphWidth, height = 24.dp)
-                                .offset(x = DetailRatingGlyphEnvelopeOffset)
-                                .testTag("detail-rating-star-$value-glyph"),
-                        ) {
-                            Icon(
-                                imageVector = if (selected) TsuyomiIcons.Star else TsuyomiIcons.StarOutline,
-                                contentDescription = stringResource(R.string.book_rating_description, value),
-                                modifier = Modifier.size(24.dp).offset(x = DetailRatingIconOffset),
-                            )
-                        }
+                text = buildAnnotatedString {
+                    withLink(LinkAnnotation.Clickable(searchLabel, linkStyles) { onSearchAuthor(value) }) {
+                        append(value)
                     }
-                }
-            }
-            Row(
-                modifier = Modifier.fillMaxWidth().padding(top = TsuyomiSpacing.Xs),
-                horizontalArrangement = Arrangement.spacedBy(TsuyomiSpacing.Xs),
+                },
+                modifier = Modifier.heightIn(min = metadataLineHeight).testTag("detail-author"),
+                style = metadataStyle,
+            )
+        }
+    }
+}
+
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun DetailSourceMetadata(status: String?, lastUpdatedDate: String?) {
+    val metadataStyle = MaterialTheme.typography.bodyMedium.copy(lineHeight = 21.sp)
+    val metadataLineHeight = with(LocalDensity.current) { metadataStyle.lineHeight.toDp() }
+    FlowRow(
+        modifier = Modifier.fillMaxWidth().testTag("detail-metadata-row"),
+        horizontalArrangement = Arrangement.spacedBy(TsuyomiSpacing.Xs),
+        verticalArrangement = Arrangement.spacedBy(TsuyomiSpacing.Xs),
+    ) {
+        status?.trim()?.takeIf(String::isNotEmpty)?.let { value ->
+            Text(
+                text = value,
+                modifier = Modifier.heightIn(min = metadataLineHeight).testTag("detail-publication-status"),
+                style = metadataStyle,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+        lastUpdatedDate?.let { date ->
+            Text(
+                text = stringResource(R.string.book_last_updated, date),
+                modifier = Modifier.heightIn(min = metadataLineHeight).testTag("detail-last-updated"),
+                style = metadataStyle,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+    }
+}
+
+@Composable
+private fun DetailTitle(titleText: String) {
+    var expanded by rememberSaveable(titleText) { mutableStateOf(false) }
+    var collapsedOverflows by remember(titleText) { mutableStateOf(false) }
+    val showToggle = collapsedOverflows || expanded
+    val titleStyle = MaterialTheme.typography.titleLarge.copy(lineHeight = 27.sp)
+    val actionLabel = stringResource(if (expanded) R.string.book_collapse_full_title else R.string.book_expand_full_title)
+    val expansionState = stringResource(if (expanded) R.string.book_title_expanded else R.string.book_title_collapsed)
+    val iconSize = with(LocalDensity.current) { titleStyle.fontSize.toDp() }
+    Box(Modifier.fillMaxWidth()) {
+        Text(
+            text = titleText,
+            modifier = Modifier.fillMaxWidth()
+                .padding(end = if (showToggle) DetailTitleToggleTarget else 0.dp)
+                .testTag("detail-title-flow"),
+            maxLines = if (expanded) Int.MAX_VALUE else 2,
+            overflow = TextOverflow.Ellipsis,
+            onTextLayout = { result ->
+                if (!expanded) collapsedOverflows = result.hasVisualOverflow
+            },
+            style = titleStyle,
+        )
+        if (showToggle) {
+            Box(
+                modifier = Modifier.align(Alignment.BottomEnd)
+                    .size(DetailTitleToggleTarget)
+                    .semantics { stateDescription = expansionState }
+                    .clickable(role = Role.Button) { expanded = !expanded }
+                    .testTag("detail-title-overflow"),
+                contentAlignment = Alignment.Center,
             ) {
-                DetailLibraryStateButton(
-                    inLibrary = localState.inLibrary,
-                    onAddToLibrary = onAddToLibrary,
-                    modifier = Modifier.weight(1f),
+                Icon(
+                    imageVector = TsuyomiIcons.Info,
+                    contentDescription = actionLabel,
+                    modifier = Modifier.size(iconSize),
                 )
-                DetailReadLaterStateButton(
-                    selected = localState.readLater,
-                    onToggle = onToggleReadLater,
-                    modifier = Modifier.weight(1f),
-                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun DetailRatingControl(localState: DetailLocalState, onSetRating: (Int?) -> Unit) {
+    Row(
+        modifier = Modifier.testTag("detail-rating-row"),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Row(
+            modifier = Modifier.height(DetailRatingTargetSize)
+                .padding(end = TsuyomiSpacing.Xs)
+                .offset(x = -TsuyomiSpacing.Xs)
+                .testTag("detail-rating-band"),
+            horizontalArrangement = Arrangement.Center,
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            repeat(5) { index ->
+                val value = index + 1
+                val selected = value <= (localState.rating ?: 0)
+                IconButton(
+                    onClick = { onSetRating(if (localState.rating == value) null else value) },
+                    enabled = localState.inLibrary,
+                    modifier = Modifier.width(DetailRatingSlotWidth).height(DetailRatingTargetSize)
+                        .semantics { this.selected = selected }
+                        .testTag("detail-rating-star-$value-touch"),
+                ) {
+                    Icon(
+                        imageVector = if (selected) TsuyomiIcons.Star else TsuyomiIcons.StarOutline,
+                        contentDescription = stringResource(R.string.book_rating_description, value),
+                        modifier = Modifier.size(DetailRatingGlyphSize).testTag("detail-rating-star-$value-glyph"),
+                    )
+                }
             }
         }
     }
@@ -232,90 +350,33 @@ internal fun DetailIdentityModule(
 internal fun DetailLibraryStateButton(
     inLibrary: Boolean,
     onAddToLibrary: () -> Unit,
+    onOpenDestinations: () -> Unit,
+    destinationMenuExpanded: Boolean,
+    onDestinationMenuExpandedChange: (Boolean) -> Unit,
+    destinationMenuContent: @Composable ColumnScope.(dismissMenu: () -> Unit) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val state = stringResource(if (inLibrary) R.string.book_in_library else R.string.book_not_in_library)
-    Button(
-        onClick = onAddToLibrary,
-        enabled = !inLibrary,
+    TsuyomiSplitButton(
+        text = stringResource(if (inLibrary) R.string.book_in_library else R.string.book_add_to_library),
+        leadingIcon = TsuyomiIcons.Shelf,
+        trailingIcon = TsuyomiIcons.Disclosure,
+        trailingDescription = "更多加入选项",
+        onLeadingClick = onAddToLibrary,
+        onMenuOpen = onOpenDestinations,
+        menuExpanded = destinationMenuExpanded,
+        onMenuExpandedChange = onDestinationMenuExpandedChange,
+        leadingEnabled = !inLibrary,
         modifier = modifier
-            .heightIn(min = 48.dp)
             .semantics {
                 selected = inLibrary
                 stateDescription = state
             }
             .testTag("detail-library-action"),
-        shape = MaterialTheme.shapes.small,
-        colors = ButtonDefaults.buttonColors(
-            containerColor = MaterialTheme.colorScheme.primaryContainer,
-            contentColor = MaterialTheme.colorScheme.onPrimaryContainer,
-            disabledContainerColor = MaterialTheme.colorScheme.primaryContainer,
-            disabledContentColor = MaterialTheme.colorScheme.onPrimaryContainer,
-        ),
-        contentPadding = PaddingValues(horizontal = TsuyomiSpacing.Sm),
-    ) {
-        Icon(TsuyomiIcons.Shelf, contentDescription = null, modifier = Modifier.size(18.dp))
-        Text(
-            text = stringResource(if (inLibrary) R.string.book_in_library else R.string.book_add_to_library),
-            modifier = Modifier.padding(start = TsuyomiSpacing.Xs),
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
-            style = MaterialTheme.typography.labelLarge.copy(
-                fontWeight = if (inLibrary) FontWeight.SemiBold else FontWeight.Medium,
-            ),
-        )
-    }
+        menuContent = destinationMenuContent,
+    )
 }
 
-@Composable
-internal fun DetailReadLaterStateButton(
-    selected: Boolean,
-    onToggle: () -> Unit,
-    modifier: Modifier = Modifier,
-) {
-    val state = stringResource(
-        if (selected) R.string.book_read_later_selected else R.string.book_read_later_unselected,
-    )
-    Button(
-        onClick = onToggle,
-        modifier = modifier
-            .heightIn(min = 48.dp)
-            .semantics {
-                this.selected = selected
-                stateDescription = state
-            }
-            .testTag("detail-read-later-action"),
-        shape = MaterialTheme.shapes.small,
-        colors = ButtonDefaults.buttonColors(
-            containerColor = if (selected) {
-                MaterialTheme.colorScheme.tertiaryContainer
-            } else {
-                MaterialTheme.colorScheme.surfaceContainerHigh
-            },
-            contentColor = if (selected) {
-                MaterialTheme.colorScheme.onTertiaryContainer
-            } else {
-                MaterialTheme.colorScheme.onSurfaceVariant
-            },
-        ),
-        contentPadding = PaddingValues(horizontal = TsuyomiSpacing.Sm),
-    ) {
-        Icon(
-            imageVector = if (selected) TsuyomiIcons.Bookmark else TsuyomiIcons.BookmarkOutline,
-            contentDescription = null,
-            modifier = Modifier.size(18.dp),
-        )
-        Text(
-            text = stringResource(R.string.book_read_later),
-            modifier = Modifier.padding(start = TsuyomiSpacing.Xs),
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
-            style = MaterialTheme.typography.labelLarge.copy(
-                fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Medium,
-            ),
-        )
-    }
-}
 
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
@@ -327,7 +388,7 @@ internal fun DetailTagActionsModule(
     var dialogOpen by rememberSaveable { mutableStateOf(false) }
     var draft by rememberSaveable { mutableStateOf("") }
     Surface(
-        modifier = Modifier.fillMaxWidth().padding(horizontal = TsuyomiSpacing.Md, vertical = TsuyomiSpacing.Xs),
+        modifier = Modifier.fillMaxWidth().padding(horizontal = TsuyomiSpacing.Md, vertical = TsuyomiSpacing.Xs).testTag("detail-tag-surface"),
         shape = MaterialTheme.shapes.medium,
         color = MaterialTheme.colorScheme.surfaceContainerLow,
     ) {
@@ -483,17 +544,19 @@ internal fun DetailMutationBanner(status: DetailMutationStatus) {
 
 @Composable
 internal fun mutationMessage(status: DetailMutationStatus): String {
-    val operation = stringResource(
-        when (status.operation) {
-            DetailMutationOperation.ADD_TO_LIBRARY -> R.string.book_mutation_add
-            DetailMutationOperation.REMOVE_FROM_LIBRARY -> R.string.book_mutation_remove
-            DetailMutationOperation.CACHE_DETAIL -> R.string.book_mutation_cache
-            DetailMutationOperation.REFRESH_DETAIL -> R.string.book_mutation_refresh
-            DetailMutationOperation.SET_RATING -> R.string.book_mutation_rating
-            DetailMutationOperation.ADD_TAG -> R.string.book_mutation_tag
-            DetailMutationOperation.TOGGLE_READ_LATER -> R.string.book_mutation_read_later
-        },
-    )
+    val operation = when (status.operation) {
+        DetailMutationOperation.ADD_TO_LIBRARY -> stringResource(R.string.book_mutation_add)
+        DetailMutationOperation.REMOVE_FROM_LIBRARY -> stringResource(R.string.book_mutation_remove)
+        DetailMutationOperation.CACHE_DETAIL -> stringResource(R.string.book_mutation_cache)
+        DetailMutationOperation.REFRESH_DETAIL -> stringResource(R.string.book_mutation_refresh)
+        DetailMutationOperation.SET_RATING -> stringResource(R.string.book_mutation_rating)
+        DetailMutationOperation.ADD_TAG -> stringResource(R.string.book_mutation_tag)
+        DetailMutationOperation.TOGGLE_READ_LATER -> stringResource(R.string.book_mutation_read_later)
+        DetailMutationOperation.REMOVE_FROM_REMOTE -> "从远程书架移除"
+        DetailMutationOperation.MOVE_REMOTE -> "移动远程分类"
+        DetailMutationOperation.RECONCILE_RETRY -> "重试远端同步"
+        DetailMutationOperation.RECONCILE_ACKNOWLEDGE -> "解除锁定状态"
+    }
     return when (status.phase) {
         DetailMutationPhase.WORKING -> stringResource(R.string.book_mutation_working, operation)
         DetailMutationPhase.SUCCESS -> stringResource(R.string.book_mutation_success, operation)

@@ -19,13 +19,17 @@ SUPPORTED_BASELINE_SCHEMAS = {
     "tsuyomi-r1-change-report-v1",
     "tsuyomi-r1-baseline-v1",
 }
-SKILL_ROOT = Path("tools/skills/tsuyomi-android-review")
+SKILL_ROOT = Path(".agents/skills/tsuyomi-android-review")
 POLICY_PATH = SKILL_ROOT / "review-policy.json"
 POLICY_SCHEMA = "tsuyomi-android-review-policy-v1"
 WORKFLOW_FILES = {
+    Path(".github/workflows/repository-quality.yml"),
+    Path("AGENTS.md"),
     Path(".github/workflows/android-quality.yml"),
     Path("CONTRIBUTING.md"),
     Path("WORKSPACE.md"),
+    Path("DOCUMENTATION.md"),
+    Path("TOOLING.md"),
 }
 EXCLUDED_DIRECTORIES = {
     "build",
@@ -343,8 +347,8 @@ def baseline_build_id(data: dict) -> str | None:
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Detect Tsuyomi Android Review Graph impact")
     parser.add_argument("--root", type=Path, default=Path.cwd(), help="monorepo root or a child path")
-    parser.add_argument("--baseline", type=Path, help="previous R1 report or baseline JSON")
-    parser.add_argument("--output", type=Path, required=True, help="output R1 report JSON")
+    parser.add_argument("--baseline", type=Path, help="previous UI-R1 report or baseline JSON")
+    parser.add_argument("--output", type=Path, required=True, help="output UI-R1 report JSON")
     parser.add_argument(
         "--force-full-review",
         action="store_true",
@@ -373,7 +377,7 @@ def load_baseline(args: argparse.Namespace, repo_root: Path) -> BaselineState:
     baseline_path = args.baseline if args.baseline.is_absolute() else repo_root / args.baseline
     data = json.loads(baseline_path.read_text(encoding="utf-8"))
     if data.get("schema") not in SUPPORTED_BASELINE_SCHEMAS:
-        raise SystemExit("Unsupported R1 baseline schema")
+        raise SystemExit("Unsupported UI-R1 baseline schema")
     return BaselineState(data, baseline_files(data), baseline_build_id(data))
 
 

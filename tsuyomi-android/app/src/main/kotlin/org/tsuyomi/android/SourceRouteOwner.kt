@@ -15,6 +15,7 @@ import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.Stable
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import org.tsuyomi.feature.library.LibraryDropDestination
 import androidx.compose.ui.platform.LocalContext
 import androidx.navigation.NavBackStackEntry
 import androidx.navigation.NavHostController
@@ -63,7 +64,8 @@ internal class SourceRouteOwner(
         navController.navigate(Routes.SourceHome)
     }
     fun navigateToRemoteLibrary() {
-        navController.navigate(Routes.RemoteLibrary)
+        val sourceId = installer.activePackage?.manifest?.sourceId?.value ?: return
+        navController.navigate(Routes.libraryMirror(sourceId))
     }
     fun navigateToVerification() {
         navController.navigate(Routes.Verification)
@@ -142,7 +144,28 @@ internal class SourceRouteOwner(
     suspend fun openRemoteLibrary() {
         installer.activePackage?.let { packageInfo ->
             flow.open(packageInfo)
-            navController.navigate(Routes.RemoteLibrary)
+            navController.navigate(Routes.libraryMirror(packageInfo.manifest.sourceId.value))
+        }
+    }
+
+    suspend fun openRemoteDestination(entry: LibraryEntry, destination: LibraryDropDestination.RemoteMirror) {
+        val packageInfo = installer.activePackage
+            ?.takeIf { it.manifest.sourceId.value == entry.book.identity.sourceId }
+            ?: return
+        flow.open(packageInfo)
+        flow.prepareBook(
+            org.tsuyomi.shared.sourcecontract.SourceBookSummary(
+                identity = entry.book.identity,
+                title = entry.book.title,
+                author = entry.book.author,
+                coverUrl = entry.book.coverUrl,
+                canonicalUrl = entry.book.canonicalUrl.orEmpty(),
+            ),
+        )
+        navController.navigate(Routes.Detail)
+        navController.currentBackStackEntry?.savedStateHandle?.apply {
+            set(RemoteDestinationTargetIdKey, destination.targetId)
+            set(RemoteDestinationRequestKey, (get<Long>(RemoteDestinationRequestKey) ?: 0L) + 1L)
         }
     }
 
@@ -298,3 +321,6 @@ internal fun rememberSourceRouteOwner(
     }
     return owner
 }
+
+internal const val RemoteDestinationRequestKey = "remote-destination-request"
+internal const val RemoteDestinationTargetIdKey = "remote-destination-target-id"

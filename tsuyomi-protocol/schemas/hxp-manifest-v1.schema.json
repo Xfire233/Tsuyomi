@@ -112,7 +112,9 @@
               "additionalProperties": false,
               "properties": {
                 "read": { "$ref": "#/$defs/remoteOperationPolicy" },
-                "add": { "$ref": "#/$defs/remoteOperationPolicy" }
+                "add": { "$ref": "#/$defs/remoteOperationPolicy" },
+                "remove": { "$ref": "#/$defs/remoteOperationPolicy" },
+                "move": { "$ref": "#/$defs/remoteOperationPolicy" }
               }
             }
           },
@@ -186,7 +188,7 @@
                 "type": "object",
                 "additionalProperties": false,
                 "required": ["kind"],
-                "properties": { "kind": { "enum": ["remoteBookId", "cursor"] } }
+                "properties": { "kind": { "enum": ["remoteBookId", "cursor", "targetId"] } }
               }
             ]
           }

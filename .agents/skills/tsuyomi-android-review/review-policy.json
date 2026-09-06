@@ -1,7 +1,7 @@
 {
   "schema": "tsuyomi-android-review-policy-v1",
-  "mode": "phase4a-production-standard-first",
-  "effectiveFrom": "2026-08-29",
+  "mode": "phase4-production-standard-first",
+  "effectiveFrom": "2026-09-05",
   "activeProfiles": [
     "STANDARD"
   ],
@@ -15,7 +15,7 @@
       "baselineBuildId": "3be8ea00cdac3ed7164fd170929bfb97a1c498cf63032fbbec4630ea5bd095d7"
     }
   ],
-  "phase4Milestone": "Execute the authorized Phase 4A Wenku8 usable-reader priority inside the direct Atlas production takeover. Promote Atlas S01-S04 and B01-B03 around real signed-source install/login/search/detail/directory/Reader owners, close the local Library resume loop, include host-validated covers and separately initiated read-only website favourites/copy-to-local, and forbid implicit website writes. All 28 nodes remain production-stage obligations; S/X require live online services plus signed deterministic fixture replay. E-ink remains frozen.",
+  "phase4Milestone": "Execute the currently authorized Phase 4 Standard work selected by the owning Phase document, explicit gate outcomes and current user direction. The review policy selects profiles, nodes and evidence lanes only; it does not grant implementation scope. All catalog nodes remain production-stage obligations, actual-online prefixes require live online services plus signed deterministic fixture replay, and E-ink remains frozen until its explicit restoration trigger.",
   "routineReview": {
     "buildOnce": true,
     "deployOncePerActiveDevice": true,
@@ -23,7 +23,7 @@
     "journeysOnlyForChangedTransitions": true
   },
   "nodeExecution": {
-    "activeStage": "PHASE4A_PRODUCTION_IMPLEMENTATION",
+    "activeStage": "PHASE4_PRODUCTION_IMPLEMENTATION",
     "activeNodePrefixes": [
       "L",
       "B",
@@ -61,7 +61,7 @@
     ]
   },
   "resume": {
-    "trigger": "Explicit user decision after the Phase 4 Standard UX milestone.",
+    "trigger": "Explicit user decision after the active Phase 4 Standard milestone.",
     "mode": "full-eink-restoration",
     "requiredScope": [
       "reconcile every change accumulated since baselineBuildId",

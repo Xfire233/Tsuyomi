@@ -11,6 +11,10 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: android-quality-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
 defaults:
   run:
     working-directory: tsuyomi-android
@@ -18,7 +22,7 @@ defaults:
 jobs:
   android-build-test-lint-goldens:
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    timeout-minutes: 18
     steps:
       - name: Checkout
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
@@ -33,19 +37,43 @@ jobs:
           else
             base="${{ github.event.before }}"
           fi
-          if [ -z "$base" ] || ! git -C "$GITHUB_WORKSPACE" cat-file -e "$base^{commit}" 2>/dev/null || ! git -C "$GITHUB_WORKSPACE" diff --quiet "$base" "$GITHUB_SHA" -- tsuyomi-android ':!tsuyomi-android/**/*.md' ':!tsuyomi-android/*.md' .github/workflows/android-quality.yml; then
+
+          if [ -z "$base" ] || ! git -C "$GITHUB_WORKSPACE" cat-file -e "$base^{commit}" 2>/dev/null; then
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+            echo "prototype_changed=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          if ! git -C "$GITHUB_WORKSPACE" diff --quiet "$base" "$GITHUB_SHA" -- tsuyomi-android ':!tsuyomi-android/**/*.md' ':!tsuyomi-android/*.md' .github/workflows/android-quality.yml; then
             echo "changed=true" >> "$GITHUB_OUTPUT"
           else
             echo "changed=false" >> "$GITHUB_OUTPUT"
+          fi
+
+          if ! git -C "$GITHUB_WORKSPACE" diff --quiet "$base" "$GITHUB_SHA" -- \
+            tsuyomi-android/prototype/ui-atlas \
+            tsuyomi-android/build-logic \
+            tsuyomi-android/gradle \
+            tsuyomi-android/build.gradle.kts \
+            tsuyomi-android/settings.gradle.kts \
+            tsuyomi-android/gradle.properties \
+            tsuyomi-android/gradlew \
+            tsuyomi-android/gradlew.bat; then
+            echo "prototype_changed=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "prototype_changed=false" >> "$GITHUB_OUTPUT"
           fi
       - name: Tool versions
         run: |
           java -version
           python --version
-      - name: Build, test, lint, and validate goldens
+      - name: Set up Gradle cache
+        if: steps.changes.outputs.changed == 'true'
+        uses: gradle/actions/setup-gradle@4c44018e59b437e86cdfc41da381398f93ed8808
+      - name: Build, test, lint, validate goldens, and verify locks
         if: steps.changes.outputs.changed == 'true'
         run: >-
-          ./gradlew --no-daemon --console=plain --dependency-verification strict
+          ./gradlew --no-daemon --console=plain --dependency-verification strict --write-locks
           :app:assembleDebug
           :app:lintDebug
           :core:ui:lintDebug
@@ -68,7 +96,7 @@ jobs:
           :feature:browse:validateDebugScreenshotTest
           :feature:settings:validateDebugScreenshotTest
       - name: Build and lint isolated UI atlas prototype
-        if: steps.changes.outputs.changed == 'true'
+        if: steps.changes.outputs.changed == 'true' && steps.changes.outputs.prototype_changed == 'true'
         run: >-
           ./gradlew --no-daemon --console=plain --dependency-verification strict
           -Ptsuyomi.prototype=true
@@ -77,13 +105,11 @@ jobs:
           :prototype:ui-atlas:lintDebug
       - name: Lock state is stable
         if: steps.changes.outputs.changed == 'true'
-        run: |
-          ./gradlew --no-daemon --console=plain --write-locks :app:assembleDebug
-          git diff --exit-code -- '**/*gradle.lockfile'
+        run: git diff --exit-code -- '**/*gradle.lockfile'
 
   android-api29-instrumentation:
     runs-on: ubuntu-latest
-    timeout-minutes: 50
+    timeout-minutes: 18
     steps:
       - name: Checkout
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
@@ -98,11 +124,52 @@ jobs:
           else
             base="${{ github.event.before }}"
           fi
-          if [ -z "$base" ] || ! git -C "$GITHUB_WORKSPACE" cat-file -e "$base^{commit}" 2>/dev/null || ! git -C "$GITHUB_WORKSPACE" diff --quiet "$base" "$GITHUB_SHA" -- tsuyomi-android ':!tsuyomi-android/**/*.md' ':!tsuyomi-android/*.md' .github/workflows/android-quality.yml; then
+
+          if [ -z "$base" ] || ! git -C "$GITHUB_WORKSPACE" cat-file -e "$base^{commit}" 2>/dev/null; then
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+            echo "prototype_changed=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          if ! git -C "$GITHUB_WORKSPACE" diff --quiet "$base" "$GITHUB_SHA" -- tsuyomi-android ':!tsuyomi-android/**/*.md' ':!tsuyomi-android/*.md' .github/workflows/android-quality.yml; then
             echo "changed=true" >> "$GITHUB_OUTPUT"
           else
             echo "changed=false" >> "$GITHUB_OUTPUT"
           fi
+
+          if ! git -C "$GITHUB_WORKSPACE" diff --quiet "$base" "$GITHUB_SHA" -- \
+            tsuyomi-android/prototype/ui-atlas \
+            tsuyomi-android/build-logic \
+            tsuyomi-android/gradle \
+            tsuyomi-android/build.gradle.kts \
+            tsuyomi-android/settings.gradle.kts \
+            tsuyomi-android/gradle.properties \
+            tsuyomi-android/gradlew \
+            tsuyomi-android/gradlew.bat; then
+            echo "prototype_changed=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "prototype_changed=false" >> "$GITHUB_OUTPUT"
+          fi
+      - name: Set up Gradle cache
+        if: steps.changes.outputs.changed == 'true'
+        uses: gradle/actions/setup-gradle@4c44018e59b437e86cdfc41da381398f93ed8808
+      - name: Compile production instrumentation APKs
+        if: steps.changes.outputs.changed == 'true'
+        run: >-
+          ./gradlew --no-daemon --console=plain --dependency-verification strict
+          :app:assembleDebugAndroidTest
+          :feature:settings:assembleDebugAndroidTest
+          :core:ui:assembleDebugAndroidTest
+          :core:security:assembleDebugAndroidTest
+          :core:database:assembleDebugAndroidTest
+          :core:webview:assembleDebugAndroidTest
+          :source:quickjs-runtime:assembleDebugAndroidTest
+      - name: Compile isolated UI atlas instrumentation APK
+        if: steps.changes.outputs.changed == 'true' && steps.changes.outputs.prototype_changed == 'true'
+        run: >-
+          ./gradlew --no-daemon --console=plain --dependency-verification strict
+          -Ptsuyomi.prototype=true
+          :prototype:ui-atlas:assembleDebugAndroidTest
       - name: Install API 29 emulator image
         if: steps.changes.outputs.changed == 'true'
         run: |
@@ -149,12 +216,11 @@ jobs:
           "$ADB" shell settings put global window_animation_scale 0
           "$ADB" shell settings put global transition_animation_scale 0
           "$ADB" shell settings put global animator_duration_scale 0
-      - name: Run API 29 instrumentation
+      - name: Run production API 29 instrumentation
         if: steps.changes.outputs.changed == 'true'
         run: >-
           ./gradlew --no-daemon --console=plain --dependency-verification strict
           --max-workers=1
-          -Ptsuyomi.prototype=true
           :app:connectedDebugAndroidTest
           :feature:settings:connectedDebugAndroidTest
           :core:ui:connectedDebugAndroidTest
@@ -162,4 +228,10 @@ jobs:
           :core:database:connectedDebugAndroidTest
           :core:webview:connectedDebugAndroidTest
           :source:quickjs-runtime:connectedDebugAndroidTest
+      - name: Run isolated UI atlas API 29 instrumentation
+        if: steps.changes.outputs.changed == 'true' && steps.changes.outputs.prototype_changed == 'true'
+        run: >-
+          ./gradlew --no-daemon --console=plain --dependency-verification strict
+          --max-workers=1
+          -Ptsuyomi.prototype=true
           :prototype:ui-atlas:connectedDebugAndroidTest

@@ -10,6 +10,7 @@ import {
   buildDetailRequest,
   buildDirectoryRequest,
   buildSearchRequest,
+  buildAuthorSearchRequest,
   buildRemoteLibraryAddRequest,
   buildRemoteLibraryRequest,
   buildHomeRequest,
@@ -19,6 +20,12 @@ import {
   parseSearch,
   parseRemoteLibrary,
   parseRemoteLibraryAdd,
+  buildRemoteLibraryRemoveRequest,
+  parseRemoteLibraryRemove,
+  buildRemoteLibraryMoveRequest,
+  parseRemoteLibraryMove,
+  buildRemoteLibraryTargetsRequest,
+  parseRemoteLibraryTargets,
   parseHome,
 } from '../dist/modules/wenku8/index.mjs';
 
@@ -106,6 +113,7 @@ test('detail emits presentation-neutral metadata without source HTML', async () 
   assert.equal(detail.description, '一名邮差在雾港追寻遗失的航线。此文本为测试用虚构简介。');
   assert.deepEqual(detail.tags, ['奇幻', '冒险']);
   assert.equal(detail.status, '连载中');
+  assert.equal(detail.lastUpdatedDate, '2026-02-03');
   assert.equal('rawHtml' in detail, false);
 });
 
@@ -123,6 +131,17 @@ test('detail extracts only the labelled live introduction and exact cover', asyn
   assert.equal(detail.description, '一名邮差在雾港追寻遗失的航线。');
   assert.equal(detail.summary.coverUrl, 'https://img.wenku8.com/image/12/1234/1234s.jpg');
   assert.equal(detail.description.includes('同分类推荐'), false);
+  assert.equal(detail.lastUpdatedDate, '2024-02-29');
+});
+
+test('detail omits missing and invalid labelled source update dates', () => {
+  const missing = parseDetail('<h1>雾港纪事</h1>', '1234');
+  const invalid = parseDetail('<h1>雾港纪事</h1><span>最后更新：</span><span>2026-02-30</span><br>阅读时间：2030-01-01', '1234');
+  const unrelated = parseDetail('<h1>雾港纪事</h1><span>最后更新：尚未发布；阅读时间：2030-01-01</span>', '1234');
+
+  assert.equal(missing.lastUpdatedDate, null);
+  assert.equal(invalid.lastUpdatedDate, null);
+  assert.equal(unrelated.lastUpdatedDate, null);
 });
 
 test('directory preserves order and deduplicates by stable chapter identity', async () => {
@@ -210,6 +229,15 @@ test('request builders use live Wenku8 routes without admitting raw pages to dur
   assert.equal(search.queryEncoding, 'gb18030');
   assert.equal(search.decode, 'gb18030');
   assert.equal(search.cache, 'network-only');
+  const author = buildAuthorSearchRequest('林川', 1);
+  assert.deepEqual(author.query, [
+    { name: 'searchtype', value: 'author' },
+    { name: 'searchkey', value: '林川' },
+    { name: 'page', value: '1' },
+  ]);
+  assert.equal(author.queryEncoding, search.queryEncoding);
+  assert.equal(author.decode, search.decode);
+  assert.equal(author.cache, search.cache);
   assert.equal(buildDetailRequest('1234').url, 'https://www.wenku8.net/book/1234.htm');
   assert.equal(buildDirectoryRequest('1234').url, 'https://www.wenku8.net/modules/article/reader.php?aid=1234');
   assert.equal(
@@ -385,9 +413,11 @@ test('remote favourites pagination is explicit bounded and complete', async () =
   assert.equal(first.complete, false);
   assert.equal(first.nextCursor, 'page-2');
   assert.equal(first.items[0].remoteBookId, '1234');
+  assert.equal(first.items[0].remoteTargetId, '1');
   const second = parseRemoteLibrary(await fixture('remote-library-page-2'));
   assert.equal(second.complete, true);
   assert.equal(second.nextCursor, null);
+  assert.equal(second.items[0].remoteTargetId, '0');
   assert.throws(() => buildRemoteLibraryRequest(''), /INVALID_REMOTE_CURSOR/);
 });
 
@@ -405,4 +435,52 @@ test('remote add is an exact idempotent typed operation', async () => {
   });
   assert.equal(parseRemoteLibraryAdd(await fixture('remote-add-already-present'), '1234').outcome, 'already-present');
   assert.throws(() => parseRemoteLibraryAdd('<html>ok</html>', '1234'), /AMBIGUOUS_REMOTE_ADD/);
+});
+
+test('remote remove is an exact idempotent typed operation', async () => {
+  assert.deepEqual(buildRemoteLibraryRemoveRequest('1234'), {
+    url: 'https://www.wenku8.net/modules/article/bookcase.php',
+    method: 'POST',
+    headers: { Accept: 'text/html,application/xhtml+xml' },
+    form: { action: 'remove', aid: '1234' },
+    decode: 'gb18030',
+    cache: 'network-only',
+  });
+  assert.deepEqual(parseRemoteLibraryRemove('<div data-outcome="applied"></div>', '1234'), {
+    sourceId: 'org.tsuyomi.wenku8', remoteBookId: '1234', outcome: 'applied',
+  });
+  assert.equal(parseRemoteLibraryRemove('<div data-outcome="already-absent"></div>', '1234').outcome, 'already-absent');
+  assert.throws(() => parseRemoteLibraryRemove('<html>ok</html>', '1234'), /AMBIGUOUS_REMOTE_REMOVE/);
+});
+
+test('remote move is an exact idempotent typed operation with target binding', async () => {
+  assert.deepEqual(buildRemoteLibraryMoveRequest('1234', 'finished'), {
+    url: 'https://www.wenku8.net/modules/article/bookcase.php',
+    method: 'POST',
+    headers: { Accept: 'text/html,application/xhtml+xml' },
+    form: { action: 'move', aid: '1234', target: 'finished' },
+    decode: 'gb18030',
+    cache: 'network-only',
+  });
+  assert.deepEqual(parseRemoteLibraryMove('<div data-outcome="applied"></div>', '1234', 'finished'), {
+    sourceId: 'org.tsuyomi.wenku8', remoteBookId: '1234', targetId: 'finished', outcome: 'applied',
+  });
+  assert.equal(parseRemoteLibraryMove('<div data-outcome="already-at-target"></div>', '1234', 'finished').outcome, 'already-at-target');
+  assert.throws(() => parseRemoteLibraryMove('<html>ok</html>', '1234', 'finished'), /AMBIGUOUS_REMOTE_MOVE/);
+});
+
+test('remote targets returns typed folder hierarchy', async () => {
+  assert.deepEqual(buildRemoteLibraryTargetsRequest(), {
+    url: 'https://www.wenku8.net/modules/article/bookcase.php',
+    method: 'GET',
+    headers: { Accept: 'text/html,application/xhtml+xml' },
+    query: [{ name: 'action', value: 'targets' }],
+    queryEncoding: 'gb18030',
+    decode: 'gb18030',
+    cache: 'network-only',
+  });
+  const defaultTargets = parseRemoteLibraryTargets('<html></html>');
+  assert.equal(defaultTargets.sourceId, 'org.tsuyomi.wenku8');
+  assert.equal(defaultTargets.targets.length, 3);
+  assert.equal(defaultTargets.targets[0].targetId, 'default');
 });

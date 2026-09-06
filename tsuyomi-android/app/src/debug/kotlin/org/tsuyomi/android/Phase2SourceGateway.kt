@@ -153,6 +153,8 @@ internal object Phase2SourceGateway {
                 request.url.path == "/index.php" -> "home-index.html"
                 request.url.path == "/zt/sugoi/2026.php" -> "home-sugoi-2026.html"
                 request.url.path in setOf("/modules/article/toplist.php", "/modules/article/tags.php") -> "home.html"
+                request.url.path.contains("search.php") &&
+                    request.url.rawQuery.orEmpty().split('&').contains("searchtype=author") -> "search-author.html"
                 request.url.path.contains("search.php") -> "search.html"
                 request.url.path == "/modules/article/articleinfo.php" -> "detail.html"
                 request.url.path == "/modules/article/reader.php" &&

@@ -191,6 +191,8 @@ internal object HxpManifestParser {
         val required = buildSet {
             if (read) add("read")
             if ("add" in writes) add("add")
+            if ("remove" in writes) add("remove")
+            if ("move" in writes) add("move")
         }
         val raw = remoteLibrary["policies"] ?: return if (required.isEmpty()) emptyMap() else fail(HxpVerificationError.CAPABILITY_POLICY_VIOLATION)
         val objectValue = raw.asObject()
@@ -199,6 +201,8 @@ internal object HxpManifestParser {
             val operation = when (name) {
                 "read" -> RemoteOperation.READ
                 "add" -> RemoteOperation.ADD
+                "remove" -> RemoteOperation.REMOVE
+                "move" -> RemoteOperation.MOVE
                 else -> fail(HxpVerificationError.CAPABILITY_POLICY_VIOLATION)
             }
             operation to parseRemotePolicy(operation, value.asObject(), networkOrigins)
@@ -217,7 +221,7 @@ internal object HxpManifestParser {
         val method = runCatching { NetworkMethod.valueOf(value.string("method")) }
             .getOrElse { fail(HxpVerificationError.INVALID_MANIFEST) }
         if ((operation == RemoteOperation.READ && method != NetworkMethod.GET) ||
-            (operation == RemoteOperation.ADD && method != NetworkMethod.POST)
+            (operation in setOf(RemoteOperation.ADD, RemoteOperation.REMOVE, RemoteOperation.MOVE) && method != NetworkMethod.POST)
         ) fail(HxpVerificationError.CAPABILITY_POLICY_VIOLATION)
         val path = value.string("path")
         if (!path.startsWith('/') || '?' in path || '#' in path || path.length > 1024) fail(HxpVerificationError.INVALID_MANIFEST)
@@ -235,7 +239,7 @@ internal object HxpManifestParser {
                 }
                 "remoteBookId" -> {
                     ruleObject.requireKeys(setOf("kind"))
-                    if (operation != RemoteOperation.ADD) fail(HxpVerificationError.CAPABILITY_POLICY_VIOLATION)
+                    if (operation !in setOf(RemoteOperation.ADD, RemoteOperation.REMOVE, RemoteOperation.MOVE)) fail(HxpVerificationError.CAPABILITY_POLICY_VIOLATION)
                     HxpRemoteParameter.RemoteBookId(name)
                 }
                 "cursor" -> {
@@ -243,10 +247,18 @@ internal object HxpManifestParser {
                     if (operation != RemoteOperation.READ || name != "cursor") fail(HxpVerificationError.CAPABILITY_POLICY_VIOLATION)
                     HxpRemoteParameter.Cursor(name)
                 }
+                "targetId" -> {
+                    ruleObject.requireKeys(setOf("kind"))
+                    if (operation != RemoteOperation.MOVE) fail(HxpVerificationError.CAPABILITY_POLICY_VIOLATION)
+                    HxpRemoteParameter.TargetId(name)
+                }
                 else -> fail(HxpVerificationError.INVALID_MANIFEST)
             }
         }
-        if (parameters.count { it is HxpRemoteParameter.RemoteBookId } != (if (operation == RemoteOperation.ADD) 1 else 0) ||
+        val expectedBookIdCount = if (operation in setOf(RemoteOperation.ADD, RemoteOperation.REMOVE, RemoteOperation.MOVE)) 1 else 0
+        val expectedTargetIdCount = if (operation == RemoteOperation.MOVE) 1 else 0
+        if (parameters.count { it is HxpRemoteParameter.RemoteBookId } != expectedBookIdCount ||
+            parameters.count { it is HxpRemoteParameter.TargetId } != expectedTargetIdCount ||
             parameters.count { it is HxpRemoteParameter.Cursor } > 1
         ) fail(HxpVerificationError.CAPABILITY_POLICY_VIOLATION)
         val redirects: List<HxpRemoteRedirectTarget> = when (val rawRedirects = value["redirects"]) {

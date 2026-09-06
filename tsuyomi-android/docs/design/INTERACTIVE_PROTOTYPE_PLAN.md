@@ -46,7 +46,7 @@ This plan may choose prototype mechanics, review tooling and deterministic simul
 
 ### 2.1 Operational execution
 
-`tools/skills/tsuyomi-android-review/SKILL.md` is the only runbook. `review-policy.json` is the only machine-readable source for active/deferred profiles. This plan owns prototype architecture and acceptance behavior, not commands, tool fallback order, or per-run evidence selection.
+`.agents/skills/tsuyomi-android-review/SKILL.md` is the only runbook. `review-policy.json` is the only machine-readable source for active/deferred profiles. This plan owns prototype architecture and acceptance behavior, not commands, tool fallback order, or per-run evidence selection.
 
 R1 still accounts for all 28 nodes and every affected obligation. During `phase4-standard-first`, R2–R4 execute routine design/review only on Standard; E-ink obligations remain represented but deferred. Workflow-only changes stop after R1, and an empty delta never upgrades review state.
 

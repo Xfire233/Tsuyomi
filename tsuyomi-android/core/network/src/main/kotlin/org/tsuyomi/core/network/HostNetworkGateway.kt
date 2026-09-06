@@ -36,6 +36,8 @@ data class SourceNetworkGrant(
     val requestTimeoutMs: Int,
     val maxResponseBytes: Int,
     val remoteAddPolicy: RemoteOperationRequestPolicy? = null,
+    val remoteRemovePolicy: RemoteOperationRequestPolicy? = null,
+    val remoteMovePolicy: RemoteOperationRequestPolicy? = null,
 ) {
     init {
         require(sourceId.isNotBlank() && extensionVersion.isNotBlank())
@@ -48,6 +50,13 @@ data class SourceNetworkGrant(
         require(remoteAddPolicy == null || remoteAddPolicy.remoteBookIdParameter != null)
         require(remoteAddPolicy == null || remoteAddPolicy.cursorParameter == null)
         require(remoteAddPolicy == null || origins.any { it.canonical == remoteAddPolicy.origin.canonical })
+        require(remoteRemovePolicy == null || remoteRemovePolicy.remoteBookIdParameter != null)
+        require(remoteRemovePolicy == null || remoteRemovePolicy.cursorParameter == null)
+        require(remoteRemovePolicy == null || origins.any { it.canonical == remoteRemovePolicy.origin.canonical })
+        require(remoteMovePolicy == null || remoteMovePolicy.remoteBookIdParameter != null)
+        require(remoteMovePolicy == null || remoteMovePolicy.targetIdParameter != null)
+        require(remoteMovePolicy == null || remoteMovePolicy.cursorParameter == null)
+        require(remoteMovePolicy == null || origins.any { it.canonical == remoteMovePolicy.origin.canonical })
     }
 
     fun allowsCookies(origin: HttpsOrigin): Boolean =
@@ -244,11 +253,12 @@ class HostNetworkGateway(
         referrer: URI?,
         operationContext: SourceOperationContext?,
     ): HostHttpResponse {
-        if (operationContext?.kind == SourceOperationKind.REMOTE_LIBRARY_ADD) {
+        if (operationContext?.kind in setOf(SourceOperationKind.REMOTE_LIBRARY_ADD, SourceOperationKind.REMOTE_LIBRARY_REMOVE, SourceOperationKind.REMOTE_LIBRARY_MOVE)) {
+            val context = requireNotNull(operationContext)
             directActionTokens.accept(
                 sourceId = grant.sourceId,
-                remoteBookId = requireNotNull(operationContext.remoteBookId),
-                token = requireNotNull(operationContext.addToken),
+                remoteBookId = requireNotNull(context.remoteBookId),
+                token = requireNotNull(context.directActionToken),
             )
         }
         var url = initialUrl
@@ -265,7 +275,7 @@ class HostNetworkGateway(
                 if (method != redirect.method) throw HostNetworkException(HostNetworkError.REDIRECT_DISALLOWED)
                 val expectedReferrer = redirect.referrerPath?.let { URI(redirect.origin.canonical + it) }
                 if (currentReferrer != expectedReferrer) throw HostNetworkException(HostNetworkError.REDIRECT_DISALLOWED)
-                validateProtectedAddSurface(
+                validateProtectedSurfaces(
                     grant,
                     request.copy(
                         url = url.toString(),
@@ -339,23 +349,46 @@ class HostNetworkGateway(
         request: SourceNetworkRequest,
         operationContext: SourceOperationContext?,
     ) {
-        if (operationContext?.kind == SourceOperationKind.REMOTE_LIBRARY_ADD) {
-            if (grant.remoteAddPolicy != operationContext.policy || request.cache != NetworkCacheMode.NETWORK_ONLY) {
-                throw HostNetworkException(HostNetworkError.INVALID_REQUEST)
+        when (operationContext?.kind) {
+            SourceOperationKind.REMOTE_LIBRARY_ADD -> {
+                if (grant.remoteAddPolicy != operationContext.policy || request.cache != NetworkCacheMode.NETWORK_ONLY) {
+                    throw HostNetworkException(HostNetworkError.INVALID_REQUEST)
+                }
+                operationContext.validate(request)
+                return
             }
-            operationContext.validate(request)
-            return
+            SourceOperationKind.REMOTE_LIBRARY_REMOVE -> {
+                if (grant.remoteRemovePolicy != operationContext.policy || request.cache != NetworkCacheMode.NETWORK_ONLY) {
+                    throw HostNetworkException(HostNetworkError.INVALID_REQUEST)
+                }
+                operationContext.validate(request)
+                return
+            }
+            SourceOperationKind.REMOTE_LIBRARY_MOVE -> {
+                if (grant.remoteMovePolicy != operationContext.policy || request.cache != NetworkCacheMode.NETWORK_ONLY) {
+                    throw HostNetworkException(HostNetworkError.INVALID_REQUEST)
+                }
+                operationContext.validate(request)
+                return
+            }
+            else -> Unit
         }
-        validateProtectedAddSurface(grant, request, operationContext)
+        validateProtectedSurfaces(grant, request, operationContext)
         operationContext?.validate(request)
     }
 
-    private fun validateProtectedAddSurface(
+    private fun validateProtectedSurfaces(
         grant: SourceNetworkGrant,
         request: SourceNetworkRequest,
         operationContext: SourceOperationContext?,
     ) {
         if (operationContext?.kind != SourceOperationKind.REMOTE_LIBRARY_ADD && grant.remoteAddPolicy?.matchesSurface(request) == true) {
+            throw HostNetworkException(HostNetworkError.INVALID_REQUEST)
+        }
+        if (operationContext?.kind != SourceOperationKind.REMOTE_LIBRARY_REMOVE && grant.remoteRemovePolicy?.matchesSurface(request) == true) {
+            throw HostNetworkException(HostNetworkError.INVALID_REQUEST)
+        }
+        if (operationContext?.kind != SourceOperationKind.REMOTE_LIBRARY_MOVE && grant.remoteMovePolicy?.matchesSurface(request) == true) {
             throw HostNetworkException(HostNetworkError.INVALID_REQUEST)
         }
     }

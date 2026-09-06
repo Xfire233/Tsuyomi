@@ -72,6 +72,12 @@ id_ed25519
 **/.mcp.json
 **/.ai/
 **/.agents/
+!/.agents/
+!/.agents/skills/
+!/.agents/skills/tsuyomi-android-review/
+!/.agents/skills/tsuyomi-android-review/**
+/.agents/skills/**/__pycache__/
+/.agents/skills/**/*.py[cod]
 **/.cursor/
 **/.windsurf/
 **/.omp/

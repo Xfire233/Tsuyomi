@@ -20,6 +20,7 @@ import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.Bookmark
 import androidx.compose.material.icons.filled.BookmarkBorder
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.CreateNewFolder
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Deselect
@@ -40,6 +41,7 @@ import androidx.compose.material.icons.filled.Notifications
 import androidx.compose.material.icons.filled.OpenInFull
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.filled.PushPin
 import androidx.compose.material.icons.filled.SelectAll
 import androidx.compose.material.icons.filled.Reorder
 import androidx.compose.material.icons.filled.Search
@@ -92,6 +94,8 @@ object TsuyomiIcons {
     val ToTop: ImageVector = Icons.Filled.ArrowUpward
     val ToBottom: ImageVector = Icons.Filled.ArrowDownward
     val Close: ImageVector = Icons.Filled.Close
+    val Pin: ImageVector = Icons.Filled.PushPin
+    val Copy: ImageVector = Icons.Filled.ContentCopy
     val Delete: ImageVector = Icons.Filled.Delete
     val CreateFolder: ImageVector = Icons.Filled.CreateNewFolder
     val MoveToFolder: ImageVector = Icons.AutoMirrored.Filled.DriveFileMove

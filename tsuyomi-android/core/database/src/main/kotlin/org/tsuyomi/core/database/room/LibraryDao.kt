@@ -73,6 +73,9 @@ internal interface LibraryDao {
     @Query("SELECT source_id, remote_book_id FROM manual_collection_memberships WHERE collection_id = :collectionId ORDER BY display_order, source_id, remote_book_id")
     suspend fun manualCollectionIdentities(collectionId: String): List<BookIdentityRow>
 
+    @Query("SELECT collection_id FROM manual_collection_memberships WHERE source_id = :sourceId AND remote_book_id = :remoteBookId ORDER BY collection_id")
+    suspend fun manualCollectionIds(sourceId: String, remoteBookId: String): List<String>
+
     @RawQuery
     suspend fun smartCollectionIdentities(query: SupportSQLiteQuery): List<BookIdentityRow>
 
@@ -120,16 +123,55 @@ internal interface LibraryDao {
 
     @Query("UPDATE source_remote_policy SET add_writeback_enabled = :enabled WHERE source_id = :sourceId AND capability_set_fingerprint = :capabilityFingerprint")
     suspend fun setAddWritebackEnabled(sourceId: String, capabilityFingerprint: String, enabled: Boolean): Int
+    @Query("UPDATE source_remote_policy SET remove_writeback_enabled = :enabled WHERE source_id = :sourceId AND capability_set_fingerprint = :capabilityFingerprint")
+    suspend fun setRemoveWritebackEnabled(sourceId: String, capabilityFingerprint: String, enabled: Boolean): Int
+    @Query("UPDATE source_remote_policy SET move_writeback_enabled = :enabled WHERE source_id = :sourceId AND capability_set_fingerprint = :capabilityFingerprint")
+    suspend fun setMoveWritebackEnabled(sourceId: String, capabilityFingerprint: String, enabled: Boolean): Int
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun upsertRemoteMirrorBinding(entity: RemoteMirrorBindingEntity)
+
+    @Query("SELECT * FROM remote_mirror_bindings ORDER BY source_id")
+    suspend fun remoteMirrorBindings(): List<RemoteMirrorBindingEntity>
+
+    @Query("SELECT * FROM remote_mirror_bindings WHERE source_id = :sourceId")
+    suspend fun remoteMirrorBinding(sourceId: String): RemoteMirrorBindingEntity?
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun upsertRemoteMirrorTargets(entities: List<RemoteMirrorTargetEntity>)
+
+    @Query("UPDATE remote_mirror_targets SET frozen = 1 WHERE source_id = :sourceId")
+    suspend fun freezeRemoteMirrorTargets(sourceId: String)
+
+    @Query("SELECT * FROM remote_mirror_targets WHERE source_id = :sourceId ORDER BY frozen, target_id")
+    suspend fun remoteMirrorTargets(sourceId: String): List<RemoteMirrorTargetEntity>
+
+    @Query("DELETE FROM remote_mirror_items WHERE source_id = :sourceId")
+    suspend fun deleteRemoteMirrorItems(sourceId: String)
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun upsertRemoteMirrorItems(entities: List<RemoteMirrorItemEntity>)
+
+    @Query("SELECT b.*, i.target_id AS mirror_target_id FROM books b INNER JOIN remote_mirror_items i ON i.source_id = b.source_id AND i.remote_book_id = b.remote_book_id WHERE i.source_id = :sourceId ORDER BY b.title COLLATE NOCASE, b.remote_book_id")
+    suspend fun remoteMirrorBooks(sourceId: String): List<RemoteMirrorBookRow>
+
+    @Query("UPDATE remote_mirror_items SET target_id = :targetId, updated_at_epoch_second = :updatedAt WHERE source_id = :sourceId AND remote_book_id = :remoteBookId")
+    suspend fun updateRemoteMirrorBookTarget(sourceId: String, remoteBookId: String, targetId: String?, updatedAt: Long): Int
+
+    @Query("DELETE FROM remote_mirror_items WHERE source_id = :sourceId AND remote_book_id = :remoteBookId")
+    suspend fun deleteRemoteMirrorBook(sourceId: String, remoteBookId: String): Int
+
+    @Query("SELECT COUNT(*) FROM remote_mirror_items WHERE source_id = :sourceId AND target_id = :targetId")
+    suspend fun remoteMirrorTargetCount(sourceId: String, targetId: String): Int
     @Query("UPDATE source_remote_policy SET add_writeback_enabled = 0 WHERE add_writeback_enabled = 1")
     suspend fun disableAllAddWriteback(): Int
     @Query("UPDATE source_remote_policy SET first_import_prompt_dismissed = 1 WHERE source_id = :sourceId AND capability_set_fingerprint = :capabilityFingerprint AND first_import_prompt_dismissed = 0")
     suspend fun dismissFirstImportPrompt(sourceId: String, capabilityFingerprint: String): Int
 
-
     @Insert(onConflict = OnConflictStrategy.ABORT)
     suspend fun insertReconciliation(entity: RemoteLibraryReconciliationEntity)
 
-    @Query("SELECT * FROM remote_library_reconciliation WHERE source_id = :sourceId AND remote_book_id = :remoteBookId AND state IN ('PENDING_USER_ACTION','IN_FLIGHT') LIMIT 1")
+    @Query("SELECT * FROM remote_library_reconciliation WHERE source_id = :sourceId AND remote_book_id = :remoteBookId AND state IN ('PENDING_USER_ACTION','IN_FLIGHT','UNRESOLVED') ORDER BY rowid DESC LIMIT 1")
     suspend fun activeReconciliation(sourceId: String, remoteBookId: String): RemoteLibraryReconciliationEntity?
 
     @Query("SELECT * FROM remote_library_reconciliation WHERE source_id = :sourceId AND remote_book_id = :remoteBookId ORDER BY rowid DESC LIMIT 1")
@@ -138,8 +180,17 @@ internal interface LibraryDao {
     @Query("UPDATE remote_library_reconciliation SET state = :nextState, updated_at_epoch_second = :updatedAt, diagnostic_id = :diagnosticId WHERE id = :id AND state = :expectedState")
     suspend fun transitionReconciliation(id: String, expectedState: String, nextState: String, updatedAt: Long, diagnosticId: String?): Int
 
+    @Query("UPDATE remote_library_reconciliation SET state = 'CONFIRMED', updated_at_epoch_second = :updatedAt, diagnostic_id = NULL WHERE source_id = :sourceId AND remote_book_id = :remoteBookId AND operation = 'ADD' AND state = 'UNRESOLVED'")
+    suspend fun confirmUnresolvedAdds(sourceId: String, remoteBookId: String, updatedAt: Long): Int
+
     @Query("SELECT * FROM remote_library_reconciliation WHERE id = :id")
     suspend fun reconciliation(id: String): RemoteLibraryReconciliationEntity?
+
+    @Query("SELECT * FROM remote_library_reconciliation WHERE state = 'UNRESOLVED'")
+    suspend fun unresolvedReconciliations(): List<RemoteLibraryReconciliationEntity>
+
+    @Query("SELECT * FROM remote_library_reconciliation WHERE source_id = :sourceId AND state = 'UNRESOLVED'")
+    suspend fun unresolvedReconciliationsForSource(sourceId: String): List<RemoteLibraryReconciliationEntity>
 
     @Insert(onConflict = OnConflictStrategy.ABORT)
     suspend fun insertCollection(entity: CollectionEntity)

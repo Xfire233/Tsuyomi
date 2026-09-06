@@ -103,6 +103,7 @@ fun SearchScreen(
     onUseOfflineCache: () -> Unit,
     onOpenVerification: () -> Unit,
     modifier: Modifier = Modifier,
+    authorSearch: Boolean = false,
     coverState: @Composable (SourceBookSummary) -> CoverUiState = { book ->
         CoverUiState.Fallback(FallbackSpec(book.title, book.identity.sourceId))
     },
@@ -130,7 +131,7 @@ fun SearchScreen(
                 horizontal = TsuyomiSpacing.Md,
                 vertical = TsuyomiSpacing.Sm,
             ),
-            label = { Text(stringResource(R.string.search_query_label)) },
+            label = { Text(stringResource(if (authorSearch) R.string.search_author_query_label else R.string.search_query_label)) },
             trailingIcon = {
                 TsuyomiIconButton(
                     imageVector = TsuyomiIcons.Search,
@@ -425,5 +426,6 @@ private fun errorMessage(code: SourceErrorCode): Int = when (code) {
     SourceErrorCode.VERIFICATION_REQUIRED -> R.string.search_error_verification
     SourceErrorCode.EMPTY_SOURCE_RESPONSE -> R.string.search_error_empty_response
     SourceErrorCode.MALFORMED_SOURCE_RESPONSE -> R.string.search_error_malformed
+    SourceErrorCode.EXTENSION_CANCELLED -> R.string.search_error_cancelled
     else -> R.string.search_error_generic
 }

@@ -5,6 +5,7 @@
 
 package org.tsuyomi.android
 
+import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.platform.LocalResources
@@ -27,23 +28,25 @@ import org.tsuyomi.feature.library.SystemLibraryFilter
 internal fun NavGraphBuilder.libraryRoutes(
     navController: NavHostController,
     controller: LibraryFlowController,
-    coverState: (LibraryEntry) -> CoverUiState,
+    coverState: @Composable (LibraryEntry) -> CoverUiState,
     resumeReading: suspend (LibraryEntry) -> Boolean,
     openBookDetail: suspend (LibraryEntry) -> Boolean,
     onCoverVisibility: (LibraryEntry, Boolean) -> Unit,
+    openRemoteDestination: suspend (LibraryEntry, LibraryDropDestination.RemoteMirror) -> Unit,
 ) {
-    libraryHomeRoute(navController, controller, coverState, onCoverVisibility, openBookDetail)
-    libraryNodeRoutes(navController, controller, coverState, onCoverVisibility, resumeReading, openBookDetail)
-    libraryTagsRoutes(navController, controller, coverState, onCoverVisibility, openBookDetail)
+    libraryHomeRoute(navController, controller, coverState, onCoverVisibility, openBookDetail, openRemoteDestination)
+    libraryNodeRoutes(navController, controller, coverState, onCoverVisibility, resumeReading, openBookDetail, openRemoteDestination)
+    libraryTagsRoutes(navController, controller, coverState, onCoverVisibility, openBookDetail, openRemoteDestination)
     collectionsRoute(controller)
 }
 
 private fun NavGraphBuilder.libraryHomeRoute(
     navController: NavHostController,
     controller: LibraryFlowController,
-    coverState: (LibraryEntry) -> CoverUiState,
+    coverState: @Composable (LibraryEntry) -> CoverUiState,
     onCoverVisibility: (LibraryEntry, Boolean) -> Unit,
     openBookDetail: suspend (LibraryEntry) -> Boolean,
+    openRemoteDestination: suspend (LibraryEntry, LibraryDropDestination.RemoteMirror) -> Unit,
 ) {
     composable(Routes.Library) {
         val scope = rememberCoroutineScope()
@@ -62,6 +65,12 @@ private fun NavGraphBuilder.libraryHomeRoute(
                 controller.selectCollection(collection.collectionId)
                 navController.navigate(Routes.libraryCollection(collection.collectionId))
             },
+            onOpenMirror = { mirror ->
+                navController.navigate(
+                    mirror.targetId?.let { Routes.libraryMirrorFolder(mirror.sourceId, it) }
+                        ?: Routes.libraryMirror(mirror.sourceId),
+                )
+            },
             onOpenBook = { entry ->
                 controller.openOrToggleEntry(entry)
                 scope.launch { openBookDetail(entry) }
@@ -76,7 +85,7 @@ private fun NavGraphBuilder.libraryHomeRoute(
             onLongPressCollection = controller::longPressCollection,
             onToggleCollectionSelection = controller::toggleCollectionSelection,
             onDropBooks = { payload, destination ->
-                handleLibraryDrop(controller, scope, failureMessage, true, payload, destination)
+                handleLibraryDrop(controller, scope, failureMessage, true, payload, destination, openRemoteDestination)
             },
             reorderEnabled = controller.state.sortMode == org.tsuyomi.feature.library.LibrarySortMode.CUSTOM &&
                 controller.state.filter == SystemLibraryFilter.ALL,
@@ -96,10 +105,11 @@ private fun NavGraphBuilder.libraryHomeRoute(
 private fun NavGraphBuilder.libraryNodeRoutes(
     navController: NavHostController,
     controller: LibraryFlowController,
-    coverState: (LibraryEntry) -> CoverUiState,
+    coverState: @Composable (LibraryEntry) -> CoverUiState,
     onCoverVisibility: (LibraryEntry, Boolean) -> Unit,
     resumeReading: suspend (LibraryEntry) -> Boolean,
     openBookDetail: suspend (LibraryEntry) -> Boolean,
+    openRemoteDestination: suspend (LibraryEntry, LibraryDropDestination.RemoteMirror) -> Unit,
 ) {
     composable(Routes.LibrarySystem) { backStackEntry ->
         val scope = rememberCoroutineScope()
@@ -141,7 +151,7 @@ private fun NavGraphBuilder.libraryNodeRoutes(
             onLongPressCollection = controller::longPressCollection,
             onToggleCollectionSelection = controller::toggleCollectionSelection,
             onDropBooks = { payload, destination ->
-                handleLibraryDrop(controller, scope, failureMessage, false, payload, destination)
+                handleLibraryDrop(controller, scope, failureMessage, false, payload, destination, openRemoteDestination)
             },
             reorderEnabled = false,
             onShortcutLockedChanged = { locked -> scope.launch { controller.setShortcutLocked(locked) } },
@@ -187,7 +197,7 @@ private fun NavGraphBuilder.libraryNodeRoutes(
             onLongPressCollection = controller::longPressCollection,
             onToggleCollectionSelection = controller::toggleCollectionSelection,
             onDropBooks = { payload, destination ->
-                handleLibraryDrop(controller, scope, failureMessage, true, payload, destination)
+                handleLibraryDrop(controller, scope, failureMessage, true, payload, destination, openRemoteDestination)
             },
             reorderEnabled = controller.state.sortMode == org.tsuyomi.feature.library.LibrarySortMode.CUSTOM &&
                 controller.state.filter == SystemLibraryFilter.ALL &&
@@ -210,9 +220,10 @@ private fun NavGraphBuilder.libraryNodeRoutes(
 private fun NavGraphBuilder.libraryTagsRoutes(
     navController: NavHostController,
     controller: LibraryFlowController,
-    coverState: (LibraryEntry) -> CoverUiState,
+    coverState: @Composable (LibraryEntry) -> CoverUiState,
     onCoverVisibility: (LibraryEntry, Boolean) -> Unit,
     openBookDetail: suspend (LibraryEntry) -> Boolean,
+    openRemoteDestination: suspend (LibraryEntry, LibraryDropDestination.RemoteMirror) -> Unit,
 ) {
     composable(Routes.LibraryTags) {
         LibraryTagsScreen(
@@ -249,7 +260,7 @@ private fun NavGraphBuilder.libraryTagsRoutes(
             onLongPressCollection = controller::longPressCollection,
             onToggleCollectionSelection = controller::toggleCollectionSelection,
             onDropBooks = { payload, destination ->
-                handleLibraryDrop(controller, scope, failureMessage, false, payload, destination)
+                handleLibraryDrop(controller, scope, failureMessage, false, payload, destination, openRemoteDestination)
             },
             reorderEnabled = false,
             onShortcutLockedChanged = { locked -> scope.launch { controller.setShortcutLocked(locked) } },
@@ -271,6 +282,7 @@ private fun handleLibraryDrop(
     allowLibraryReorder: Boolean,
     payload: LibraryDragPayload,
     destination: LibraryDropDestination,
+    openRemoteDestination: suspend (LibraryEntry, LibraryDropDestination.RemoteMirror) -> Unit,
 ) {
     when (payload) {
         is LibraryDragPayload.Books -> when (destination) {
@@ -304,6 +316,14 @@ private fun handleLibraryDrop(
             is LibraryDropDestination.Library -> if (allowLibraryReorder && !payload.fromShortcut) {
                 scope.launch { controller.reorderBooks(payload.identities, destination.index, failureMessage) }
             }
+            is LibraryDropDestination.RemoteMirror -> payload.identities.singleOrNull()?.let { identity ->
+                controller.state.entries.firstOrNull { it.book.identity == identity }?.let { entry ->
+                    scope.launch { openRemoteDestination(entry, destination) }
+                }
+            }
+            LibraryDropDestination.LocalCopy,
+            LibraryDropDestination.RemoteRemove,
+            -> Unit
             LibraryDropDestination.Remove -> {
                 if (payload.fromShortcut && payload.identities.size == 1) {
                     scope.launch { controller.removeBookShortcut(payload.identities.single(), failureMessage) }
@@ -322,7 +342,11 @@ private fun handleLibraryDrop(
             }
             is LibraryDropDestination.Book,
             is LibraryDropDestination.Collection,
-            is LibraryDropDestination.Library -> Unit
+            is LibraryDropDestination.Library,
+            is LibraryDropDestination.RemoteMirror,
+            LibraryDropDestination.LocalCopy,
+            LibraryDropDestination.RemoteRemove,
+            -> Unit
         }
     }
 }
