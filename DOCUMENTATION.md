@@ -16,11 +16,11 @@ This registry defines why each first-party document exists, when to read or upda
 | Completion / stop | Evidence that the required reading or update is sufficient; linked documents are not read automatically after this point. |
 | Lifecycle | Active authority/procedure/reference, accepted ADR, release record, or history. |
 
-A document is not mandatory merely because another document links to it. Follow a link only when its Trigger matches the current task. Current user direction and the authority order in `AGENTS.md` still override lower-authority records.
+An environment-provided `AGENTS.md` may impose higher-priority agent instructions without being a versioned first-party document. A registered document is not mandatory merely because another document links to it; follow a link only when its Trigger matches the current task. Current user direction and the active agent authority order still override lower-authority records.
 
 ## Dispatch procedure
 
-1. Bootstrap non-trivial work with `AGENTS.md`, `WORKSPACE.md`, the affected component `CONTRIBUTING.md`, current handoff when present, and required memory recall.
+1. Bootstrap non-trivial work with the environment-provided agent instructions, `WORKSPACE.md`, the affected component `CONTRIBUTING.md`, current handoff when present, and required memory recall.
 2. Classify the needed decision as Contract, Phase, Gate, Procedure, Policy, Evidence, State, or History using `WORKSPACE.md`.
 3. Select the single owning row below. Read only its affected sections and any prerequisite explicitly named by the row.
 4. Stop when the row's Completion condition is satisfied. Do not recursively read every referenced document.
@@ -30,7 +30,6 @@ A document is not mandatory merely because another document links to it. Follow 
 
 | Document | Role / purpose | Trigger | Method | Scope / exclusions | Completion / stop | Lifecycle |
 |---|---|---|---|---|---|---|
-| `AGENTS.md` | Repository agent rules, authority order, authorization and continuity requirements | Every non-trivial agent task and fresh-session recovery | Load first; extract mandatory reads, forbidden actions and authorization boundaries | Agent operation only; product behavior remains with contracts | All applicable mandatory steps and prohibitions are identified | Active instruction |
 | `WORKSPACE.md` | Monorepo map, component boundaries and governance object model | First repository task, cross-component work or ownership ambiguity | Identify affected component and object owner, then follow one matching registry row | Navigation; not detailed product/process authority | Component and unique owner are known | Active entry point |
 | `DOCUMENTATION.md` | Document dispatch, scope and stop conditions | Any uncertainty about which document to read/update; adding, removing or repurposing a document | Match the task to one row; update the registry atomically with document lifecycle changes | Metadata only; never copies binding rules | One owner selected and no unregistered first-party document remains | Active registry |
 | `TOOLING.md` | Tool, Skill and MCP dispatch, exclusions and fallback | Tool choice, installation, failure, overlap, discovery or governance change | Match required output to the first owner; obey scope and completion fields | Development resources only; not product or Phase authority | Required output exists, owner is released, and no unnecessary fallback ran | Active registry |

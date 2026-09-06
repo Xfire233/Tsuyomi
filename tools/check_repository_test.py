@@ -279,6 +279,13 @@ class ToolingGovernanceTest(unittest.TestCase):
             violations = check_repository.documentation_governance_violations(root)
             self.assertTrue(any("NEW.md: document is not registered" in violation for violation in violations))
 
+    def test_environment_agent_instructions_are_not_registered_documents(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            self.create_valid_registry(root)
+            (root / "AGENTS.md").write_text("# Environment instructions\n", encoding="utf-8")
+            self.assertEqual([], check_repository.documentation_governance_violations(root))
+
     def test_duplicate_document_responsibility_is_rejected(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

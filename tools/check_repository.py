@@ -286,12 +286,16 @@ def skill_frontmatter_name(text: str) -> str | None:
 def documentation_inventory_paths(repo_root: Path) -> list[Path]:
     paths: set[Path] = set()
     for path in repo_root.glob("*.md"):
-        if path.is_file():
+        if path.is_file() and path.name not in FORBIDDEN_NAMES:
             paths.add(path.relative_to(repo_root))
     for component in ("tsuyomi-android", "tsuyomi-protocol", "tsuyomi-extensions"):
         root = repo_root / component
         if root.is_dir():
-            paths.update(path.relative_to(repo_root) for path in root.glob("*.md") if path.is_file())
+            paths.update(
+                path.relative_to(repo_root)
+                for path in root.glob("*.md")
+                if path.is_file() and path.name not in FORBIDDEN_NAMES
+            )
     for relative_root in (
         Path(".github"),
         Path("tsuyomi-android/docs"),
