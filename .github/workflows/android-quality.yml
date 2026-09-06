@@ -57,7 +57,7 @@ jobs:
           python --version
       - name: Set up Gradle cache
         if: steps.plan.outputs.changed == 'true'
-        uses: gradle/actions/setup-gradle@4c44018e59b437e86cdfc41da381398f93ed8808
+        uses: gradle/actions/setup-gradle@ed408507eac070d1f99cc633dbcf757c94c7933a
       - name: Build, test, lint, and validate affected goldens
         if: steps.plan.outputs.build_tasks != ''
         run: >-
@@ -88,7 +88,7 @@ jobs:
             --github-output "$GITHUB_OUTPUT"
       - name: Set up Gradle cache
         if: steps.plan.outputs.device_needed == 'true'
-        uses: gradle/actions/setup-gradle@4c44018e59b437e86cdfc41da381398f93ed8808
+        uses: gradle/actions/setup-gradle@ed408507eac070d1f99cc633dbcf757c94c7933a
       - name: Compile affected production instrumentation APKs
         if: steps.plan.outputs.instrumentation_compile_tasks != ''
         run: >-
@@ -155,7 +155,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
       - name: Set up Gradle cache
-        uses: gradle/actions/setup-gradle@4c44018e59b437e86cdfc41da381398f93ed8808
+        uses: gradle/actions/setup-gradle@ed408507eac070d1f99cc633dbcf757c94c7933a
       - name: Run Pixel 6 API 29 managed-device pilot
         run: >-
           ./gradlew --no-daemon --console=plain --dependency-verification strict
