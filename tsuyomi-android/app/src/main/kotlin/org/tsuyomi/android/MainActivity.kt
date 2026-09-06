@@ -72,13 +72,15 @@ import org.tsuyomi.feature.book.BookDetailTopBar
 import org.tsuyomi.feature.book.BookDirectoryScreen
 import org.tsuyomi.feature.browse.BrowseScreen
 import org.tsuyomi.feature.browse.BrowseTopBar
+import org.tsuyomi.feature.settings.FeatureIntroductionDialog
+import org.tsuyomi.feature.settings.featureIntroductionDefinition
 import org.tsuyomi.feature.browse.SourceHomeViewState
-import org.tsuyomi.feature.browse.RemoteLibraryScreen
 import org.tsuyomi.feature.reader.ReaderScreen
 import org.tsuyomi.feature.search.SearchLayout
 import org.tsuyomi.feature.search.SearchScreen
 import org.tsuyomi.feature.search.SearchTopBar
 import org.tsuyomi.shared.backup.PortableReaderPreferences
+import org.tsuyomi.source.extensionmanager.RemoteOperation
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -107,6 +109,8 @@ internal fun TsuyomiApp(
     val readerPreferences by application.readerPreferencesRepository.preferences.collectAsStateWithLifecycle(
         PortableReaderPreferences(flow = "scroll", fontScale = 1.0, lineHeight = 1.5, theme = "paper"),
     )
+    val introductionPreferences: org.tsuyomi.core.preferences.FeatureIntroductionPreferences? by
+        application.featureIntroductionPreferencesRepository.preferences.collectAsStateWithLifecycle(initialValue = null)
     val transferCoordinator = remember {
         TransferCoordinator(context.applicationContext, application.transferRepository, application.readerPreferencesRepository)
     }
@@ -145,6 +149,14 @@ internal fun TsuyomiApp(
             ?: MutableStateFlow(SearchLayout.LIST)
     }
     val searchLayout by searchLayoutFlow.collectAsStateWithLifecycle()
+    val detailRemoteMembershipFlow = remember(currentEntry) {
+        currentEntry
+            ?.takeIf { it.destination.route == Routes.Detail }
+            ?.savedStateHandle
+            ?.getStateFlow(RemoteBookMembershipKey, false)
+            ?: MutableStateFlow(false)
+    }
+    val detailBookInRemoteLibrary by detailRemoteMembershipFlow.collectAsStateWithLifecycle()
     val sourceOwner = rememberSourceRouteOwner(
         application = application,
         navController = navController,
@@ -152,6 +164,20 @@ internal fun TsuyomiApp(
         currentRoute = currentRoute,
         onLibraryChanged = ::reloadLibrary,
     )
+    var pendingIntroductionId by rememberSaveable { mutableStateOf<String?>(null) }
+    val introductionRouteId = when (currentRoute) {
+        Routes.LibraryMirror, Routes.LibraryMirrorFolder -> "website-mirror"
+        Routes.Collections -> "smart-collection"
+        Routes.RemoteLibrary -> "website-writeback"
+        Routes.Transfer -> "data-transfer"
+        else -> null
+    }
+    LaunchedEffect(currentRoute, introductionRouteId, introductionPreferences) {
+        val preferences = introductionPreferences ?: return@LaunchedEffect
+        pendingIntroductionId = introductionRouteId?.takeIf { id ->
+            preferences.enabled && "$id:1" !in preferences.seenVersions
+        }
+    }
     var detailRemoveConfirmationVisible by rememberSaveable { mutableStateOf(false) }
     fun issueDetailCommand(command: SourceDetailRouteOwner.Command) {
         val entry = currentEntry?.takeIf { it.destination.route == Routes.Detail } ?: return
@@ -159,6 +185,11 @@ internal fun TsuyomiApp(
         handle[SourceDetailRouteOwner.CommandKey] = command.name
         handle[SourceDetailRouteOwner.CommandSequenceKey] =
             (handle.get<Long>(SourceDetailRouteOwner.CommandSequenceKey) ?: 0L) + 1L
+    }
+    fun issueDetailRequest(key: String) {
+        val entry = currentEntry?.takeIf { it.destination.route == Routes.Detail } ?: return
+        val handle = entry.savedStateHandle
+        handle[key] = (handle.get<Long>(key) ?: 0L) + 1L
     }
     LaunchedEffect(currentRoute) {
         if (currentRoute != Routes.Detail) detailRemoveConfirmationVisible = false
@@ -233,12 +264,13 @@ internal fun TsuyomiApp(
     val sourceHomeContent = sourceOwner.flow.homeState as? SourceHomeViewState.Content
     val sourceHomeSourceName = activeSourcePackage?.manifest?.displayName.orEmpty()
     val isRoot = currentRoute in setOf(Routes.Library, Routes.Browse, Routes.More)
-    val settingsDependencies = remember(environment, controller, transferCoordinator, readerPreferences) {
+    val settingsDependencies = remember(environment, controller, transferCoordinator, readerPreferences, application) {
         SettingsRouteDependencies(
             environment = environment,
             displayController = controller,
             transferCoordinator = transferCoordinator,
             readerPreferences = readerPreferences,
+            application = application,
         )
     }
 
@@ -262,13 +294,30 @@ internal fun TsuyomiApp(
             },
         )
     }
+    pendingIntroductionId?.let { id ->
+        featureIntroductionDefinition(id)?.let { introduction ->
+            FeatureIntroductionDialog(
+                introduction = introduction,
+                onAcknowledged = {
+                    pendingIntroductionId = null
+                    scope.launch {
+                        application.featureIntroductionPreferencesRepository.markSeen(
+                            introduction.id,
+                            introduction.version,
+                        )
+                    }
+                },
+                onDismiss = { pendingIntroductionId = null },
+            )
+        }
+    }
     BoxWithConstraints(Modifier.fillMaxSize()) {
         val windowSize = TsuyomiWindowSize(
             widthDp = maxWidth.value.toInt(),
             heightDp = maxHeight.value.toInt(),
         )
         val routeOwnsChrome = environment.effectiveProfile == DisplayProfile.STANDARD &&
-            currentRoute in setOf(Routes.Reader, Routes.RemoteLibrary)
+            currentRoute in setOf(Routes.Reader, Routes.RemoteLibrary, Routes.LibraryMirror, Routes.LibraryMirrorFolder)
         Surface(
             modifier = Modifier
                 .fillMaxSize()
@@ -402,17 +451,30 @@ internal fun TsuyomiApp(
                         currentRoute == Routes.Detail &&
                         environment.effectiveProfile == DisplayProfile.STANDARD
                     ) {
+                        val selectedBook = sourceOwner.flow.selectedBook
+                        val selectedPackage = sourceOwner.installer.activePackage
+                        val sameActiveSource = selectedBook != null &&
+                            selectedPackage?.manifest?.sourceId?.value == selectedBook.identity.sourceId
+                        val remotePolicies = selectedPackage?.manifest?.capabilities?.remoteLibrary?.policies
                         BookDetailTopBar(
-                            title = sourceOwner.flow.selectedBook?.title ?: stringResource(R.string.title_book_detail),
+                            title = selectedBook?.title ?: stringResource(R.string.title_book_detail),
                             inLibrary = sourceOwner.flow.remoteLibrary.selectedBookInLibrary,
                             onNavigateUp = { navController.navigateUp() },
                             onCacheDetail = { issueDetailCommand(SourceDetailRouteOwner.Command.CACHE_DETAIL) },
                             onRefresh = { issueDetailCommand(SourceDetailRouteOwner.Command.REFRESH_DETAIL) },
                             onRemoveFromLibrary = { detailRemoveConfirmationVisible = true },
+                            remoteRemoveAvailable = detailBookInRemoteLibrary && sameActiveSource &&
+                                remotePolicies?.containsKey(RemoteOperation.REMOVE) == true,
+                            remoteMoveAvailable = detailBookInRemoteLibrary && sameActiveSource &&
+                                libraryFlow.isWebsiteGroupingEnabled(selectedBook.identity.sourceId) &&
+                                remotePolicies?.containsKey(RemoteOperation.MOVE) == true,
+                            onRemoveFromRemote = { issueDetailRequest(RemoteRemoveRequestKey) },
+                            onMoveRemote = { issueDetailRequest(RemoteMoveRequestKey) },
                         )
                     } else if (
                         currentRoute in setOf(
                             Routes.Verification,
+                            Routes.VerifiedHomePage,
                             Routes.VerifiedPage,
                             Routes.VerifiedDetailPage,
                             Routes.VerifiedDirectoryPage,
@@ -451,14 +513,16 @@ internal fun TsuyomiApp(
                     libraryRoutes(
                         navController = navController,
                         controller = libraryFlow,
-                        coverState = libraryFlow::coverState,
+                        coverState = { entry -> libraryFlow.coverState(entry) },
                         openBookDetail = sourceOwner::openLibraryDetail,
                         resumeReading = sourceOwner::resumeReading,
                         onCoverVisibility = libraryFlow::setCoverVisible,
+                        openRemoteDestination = sourceOwner::openRemoteDestination,
                     )
                     sourceRoutes(
                         navController = navController,
                         owner = sourceOwner,
+                        libraryFlow = libraryFlow,
                         readerPreferences = readerPreferences,
                         onReaderPreferencesChanged = { updated ->
                             scope.launch { application.readerPreferencesRepository.update(updated) }

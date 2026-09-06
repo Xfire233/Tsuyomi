@@ -69,7 +69,7 @@ data class HxpCookieCapability(val sourceScoped: Boolean, val origins: Set<Https
 data class HxpWebLoginCapability(val enabled: Boolean, val origins: Set<HttpsOrigin>)
 data class HxpHomeCapability(val enabled: Boolean)
 
-enum class RemoteOperation { READ, ADD }
+enum class RemoteOperation { READ, TARGETS, ADD, REMOVE, MOVE }
 
 sealed interface HxpRemoteParameter {
     val name: String
@@ -77,6 +77,7 @@ sealed interface HxpRemoteParameter {
     data class Fixed(override val name: String, val value: String) : HxpRemoteParameter
     data class RemoteBookId(override val name: String) : HxpRemoteParameter
     data class Cursor(override val name: String) : HxpRemoteParameter
+    data class TargetId(override val name: String) : HxpRemoteParameter
 }
 
 

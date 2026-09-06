@@ -57,4 +57,26 @@ class SourceHomeContractsTest {
             page.copy(features = List(5) { index -> page.features.single().copy(id = "feature-$index") })
         }
     }
+
+    @Test
+    fun detailAcceptsOnlyValidIsoCalendarUpdateDates() {
+        val summary = SourceBookSummary(
+            identity = BookIdentity("org.tsuyomi.wenku8", "1234"),
+            title = "雾港纪事",
+            author = "林川",
+            coverUrl = null,
+            canonicalUrl = "https://www.wenku8.net/book/1234.htm",
+        )
+
+        assertEquals(
+            "2024-02-29",
+            SourceBookDetail(summary, null, emptyList(), null, "2024-02-29").lastUpdatedDate,
+        )
+        assertThrows(IllegalArgumentException::class.java) {
+            SourceBookDetail(summary, null, emptyList(), null, "2025-02-29")
+        }
+        assertThrows(IllegalArgumentException::class.java) {
+            SourceBookDetail(summary, null, emptyList(), null, "2024-2-29")
+        }
+    }
 }

@@ -51,4 +51,21 @@ internal class SourceInstallControllerInstrumentedTest : SourceFlowInstrumentedT
         assertFalse(after.available)
         assertEquals(before.generation + 1, after.generation)
     }
+    @Test
+    fun restorePreservesEveryMatchingWritebackReceipt() = runBlocking {
+        val packageInfo = installFixture()
+        val sourceId = packageInfo.manifest.sourceId.value
+        val policy = requireNotNull(library.sourceRemotePolicy(sourceId))
+        assertTrue(library.setAddWritebackEnabled(sourceId, policy.capabilitySetFingerprint, true))
+        assertTrue(library.setRemoveWritebackEnabled(sourceId, policy.capabilitySetFingerprint, true))
+        assertTrue(library.setMoveWritebackEnabled(sourceId, policy.capabilitySetFingerprint, true))
+
+        SourceInstallController(context, library).restoreInstalled()
+
+        val restored = requireNotNull(library.sourceRemotePolicy(sourceId))
+        assertTrue(restored.addWritebackEnabled)
+        assertTrue(restored.removeWritebackEnabled)
+        assertTrue(restored.moveWritebackEnabled)
+    }
+
 }

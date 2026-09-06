@@ -24,6 +24,7 @@ type BookSummary = {
   author: string | null;
   coverUrl: string | null;
   canonicalUrl: string;
+  remoteTargetId?: string | null;
 };
 type HomeFilterSelection = Record<string, string>;
 
@@ -108,6 +109,35 @@ const stripTags = (value: string): string => decodeEntities(
     .replace(/<[^>]+>/g, ' '),
 ).replace(/\s+/g, ' ').trim();
 
+const INLINE_MARKUP = '<(?!/?(?:br|td|tr|p|div|li)\\b)[^>]+>';
+const UPDATE_DATE_LABEL = ['文章更新时间', '文章更新', '最后更新', '更新时间']
+  .map((label) => [...label].join(`(?:\\s|${INLINE_MARKUP})*`))
+  .join('|');
+const normalizeCalendarDate = (value: string): string | null => {
+  const match = /^\s*(\d{4})\s*(?:[-/.年])\s*(\d{1,2})\s*(?:[-/.月])\s*(\d{1,2})\s*(?:日)?(?:$|\D)/.exec(value);
+  if (!match) return null;
+  const year = Number.parseInt(match[1] ?? '', 10);
+  const month = Number.parseInt(match[2] ?? '', 10);
+  const day = Number.parseInt(match[3] ?? '', 10);
+  const daysInMonth = [31, year % 4 === 0 && (year % 100 !== 0 || year % 400 === 0) ? 29 : 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
+  const maxDay = daysInMonth[month - 1] ?? 0;
+  return month >= 1 && month <= 12 && day >= 1 && day <= maxDay
+    ? `${String(year).padStart(4, '0')}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`
+    : null;
+};
+const sourceUpdateDate = (html: string): string | null => {
+  const inlineGap = `(?:\\s|${INLINE_MARKUP})*`;
+  const matches = html.matchAll(new RegExp(
+    `(?:${UPDATE_DATE_LABEL})${inlineGap}[：:]${inlineGap}((?:(?!<br\\b|</(?:td|tr|p|div|li)\\b)[\\s\\S]){0,200})`,
+    'gi',
+  ));
+  for (const match of matches) {
+    const normalized = normalizeCalendarDate(stripTags(match[1] ?? ''));
+    if (normalized) return normalized;
+  }
+  return null;
+};
+
 const attribute = (attributes: string, name: string): string | null => {
   const match = new RegExp(`\\b${name}\\s*=\\s*(?:"([^"]*)"|'([^']*)'|([^\\s>]+))`, 'i').exec(attributes);
   return match ? decodeEntities(match[1] ?? match[2] ?? match[3] ?? '') : null;
@@ -175,7 +205,7 @@ const findBalancedContainer = (html: string, identities: string[]): string | nul
 };
 
 const bookIdentityFromUrl = (href: string): { remoteBookId: string; canonicalUrl: string } | null => {
-  const id = /(?:\/book\/(\d+)\.htm|articleinfo\.php\?[^#]*(?:\bid|\baid|\bbid)=(\d+))/i
+  const id = /(?:\/book\/(\d+)\.htm|readbookcase\.php\?[^#]*\baid=(\d+)|articleinfo\.php\?[^#]*(?:\baid|\bid|\bbid)=(\d+))/i
     .exec(decodeEntities(href))?.slice(1).find(Boolean);
   return id ? { remoteBookId: id, canonicalUrl: `${ORIGIN}/book/${id}.htm` } : null;
 };
@@ -311,7 +341,7 @@ export const classifyPage = (
     return hasConcreteBookAnchor(html) ? 'ok' : 'malformed';
   }
   if (operation === 'remote-library') {
-    return /data-complete=["'](?:true|false)["']/i.test(html) && (hasConcreteBookAnchor(html) || /(?:bookcase|收藏|书架)/i.test(html)) ? 'ok' : 'malformed';
+    return (hasConcreteBookAnchor(html) || /(?:bookcase|收藏|书架|您的书架)/i.test(html)) ? 'ok' : 'malformed';
   }
   if (!remoteBookId) return 'malformed';
   if (operation === 'detail') {
@@ -324,7 +354,11 @@ export const classifyPage = (
   const identity = readerIdentityFromUrl(finalUrl);
   return identity?.remoteBookId === remoteBookId && identity.chapterId === chapterId && looksLikeChapter(html) ? 'ok' : 'malformed';
 };
-export const buildSearchRequest = (query: string, page = 1): NetworkRequest => {
+const buildSearchRequestForType = (
+  searchtype: 'articlename' | 'author',
+  query: string,
+  page = 1,
+): NetworkRequest => {
   const normalized = query.trim();
   if (!normalized || normalized.length > 100 || !Number.isInteger(page) || page < 1 || page > 100) {
     throw new Error('INVALID_SEARCH_INPUT');
@@ -332,7 +366,7 @@ export const buildSearchRequest = (query: string, page = 1): NetworkRequest => {
   return {
     url: `${ORIGIN}/modules/article/search.php`,
     query: [
-      { name: 'searchtype', value: 'articlename' },
+      { name: 'searchtype', value: searchtype },
       { name: 'searchkey', value: normalized },
       { name: 'page', value: String(page) },
     ],
@@ -343,6 +377,10 @@ export const buildSearchRequest = (query: string, page = 1): NetworkRequest => {
     cache: 'network-only',
   };
 };
+export const buildSearchRequest = (query: string, page = 1): NetworkRequest =>
+  buildSearchRequestForType('articlename', query, page);
+export const buildAuthorSearchRequest = (author: string, page = 1): NetworkRequest =>
+  buildSearchRequestForType('author', author, page);
 
 export const parseSearch = (
   html: string,
@@ -378,15 +416,18 @@ export const parseSearch = (
     const context = rowStart >= 0 && rowEnd >= anchors.lastIndex
       ? html.slice(rowStart, rowEnd + 6)
       : html.slice(Math.max(0, match.index - 600), Math.min(html.length, anchors.lastIndex + 600));
-    const author = firstText(context, [/(?:小说作者|作者)\s*[：:]\s*([^<\n]+)/i]);
+    const author = firstText(context, [/(?:小说作者|作者)\s*[：:]\s*([^<\n]+)/i, /authorarticle\.php\?author=([^'">\s]+)/i]);
     const image = /<img\b([^>]*)>/i.exec(context);
     const cover = image ? attribute(image[1] ?? '', 'src') : null;
+    const aid = identity.remoteBookId;
+    const dir = Math.floor(parseInt(aid, 10) / 1000);
+    const derivedCover = !isNaN(dir) ? `${ORIGIN}/files/article/image/${dir}/${aid}/${aid}s.jpg` : null;
     items.push({
       sourceId: SOURCE_ID,
       remoteBookId: identity.remoteBookId,
       title,
       author,
-      coverUrl: cover ? absoluteMediaUrl(cover, identity.canonicalUrl) : null,
+      coverUrl: cover ? absoluteMediaUrl(cover, identity.canonicalUrl) : derivedCover,
       canonicalUrl: identity.canonicalUrl,
     });
     seen.add(identity.remoteBookId);
@@ -641,6 +682,7 @@ export const parseDetail = (html: string, remoteBookId: string) => {
     .map((match) => attribute(match[1] ?? '', 'src'))
     .find((src): src is string => src !== null && new RegExp(`/(?:files/article/image/\\d+/${remoteBookId}/|image/\\d+/${remoteBookId}/${remoteBookId}s?\\.)`, 'i').test(src)) ?? null;
   const status = firstText(html, [/(?:写作进程|文章状态|小说状态|状态)\s*[：:]\s*([^<\n]+)/i]);
+  const lastUpdatedDate = sourceUpdateDate(html);
   const tagsText = firstText(html, [/(?:小说Tags|小说标签|作品Tags|标签|小说类别|文章类别|类型)\s*[：:]\s*([^<\n]+)/i]);
   const tags = tagsText ? tagsText.split(/[\s,，/|]+/).map((tag) => tag.trim()).filter(Boolean) : [];
   return {
@@ -655,6 +697,7 @@ export const parseDetail = (html: string, remoteBookId: string) => {
     description,
     tags: [...new Set(tags)],
     status,
+    lastUpdatedDate,
   };
 };
 
@@ -789,36 +832,198 @@ export const buildRemoteLibraryRequest = (cursor: string | null): NetworkRequest
 };
 
 export const parseRemoteLibrary = (html: string): { items: BookSummary[]; nextCursor: string | null; complete: boolean } => {
-  const parsed = parseSearch(html);
+  const rows = Array.from(html.matchAll(/<tr\b[^>]*>([\s\S]*?)<\/tr>/gi));
+  const items = rows.flatMap((row) => {
+    const rowContent = row[1] ?? '';
+    const rowHtml = `<html><body><table><tr>${rowContent}</tr></table></body></html>`;
+    const parsed = parseSearch(rowHtml).items;
+    const select = /<select\b[^>]*name=["']classlist["'][^>]*>([\s\S]*?)<\/select>/i.exec(rowContent)?.[1];
+    let remoteTargetId: string | null = null;
+    if (select) {
+      let firstTargetId: string | null = null;
+      for (const option of select.matchAll(/<option\b([^>]*)>/gi)) {
+        const attributes = option[1] ?? '';
+        const optionTargetId = /\bvalue\s*=\s*["']([^"']+)["']/i.exec(attributes)?.[1]?.trim() ?? null;
+        firstTargetId ??= optionTargetId;
+        if (!/\bselected(?:\s*=\s*(?:["']selected["']|selected))?/i.test(attributes)) continue;
+        remoteTargetId = optionTargetId;
+        break;
+      }
+      remoteTargetId ??= firstTargetId;
+    }
+    return parsed.map((book) => ({ ...book, remoteTargetId }));
+  });
+  const parsedItems = items.length > 0 ? items : parseSearch(html).items;
   const cursor = /data-next-cursor=["']([^"']+)["']/i.exec(html)?.[1] ?? null;
   if (cursor !== null && !/^page-[2-9][0-9]{0,2}$/.test(cursor)) throw new Error('INVALID_REMOTE_CURSOR');
-  const complete = /data-complete=["']true["']/i.test(html);
-  if (!complete && cursor === null) throw new Error('INCOMPLETE_REMOTE_LIBRARY');
-  return { items: parsed.items, nextCursor: cursor, complete };
+  const complete = /data-complete=["']true["']/i.test(html) || cursor === null;
+  return { items: parsedItems, nextCursor: cursor, complete };
 };
 
 export const buildRemoteLibraryAddRequest = (remoteBookId: string): NetworkRequest => {
   if (!/^\d{1,12}$/.test(remoteBookId)) throw new Error('INVALID_BOOK_ID');
   return {
-    url: `${ORIGIN}/modules/article/bookcase.php`,
-    method: 'POST',
+    url: `${ORIGIN}/modules/article/addbookcase.php`,
+    query: [{ name: 'bid', value: remoteBookId }],
+    queryEncoding: 'utf-8',
+    method: 'GET',
     headers: { Accept: 'text/html,application/xhtml+xml' },
-    form: { action: 'add', aid: remoteBookId },
     decode: 'gb18030',
     cache: 'network-only',
   };
 };
 
-export const parseRemoteLibraryAdd = (html: string, remoteBookId: string) => {
-  const outcome = /data-outcome=["'](applied|already-present)["']/i.exec(html)?.[1];
-  if (outcome !== 'applied' && outcome !== 'already-present') throw new Error('AMBIGUOUS_REMOTE_ADD');
-  return { sourceId: SOURCE_ID, remoteBookId, outcome };
+export const parseRemoteLibraryAdd = (html: string, remoteBookId: string, finalUrl?: string) => {
+  if (!/^\d{1,12}$/.test(remoteBookId)) throw new Error('INVALID_BOOK_ID');
+  const escapedBookId = remoteBookId.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const exactUrl = finalUrl !== undefined && new RegExp(
+    `^https://www\\.wenku8\\.net/modules/article/addbookcase\\.php\\?(?:[^#]*&)?bid=${escapedBookId}(?:&[^#]*)?(?:#.*)?$`,
+    'i',
+  ).test(decodeEntities(finalUrl));
+  if (!exactUrl) throw new Error('REMOTE_ADD_IDENTITY_MISMATCH');
+  const title = firstText(html, [/<[^>]+\bclass=["'][^"']*\bblocktitle\b[^"']*["'][^>]*>([\s\S]*?)<\/[^>]+>/i]);
+  const message = stripTags(html);
+  if (title === '出现错误！' || title === '出現錯誤！') {
+    if (/(?:已经|已經|已)(?:加入|存在|在)[^。！!]{0,16}(?:书架|書架|收藏)/u.test(message)) {
+      return { sourceId: SOURCE_ID, remoteBookId, outcome: 'already-present' };
+    }
+    throw new Error('AMBIGUOUS_REMOTE_ADD');
+  }
+  if (/^操作成功[！!]?$/.test(title ?? '') && /(?:小说|小說).{0,12}(?:已加入|加入成功).{0,8}(?:书架|書架)/u.test(message)) {
+    return { sourceId: SOURCE_ID, remoteBookId, outcome: 'applied' };
+  }
+  throw new Error('AMBIGUOUS_REMOTE_ADD');
+};
+export const buildRemoteLibraryRemoveRequest = (remoteBookId: string): NetworkRequest => {
+  if (!/^\d{1,12}$/.test(remoteBookId)) throw new Error('INVALID_BOOK_ID');
+  return {
+    url: `${ORIGIN}/modules/article/bookcase.php`,
+    method: 'POST',
+    headers: { Accept: 'text/html,application/xhtml+xml' },
+    form: { action: 'remove', aid: remoteBookId },
+    decode: 'gb18030',
+    cache: 'network-only',
+  };
+};
+
+export const parseRemoteLibraryRemove = (html: string, remoteBookId: string) => {
+  if (!/^\d{1,12}$/.test(remoteBookId)) throw new Error('INVALID_BOOK_ID');
+  const evidenceTag = /<[^>]*\bdata-outcome=["'](?:applied|already-absent)["'][^>]*>/i.exec(html)?.[0];
+  if (evidenceTag) {
+    const outcome = /\bdata-outcome=["'](applied|already-absent)["']/i.exec(evidenceTag)?.[1];
+    const evidencedBookId = /\bdata-book-id=["']([^"']+)["']/i.exec(evidenceTag)?.[1];
+    if (evidencedBookId !== remoteBookId || !outcome) throw new Error('REMOTE_REMOVE_IDENTITY_MISMATCH');
+    return { sourceId: SOURCE_ID, remoteBookId, outcome };
+  }
+  const title = firstText(html, [/<[^>]+\bclass=["'][^"']*\bblocktitle\b[^"']*["'][^>]*>([\s\S]*?)<\/[^>]+>/i]);
+  const message = stripTags(html);
+  if ((title === '出现错误！' || title === '出現錯誤！') && /(?:不在|不存在|已经移除|已經移除).{0,12}(?:书架|書架|收藏)/u.test(message)) {
+    return { sourceId: SOURCE_ID, remoteBookId, outcome: 'already-absent' };
+  }
+  if (/^操作成功[！!]?$/.test(title ?? '') && /(?:移出|移除|删除|刪除).{0,12}(?:书架|書架|收藏)/u.test(message)) {
+    return { sourceId: SOURCE_ID, remoteBookId, outcome: 'applied' };
+  }
+  const escapedBookId = remoteBookId.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  if (new RegExp(`href=["'][^"']*/book/${escapedBookId}\\.htm(?:[?#][^"']*)?["']`, 'i').test(html)) {
+    throw new Error('REMOTE_REMOVE_STILL_PRESENT');
+  }
+  throw new Error('AMBIGUOUS_REMOTE_REMOVE');
+};
+export const buildRemoteLibraryMoveRequest = (remoteBookId: string, targetId: string): NetworkRequest => {
+  if (!/^\d{1,12}$/.test(remoteBookId)) throw new Error('INVALID_BOOK_ID');
+  if (!/^[a-zA-Z0-9_-]{1,64}$/.test(targetId)) throw new Error('INVALID_TARGET_ID');
+  return {
+    url: `${ORIGIN}/modules/article/bookcase.php`,
+    method: 'POST',
+    headers: { Accept: 'text/html,application/xhtml+xml' },
+    form: { action: 'move', aid: remoteBookId, target: targetId },
+    decode: 'gb18030',
+    cache: 'network-only',
+  };
+};
+
+export const parseRemoteLibraryMove = (html: string, remoteBookId: string, targetId: string) => {
+  if (!/^\d{1,12}$/.test(remoteBookId)) throw new Error('INVALID_BOOK_ID');
+  if (!/^[a-zA-Z0-9_-]{1,64}$/.test(targetId)) throw new Error('INVALID_TARGET_ID');
+  const evidenceTag = /<[^>]*\bdata-outcome=["'](?:applied|already-at-target)["'][^>]*>/i.exec(html)?.[0];
+  if (evidenceTag) {
+    const outcome = /\bdata-outcome=["'](applied|already-at-target)["']/i.exec(evidenceTag)?.[1];
+    const evidencedBookId = /\bdata-book-id=["']([^"']+)["']/i.exec(evidenceTag)?.[1];
+    const evidencedTargetId = /\bdata-target-id=["']([^"']+)["']/i.exec(evidenceTag)?.[1];
+    if (evidencedBookId !== remoteBookId || evidencedTargetId !== targetId || !outcome) {
+      throw new Error('REMOTE_MOVE_IDENTITY_MISMATCH');
+    }
+    return { sourceId: SOURCE_ID, remoteBookId, targetId, outcome };
+  }
+  const escapedBookId = remoteBookId.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  for (const row of html.matchAll(/<tr\b[^>]*>([\s\S]*?)<\/tr>/gi)) {
+    const rowHtml = row[1] ?? '';
+    if (!new RegExp(`href=["'][^"']*/book/${escapedBookId}\\.htm(?:[?#][^"']*)?["']`, 'i').test(rowHtml)) continue;
+    const select = /<select\b[^>]*name=["']classlist["'][^>]*>([\s\S]*?)<\/select>/i.exec(rowHtml)?.[1];
+    const selected = select && /<option\b(?=[^>]*\bselected(?:\s*=\s*(?:["']selected["']|selected))?)[^>]*\bvalue\s*=\s*["']([^"']+)["'][^>]*>/i.exec(select)?.[1]?.trim();
+    if (selected === targetId) return { sourceId: SOURCE_ID, remoteBookId, targetId, outcome: 'applied' };
+    if (selected) throw new Error('REMOTE_MOVE_TARGET_MISMATCH');
+  }
+  throw new Error('AMBIGUOUS_REMOTE_MOVE');
+};
+export const buildRemoteLibraryTargetsRequest = (): NetworkRequest => {
+  return {
+    url: `${ORIGIN}/modules/article/bookcase.php`,
+    method: 'GET',
+    headers: { Accept: 'text/html,application/xhtml+xml' },
+    query: [{ name: 'action', value: 'targets' }],
+    queryEncoding: 'gb18030',
+    decode: 'gb18030',
+    cache: 'network-only',
+  };
+};
+
+export const parseRemoteLibraryTargets = (html: string) => {
+  const rawJson = /data-targets=["']([^"']+)["']/i.exec(html)?.[1];
+  const targets: Array<{ targetId: string; displayName: string; parentId?: string; kind?: string }> = [];
+  if (rawJson) {
+    let decoded: unknown;
+    try {
+      decoded = JSON.parse(decodeURIComponent(rawJson));
+    } catch {
+      throw new Error('MALFORMED_TARGETS');
+    }
+    if (!Array.isArray(decoded)) throw new Error('MALFORMED_TARGETS');
+    for (const item of decoded) {
+      if (typeof item !== 'object' || item === null) throw new Error('MALFORMED_TARGETS');
+      const candidate = item as Record<string, unknown>;
+      const targetId = typeof candidate.targetId === 'string' ? candidate.targetId.trim() : '';
+      const displayName = typeof candidate.displayName === 'string' ? candidate.displayName.trim() : '';
+      const parentId = typeof candidate.parentId === 'string' ? candidate.parentId.trim() : undefined;
+      const kind = typeof candidate.kind === 'string' ? candidate.kind.trim() : 'folder';
+      if (!/^[a-zA-Z0-9_-]{1,64}$/.test(targetId) || !displayName || displayName.length > 128 ||
+          (parentId !== undefined && !/^[a-zA-Z0-9_-]{1,64}$/.test(parentId)) || kind !== 'folder') {
+        throw new Error('MALFORMED_TARGETS');
+      }
+      targets.push({ targetId, displayName, ...(parentId ? { parentId } : {}), kind });
+    }
+  } else {
+    const selectMatch = /<select\b[^>]*name=["']classlist["'][^>]*>([\s\S]*?)<\/select>/i.exec(html);
+    if (selectMatch?.[1]) {
+      for (const option of selectMatch[1].matchAll(/<option\b[^>]*value=["']([^"']+)["'][^>]*>([\s\S]*?)<\/option>/gi)) {
+        const targetId = (option[1] ?? '').trim();
+        const displayName = stripTags(option[2] ?? '').trim();
+        if (!/^[a-zA-Z0-9_-]{1,64}$/.test(targetId) || !displayName || displayName.length > 128) throw new Error('MALFORMED_TARGETS');
+        targets.push({ targetId, displayName, kind: 'folder' });
+      }
+    }
+  }
+  if (!targets.length || new Set(targets.map((target) => target.targetId)).size !== targets.length) {
+    throw new Error('AMBIGUOUS_REMOTE_TARGETS');
+  }
+  return { sourceId: SOURCE_ID, targets };
 };
 
 const api = {
   sourceId: SOURCE_ID,
   classifyPage,
   buildSearchRequest,
+  buildAuthorSearchRequest,
   parseSearch,
   buildDetailRequest,
   parseDetail,
@@ -830,10 +1035,15 @@ const api = {
   parseRemoteLibrary,
   buildRemoteLibraryAddRequest,
   parseRemoteLibraryAdd,
+  buildRemoteLibraryRemoveRequest,
+  parseRemoteLibraryRemove,
+  buildRemoteLibraryMoveRequest,
+  parseRemoteLibraryMove,
+  buildRemoteLibraryTargetsRequest,
+  parseRemoteLibraryTargets,
   buildHomeRequest,
   parseHome,
 };
-
 declare global {
   var tsuyomiExtension: typeof api | undefined;
 }

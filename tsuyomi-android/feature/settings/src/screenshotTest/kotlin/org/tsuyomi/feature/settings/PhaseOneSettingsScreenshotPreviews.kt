@@ -44,7 +44,7 @@ fun StandardDisplaySettingsScreenshots() {
     SettingsPreview(environment = standardEnvironment())
 }
 
-@PreviewTest
+// Retained for IDE review; screenshot evidence resumes only when the EINK profile is unfrozen.
 @Preview(name = "eink-portrait", device = EInkPortrait, locale = "zh-rCN")
 @Preview(name = "eink-landscape", device = EInkLandscape, locale = "zh-rCN")
 @Preview(
@@ -70,7 +70,7 @@ fun AutoUnknownDisplaySettingsScreenshot() {
     )
 }
 
-@PreviewTest
+// Retained for IDE review; screenshot evidence resumes only when the EINK profile is unfrozen.
 @Preview(name = "auto-recognized-eink", device = EInkPortrait, locale = "zh-rCN")
 @Composable
 fun AutoRecognizedEInkSettingsScreenshot() {
@@ -124,7 +124,13 @@ fun FixedDynamicDarkSettingsScreenshot() {
 @Composable
 fun MoreScreenScreenshot() {
     ScreenSurface(standardEnvironment()) {
-        MoreScreen(onOpenDisplaySettings = {}, onOpenAbout = {})
+        MoreScreen(
+            onOpenDisplaySettings = {},
+            onOpenReaderSettings = {},
+            onOpenDataTransfer = {},
+            onOpenHelp = {},
+            onOpenAbout = {},
+        )
     }
 }
 
@@ -133,7 +139,7 @@ fun MoreScreenScreenshot() {
 @Composable
 fun AboutScreenScreenshot() {
     ScreenSurface(standardEnvironment()) {
-        AboutScreen(applicationName = "Tsuyomi", versionName = "0.1.0")
+        AboutScreen(applicationName = "Tsuyomi", versionName = "0.1.0", licenseText = "Apache License 2.0")
     }
 }
 
@@ -222,4 +228,5 @@ private val PreviewActions = DisplaySettingsActions(
     onRefreshNow = {},
     onRetryWrite = {},
     onAcknowledgeWriteFailure = {},
+    onResetInterfacePreferences = {},
 )

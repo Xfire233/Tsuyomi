@@ -5,6 +5,7 @@
 package org.tsuyomi.feature.book
 
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
@@ -48,8 +49,8 @@ fun BookDetailScreen(
     descending: Boolean,
     selectedChapterId: String?,
     onSetRating: (Int?) -> Unit,
+    onSearchAuthor: (String) -> Unit,
     onAddTag: (String) -> Unit,
-    onToggleReadLater: () -> Unit,
     onToggleUnreadOnly: () -> Unit,
     onToggleOrder: () -> Unit,
     onSelectChapter: (SourceChapter) -> Unit,
@@ -61,6 +62,15 @@ fun BookDetailScreen(
     onUseOfflineCache: () -> Unit,
     onOpenVerification: () -> Unit,
     modifier: Modifier = Modifier,
+    onOpenDestinations: () -> Unit = {},
+    destinationMenuExpanded: Boolean = false,
+    onDestinationMenuExpandedChange: (Boolean) -> Unit = {},
+    destinationMenuContent: @Composable ColumnScope.(dismissMenu: () -> Unit) -> Unit = { _ -> },
+    destinationMessage: String? = null,
+    partialMoveTargetName: String? = null,
+    onRetryMoveOnly: () -> Unit = {},
+    onRetryRemoteReconciliation: () -> Unit = {},
+    onAcknowledgeRemoteReconciliation: () -> Unit = {},
 ) {
     if (LocalDisplayEnvironment.current.effectiveProfile == DisplayProfile.EINK) {
         FrozenEInkBookDetailScreen(
@@ -76,7 +86,7 @@ fun BookDetailScreen(
         )
         return
     }
-    StandardAtlasBookDetailScreen(
+    StandardBookDetailScreen(
         state = state,
         directoryState = directoryState,
         localState = localState,
@@ -86,16 +96,25 @@ fun BookDetailScreen(
         descending = descending,
         selectedChapterId = selectedChapterId,
         onSetRating = onSetRating,
+        onSearchAuthor = onSearchAuthor,
         onAddTag = onAddTag,
-        onToggleReadLater = onToggleReadLater,
         onToggleUnreadOnly = onToggleUnreadOnly,
         onToggleOrder = onToggleOrder,
         onSelectChapter = onSelectChapter,
         onContinueReading = onContinueReading,
         onAddToLibrary = onAddToLibrary,
+        onOpenDestinations = onOpenDestinations,
+        destinationMenuExpanded = destinationMenuExpanded,
+        onDestinationMenuExpandedChange = onDestinationMenuExpandedChange,
+        destinationMenuContent = destinationMenuContent,
+        destinationMessage = destinationMessage,
+        partialMoveTargetName = partialMoveTargetName,
+        onRetryMoveOnly = onRetryMoveOnly,
         onRetry = onRetry,
         onUseOfflineCache = onUseOfflineCache,
         onOpenVerification = onOpenVerification,
+        onRetryRemoteReconciliation = onRetryRemoteReconciliation,
+        onAcknowledgeRemoteReconciliation = onAcknowledgeRemoteReconciliation,
         modifier = modifier,
     )
 }

@@ -79,4 +79,26 @@
     <string name="smart_hint_days">输入 0–36500 天</string>
     <string name="smart_hint_status">ongoing, completed, hiatus, cancelled, unknown</string>
     <string name="smart_hint_progress">unstarted, reading, finished</string>
+    <string name="remote_library_loading">正在读取网站收藏</string>
+    <string name="remote_library_loading_message">仅在这次明确操作中连接来源网站。</string>
+    <string name="remote_library_manual_notice">网站收藏不会自动同步。下方操作只会在你点击时执行。</string>
+    <string name="remote_library_selected_title">已选择 %1$d 项</string>
+    <string name="remote_library_subtitle">网站收藏 · 共 %1$d 项</string>
+    <string name="remote_library_refresh">刷新列表</string>
+    <string name="remote_library_copy_all">全部复制到本地书架</string>
+    <string name="remote_library_copy_selected">复制所选到本地书架</string>
+    <string name="remote_library_idle_title">尚未读取网站收藏</string>
+    <string name="remote_library_idle_message">列表只会在你点击“刷新列表”时读取；进入页面、登录返回和恢复页面都不会自动连接网站。</string>
+    <string name="remote_library_empty_title">网站收藏为空</string>
+    <string name="remote_library_read_only_empty_message">当前只读列表没有可复制的书籍；刷新不会创建本地书架条目或向网站写入。</string>
+    <string name="remote_library_login_title">需要登录验证</string>
+    <string name="remote_library_login_message">登录凭据不可用。完成可见的来源登录后，仍需再次点击“刷新列表”。</string>
+    <string name="remote_library_open_verification">前往登录验证</string>
+    <string name="remote_library_error_title">网站收藏读取失败</string>
+    <string name="remote_library_error_message">本地书架未改动，也未向网站提交写入。可安全重新读取列表。</string>
+    <string name="remote_library_retry">重试读取</string>
+    <string name="remote_library_copy_dialog_title">复制网站收藏到本地书架</string>
+    <string name="remote_library_copy_dialog_message">将 %1$d 本网站收藏复制到本地书架；已经存在的书籍保持不变。此操作只写本地，不会向网站发送添加、移除或移动请求。</string>
+    <string name="remote_library_copy_confirm">确认复制到本地书架</string>
+    <string name="remote_library_copy_cancel">取消</string>
 </resources>

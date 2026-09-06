@@ -57,8 +57,9 @@ internal fun LibraryDragVisualOverlay(
     entries: List<LibraryEntry>,
     shortcuts: List<ProductionShortcut>,
     layout: LibraryLayout,
-    coverState: (LibraryEntry) -> CoverUiState,
+    coverState: @Composable (LibraryEntry) -> CoverUiState,
     modifier: Modifier = Modifier,
+    showRemoveTarget: Boolean = true,
 ) {
     val payload = coordinator.activePayload
     val instant = LocalDisplayEnvironment.current.instantMotion
@@ -101,39 +102,41 @@ internal fun LibraryDragVisualOverlay(
                         }
                     }
                 }
-                Surface(
-                    modifier = Modifier.align(Alignment.BottomCenter)
-                        .padding(bottom = 16.dp)
-                        .heightIn(min = 48.dp)
-                        .libraryDeleteDropTarget(coordinator)
-                        .testTag("library-delete-drop-target"),
-                    color = if (coordinator.isOverDelete) {
-                        MaterialTheme.colorScheme.errorContainer
-                    } else {
-                        MaterialTheme.colorScheme.surfaceContainerHigh
-                    },
-                    border = if (coordinator.isOverDelete) {
-                        BorderStroke(2.dp, MaterialTheme.colorScheme.error)
-                    } else null,
-                    shape = MaterialTheme.shapes.extraLarge,
-                    tonalElevation = 6.dp,
-                ) {
-                    Row(
-                        modifier = Modifier.padding(horizontal = 20.dp, vertical = 12.dp),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                        verticalAlignment = Alignment.CenterVertically,
+                if (showRemoveTarget) {
+                    Surface(
+                        modifier = Modifier.align(Alignment.BottomCenter)
+                            .padding(bottom = 16.dp)
+                            .heightIn(min = 48.dp)
+                            .libraryDeleteDropTarget(coordinator)
+                            .testTag("library-delete-drop-target"),
+                        color = if (coordinator.isOverDelete) {
+                            MaterialTheme.colorScheme.errorContainer
+                        } else {
+                            MaterialTheme.colorScheme.surfaceContainerHigh
+                        },
+                        border = if (coordinator.isOverDelete) {
+                            BorderStroke(2.dp, MaterialTheme.colorScheme.error)
+                        } else null,
+                        shape = MaterialTheme.shapes.extraLarge,
+                        tonalElevation = 6.dp,
                     ) {
-                        Icon(TsuyomiIcons.Delete, contentDescription = null)
-                        val shortcutRemoval = active is LibraryDragPayload.Shortcut ||
-                            (active is LibraryDragPayload.Books && active.fromShortcut)
-                        Text(
-                            when {
-                                coordinator.isOverDelete && shortcutRemoval -> "松开以移出快捷书架"
-                                coordinator.isOverDelete -> "松开以移出书架"
-                                shortcutRemoval -> "拖到这里移出快捷书架"
-                                else -> "拖到这里移出书架"
-                            },
-                        )
+                        Row(
+                            modifier = Modifier.padding(horizontal = 20.dp, vertical = 12.dp),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Icon(TsuyomiIcons.Delete, contentDescription = null)
+                            val shortcutRemoval = active is LibraryDragPayload.Shortcut ||
+                                (active is LibraryDragPayload.Books && active.fromShortcut)
+                            Text(
+                                when {
+                                    coordinator.isOverDelete && shortcutRemoval -> "松开以移出快捷书架"
+                                    coordinator.isOverDelete -> "松开以移出书架"
+                                    shortcutRemoval -> "拖到这里移出快捷书架"
+                                    else -> "拖到这里移出书架"
+                                },
+                            )
+                        }
                     }
                 }
             }
@@ -142,9 +145,9 @@ internal fun LibraryDragVisualOverlay(
 }
 
 internal fun dragPreviewSize(payload: LibraryDragPayload, layout: LibraryLayout): DpSize = when (payload) {
-    is LibraryDragPayload.Shortcut -> DpSize(84.dp, 116.dp)
+    is LibraryDragPayload.Shortcut -> DpSize(216.dp, 64.dp)
     is LibraryDragPayload.Books -> if (payload.fromShortcut) {
-        DpSize(84.dp, 116.dp)
+        DpSize(216.dp, 64.dp)
     } else when (layout) {
         LibraryLayout.GRID -> DpSize(132.dp, 180.dp)
         LibraryLayout.LIST -> DpSize(292.dp, 104.dp)
@@ -156,7 +159,7 @@ internal fun dragPreviewSize(payload: LibraryDragPayload, layout: LibraryLayout)
 internal fun LibraryBookDragPreview(
     entries: List<LibraryEntry>,
     layout: LibraryLayout,
-    coverState: (LibraryEntry) -> CoverUiState,
+    coverState: @Composable (LibraryEntry) -> CoverUiState,
 ) {
     val lead = entries.firstOrNull() ?: return
     when (layout) {
@@ -211,38 +214,58 @@ internal fun LibraryBookDragPreview(
 }
 
 @Composable
-internal fun ShortcutBookDragPreview(entry: LibraryEntry, coverState: (LibraryEntry) -> CoverUiState) {
+internal fun ShortcutBookDragPreview(
+    entry: LibraryEntry,
+    coverState: @Composable (LibraryEntry) -> CoverUiState,
+) {
     Surface(
-        modifier = Modifier.size(width = 84.dp, height = 116.dp),
-        shape = MaterialTheme.shapes.small,
+        modifier = Modifier.size(width = 216.dp, height = 64.dp),
+        shape = MaterialTheme.shapes.medium,
+        color = MaterialTheme.colorScheme.surfaceContainerHigh,
         tonalElevation = 8.dp,
         shadowElevation = 10.dp,
     ) {
-        Column(Modifier.padding(4.dp)) {
-            CoverImage(coverState(entry), modifier = Modifier.fillMaxWidth().height(76.dp))
-            Text(entry.book.title, maxLines = 2, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.labelSmall)
+        Row(Modifier.padding(6.dp), verticalAlignment = Alignment.CenterVertically) {
+            CoverImage(coverState(entry), modifier = Modifier.size(width = 39.dp, height = 52.dp))
+            Text(
+                entry.book.title,
+                modifier = Modifier.padding(horizontal = 10.dp),
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
+                style = MaterialTheme.typography.labelLarge,
+            )
         }
     }
 }
 
 @Composable
-internal fun ShortcutDragPreview(shortcut: ProductionShortcut, coverState: (LibraryEntry) -> CoverUiState) {
+internal fun ShortcutDragPreview(
+    shortcut: ProductionShortcut,
+    coverState: @Composable (LibraryEntry) -> CoverUiState,
+) {
     Surface(
-        modifier = Modifier.size(width = 84.dp, height = 116.dp),
-        shape = MaterialTheme.shapes.small,
+        modifier = Modifier.size(width = 216.dp, height = 64.dp),
+        shape = MaterialTheme.shapes.medium,
         color = MaterialTheme.colorScheme.surfaceContainerHigh,
         tonalElevation = 8.dp,
         shadowElevation = 10.dp,
     ) {
-        Column(Modifier.padding(4.dp)) {
+        Row(Modifier.padding(6.dp), verticalAlignment = Alignment.CenterVertically) {
             Box(
-                Modifier.fillMaxWidth().height(76.dp).background(MaterialTheme.colorScheme.surfaceContainerHighest),
+                Modifier.size(width = 39.dp, height = 52.dp)
+                    .background(MaterialTheme.colorScheme.surfaceContainerHighest),
                 contentAlignment = Alignment.Center,
             ) {
                 shortcut.entry?.let { CoverImage(coverState(it), modifier = Modifier.fillMaxSize()) }
-                    ?: Icon(shortcut.icon, contentDescription = null)
+                    ?: Icon(shortcut.icon, contentDescription = null, modifier = Modifier.size(24.dp))
             }
-            Text(shortcut.label, maxLines = 2, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.labelSmall)
+            Text(
+                shortcut.label,
+                modifier = Modifier.padding(horizontal = 10.dp),
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
+                style = MaterialTheme.typography.labelLarge,
+            )
         }
     }
 }

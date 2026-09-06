@@ -19,7 +19,7 @@ Raw prompts, full private transcripts, credentials, source content and local aut
 ## Authority ownership
 
 - Product-visible Android UI: `docs/design/UI_CONSTITUTION.md` active constraint spine and its owned detailed sections.
-- UI evidence mechanics: `docs/design/UI_ATLAS.md` and `ReviewNodeCatalog.kt`; these prove behavior but cannot invent it.
+- UI evidence mechanics: `docs/design/UI_ATLAS.md` plus `.agents/skills/tsuyomi-android-review/review-node-catalog.json`; these prove behavior but cannot invent it.
 - Scope and implementation authorization conditions: Phase documents; actual approval/authorization outcomes remain separate gates/checkpoints.
 - Domain, security, protocol, persistence and migration invariants: ADR and architecture documents.
 - Repository process and release evidence: `docs/process`.
@@ -38,7 +38,7 @@ Treat every explicit requirement, correction, rejection, approval or supersessio
 6. **Package when needed** — invoke `to-spec` for coherent future work according to the trigger policy below.
 7. **Handoff** — refresh `.local/ACTIVE_HANDOFF.md` with worktree, authorization, proof, blockers and next action.
 
-The transaction is incomplete if a requirement exists only in chat, only in Mnemopi, only in a to-spec issue, only in prototype code, or only in a screenshot.
+The transaction is incomplete if a requirement exists only in chat, only in Mnemopi, only in a to-spec issue, only in historical review material, or only in a screenshot.
 
 ## Mnemopi trigger policy
 
@@ -65,6 +65,8 @@ Run a memory checkpoint:
 Retain durable, reusable facts only. Do not store ephemeral todo state, build output, secrets, private content or unapproved speculation. When a rule changes, recall the old fact, read its full content, then invalidate or replace it through `memory_edit`.
 
 ## to-spec trigger policy
+
+`TOOLING.md` owns generic `to-spec` dispatch, exclusions, fallback and health checks. This section owns Tsuyomi's repository-specific publication triggers so they are not independently redefined in Skills, agent configuration or issue templates.
 
 The installed `to-spec` skill is explicitly authorized for this repository when:
 

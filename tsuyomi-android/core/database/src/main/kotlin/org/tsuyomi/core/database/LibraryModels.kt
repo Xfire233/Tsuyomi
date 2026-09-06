@@ -55,6 +55,7 @@ data class LibraryEntry(
     val readLater: Boolean = false,
     val sourceAvailable: Boolean,
     val reconciliation: RemoteReconciliationState?,
+    val reconciliationOperation: String? = null,
     val progress: ReadingProgress? = null,
 ) {
     init {
@@ -70,6 +71,18 @@ enum class RemoteReconciliationState {
     CANCELLED,
 }
 
+data class RemoteReconciliationRecord(
+    val id: String,
+    val sourceId: String,
+    val remoteBookId: String,
+    val state: RemoteReconciliationState,
+    val operation: String,
+    val targetId: String? = null,
+    val targetName: String? = null,
+    val diagnosticId: String? = null,
+    val updatedAtEpochSecond: Long,
+)
+
 data class SourceRemotePolicy(
     val sourceId: String,
     val trustedPublisherFingerprint: String,
@@ -77,8 +90,37 @@ data class SourceRemotePolicy(
     val approvedOrigin: String,
     val addWritebackEnabled: Boolean,
     val firstImportPromptDismissed: Boolean,
+    val removeWritebackEnabled: Boolean = false,
+    val moveWritebackEnabled: Boolean = false,
 )
 
+data class RemoteMirrorBinding(
+    val sourceId: String,
+    val displayName: String,
+    val frozen: Boolean,
+    val updatedAtEpochSecond: Long,
+)
+
+data class RemoteMirrorTargetSnapshot(
+    val sourceId: String,
+    val targetId: String,
+    val displayName: String,
+    val parentId: String? = null,
+    val kind: String = "folder",
+    val frozen: Boolean = false,
+    val updatedAtEpochSecond: Long,
+)
+
+data class RemoteMirrorBookSnapshot(
+    val book: LibraryBook,
+    val targetId: String?,
+)
+
+data class RemoteMirrorSnapshot(
+    val binding: RemoteMirrorBinding,
+    val targets: List<RemoteMirrorTargetSnapshot>,
+    val books: List<RemoteMirrorBookSnapshot>,
+)
 data class SourceAvailability(
     val sourceId: String,
     val verifiedVersion: String?,

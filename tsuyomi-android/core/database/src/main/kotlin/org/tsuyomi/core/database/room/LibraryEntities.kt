@@ -144,6 +144,26 @@ internal data class ReadingProgressEntity(
     @ColumnInfo(name = "updated_at_nano")
     val updatedAtNano: Int,
 )
+@Entity(
+    tableName = "completed_chapters",
+    primaryKeys = ["source_id", "remote_book_id", "chapter_id"],
+    foreignKeys = [
+        ForeignKey(
+            entity = BookEntity::class,
+            parentColumns = ["source_id", "remote_book_id"],
+            childColumns = ["source_id", "remote_book_id"],
+            onDelete = ForeignKey.CASCADE,
+        ),
+    ],
+)
+internal data class CompletedChapterEntity(
+    @ColumnInfo(name = "source_id") val sourceId: String,
+    @ColumnInfo(name = "remote_book_id") val remoteBookId: String,
+    @ColumnInfo(name = "chapter_id") val chapterId: String,
+    @ColumnInfo(name = "completed_at_epoch_second") val completedAtEpochSecond: Long,
+    @ColumnInfo(name = "completed_at_nano") val completedAtNano: Int,
+)
+
 
 @Entity(
     tableName = "library_entries",
@@ -202,6 +222,55 @@ internal data class SourceRemotePolicyEntity(
     @ColumnInfo(name = "approved_origin") val approvedOrigin: String,
     @ColumnInfo(name = "add_writeback_enabled") val addWritebackEnabled: Boolean,
     @ColumnInfo(name = "first_import_prompt_dismissed") val firstImportPromptDismissed: Boolean,
+    @ColumnInfo(name = "remove_writeback_enabled", defaultValue = "0") val removeWritebackEnabled: Boolean = false,
+    @ColumnInfo(name = "move_writeback_enabled", defaultValue = "0") val moveWritebackEnabled: Boolean = false,
+)
+
+@Entity(tableName = "remote_mirror_bindings")
+internal data class RemoteMirrorBindingEntity(
+    @PrimaryKey @ColumnInfo(name = "source_id") val sourceId: String,
+    @ColumnInfo(name = "display_name") val displayName: String,
+    val frozen: Boolean,
+    @ColumnInfo(name = "updated_at_epoch_second") val updatedAtEpochSecond: Long,
+)
+
+@Entity(
+    tableName = "remote_mirror_targets",
+    primaryKeys = ["source_id", "target_id"],
+)
+internal data class RemoteMirrorTargetEntity(
+    @ColumnInfo(name = "source_id") val sourceId: String,
+    @ColumnInfo(name = "target_id") val targetId: String,
+    @ColumnInfo(name = "display_name") val displayName: String,
+    @ColumnInfo(name = "parent_id") val parentId: String?,
+    val kind: String,
+    val frozen: Boolean,
+    @ColumnInfo(name = "updated_at_epoch_second") val updatedAtEpochSecond: Long,
+)
+
+@Entity(
+    tableName = "remote_mirror_items",
+    primaryKeys = ["source_id", "remote_book_id"],
+    foreignKeys = [
+        ForeignKey(
+            entity = BookEntity::class,
+            parentColumns = ["source_id", "remote_book_id"],
+            childColumns = ["source_id", "remote_book_id"],
+            onDelete = ForeignKey.CASCADE,
+        ),
+    ],
+    indices = [Index(value = ["source_id", "remote_book_id"])],
+)
+internal data class RemoteMirrorItemEntity(
+    @ColumnInfo(name = "source_id") val sourceId: String,
+    @ColumnInfo(name = "remote_book_id") val remoteBookId: String,
+    @ColumnInfo(name = "target_id") val targetId: String?,
+    @ColumnInfo(name = "updated_at_epoch_second") val updatedAtEpochSecond: Long,
+)
+
+internal data class RemoteMirrorBookRow(
+    @androidx.room.Embedded val book: BookEntity,
+    @ColumnInfo(name = "mirror_target_id") val targetId: String?,
 )
 
 @Entity(
@@ -220,6 +289,9 @@ internal data class RemoteLibraryReconciliationEntity(
     @ColumnInfo(name = "created_at_epoch_second") val createdAtEpochSecond: Long,
     @ColumnInfo(name = "updated_at_epoch_second") val updatedAtEpochSecond: Long,
     @ColumnInfo(name = "diagnostic_id") val diagnosticId: String?,
+    @ColumnInfo(name = "operation", defaultValue = "'ADD'") val operation: String = "ADD",
+    @ColumnInfo(name = "target_id") val targetId: String? = null,
+    @ColumnInfo(name = "target_name") val targetName: String? = null,
 )
 
 @Entity(

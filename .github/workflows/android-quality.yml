@@ -7,9 +7,21 @@ on:
   pull_request:
   push:
     branches: [main]
+  workflow_dispatch:
+    inputs:
+      managed_device_pilot:
+        description: Run the non-required Pixel 6 API 29 managed-device pilot
+        required: false
+        default: false
+        type: boolean
+
 
 permissions:
   contents: read
+
+concurrency:
+  group: android-quality-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
 
 defaults:
   run:
@@ -18,14 +30,14 @@ defaults:
 jobs:
   android-build-test-lint-goldens:
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    timeout-minutes: 18
     steps:
       - name: Checkout
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
           fetch-depth: 0
-      - name: Detect Android changes
-        id: changes
+      - name: Plan affected Android verification
+        id: plan
         shell: bash
         run: |
           if [ "${{ github.event_name }}" = "pull_request" ]; then
@@ -33,64 +45,35 @@ jobs:
           else
             base="${{ github.event.before }}"
           fi
-          if [ -z "$base" ] || ! git -C "$GITHUB_WORKSPACE" cat-file -e "$base^{commit}" 2>/dev/null || ! git -C "$GITHUB_WORKSPACE" diff --quiet "$base" "$GITHUB_SHA" -- tsuyomi-android ':!tsuyomi-android/**/*.md' ':!tsuyomi-android/*.md' .github/workflows/android-quality.yml; then
-            echo "changed=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "changed=false" >> "$GITHUB_OUTPUT"
-          fi
+          python "$GITHUB_WORKSPACE/tools/android_ci_plan.py" \
+            --repo-root "$GITHUB_WORKSPACE" \
+            --base "$base" \
+            --head "$GITHUB_SHA" \
+            --github-output "$GITHUB_OUTPUT"
       - name: Tool versions
+        if: steps.plan.outputs.changed == 'true'
         run: |
           java -version
           python --version
-      - name: Build, test, lint, and validate goldens
-        if: steps.changes.outputs.changed == 'true'
+      - name: Set up Gradle cache
+        if: steps.plan.outputs.changed == 'true'
+        uses: gradle/actions/setup-gradle@ed408507eac070d1f99cc633dbcf757c94c7933a
+      - name: Build, test, lint, and validate affected goldens
+        if: steps.plan.outputs.build_tasks != ''
         run: >-
           ./gradlew --no-daemon --console=plain --dependency-verification strict
-          :app:assembleDebug
-          :app:lintDebug
-          :core:ui:lintDebug
-          :core:security:lintDebug
-          :core:database:lintDebug
-          :shared:model:test
-          :shared:locator:test
-          :shared:smart-shelf:test
-          :shared:backup:test
-          :reader:engine:test
-          :app:testDebugUnitTest
-          :core:display:testDebugUnitTest
-          :core:files:testDebugUnitTest
-          :core:security:testDebugUnitTest
-          :core:network:testDebugUnitTest
-          :source:extension-manager:testDebugUnitTest
-          :source:extension-testkit:testDebugUnitTest
-          :core:ui:validateDebugScreenshotTest
-          :feature:library:validateDebugScreenshotTest
-          :feature:browse:validateDebugScreenshotTest
-          :feature:settings:validateDebugScreenshotTest
-      - name: Build and lint isolated UI atlas prototype
-        if: steps.changes.outputs.changed == 'true'
-        run: >-
-          ./gradlew --no-daemon --console=plain --dependency-verification strict
-          -Ptsuyomi.prototype=true
-          :prototype:ui-atlas:assembleDebug
-          :prototype:ui-atlas:assembleDebugAndroidTest
-          :prototype:ui-atlas:lintDebug
-      - name: Lock state is stable
-        if: steps.changes.outputs.changed == 'true'
-        run: |
-          ./gradlew --no-daemon --console=plain --write-locks :app:assembleDebug
-          git diff --exit-code -- '**/*gradle.lockfile'
+          ${{ steps.plan.outputs.build_tasks }}
 
   android-api29-instrumentation:
     runs-on: ubuntu-latest
-    timeout-minutes: 50
+    timeout-minutes: 18
     steps:
       - name: Checkout
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
           fetch-depth: 0
-      - name: Detect Android changes
-        id: changes
+      - name: Plan affected Android verification
+        id: plan
         shell: bash
         run: |
           if [ "${{ github.event_name }}" = "pull_request" ]; then
@@ -98,13 +81,21 @@ jobs:
           else
             base="${{ github.event.before }}"
           fi
-          if [ -z "$base" ] || ! git -C "$GITHUB_WORKSPACE" cat-file -e "$base^{commit}" 2>/dev/null || ! git -C "$GITHUB_WORKSPACE" diff --quiet "$base" "$GITHUB_SHA" -- tsuyomi-android ':!tsuyomi-android/**/*.md' ':!tsuyomi-android/*.md' .github/workflows/android-quality.yml; then
-            echo "changed=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "changed=false" >> "$GITHUB_OUTPUT"
-          fi
+          python "$GITHUB_WORKSPACE/tools/android_ci_plan.py" \
+            --repo-root "$GITHUB_WORKSPACE" \
+            --base "$base" \
+            --head "$GITHUB_SHA" \
+            --github-output "$GITHUB_OUTPUT"
+      - name: Set up Gradle cache
+        if: steps.plan.outputs.device_needed == 'true'
+        uses: gradle/actions/setup-gradle@ed408507eac070d1f99cc633dbcf757c94c7933a
+      - name: Compile affected production instrumentation APKs
+        if: steps.plan.outputs.instrumentation_compile_tasks != ''
+        run: >-
+          ./gradlew --no-daemon --console=plain --dependency-verification strict
+          ${{ steps.plan.outputs.instrumentation_compile_tasks }}
       - name: Install API 29 emulator image
-        if: steps.changes.outputs.changed == 'true'
+        if: steps.plan.outputs.device_needed == 'true'
         run: |
           export ANDROID_AVD_HOME="$RUNNER_TEMP/tsuyomi-avd"
           mkdir -p "$ANDROID_AVD_HOME"
@@ -112,13 +103,13 @@ jobs:
           echo no | "$ANDROID_HOME/cmdline-tools/latest/bin/avdmanager" create avd --force --name tsuyomi-ci-api29 --package "system-images;android-29;default;x86_64" --device pixel_2
           "$ANDROID_HOME/emulator/emulator" -list-avds
       - name: Enable KVM
-        if: steps.changes.outputs.changed == 'true'
+        if: steps.plan.outputs.device_needed == 'true'
         run: |
           echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
           sudo udevadm control --reload-rules
           sudo udevadm trigger --name-match=kvm
       - name: Start emulator
-        if: steps.changes.outputs.changed == 'true'
+        if: steps.plan.outputs.device_needed == 'true'
         run: |
           export ANDROID_AVD_HOME="$RUNNER_TEMP/tsuyomi-avd"
           ADB="$ANDROID_HOME/platform-tools/adb"
@@ -149,17 +140,25 @@ jobs:
           "$ADB" shell settings put global window_animation_scale 0
           "$ADB" shell settings put global transition_animation_scale 0
           "$ADB" shell settings put global animator_duration_scale 0
-      - name: Run API 29 instrumentation
-        if: steps.changes.outputs.changed == 'true'
+      - name: Run affected production API 29 instrumentation
+        if: steps.plan.outputs.instrumentation_tasks != ''
         run: >-
           ./gradlew --no-daemon --console=plain --dependency-verification strict
           --max-workers=1
-          -Ptsuyomi.prototype=true
-          :app:connectedDebugAndroidTest
-          :feature:settings:connectedDebugAndroidTest
-          :core:ui:connectedDebugAndroidTest
-          :core:security:connectedDebugAndroidTest
-          :core:database:connectedDebugAndroidTest
-          :core:webview:connectedDebugAndroidTest
-          :source:quickjs-runtime:connectedDebugAndroidTest
-          :prototype:ui-atlas:connectedDebugAndroidTest
+          ${{ steps.plan.outputs.instrumentation_tasks }}
+
+  android-api29-managed-device-pilot:
+    if: github.event_name == 'workflow_dispatch' && inputs.managed_device_pilot
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+      - name: Set up Gradle cache
+        uses: gradle/actions/setup-gradle@ed408507eac070d1f99cc633dbcf757c94c7933a
+      - name: Run Pixel 6 API 29 managed-device pilot
+        run: >-
+          ./gradlew --no-daemon --console=plain --dependency-verification strict
+          --max-workers=1
+          :app:tsuyomiPixel6Api29DebugAndroidTest
+          -Pandroid.testInstrumentationRunnerArguments.class=org.tsuyomi.android.SourceRemoteLibraryPullInstrumentedTest

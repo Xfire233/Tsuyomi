@@ -9,12 +9,18 @@ import org.tsuyomi.core.network.DirectActionTokenRegistry
 import org.tsuyomi.core.webview.CapturedVerifiedPage
 import org.tsuyomi.shared.sourcecontract.ReaderDocument
 import org.tsuyomi.shared.sourcecontract.RemoteLibraryAddResult
+import org.tsuyomi.shared.sourcecontract.RemoteLibraryRemoveResult
+import org.tsuyomi.shared.sourcecontract.RemoteLibraryMoveResult
+import org.tsuyomi.shared.sourcecontract.RemoteLibraryTargetsResult
 import org.tsuyomi.shared.sourcecontract.RemoteLibraryPage
 import org.tsuyomi.shared.sourcecontract.SourceBookDetail
 import org.tsuyomi.shared.sourcecontract.SourceBookSummary
 import org.tsuyomi.shared.sourcecontract.SourceHomePage
 import org.tsuyomi.shared.sourcecontract.SourceChapter
 import org.tsuyomi.shared.sourcecontract.SourceDirectory
+import org.tsuyomi.shared.sourcecontract.SourceDiagnostic
+import org.tsuyomi.shared.sourcecontract.SourceErrorCode
+import org.tsuyomi.shared.sourcecontract.SourceException
 import org.tsuyomi.source.extensionmanager.SourceExtensionClient
 import org.tsuyomi.source.extensionmanager.VerifiedHxpPackage
 
@@ -27,8 +33,28 @@ internal interface SourceFlowSession : Closeable {
         snapshot: CapturedVerifiedPage,
         page: Int = 1,
     ): List<SourceBookSummary> = error("Verified-page search is unavailable")
-    suspend fun home(selectedFilters: Map<String, String>, cursor: String?): SourceHomePage =
-        error("Source Home is unavailable")
+    suspend fun authorSearch(author: String, page: Int = 1, offlineOnly: Boolean = false): List<SourceBookSummary> =
+        authorSearchUnavailable()
+    suspend fun authorSearchRequestUrl(author: String, page: Int = 1): String = authorSearchUnavailable()
+    suspend fun authorSearchVerifiedPage(
+        author: String,
+        snapshot: CapturedVerifiedPage,
+        page: Int = 1,
+    ): List<SourceBookSummary> = authorSearchUnavailable()
+    suspend fun home(
+        selectedFilters: Map<String, String>,
+        cursor: String?,
+        offlineOnly: Boolean = false,
+    ): SourceHomePage = error("Source Home is unavailable")
+    suspend fun homeRequestUrl(
+        selectedFilters: Map<String, String>,
+        cursor: String?,
+    ): String = error("Source Home request inspection is unavailable")
+    suspend fun homeVerifiedPage(
+        selectedFilters: Map<String, String>,
+        cursor: String?,
+        snapshot: CapturedVerifiedPage,
+    ): SourceHomePage = error("Verified-page Source Home is unavailable")
     suspend fun detail(remoteBookId: String, offlineOnly: Boolean = false): SourceBookDetail
     suspend fun detailRequestUrl(remoteBookId: String): String = error("Detail request inspection is unavailable")
     suspend fun detailVerifiedPage(
@@ -51,7 +77,19 @@ internal interface SourceFlowSession : Closeable {
     suspend fun chapter(chapter: SourceChapter, remoteBookId: String, offlineOnly: Boolean = false): ReaderDocument
     suspend fun listRemoteLibrary(cursor: String?): RemoteLibraryPage
     suspend fun addRemoteLibrary(remoteBookId: String, directActionToken: String): RemoteLibraryAddResult
+    suspend fun removeRemoteLibrary(remoteBookId: String, directActionToken: String): RemoteLibraryRemoveResult
+    suspend fun moveRemoteLibrary(remoteBookId: String, targetId: String, directActionToken: String): RemoteLibraryMoveResult
+    suspend fun listRemoteTargets(): RemoteLibraryTargetsResult
 }
+
+private fun authorSearchUnavailable(): Nothing = throw SourceException(
+    code = SourceErrorCode.EXTENSION_RUNTIME_FAILURE,
+    diagnostic = SourceDiagnostic(
+        correlationId = "author-search-unavailable",
+        stage = "author-search",
+        safeCode = "author-search-unavailable",
+    ),
+)
 
 private class ExtensionSourceFlowSession(
     private val delegate: SourceExtensionClient,
@@ -66,8 +104,27 @@ private class ExtensionSourceFlowSession(
     ): List<SourceBookSummary> = verifiedPageClient(snapshot).use { client ->
         client.search(query, page, offlineOnly = false)
     }
-    override suspend fun home(selectedFilters: Map<String, String>, cursor: String?) =
-        delegate.home(selectedFilters, cursor)
+    override suspend fun authorSearch(author: String, page: Int, offlineOnly: Boolean) =
+        delegate.authorSearch(author, page, offlineOnly)
+    override suspend fun authorSearchRequestUrl(author: String, page: Int) = delegate.authorSearchRequestUrl(author, page)
+    override suspend fun authorSearchVerifiedPage(
+        author: String,
+        snapshot: CapturedVerifiedPage,
+        page: Int,
+    ): List<SourceBookSummary> = verifiedPageClient(snapshot).use { client ->
+        client.authorSearch(author, page, offlineOnly = false)
+    }
+    override suspend fun home(selectedFilters: Map<String, String>, cursor: String?, offlineOnly: Boolean) =
+        delegate.home(selectedFilters, cursor, offlineOnly)
+    override suspend fun homeRequestUrl(selectedFilters: Map<String, String>, cursor: String?) =
+        delegate.homeRequestUrl(selectedFilters, cursor)
+    override suspend fun homeVerifiedPage(
+        selectedFilters: Map<String, String>,
+        cursor: String?,
+        snapshot: CapturedVerifiedPage,
+    ): SourceHomePage = verifiedPageClient(snapshot).use { client ->
+        client.home(selectedFilters, cursor, offlineOnly = false)
+    }
     override suspend fun detail(remoteBookId: String, offlineOnly: Boolean) = delegate.detail(remoteBookId, offlineOnly)
     override suspend fun detailRequestUrl(remoteBookId: String) = delegate.detailRequestUrl(remoteBookId)
     override suspend fun detailVerifiedPage(remoteBookId: String, snapshot: CapturedVerifiedPage) =
@@ -90,6 +147,11 @@ private class ExtensionSourceFlowSession(
     override suspend fun listRemoteLibrary(cursor: String?) = delegate.listRemoteLibrary(cursor)
     override suspend fun addRemoteLibrary(remoteBookId: String, directActionToken: String) =
         delegate.addRemoteLibrary(remoteBookId, directActionToken)
+    override suspend fun removeRemoteLibrary(remoteBookId: String, directActionToken: String) =
+        delegate.removeRemoteLibrary(remoteBookId, directActionToken)
+    override suspend fun moveRemoteLibrary(remoteBookId: String, targetId: String, directActionToken: String) =
+        delegate.moveRemoteLibrary(remoteBookId, targetId, directActionToken)
+    override suspend fun listRemoteTargets() = delegate.listRemoteTargets()
     override fun close() = delegate.close()
 }
 

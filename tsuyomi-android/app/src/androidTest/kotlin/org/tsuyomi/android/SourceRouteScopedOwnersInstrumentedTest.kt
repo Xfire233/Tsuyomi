@@ -26,12 +26,16 @@ import org.tsuyomi.core.media.api.CoverUiState
 import org.tsuyomi.core.database.LibraryBook
 import org.tsuyomi.core.database.ReadingProgress
 import org.tsuyomi.shared.sourcecontract.RemoteLibraryPage
+import org.tsuyomi.shared.sourcecontract.RemoteLibraryTargetsResult
+import org.tsuyomi.shared.sourcecontract.RemoteTarget
 import org.tsuyomi.shared.sourcecontract.SourceDiagnostic
 import org.tsuyomi.shared.sourcecontract.SourceErrorCode
+import org.tsuyomi.core.webview.CapturedVerifiedPage
 import org.tsuyomi.shared.sourcecontract.SourceException
 import org.tsuyomi.feature.book.SourceBookState
 import org.tsuyomi.feature.search.SearchResultState
 import org.tsuyomi.feature.search.SearchLayout
+import org.tsuyomi.feature.library.remoteLibrarySelectionId
 import org.tsuyomi.shared.locator.DocumentIdentity
 import org.tsuyomi.shared.locator.LocatorPrecision
 import org.tsuyomi.shared.locator.ReaderLocator
@@ -73,6 +77,183 @@ internal class SourceRouteScopedOwnersInstrumentedTest : SourceFlowInstrumentedT
             assertEquals(SearchLayout.LIST, owner.layout.value)
             owner.cycleLayout()
             assertEquals(SearchLayout.COMPACT, SourceSearchRouteOwner(flow, savedState).layout.value)
+        }
+    }
+
+    @Test
+    fun author_submit_uses_the_exact_author_and_matching_verified_page_mode_without_restore_replay() = runBlocking {
+        val packageInfo = installFixture()
+        val author = "作者 原样"
+        val requestUrl = "https://www.wenku8.net/modules/article/search.php?searchtype=author&searchkey=author&page=1"
+        var authorRequests = 0
+        var verifiedAuthor: String? = null
+        val snapshot = CapturedVerifiedPage(requestUrl, requestUrl, "<html></html>")
+        controller {
+            FakeSession(
+                authorSearchResult = { requestedAuthor, offlineOnly ->
+                    authorRequests++
+                    assertEquals(author, requestedAuthor)
+                    assertTrue(!offlineOnly)
+                    listOf(summary(SOURCE_FLOW_TEST_SOURCE_ID, "101", "作者结果"))
+                },
+                authorSearchRequestUrl = { requestedAuthor ->
+                    assertEquals(author, requestedAuthor)
+                    requestUrl
+                },
+                authorSearchVerifiedPage = { requestedAuthor, receivedSnapshot ->
+                    verifiedAuthor = requestedAuthor
+                    assertEquals(snapshot, receivedSnapshot)
+                    listOf(summary(SOURCE_FLOW_TEST_SOURCE_ID, "102", "验证作者结果"))
+                },
+            )
+        }.use { flow ->
+            flow.open(packageInfo)
+            val savedState = SavedStateHandle()
+            val owner = SourceSearchRouteOwner(flow, savedState)
+
+            owner.submitAuthor(author)
+
+            assertEquals(1, authorRequests)
+            assertEquals(author, owner.query)
+            assertTrue(owner.authorSearch)
+            assertEquals("作者结果", (owner.state as SearchResultState.Results).items.single().title)
+            val restoredOwner = SourceSearchRouteOwner(flow, savedState)
+            assertEquals(author, restoredOwner.query)
+            assertTrue(restoredOwner.authorSearch)
+            restoredOwner.restore(packageInfo)
+            assertEquals(1, authorRequests)
+            assertTrue(owner.authorSearch)
+            assertEquals(requestUrl, flow.searchVerifiedPageRequestUrl())
+            assertTrue(flow.searchVerifiedPage(snapshot))
+            owner.acceptVerifiedPageResult()
+            assertEquals(author, verifiedAuthor)
+            assertEquals("验证作者结果", (owner.state as SearchResultState.Results).items.single().title)
+        }
+    }
+
+    @Test
+    fun author_retry_and_explicit_offline_cache_retain_author_mode_until_query_edit() = runBlocking {
+        val packageInfo = installFixture()
+        val requests = mutableListOf<Boolean>()
+        controller {
+            FakeSession(
+                searchResult = { query, offlineOnly ->
+                    assertEquals("标题", query)
+                    assertTrue(!offlineOnly)
+                    listOf(summary(SOURCE_FLOW_TEST_SOURCE_ID, "103", "标题结果"))
+                },
+                authorSearchResult = { author, offlineOnly ->
+                    assertEquals("作者", author)
+                    requests += offlineOnly
+                    listOf(summary(SOURCE_FLOW_TEST_SOURCE_ID, "104", "作者结果"))
+                },
+            )
+        }.use { flow ->
+            flow.open(packageInfo)
+            val owner = SourceSearchRouteOwner(flow, SavedStateHandle())
+
+            owner.submitAuthor("作者")
+            owner.submit(offlineOnly = true)
+
+            assertEquals(listOf(false, true), requests)
+            assertTrue(owner.authorSearch)
+            owner.updateQuery("标题")
+            assertTrue(!owner.authorSearch)
+            owner.submit()
+            assertEquals("标题结果", (owner.state as SearchResultState.Results).items.single().title)
+        }
+    }
+
+    @Test
+    fun latest_author_invocation_owns_the_retained_working_state_and_results() = runBlocking {
+        val packageInfo = installFixture()
+        val firstStarted = CompletableDeferred<Unit>()
+        val releaseFirst = CompletableDeferred<Unit>()
+        controller {
+            FakeSession(
+                authorSearchResult = { author, _ ->
+                    if (author == "先前作者") {
+                        firstStarted.complete(Unit)
+                        releaseFirst.await()
+                        listOf(summary(SOURCE_FLOW_TEST_SOURCE_ID, "105", "过期结果"))
+                    } else {
+                        assertEquals("当前作者", author)
+                        listOf(summary(SOURCE_FLOW_TEST_SOURCE_ID, "106", "当前结果"))
+                    }
+                },
+            )
+        }.use { flow ->
+            flow.open(packageInfo)
+            val owner = SourceSearchRouteOwner(flow, SavedStateHandle())
+
+            val first = async { owner.submitAuthor("先前作者") }
+            firstStarted.await()
+            assertEquals(SearchResultState.Loading, owner.state)
+            owner.submitAuthor("当前作者")
+            releaseFirst.complete(Unit)
+            first.await()
+
+            assertEquals("当前作者", owner.query)
+            assertEquals("当前结果", (owner.state as SearchResultState.Results).items.single().title)
+        }
+    }
+
+    @Test
+    fun author_over_the_search_bound_fails_without_truncation_or_network_request() = runBlocking {
+        val packageInfo = installFixture()
+        var authorRequests = 0
+        val author = "a".repeat(101)
+        controller {
+            FakeSession(
+                authorSearchResult = { _, _ ->
+                    authorRequests++
+                    emptyList()
+                },
+                authorSearchRequestUrl = {
+                    authorRequests++
+                    "https://www.wenku8.net/unreachable"
+                },
+            )
+        }.use { flow ->
+            flow.open(packageInfo)
+            val owner = SourceSearchRouteOwner(flow, SavedStateHandle())
+
+            owner.submitAuthor(author)
+
+            assertEquals(0, authorRequests)
+            assertNull(flow.searchVerifiedPageRequestUrl())
+            assertEquals(0, authorRequests)
+            assertEquals(author, owner.query)
+            assertTrue(owner.authorSearch)
+            assertEquals(
+                "author-query-too-long",
+                (owner.state as SearchResultState.Failure).diagnostic.safeCode,
+            )
+        }
+    }
+
+    @Test
+    fun unavailable_author_search_is_observable_without_title_search_fallback() = runBlocking {
+        val packageInfo = installFixture()
+        var titleSearches = 0
+        controller {
+            FakeSession(
+                searchResult = { _, _ ->
+                    titleSearches++
+                    emptyList()
+                },
+            )
+        }.use { flow ->
+            flow.open(packageInfo)
+            val owner = SourceSearchRouteOwner(flow, SavedStateHandle())
+
+            owner.submitAuthor("未支持作者")
+
+            assertEquals(0, titleSearches)
+            assertEquals(
+                "author-search-unavailable",
+                (owner.state as SearchResultState.Failure).diagnostic.safeCode,
+            )
         }
     }
     @Test
@@ -132,6 +313,61 @@ internal class SourceRouteScopedOwnersInstrumentedTest : SourceFlowInstrumentedT
         }
     }
     @Test
+    fun cached_detail_opens_without_network_and_refresh_failure_keeps_content() = runBlocking {
+        val packageInfo = installFixture()
+        val book = summary(SOURCE_FLOW_TEST_SOURCE_ID, "cached-detail", "缓存详情")
+        val chapters = listOf(SourceChapter("cached-1", "缓存章节", "https://www.wenku8.net/novel/2/200/cached-1.htm"))
+        var detailRequests = 0
+        var directoryRequests = 0
+        var failRequests = false
+        controller {
+            FakeSession(
+                detail = { summary ->
+                    detailRequests++
+                    if (failRequests) throw SourceException(
+                        SourceErrorCode.VERIFICATION_REQUIRED,
+                        SourceDiagnostic("cached-detail", "detail", safeCode = "verification-required"),
+                    )
+                    SourceBookDetail(summary, "缓存简介", emptyList(), "连载")
+                },
+                directoryResult = {
+                    directoryRequests++
+                    if (failRequests) throw SourceException(
+                        SourceErrorCode.VERIFICATION_REQUIRED,
+                        SourceDiagnostic("cached-directory", "directory", safeCode = "verification-required"),
+                    )
+                    SourceDirectory(book.identity, chapters)
+                },
+            )
+        }.use { flow ->
+            flow.open(packageInfo)
+            flow.prepareLocalDetail(book)
+            val owner = SourceDetailRouteOwner(flow, SavedStateHandle())
+
+            assertEquals(0, detailRequests)
+            assertEquals(0, directoryRequests)
+            assertNull((owner.state as SourceBookState.Content).value.description)
+            assertTrue(owner.directoryState is SourceBookState.Loading)
+
+            owner.execute(SourceDetailRouteOwner.Command.CACHE_DETAIL.name)
+
+            assertEquals(1, detailRequests)
+            assertEquals(1, directoryRequests)
+            assertEquals("缓存简介", (owner.state as SourceBookState.Content).value.description)
+            assertEquals("缓存章节", (owner.directoryState as SourceBookState.Content).value.chapters.single().title)
+
+            failRequests = true
+            owner.execute(SourceDetailRouteOwner.Command.REFRESH_DETAIL.name)
+
+            assertEquals(2, detailRequests)
+            assertEquals(2, directoryRequests)
+            assertEquals("缓存简介", (owner.state as SourceBookState.Content).value.description)
+            assertEquals("缓存章节", (owner.directoryState as SourceBookState.Content).value.chapters.single().title)
+            assertEquals("source-read-failed", owner.mutation?.safeCode)
+        }
+    }
+
+    @Test
     fun canonical_detail_repairs_coverless_existing_library_metadata() = runBlocking {
         val packageInfo = installFixture()
         val book = summary(SOURCE_FLOW_TEST_SOURCE_ID, "201", "缺少封面的书架条目")
@@ -169,6 +405,42 @@ internal class SourceRouteScopedOwnersInstrumentedTest : SourceFlowInstrumentedT
             assertEquals(1, libraryChanges)
         }
     }
+    @Test
+    fun canonical_detail_repairs_coverless_remote_mirror_and_refresh_preserves_cover() = runBlocking {
+        val packageInfo = installFixture()
+        val sourceId = packageInfo.manifest.sourceId.value
+        val book = summary(sourceId, "202", "网站收藏缺少封面")
+        val detailCover = "https://www.wenku8.net/image/2/202/202s.jpg"
+        val chapters = listOf(SourceChapter("1", "第一章", "https://www.wenku8.net/novel/2/202/1.htm"))
+        putCredential(sourceId)
+
+        controller {
+            FakeSession(
+                listRemote = { RemoteLibraryPage(listOf(book), null, true) },
+                detail = { summary ->
+                    SourceBookDetail(summary.copy(coverUrl = detailCover), "简介", emptyList(), "连载")
+                },
+                directoryResult = { SourceDirectory(book.identity, chapters) },
+            )
+        }.use { flow ->
+            flow.open(packageInfo)
+            val remote = SourceRemoteLibraryRouteOwner(flow, { packageInfo }, SavedStateHandle())
+            remote.refresh()
+            assertEquals(null, remote.books.single().coverUrl)
+
+            flow.prepareBook(remote.books.single())
+            SourceDetailRouteOwner(flow, SavedStateHandle()).loadAll()
+
+            val restored = SourceRemoteLibraryRouteOwner(flow, { packageInfo }, SavedStateHandle())
+            restored.restore(sourceId)
+            assertEquals(detailCover, restored.books.single().coverUrl)
+
+            restored.refresh()
+            assertEquals(detailCover, restored.books.single().coverUrl)
+            assertEquals(detailCover, library.remoteMirrorSnapshot(sourceId)?.books?.single()?.book?.coverUrl)
+        }
+    }
+
 
 
     @Test
@@ -415,15 +687,24 @@ internal class SourceRouteScopedOwnersInstrumentedTest : SourceFlowInstrumentedT
         val packageInfo = installFixture()
         val sourceId = packageInfo.manifest.sourceId.value
         putCredential(sourceId)
-        val first = summary(sourceId, "401", "网站收藏一")
-        val second = summary(sourceId, "402", "网站收藏二")
         var reads = 0
         var writes = 0
+        val first = summary(sourceId, "401", "网站收藏一").copy(canonicalUrl = "", remoteTargetId = "first")
+        val second = summary(sourceId, "402", "网站收藏二").copy(canonicalUrl = "", remoteTargetId = "second")
         controller {
             FakeSession(
                 listRemote = {
                     reads++
                     RemoteLibraryPage(listOf(first, second), null, true)
+                },
+                targetsResult = {
+                    RemoteLibraryTargetsResult(
+                        sourceId,
+                        listOf(
+                            RemoteTarget("first", "第一分类", null, "folder"),
+                            RemoteTarget("second", "第二分类", null, "folder"),
+                        ),
+                    )
                 },
                 addRemote = { _, _ ->
                     writes++
@@ -443,24 +724,31 @@ internal class SourceRouteScopedOwnersInstrumentedTest : SourceFlowInstrumentedT
 
             assertEquals(1, reads)
             assertEquals(RemoteLibraryRouteStatus.Content, owner.status)
+            assertEquals(false, owner.loading)
             assertEquals(listOf(first, second), owner.books)
             assertTrue(library.libraryEntries().isEmpty())
 
             owner.toggleSelection(first)
             val restored = SourceRemoteLibraryRouteOwner(flow, { packageInfo }, savedState)
-            assertEquals(setOf(first.canonicalUrl), restored.selectedIds)
+            assertEquals(setOf(remoteLibrarySelectionId(first)), restored.selectedIds)
             assertEquals(RemoteLibraryRouteStatus.Idle, restored.status)
             assertTrue(restored.books.isEmpty())
             assertEquals(1, reads)
 
-            owner.requestCopy()
+            assertNull(owner.requestCopy())
             assertTrue(owner.copyConfirmationVisible)
             assertEquals(RemoteLibraryCopyResult(total = 1, added = 1), owner.confirmCopy())
+            assertTrue(requireNotNull(library.sourceRemotePolicy(sourceId)).firstImportPromptDismissed)
             assertEquals(0, writes)
             assertEquals(setOf(first.identity), library.libraryEntries().map { it.book.identity }.toSet())
 
-            owner.requestCopy()
-            assertEquals(RemoteLibraryCopyResult(total = 2, added = 1), owner.confirmCopy())
+            val restoredAfterConfirmation = SourceRemoteLibraryRouteOwner(flow, { packageInfo }, SavedStateHandle())
+            restoredAfterConfirmation.restore(sourceId)
+            restoredAfterConfirmation.selectTarget("first")
+            assertEquals(RemoteLibraryCopyResult(total = 1, added = 0), restoredAfterConfirmation.requestCopy())
+            restoredAfterConfirmation.selectTarget(null)
+            assertEquals(RemoteLibraryCopyResult(total = 2, added = 1), restoredAfterConfirmation.requestCopy())
+            assertEquals(false, restoredAfterConfirmation.copyConfirmationVisible)
             assertEquals(0, writes)
             assertEquals(setOf(first.identity, second.identity), library.libraryEntries().map { it.book.identity }.toSet())
         }
@@ -496,10 +784,13 @@ internal class SourceRouteScopedOwnersInstrumentedTest : SourceFlowInstrumentedT
 
             owner.refresh()
             assertEquals(RemoteLibraryRouteStatus.LoginRequired, owner.status)
+            assertEquals(false, owner.loading)
             owner.refresh()
             assertEquals(RemoteLibraryRouteStatus.VerificationRequired, owner.status)
+            assertEquals(false, owner.loading)
             owner.refresh()
             assertEquals(RemoteLibraryRouteStatus.Cancelled, owner.status)
+            assertEquals(false, owner.loading)
             owner.refresh()
             assertEquals(RemoteLibraryRouteStatus.Failure("network-timeout"), owner.status)
             assertEquals(false, owner.loading)

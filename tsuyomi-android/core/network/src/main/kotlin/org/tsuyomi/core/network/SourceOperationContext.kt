@@ -10,7 +10,13 @@ import org.tsuyomi.shared.sourcecontract.NetworkMethod
 import org.tsuyomi.shared.sourcecontract.SourceNetworkRequest
 
 /** Host-minted policy for one remote-library transport operation. */
-enum class SourceOperationKind { REMOTE_LIBRARY_READ, REMOTE_LIBRARY_ADD }
+enum class SourceOperationKind {
+    REMOTE_LIBRARY_READ,
+    REMOTE_LIBRARY_TARGETS,
+    REMOTE_LIBRARY_ADD,
+    REMOTE_LIBRARY_REMOVE,
+    REMOTE_LIBRARY_MOVE,
+}
 
 /** A signed, exact redirect destination for one remote-library operation. */
 data class RemoteOperationRedirectPolicy(
@@ -34,6 +40,7 @@ data class RemoteOperationRequestPolicy(
     val path: String,
     val fixedParameters: Map<String, String>,
     val remoteBookIdParameter: String? = null,
+    val targetIdParameter: String? = null,
     val cursorParameter: String? = null,
     val referrerPath: String? = null,
     val redirects: List<RemoteOperationRedirectPolicy> = emptyList(),
@@ -41,7 +48,8 @@ data class RemoteOperationRequestPolicy(
     init {
         require(path.startsWith('/') && '?' !in path && '#' !in path)
         require(remoteBookIdParameter == null || remoteBookIdParameter !in fixedParameters)
-        require(cursorParameter == null || (cursorParameter !in fixedParameters && cursorParameter != remoteBookIdParameter))
+        require(targetIdParameter == null || (targetIdParameter !in fixedParameters && targetIdParameter != remoteBookIdParameter))
+        require(cursorParameter == null || (cursorParameter !in fixedParameters && cursorParameter != remoteBookIdParameter && cursorParameter != targetIdParameter))
         require(fixedParameters.keys.all { it.isNotBlank() })
         require(referrerPath == null || (referrerPath.startsWith('/') && '?' !in referrerPath && '#' !in referrerPath))
         require(redirects.distinct() == redirects)
@@ -57,13 +65,19 @@ class SourceOperationContext internal constructor(
     val policy: RemoteOperationRequestPolicy,
     val cursor: String? = null,
     val remoteBookId: String? = null,
+    val targetId: String? = null,
     val addToken: String? = null,
+    val directActionToken: String? = addToken,
 ) {
     init {
-        require(kind != SourceOperationKind.REMOTE_LIBRARY_ADD || !addToken.isNullOrBlank())
-        require(kind != SourceOperationKind.REMOTE_LIBRARY_ADD || !remoteBookId.isNullOrBlank())
-        require(kind != SourceOperationKind.REMOTE_LIBRARY_ADD || cursor == null)
-        require(kind != SourceOperationKind.REMOTE_LIBRARY_READ || remoteBookId == null)
+        val isDirectAction = kind in setOf(SourceOperationKind.REMOTE_LIBRARY_ADD, SourceOperationKind.REMOTE_LIBRARY_REMOVE, SourceOperationKind.REMOTE_LIBRARY_MOVE)
+        require(!isDirectAction || !directActionToken.isNullOrBlank())
+        require(!isDirectAction || !remoteBookId.isNullOrBlank())
+        require(!isDirectAction || cursor == null)
+        require(kind != SourceOperationKind.REMOTE_LIBRARY_MOVE || !targetId.isNullOrBlank())
+        require(kind == SourceOperationKind.REMOTE_LIBRARY_MOVE || targetId == null)
+        require(kind !in setOf(SourceOperationKind.REMOTE_LIBRARY_READ, SourceOperationKind.REMOTE_LIBRARY_TARGETS) || remoteBookId == null)
+        require(kind != SourceOperationKind.REMOTE_LIBRARY_TARGETS || cursor == null)
         require(cursor == null || cursor.isNotBlank())
     }
 
@@ -79,6 +93,7 @@ class SourceOperationContext internal constructor(
             putAll(policy.fixedParameters)
             policy.cursorParameter?.let { name -> cursor?.let { put(name, it) } }
             policy.remoteBookIdParameter?.let { name -> remoteBookId?.let { put(name, it) } }
+            policy.targetIdParameter?.let { name -> targetId?.let { put(name, it) } }
         }
         val actual = when (request.method) {
             NetworkMethod.GET, NetworkMethod.HEAD -> decodeQuery(uri.rawQuery)
@@ -113,6 +128,9 @@ class SourceOperationContext internal constructor(
 fun remoteLibraryReadContext(policy: RemoteOperationRequestPolicy, cursor: String?): SourceOperationContext =
     SourceOperationContext(SourceOperationKind.REMOTE_LIBRARY_READ, policy, cursor = cursor)
 
+fun remoteLibraryTargetsContext(policy: RemoteOperationRequestPolicy): SourceOperationContext =
+    SourceOperationContext(SourceOperationKind.REMOTE_LIBRARY_TARGETS, policy)
+
 fun remoteLibraryAddContext(
     policy: RemoteOperationRequestPolicy,
     remoteBookId: String,
@@ -122,4 +140,30 @@ fun remoteLibraryAddContext(
     policy,
     remoteBookId = remoteBookId,
     addToken = addToken,
+)
+
+fun remoteLibraryRemoveContext(
+    policy: RemoteOperationRequestPolicy,
+    remoteBookId: String,
+    removeToken: String,
+): SourceOperationContext = SourceOperationContext(
+    SourceOperationKind.REMOTE_LIBRARY_REMOVE,
+    policy,
+    remoteBookId = remoteBookId,
+    addToken = removeToken,
+    directActionToken = removeToken,
+)
+
+fun remoteLibraryMoveContext(
+    policy: RemoteOperationRequestPolicy,
+    remoteBookId: String,
+    targetId: String,
+    moveToken: String,
+): SourceOperationContext = SourceOperationContext(
+    SourceOperationKind.REMOTE_LIBRARY_MOVE,
+    policy,
+    remoteBookId = remoteBookId,
+    targetId = targetId,
+    addToken = moveToken,
+    directActionToken = moveToken,
 )

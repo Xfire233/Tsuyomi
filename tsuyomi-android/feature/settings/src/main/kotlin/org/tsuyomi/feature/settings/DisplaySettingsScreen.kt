@@ -13,6 +13,13 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -27,6 +34,7 @@ import org.tsuyomi.core.ui.components.InfoBanner
 import org.tsuyomi.core.ui.components.InlineStatus
 import org.tsuyomi.core.ui.components.SegmentedSelector
 import org.tsuyomi.core.ui.components.SettingsActionRow
+import org.tsuyomi.core.ui.components.SettingsGroup
 import org.tsuyomi.core.ui.components.SettingsSectionHeader
 import org.tsuyomi.core.ui.components.SettingsSwitchRow
 import org.tsuyomi.core.ui.components.TsuyomiSegment
@@ -49,6 +57,7 @@ class DisplaySettingsActions(
     val onRefreshNow: () -> Unit,
     val onRetryWrite: () -> Unit,
     val onAcknowledgeWriteFailure: () -> Unit,
+    val onResetInterfacePreferences: () -> Unit,
 )
 
 /**
@@ -64,6 +73,7 @@ fun DisplaySettingsScreen(
     val environment = state.environment
     val preferences = environment.preferences
     val eInk = environment.effectiveProfile == DisplayProfile.EINK
+    var resetVisible by rememberSaveable { mutableStateOf(false) }
 
     Box(modifier = modifier.fillMaxSize()) {
         Column(
@@ -88,91 +98,97 @@ fun DisplaySettingsScreen(
                 )
             }
 
-            SettingsSectionHeader(
-                title = stringResource(R.string.settings_display_section_profile),
-            )
-            SegmentedSelector(
-                options = listOf(
-                    TsuyomiSegment(
-                        DisplayPreference.AUTO,
-                        stringResource(R.string.settings_display_profile_auto),
+            SettingsSectionHeader(title = stringResource(R.string.settings_display_section_profile))
+            SettingsGroup {
+                SegmentedSelector(
+                    options = listOf(
+                        TsuyomiSegment(DisplayPreference.AUTO, stringResource(R.string.settings_display_profile_auto)),
+                        TsuyomiSegment(DisplayPreference.STANDARD, stringResource(R.string.settings_display_profile_standard)),
+                        TsuyomiSegment(DisplayPreference.EINK, stringResource(R.string.settings_display_profile_eink)),
                     ),
-                    TsuyomiSegment(
-                        DisplayPreference.STANDARD,
-                        stringResource(R.string.settings_display_profile_standard),
-                    ),
-                    TsuyomiSegment(
-                        DisplayPreference.EINK,
-                        stringResource(R.string.settings_display_profile_eink),
-                    ),
-                ),
-                selected = preferences.displayPreference,
-                onSelect = actions.onDisplayPreferenceChange,
-            )
-            InlineStatus(
-                text = displayStatusText(environment),
-                modifier = Modifier.padding(top = TsuyomiSpacing.Sm),
-            )
-
-            SettingsSectionHeader(
-                title = stringResource(R.string.settings_display_section_appearance),
-            )
-            SegmentedSelector(
-                options = listOf(
-                    TsuyomiSegment(
-                        ColorSchemePreference.SYSTEM,
-                        stringResource(R.string.settings_display_theme_system),
-                    ),
-                    TsuyomiSegment(
-                        ColorSchemePreference.LIGHT,
-                        stringResource(R.string.settings_display_theme_light),
-                    ),
-                    TsuyomiSegment(
-                        ColorSchemePreference.DARK,
-                        stringResource(R.string.settings_display_theme_dark),
-                    ),
-                ),
-                selected = preferences.colorSchemePreference,
-                onSelect = actions.onColorSchemePreferenceChange,
-                enabled = !eInk,
-                disabledReason = if (eInk) {
-                    stringResource(R.string.settings_display_theme_disabled_eink)
-                } else {
-                    null
-                },
-            )
-            SettingsSwitchRow(
-                title = stringResource(R.string.settings_display_dynamic_title),
-                summary = stringResource(R.string.settings_display_dynamic_summary),
-                checked = preferences.dynamicColorEnabled,
-                onCheckedChange = actions.onDynamicColorEnabledChange,
-                enabled = environment.dynamicColorEligible,
-                disabledReason = when {
-                    environment.dynamicColorEligible -> null
-                    eInk -> stringResource(R.string.settings_display_dynamic_disabled_eink)
-                    else -> stringResource(R.string.settings_display_dynamic_disabled_api)
-                },
-                modifier = Modifier.padding(top = TsuyomiSpacing.Sm),
-            )
-
-            if (eInk) {
-                SettingsSectionHeader(
-                    title = stringResource(R.string.settings_display_section_refresh),
+                    selected = preferences.displayPreference,
+                    onSelect = actions.onDisplayPreferenceChange,
+                    modifier = Modifier.padding(TsuyomiSpacing.Md),
                 )
                 InlineStatus(
-                    text = stringResource(R.string.settings_display_refresh_note),
-                    modifier = Modifier.padding(top = TsuyomiSpacing.Sm),
+                    text = displayStatusText(environment),
+                    modifier = Modifier.padding(horizontal = TsuyomiSpacing.Md, vertical = TsuyomiSpacing.Sm),
                 )
-                SettingsActionRow(
-                    title = stringResource(R.string.settings_display_refresh_now_title),
-                    summary = stringResource(
-                        R.string.settings_display_refresh_now_summary,
-                        environment.redrawEpoch,
+            }
+
+            SettingsSectionHeader(title = stringResource(R.string.settings_display_section_appearance))
+            SettingsGroup {
+                SegmentedSelector(
+                    options = listOf(
+                        TsuyomiSegment(ColorSchemePreference.SYSTEM, stringResource(R.string.settings_display_theme_system)),
+                        TsuyomiSegment(ColorSchemePreference.LIGHT, stringResource(R.string.settings_display_theme_light)),
+                        TsuyomiSegment(ColorSchemePreference.DARK, stringResource(R.string.settings_display_theme_dark)),
                     ),
-                    onClick = actions.onRefreshNow,
+                    selected = preferences.colorSchemePreference,
+                    onSelect = actions.onColorSchemePreferenceChange,
+                    enabled = !eInk,
+                    disabledReason = if (eInk) stringResource(R.string.settings_display_theme_disabled_eink) else null,
+                    modifier = Modifier.padding(TsuyomiSpacing.Md),
+                )
+                SettingsSwitchRow(
+                    title = stringResource(R.string.settings_display_dynamic_title),
+                    summary = stringResource(R.string.settings_display_dynamic_summary),
+                    checked = preferences.dynamicColorEnabled,
+                    onCheckedChange = actions.onDynamicColorEnabledChange,
+                    enabled = environment.dynamicColorEligible,
+                    disabledReason = when {
+                        environment.dynamicColorEligible -> null
+                        eInk -> stringResource(R.string.settings_display_dynamic_disabled_eink)
+                        else -> stringResource(R.string.settings_display_dynamic_disabled_api)
+                    },
+                )
+            }
+
+            if (eInk) {
+                SettingsSectionHeader(title = stringResource(R.string.settings_display_section_refresh))
+                SettingsGroup {
+                    InlineStatus(
+                        text = stringResource(R.string.settings_display_refresh_note),
+                        modifier = Modifier.padding(TsuyomiSpacing.Md),
+                    )
+                    SettingsActionRow(
+                        title = stringResource(R.string.settings_display_refresh_now_title),
+                        summary = stringResource(R.string.settings_display_refresh_now_summary, environment.redrawEpoch),
+                        onClick = actions.onRefreshNow,
+                    )
+                }
+            }
+
+            SettingsSectionHeader(title = stringResource(R.string.settings_display_section_reset))
+            SettingsGroup {
+                SettingsActionRow(
+                    title = stringResource(R.string.settings_display_reset_title),
+                    summary = stringResource(R.string.settings_display_reset_summary),
+                    onClick = { resetVisible = true },
                 )
             }
         }
+    }
+
+    if (resetVisible) {
+        AlertDialog(
+            onDismissRequest = { resetVisible = false },
+            title = { Text(stringResource(R.string.settings_display_reset_dialog_title)) },
+            text = { Text(stringResource(R.string.settings_display_reset_dialog_message)) },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        resetVisible = false
+                        actions.onResetInterfacePreferences()
+                    },
+                ) { Text(stringResource(R.string.settings_display_reset_confirm)) }
+            },
+            dismissButton = {
+                TextButton(onClick = { resetVisible = false }) {
+                    Text(stringResource(R.string.settings_display_reset_cancel))
+                }
+            },
+        )
     }
 }
 

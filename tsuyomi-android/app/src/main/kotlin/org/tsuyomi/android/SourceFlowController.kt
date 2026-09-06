@@ -18,6 +18,7 @@ import org.tsuyomi.core.network.DirectActionTokenRegistry
 import org.tsuyomi.core.webview.CapturedVerifiedPage
 import org.tsuyomi.feature.book.SourceBookState
 import org.tsuyomi.feature.search.SearchResultState
+import org.tsuyomi.feature.browse.SourceHomeFailure
 import org.tsuyomi.feature.browse.SourceHomeViewState
 import org.tsuyomi.shared.locator.LocatorPrecision
 import org.tsuyomi.shared.locator.ReaderLocator
@@ -26,6 +27,7 @@ import org.tsuyomi.shared.sourcecontract.ReaderDocument
 import org.tsuyomi.shared.sourcecontract.SourceBookDetail
 import org.tsuyomi.shared.sourcecontract.SourceBookSummary
 import org.tsuyomi.shared.sourcecontract.SourceHomePage
+import org.tsuyomi.shared.sourcecontract.RemoteTarget
 import org.tsuyomi.shared.sourcecontract.SourceChapter
 import org.tsuyomi.shared.sourcecontract.SourceDiagnostic
 import org.tsuyomi.shared.sourcecontract.SourceDirectory
@@ -50,6 +52,8 @@ internal class SourceFlowController(
         private set
     var searchState: SearchResultState by mutableStateOf(SearchResultState.Idle)
         private set
+    var authorSearch: Boolean = false
+        private set
     var detailState: SourceBookState<SourceBookDetail> by mutableStateOf(SourceBookState.Loading)
         private set
     var directoryState: SourceBookState<SourceDirectory> by mutableStateOf(SourceBookState.Loading)
@@ -61,9 +65,12 @@ internal class SourceFlowController(
         private set
     var selectedChapter: SourceChapter? = null
         private set
+    var completedChapterIds: Set<String> by mutableStateOf(emptySet())
+        private set
     private var verifiedChapterLoad: SourceReaderLoad? = null
     private var preparedResumeLoad: SourceReaderLoad? = null
 
+    private var searchInvocation = 0L
     suspend fun chapterVerifiedPageRequestUrl(): String? {
         val source = sessionOwner.requireClientOrNull() ?: return null
         val book = selectedBook ?: return null
@@ -117,8 +124,25 @@ internal class SourceFlowController(
         return remoteLibrary.pull(packageInfo)
     }
 
+    internal suspend fun pullRemoteLibrary(
+        packageInfo: VerifiedHxpPackage,
+        aggregateLimitBytes: Long,
+    ): RemoteLibraryPullResult {
+        open(packageInfo)
+        return remoteLibrary.pull(packageInfo, aggregateLimitBytes)
+    }
+
     suspend fun copyRemoteLibraryToLocal(books: Collection<SourceBookSummary>): RemoteLibraryCopyResult =
         remoteLibrary.copyToLocal(books)
+
+    suspend fun localCopyConfirmationRequired(sourceId: String): Boolean =
+        library.sourceRemotePolicy(sourceId)?.firstImportPromptDismissed != true
+
+    suspend fun acknowledgeLocalCopyConfirmation(sourceId: String): Boolean {
+        val policy = library.sourceRemotePolicy(sourceId) ?: return false
+        return policy.firstImportPromptDismissed ||
+            library.dismissFirstRemoteImportPrompt(sourceId, policy.capabilitySetFingerprint)
+    }
 
     suspend fun addSelectedBook(importedAt: Instant = Instant.now()): RemoteAddUiResult =
         remoteLibrary.addLocalBook(selectedBook, importedAt)
@@ -131,6 +155,52 @@ internal class SourceFlowController(
 
     suspend fun removeSelectedBook(): Boolean = remoteLibrary.removeBook(selectedBook)
 
+    suspend fun removeSelectedBookFromWebsite(importedAt: Instant = Instant.now()): RemoteMutationUiResult =
+        remoteLibrary.removeBookFromWebsite(selectedBook, importedAt)
+
+    suspend fun moveSelectedBookOnWebsite(targetId: String, targetName: String, importedAt: Instant = Instant.now()): RemoteMutationUiResult =
+        remoteLibrary.moveBookOnWebsite(selectedBook, targetId, targetName, importedAt)
+
+    suspend fun removeBookFromWebsite(book: SourceBookSummary, importedAt: Instant = Instant.now()): RemoteMutationUiResult =
+        remoteLibrary.removeBookFromWebsite(book, importedAt)
+
+    suspend fun moveBookOnWebsite(book: SourceBookSummary, targetId: String, targetName: String, importedAt: Instant = Instant.now()): RemoteMutationUiResult =
+        remoteLibrary.moveBookOnWebsite(book, targetId, targetName, importedAt)
+
+    suspend fun listRemoteTargets(): List<RemoteTarget> = remoteLibrary.listRemoteTargets()
+
+    suspend fun writebackAuthorized(sourceId: String, operation: String): Boolean =
+        remoteLibrary.writebackAuthorized(sourceId, operation)
+
+    suspend fun saveRemoteMirrorSnapshot(
+        sourceName: String,
+        books: List<SourceBookSummary>,
+        targets: List<RemoteTarget>,
+    ): List<SourceBookSummary> = remoteLibrary.saveRemoteMirrorSnapshot(sourceName, books, targets)
+
+    suspend fun remoteMirrorSnapshot(sourceId: String) = remoteLibrary.remoteMirrorSnapshot(sourceId)
+
+    suspend fun addBookToWebsiteTarget(
+        book: org.tsuyomi.shared.sourcecontract.SourceBookSummary,
+        targetId: String,
+        targetName: String,
+        defaultTargetId: String,
+    ) = remoteLibrary.addBookToWebsiteTarget(book, targetId, targetName, defaultTargetId)
+
+    suspend fun retryRemoteMutation(book: SourceBookSummary? = selectedBook, importedAt: Instant = Instant.now()): RemoteMutationUiResult =
+        remoteLibrary.retryRemoteMutation(book ?: selectedBook, importedAt)
+
+    suspend fun acknowledgeUnresolved(identity: BookIdentity): Boolean =
+        remoteLibrary.acknowledgeUnresolved(identity)
+
+    suspend fun remoteReconciliation(identity: BookIdentity) =
+        library.bookReconciliation(identity.sourceId, identity.remoteBookId)
+
+    suspend fun authorizeWriteback(sourceId: String, operation: String, enabled: Boolean): Boolean =
+        remoteLibrary.authorizeWriteback(sourceId, operation, enabled)
+
+
+    suspend fun unresolvedReconciliations() = library.unresolvedReconciliations()
 
     suspend fun reopenWithStoredCredentials() {
         when (sessionOwner.reopen()) {
@@ -174,7 +244,14 @@ internal class SourceFlowController(
     }
 
     fun updateQuery(value: String) {
-        query = value.take(100)
+        query = value.take(MaxSearchQueryLength)
+        authorSearch = false
+        searchInvocation += 1
+    }
+
+    fun restoreSearch(query: String, authorSearch: Boolean) {
+        this.query = query
+        this.authorSearch = authorSearch
     }
 
     fun resetHomeState() {
@@ -184,43 +261,116 @@ internal class SourceFlowController(
     suspend fun loadHome(
         selectedFilters: Map<String, String>,
         cursor: String? = null,
+        offlineOnly: Boolean = false,
     ): Result<SourceHomePage> {
         val source = sessionOwner.requireClientOrNull()
             ?: return Result.failure(IllegalStateException("source-not-open"))
-        return runCatching { source.home(selectedFilters, cursor) }
+        return runCatching { source.home(selectedFilters, cursor, offlineOnly) }
+    }
+
+    suspend fun homeVerifiedPageRequestUrl(): String? {
+        val source = sessionOwner.requireClientOrNull() ?: return null
+        return runCatching { source.homeRequestUrl(home.selectedFilters, cursor = null) }.getOrNull()
+    }
+
+    suspend fun homeVerifiedPage(snapshot: CapturedVerifiedPage): Boolean {
+        val source = sessionOwner.requireClientOrNull() ?: return false
+        return try {
+            home.acceptVerifiedPage(
+                source.homeVerifiedPage(home.selectedFilters, cursor = null, snapshot = snapshot),
+            )
+            true
+        } catch (error: SourceException) {
+            home.rejectVerifiedPage(SourceHomeFailure(error.code, error.diagnostic.safeCode))
+            false
+        }
     }
 
     suspend fun search(offlineOnly: Boolean = false) {
-        val source = sessionOwner.requireClientOrNull()
-            ?: return setSearchFailure(SourceErrorCode.EXTENSION_RUNTIME_FAILURE, "source-not-open")
-        if (query.isBlank()) return
-        searchState = SearchResultState.Loading
-        searchState = try {
-            SearchResultState.Results(source.search(query, offlineOnly = offlineOnly))
+        val title = query
+        if (title.isBlank()) return
+        val invocation = beginSearch(title, authorSearch = false)
+        val source = sessionOwner.requireClientOrNull() ?: run {
+            completeSearch(invocation, searchFailure(SourceErrorCode.EXTENSION_RUNTIME_FAILURE, "source-open", "source-not-open"))
+            return
+        }
+        val result = try {
+            SearchResultState.Results(source.search(title, offlineOnly = offlineOnly))
         } catch (error: SourceException) {
             SearchResultState.Failure(error.code, error.diagnostic)
         }
+        completeSearch(invocation, result)
+    }
+
+    suspend fun authorSearch(author: String, offlineOnly: Boolean = false) {
+        query = author
+        authorSearch = true
+        if (author.isBlank()) return
+        val invocation = beginSearch(author, authorSearch = true)
+        if (author.length > MaxSearchQueryLength) {
+            completeSearch(
+                invocation,
+                searchFailure(SourceErrorCode.MALFORMED_SOURCE_RESPONSE, "author-search", "author-query-too-long"),
+            )
+            return
+        }
+        val source = sessionOwner.requireClientOrNull() ?: run {
+            completeSearch(invocation, searchFailure(SourceErrorCode.EXTENSION_RUNTIME_FAILURE, "source-open", "source-not-open"))
+            return
+        }
+        val result = try {
+            SearchResultState.Results(source.authorSearch(author, offlineOnly = offlineOnly))
+        } catch (error: SourceException) {
+            SearchResultState.Failure(error.code, error.diagnostic)
+        }
+        completeSearch(invocation, result)
     }
 
     suspend fun searchVerifiedPageRequestUrl(): String? {
+        val requestedQuery = query
+        if (requestedQuery.isBlank()) return null
+        val requestedAuthorSearch = authorSearch
+        if (requestedAuthorSearch && requestedQuery.length > MaxSearchQueryLength) {
+            searchState = searchFailure(SourceErrorCode.MALFORMED_SOURCE_RESPONSE, "author-search", "author-query-too-long")
+            return null
+        }
         val source = sessionOwner.requireClientOrNull() ?: return null
-        if (query.isBlank()) return null
-        return runCatching { source.searchRequestUrl(query) }.getOrNull()
+        return try {
+            if (requestedAuthorSearch) {
+                source.authorSearchRequestUrl(requestedQuery)
+            } else {
+                source.searchRequestUrl(requestedQuery)
+            }
+        } catch (error: SourceException) {
+            if (requestedAuthorSearch) searchState = SearchResultState.Failure(error.code, error.diagnostic)
+            null
+        }
     }
 
     suspend fun searchVerifiedPage(snapshot: CapturedVerifiedPage): Boolean {
-        val source = sessionOwner.requireClientOrNull() ?: run {
-            setSearchFailure(SourceErrorCode.EXTENSION_RUNTIME_FAILURE, "source-not-open")
+        val requestedQuery = query
+        if (requestedQuery.isBlank()) return false
+        val requestedAuthorSearch = authorSearch
+        if (requestedAuthorSearch && requestedQuery.length > MaxSearchQueryLength) {
+            searchState = searchFailure(SourceErrorCode.MALFORMED_SOURCE_RESPONSE, "author-search", "author-query-too-long")
             return false
         }
-        if (query.isBlank()) return false
-        searchState = SearchResultState.Loading
-        searchState = try {
-            SearchResultState.Results(source.searchVerifiedPage(query, snapshot))
+        val invocation = beginSearch(requestedQuery, requestedAuthorSearch)
+        val source = sessionOwner.requireClientOrNull() ?: run {
+            completeSearch(invocation, searchFailure(SourceErrorCode.EXTENSION_RUNTIME_FAILURE, "source-open", "source-not-open"))
+            return false
+        }
+        val result = try {
+            if (requestedAuthorSearch) {
+                SearchResultState.Results(source.authorSearchVerifiedPage(requestedQuery, snapshot))
+            } else {
+                SearchResultState.Results(source.searchVerifiedPage(requestedQuery, snapshot))
+            }
         } catch (error: SourceException) {
             SearchResultState.Failure(error.code, error.diagnostic)
         }
-        return searchState is SearchResultState.Results
+        completeSearch(invocation, result)
+        return searchInvocation == invocation && searchState is SearchResultState.Results
     }
     suspend fun detailVerifiedPageRequestUrl(): String? {
         val source = sessionOwner.requireClientOrNull() ?: return null
@@ -268,10 +418,30 @@ internal class SourceFlowController(
 
 
     suspend fun prepareBook(book: SourceBookSummary) {
+        if (selectedBook?.identity != book.identity) {
+            detailState = SourceBookState.Loading
+            directoryState = SourceBookState.Loading
+            selectedChapter = null
+            completedChapterIds = emptySet()
+        }
         selectedBook = book
         remoteLibrary.beginSelection(book.identity)
         snapshotStore.saveBook(book)
         remoteLibrary.refreshSelection(book)
+        val persistedCompleted = library.completedChapterIds(book.identity)
+        if (selectedBook?.identity == book.identity) completedChapterIds = persistedCompleted
+    }
+
+    suspend fun prepareLocalDetail(book: SourceBookSummary) {
+        prepareBook(book)
+        detailState = SourceBookState.Content(
+            SourceBookDetail(
+                summary = book,
+                description = null,
+                tags = emptyList(),
+                status = null,
+            ),
+        )
     }
 
     suspend fun selectBook(book: SourceBookSummary, offlineOnly: Boolean = false) {
@@ -408,12 +578,28 @@ internal class SourceFlowController(
         library.saveProgress(ReadingProgress(book.identity, locator))
     }
 
+    suspend fun markChapterCompleted(
+        identity: BookIdentity,
+        chapterId: String,
+        completedAt: Instant = Instant.now(),
+    ) {
+        if (chapterId.isBlank() || chapterId in completedChapterIds && selectedBook?.identity == identity) return
+        if (library.book(identity) == null) {
+            val book = selectedBook?.takeIf { it.identity == identity } ?: return
+            library.saveBook(mergeLibraryBook(existing = null, summary = book, updatedAt = completedAt))
+        }
+        library.markChapterCompleted(identity, chapterId, completedAt)
+        if (selectedBook?.identity == identity) {
+            completedChapterIds = library.completedChapterIds(identity)
+        }
+    }
+
     private suspend fun adoptDetail(detail: SourceBookDetail) {
         val summary = detail.summary
         if (selectedBook?.identity != summary.identity) return
         selectedBook = summary
         snapshotStore.saveBook(summary)
-        val existing = library.libraryEntry(summary.identity)?.book
+        val existing = library.book(summary.identity)
         if (existing != null) {
             val merged = mergeLibraryBook(existing, summary, Instant.now())
             if (merged != existing) library.saveBook(merged)
@@ -498,30 +684,49 @@ internal class SourceFlowController(
 
     private fun resetReadingState() {
         query = ""
+        authorSearch = false
+        searchInvocation += 1
         searchState = SearchResultState.Idle
         detailState = SourceBookState.Loading
         directoryState = SourceBookState.Loading
         selectedBook = null
         selectedChapter = null
+        completedChapterIds = emptySet()
         verifiedChapterLoad = null
         preparedResumeLoad = null
     }
 
-    private fun setSearchFailure(code: SourceErrorCode, safeId: String) {
-        searchState = SearchResultState.Failure(
+    private fun beginSearch(query: String, authorSearch: Boolean): Long {
+        searchInvocation += 1
+        this.query = query
+        this.authorSearch = authorSearch
+        searchState = SearchResultState.Loading
+        return searchInvocation
+    }
+
+    private fun completeSearch(invocation: Long, result: SearchResultState) {
+        if (searchInvocation == invocation) searchState = result
+    }
+
+    private fun searchFailure(code: SourceErrorCode, stage: String, safeCode: String): SearchResultState.Failure =
+        SearchResultState.Failure(
             code,
             SourceDiagnostic(
-                correlationId = safeId.padEnd(8, '-'),
-                stage = "source-open",
-                safeCode = safeId,
+                correlationId = safeCode.padEnd(8, '-'),
+                stage = stage,
+                safeCode = safeCode,
             ),
         )
-    }
+
 
     override fun close() {
         home.close()
         sessionOwner.close()
     }
+    private companion object {
+        const val MaxSearchQueryLength = 100
+    }
+
 }
 
 enum class SourceRestorationTarget { SEARCH, DETAIL, DIRECTORY, READER }

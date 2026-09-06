@@ -9,15 +9,38 @@ Gate 是进入下一阶段或合并/发布的判定点，不是工作范围或�
 
 每个问题只有在“源头修复、回归防线、规则沉淀、可回退提交”全部完成后才能关闭。
 
+## 命名与统一 Change Packet
+
+本文件的固定生命周期使用 `G0–G7`；Android UI 审阅过程使用 `UI-R0–UI-R4.1`；产品工作范围使用 `P1–P4`/`P4A–P4C`；Review Graph 节点写为 `RG-L01`、`RG-B03` 等。历史文件名和 schema 可保留旧名，但当前决策不得只写无命名空间的 `R1` 或 `Gate 4`。
+
+每个非平凡变更复用同一个 Change Packet，不为 Planner、Designer、Adviser 或 PR 另造互不兼容的格式：
+
+```text
+Change identity and immutable baseline/input
+Goal and non-goals
+Affected contracts, components and callers
+State transitions, failure recovery and cancellation
+Security, privacy, persistence and migration
+UI/profile applicability
+Verification matrix and evidence owners
+Rollback boundary and revert order
+Planner result
+Designer result when applicable
+Adviser result
+Implementation/merge authorization result
+```
+
+字段可以嵌入 Phase 文档、PR 描述或已有版本化计划；不得再建立一份复制当前状态的新总流程文档。
+
 ## 每个 Phase 的固定治理流程
 
-### 0. Plan and execution authorization
+### G0. Plan and execution authorization
 
 实现前，Planner 必须将版本化计划包附在 PR 或 Phase 文档：目标/非目标、端到端与失败路径、组件和迁移、UI 影响、风险、验收矩阵、回退提交顺序。任何 UI/交互/golden 变化必须由独立 Designer 审阅；每个整体代码计划必须由独立 Adviser 审阅架构、安全、生命周期、并发/取消和验证。两项结论都绑定计划输入。
 
 默认必须在这些审阅通过后等待用户明确确认才开始实现。用户在当前请求中明确声明“无人值守”或“自主批准执行”时，实施者可批准已审阅的计划范围；范围扩大、UI 增加或风险变化会使授权失效并要求重审。无人值守实施授权不取代受保护分支的用户合并确认。
 
-### 1. Scope
+### G1. Scope
 
 在实现前记录：
 
@@ -26,10 +49,10 @@ Gate 是进入下一阶段或合并/发布的判定点，不是工作范围或�
 - persisted/effective/capability 状态；
 - 安全、隐私、E-ink、无障碍、离线和失败边界；
 - 回退时允许丢弃和必须保留的数据。
-- Android UI/交互改动先执行仓库级 `tools/skills/tsuyomi-android-review/SKILL.md` R1 流程；其本地忽略报告只选择受影响 Review Graph 节点和验证层，不授予批准。
+- Android UI/交互改动先执行仓库级 `.agents/skills/tsuyomi-android-review/SKILL.md` 的 `UI-R1`；其本地忽略报告只选择受影响 Review Graph 节点和验证层，不授予批准。
 - Every explicit user design correction or supersession is reconciled into the owning active contract in the same work session, then propagated to the affected Review Graph obligation and highest observable regression seam. Chat, memory, issue drafts, prototype comments and screenshots are not sufficient standalone persistence. The continuity and empty-context recovery protocol is [`DESIGN_MEMORY_WORKFLOW.md`](DESIGN_MEMORY_WORKFLOW.md).
 
-### 2. Design
+### G2. Design
 
 设计包必须包含：
 
@@ -42,7 +65,7 @@ Gate 是进入下一阶段或合并/发布的判定点，不是工作范围或�
 
 设计产出必须经过独立 Designer UI/UX 评审。结论仅允许 `approve`、`approve with changes`、`reject`；只有绑定目标 Git 输入和证据摘要的 `approve` 才准入实现。
 
-### 3. Implementation
+### G3. Implementation
 
 - 决策放在拥有它的最低公共层，禁止在多个 screen 复制推导。
 - 修复根因；禁止 lint suppression、baseline、特殊输入分支或兼容 shim 代替迁移。
@@ -50,7 +73,7 @@ Gate 是进入下一阶段或合并/发布的判定点，不是工作范围或�
 - clean cutover：迁移所有调用者并删除旧路径、重复实现和失效文档。
 - 新依赖必须同时更新 version/lock、verification metadata、第三方声明和许可证。
 
-### 4. Adviser code review
+### G4. Adviser code review
 
 独立 Adviser 代码评审对目标 Git 输入检查：
 
@@ -63,38 +86,54 @@ Gate 是进入下一阶段或合并/发布的判定点，不是工作范围或�
 
 每个 finding 必须记录严重度、证据路径、源头修复、验证和关闭提交。目标输入改变时，只允许明确标注“不影响审阅范围”，否则重审。公开仓库只保留适合长期维护的结论和规则，不提交本地会话、提示词或私有审阅转录。
 
-### 4.5 PR admission and merge authorization
+### G4.5. PR admission and merge authorization
 
 PR 创建后及最终功能变更后，Adviser 必须对 PR head 再审阅一次；新 finding 必须按严重度关闭，head 变化会使受影响审阅失效。所有 required checks 成功后仍必须等待用户人工确认才可合并。Designer/Adviser `approve`、CI success 和无人值守实施授权都不等同于 GitHub review 或合并许可。
 
-### 5. Verification
+### G5. Verification
 
-按变更类型运行真实证明：
+验证分三层。三层复用同一 Change Packet、Git 边界和 affected-path 计划；Android Studio/Android CLI 只缩短反馈，不建立第二套 proof system。
 
-- Bug：先复现，再确认复现消失。
-- UI：真实 screen 语义测试、golden 和 AVD/设备交互。
-- 持久化/安全：API 下界 instrumentation，覆盖重建、隔离、删除和错误。
-- 协议：valid/invalid fixtures 与 conformance。
-- 功能/API：现有契约测试；只有新增可观察契约时添加测试。
+#### Tier 1 — Fast edit loop
 
-Android Phase exit/admission gate 的最低自动检查：
+- Android Studio editor/gutter、Compose Preview、Live Edit/Apply Changes、Layout Inspector 和 debugger 只回答当前编辑问题，不形成 gate evidence。
+- 使用已签入的 `.run/` Gradle configuration 或 Gradle tool window 的精确 module task；Gradle Wrapper 仍拥有 compiler/lint/test 结论。
+- 不运行全项目 model discovery、全 Android suite、AVD 重建或重复截图。
 
-```text
-assembleDebug
-lintDebug（app + affected Android libraries）
-JVM/unit tests
-受影响 instrumentation tests
-validateDebugScreenshotTest
-python -m reuse lint
-```
+#### Tier 2 — Affected-change proof
 
-跨组件 Phase exit/admission gate 同时要求 protocol `npm ci && npm test`、extensions 的 build/fixture/package determinism 检查（实现后启用）、Android 相关检查，以及根 Monorepo REUSE/制品策略。
+1. UI change 先由 `UI-R1` 以显式 baseline 或 Git merge-base 选择 owning Review Graph nodes、cross-cutting capabilities 和 evidence lanes。
+2. `tools/android_ci_plan.py` 将 changed paths 映射为精确 build、lint、JVM、screenshot、instrumentation 与 dependency-lock tasks。已知 module 不得自动扩张到全 Android；未知 Android source 或无有效 Git base 才使用保守全集。
+3. Gradle 一次构建受影响 production target；普通验证和 CI admission 不得使用 `--write-locks`。只有 dependency input 改变时才在独立的本地 maintenance 步骤更新 lock，再以干净 worktree 运行一次普通 strict verification 证明提交结果。CI 直接验证提交中的 lock；先重写 lock 再重复构建既掩盖输入事实，也浪费 admission 时间。
+4. 运行真实证明：Bug 先复现后消失；UI 用 production semantics/layout/behavior、受影响 screenshot assertion 和必要 AVD interaction；持久化/安全覆盖 API 下界、重建、隔离、删除和错误；协议使用 valid/invalid fixtures 与 conformance。
+5. Runtime change 每个 active profile 只部署一次。Android CLI 拥有 isolated AVD、delta install、exact activity launch、layout diff 和 PNG；一个 observable claim 只指定一个 evidence owner。截图不替代 gesture/state-transition test。
 
-Android Phase 的运行期验收至少包含两条不可互换的 API 29 portrait 证据：`Tsuyomi_API29` 的 `1080×2400` forced Standard 用户流，以及 `Tsuyomi_EInk_API29` 的 `1264×1680` forced E-ink 同一用户流。两者必须绑定同一目标 head，并分别记录分辨率、density、方向、font scale 和截图 SHA-256。横屏、分屏、golden 或在单一 AVD 上切换 profile 都不能替代任一 portrait 记录；缺失即阻塞 PR admission gate。完整矩阵以 [`AVD_MATRIX.md`](../verification/AVD_MATRIX.md) 为准。
+#### Bounded failure escalation
 
-Required workflow 的 path detection 必须使用仓库根锚点（例如 `git -C "$GITHUB_WORKSPACE"`），不得依赖 job 默认 `working-directory`。Hosted 准入不仅检查 check conclusion；还必须确认目标 head、关键 build/test/instrumentation/package steps 非 `skipped`，并抽查 job step/log 证明命令真实执行。绿色空任务不是证据。
+- Before running Gradle or a device Journey, write the exact change-to-evidence mapping: affected production target, smallest behavioral reproduction, adjacent state sequence if class order matters, active profiles, and the claims delegated to CI. A test merely existing in the same class or module never expands scope.
+- Debug in the fixed order `exact reproduction → affected test repeated until stable → directly adjacent sequence → affected active-profile Journey group → at most one required full class/suite`. A late full-suite failure must return to the smallest failing seam; immediately rerunning the same full suite is prohibited.
+- The same failure signature appearing in two independent Journeys is a shared harness/lifecycle/synchronization incident until disproved. Stop broad reruns, inspect the common helper and state owner, and do not change production behavior merely to make the harness idle.
+- A focused pass followed by a class-order failure is evidence of leaked state, lifecycle ownership, or synchronization—not permission to widen product scope. Test-only helper changes invalidate only the seams they touch; rerun the complete class only when it is itself a required gate and the affected group is already stable.
+- Local Tier 2 proves affected behavior and one active-profile production build. Tier 3 CI owns the complete planner-selected matrix; do not duplicate that matrix locally unless CI cannot execute it or a CI-only failure must be reproduced.
+- Resolve `activeProfiles` and `deferredProfiles` before selecting any test. Routine instrumentation and screenshot registration for a frozen profile must remain disabled/ignored. A direct deferred-profile change runs only the policy's named minimal exception; profile restoration requires an explicit policy change first.
+- After the first repeated failure signature, class-order-only failure, environment/tool blocker, or proposed scope expansion, report the completed proof, current blocker, stopped commands, and next bounded experiment immediately. Do not allow a long-running gate to conceal that the task has changed from product verification to harness debugging.
 
-### 6. Evidence
+#### Tier 3 — CI admission
+
+- `.github/workflows/android-quality.yml` 使用同一 planner 选择 bounded production tasks；documentation-only changes 不启动 Android jobs，known module changes 只跑 owning tasks，invalid/missing base 使用 conservative full plan。
+- 每个 PR/ref 只有一个 active `android-quality` run；required Android jobs 有 18 分钟 hard deadline。Instrumentation APK 可并行编译，device execution 串行。
+- Hosted admission 必须确认目标 head、关键 build/test/instrumentation/package steps 非 `skipped`，并抽查 log 证明命令真实执行。绿色空任务不是证据。
+- Gradle Managed Device 仅是 manual/non-required pilot；未证明 device geometry、稳定性、缓存和 evidence equivalence 前，不替代 required API 29 emulator lane。
+
+最低验证类别保持不变，但由 planner 选择对应 tasks：production assemble、affected lint、affected JVM/unit、affected screenshot validation、affected instrumentation，以及 repository policy/REUSE。跨组件 admission 另加 protocol `npm ci && npm test`、extensions build/fixture/package determinism 和根仓库检查。
+
+Android 运行期验收只执行 `.agents/skills/tsuyomi-android-review/review-policy.json` 当前 `activeProfiles`。每个 active profile 必须在独立 API 29 portrait AVD 上记录同一目标 head、分辨率、density、方向、font scale、用户流结果和截图 SHA-256；横屏、分屏、golden 或在单一 AVD 上切换 profile 不能替代该 portrait 记录。
+
+`deferredProfiles`/`FROZEN` profile 在日常 gate 中不构成缺失证据：保留合同、实现、fixture 和 inventory，不新增设计/批准/golden。直接修改 deferred profile 时，只执行 policy 允许的最小编译、非视觉契约测试和必要启动 smoke；恢复为 active 时重新进入完整 retained matrix 和物理设备要求。完整设备配方以 [`AVD_MATRIX.md`](../verification/AVD_MATRIX.md) 为准。
+
+Required workflow 的 path detection 必须使用仓库根锚点（例如 `git -C "$GITHUB_WORKSPACE"`），不得依赖 job 默认 `working-directory`。
+
+### G6. Evidence
 
 `docs/phases/PHASE_N.md` 必须记录：
 
@@ -103,16 +142,31 @@ Required workflow 的 path detection 必须使用仓库根锚点（例如 `git -
 - 精确命令、工具版本、设备/AVD recipe 版本；
 - 退出码和不可变产物 SHA-256；
 - screenshot/golden diff 结论；
-- 标准手机竖屏与 E-ink 竖屏的独立 AVD 记录；每条包含目标 head、物理分辨率、density、方向、profile、font scale、用户流结果和截图 SHA-256；
+- 每个 active profile 的独立 portrait AVD 记录：目标 head、物理分辨率、density、方向、profile、font scale、用户流结果和截图 SHA-256；
+- 每个 deferred profile 的 policy 状态、保留边界和恢复触发条件；
 - 已知限制、延期项和回退点。
 
 `build/` 中本地截图只能作为调试证据，不能替代版本化 Phase 记录。
 
-### 7. Retrospective
+### G7. Retrospective
 
 每个 Phase 结束后更新复盘：问题、根因、源头修复、自动防线、横向/纵向扩展。能复用于未来 Phase 的结论必须进入本文件、架构规则或贡献规则，不能只留在聊天记录。
 
 Design-memory checkpoints are event-driven rather than calendar-driven: after an accepted correction, after a coherent decision cluster, before switching feature families, and before handoff. Stable decisions enter the owning versioned contract; coherent deferred implementation packages may be published through the repository's `to-spec` workflow; local semantic memory and handoff state never replace public authority or evidence.
+
+### Package-review prevention checklist
+
+The Phase 4B retrospective exposed defects that module-local happy-path checks could not catch. Future cross-boundary packages must apply these rules before final Adviser review:
+
+- Review each operation as a complete state machine: authorization, durable intent, transport acceptance, confirmation, cancellation, process loss, explicit retry and UI presentation. A compound action persists its next stage before the first transport and never repeats a confirmed stage.
+- Bind every protected network surface to one exact signed operation context. Listing, target discovery and each mutation are separate capabilities; generic transport and inferred/default target IDs are forbidden.
+- Keep user-visible outcomes outside transient controls that dismiss after dispatch. Success, unresolved, partial and failure states remain observable and recoverable after menus, sheets or dialogs close.
+- Sparse remote projections merge into richer local metadata; they never replace authoritative local/catalog fields with absent summary values.
+- Data migrations never infer consent, authorization or acknowledgement from coincidental data overlap. Security- or privacy-significant receipts require explicit historical evidence; otherwise default to not granted.
+- Version exported transfer/protocol documents whenever the accepted field set changes. Current writers emit one strict version; readers may retain explicitly tested strict legacy versions.
+- Shared preference stores use owner-key allowlists for reset/delete. Whole-store clearing is prohibited unless that store has exactly one owner and the contract explicitly requires it.
+- CI planners accumulate overlapping module ownership, discover every test-bearing module, compare from the merge-base and rebuild changed signed fixtures before dependent instrumentation. CI validates committed dependency locks once and never rewrites them.
+- Screenshot registration follows the active review profile policy. Frozen-profile previews and goldens remain retained but are not registered as routine `PreviewTest` evidence, regenerated or counted toward the active gate; repository governance rejects accidental frozen E-ink registration.
 
 ## Finding 关闭标准
 

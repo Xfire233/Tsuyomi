@@ -6,12 +6,19 @@ package org.tsuyomi.core.ui.components
 
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.Image
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
+import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.dp
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
@@ -26,22 +33,45 @@ private val fallbackPalette = listOf(
 
 /** Pure renderer: no repository reference, request construction, transport, or cache ownership. */
 @Composable
-fun CoverImage(state: CoverUiState, modifier: Modifier = Modifier) {
+fun CoverImage(
+    state: CoverUiState,
+    modifier: Modifier = Modifier,
+    unresolvedBadge: Boolean = false,
+) {
     val bitmap = when (state) {
         is CoverUiState.Ready -> state.bitmap
         is CoverUiState.StaleReady -> state.bitmap
         else -> null
     }
     Surface(modifier = modifier, shape = MaterialTheme.shapes.small) {
-        if (bitmap != null) {
-            Image(
-                bitmap = bitmap.asImageBitmap(),
-                contentDescription = null,
-                modifier = Modifier.fillMaxSize(),
-                contentScale = ContentScale.Crop,
-            )
-        } else {
-            FallbackCover(state.fallbackSpec(), Modifier.fillMaxSize())
+        Box(modifier = Modifier.fillMaxSize()) {
+            if (bitmap != null) {
+                Image(
+                    bitmap = bitmap.asImageBitmap(),
+                    contentDescription = null,
+                    modifier = Modifier.fillMaxSize(),
+                    contentScale = ContentScale.Crop,
+                )
+            } else {
+                FallbackCover(state.fallbackSpec(), Modifier.fillMaxSize())
+            }
+            if (unresolvedBadge) {
+                Surface(
+                    modifier = Modifier
+                        .align(Alignment.TopEnd)
+                        .padding(4.dp)
+                        .testTag("cover-unresolved-badge"),
+                    shape = MaterialTheme.shapes.extraSmall,
+                    color = MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.92f),
+                ) {
+                    Text(
+                        text = "UNRESOLVED",
+                        modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp),
+                        style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
+                        color = MaterialTheme.colorScheme.onErrorContainer,
+                    )
+                }
+            }
         }
     }
 }

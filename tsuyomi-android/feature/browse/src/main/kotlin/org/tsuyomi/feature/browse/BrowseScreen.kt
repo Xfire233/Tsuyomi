@@ -157,7 +157,7 @@ fun BrowseScreen(
         return
     }
 
-    StandardAtlasBrowseScreen(
+    BrowseScreenContent(
         state = state,
         installedSource = installedSource,
         onRequestImport = onRequestImport,
@@ -172,7 +172,7 @@ fun BrowseScreen(
 }
 
 @Composable
-private fun StandardAtlasBrowseScreen(
+private fun BrowseScreenContent(
     state: BrowseUiState,
     installedSource: BrowseInstalledSource?,
     onRequestImport: () -> Unit,

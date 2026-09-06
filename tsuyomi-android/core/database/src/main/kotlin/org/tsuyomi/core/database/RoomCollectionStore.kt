@@ -115,6 +115,9 @@ internal class RoomCollectionStore(
         }
     }
 
+    suspend fun manualCollectionIds(identity: BookIdentity): Set<String> =
+        dao.manualCollectionIds(identity.sourceId, identity.remoteBookId).toCollection(linkedSetOf())
+
     suspend fun addManualMemberships(collectionId: String, identities: Set<BookIdentity>): Int =
         database.withTransaction {
             val collection = requireNotNull(dao.collection(collectionId)) { "Unknown collection" }

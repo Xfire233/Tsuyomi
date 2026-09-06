@@ -4,6 +4,8 @@
  */
 package org.tsuyomi.android
 
+import java.io.File
+import java.security.MessageDigest
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
@@ -40,7 +42,7 @@ internal class NormalizedSourceReplayInstrumentedTest : SourceFlowInstrumentedTe
         )
         val online = controller {
             FakeSession(
-                detail = { summary -> SourceBookDetail(summary.copy(title = "规范详情"), "规范简介", listOf("测试"), "连载") },
+                detail = { summary -> SourceBookDetail(summary.copy(title = "规范详情"), "规范简介", listOf("测试"), "连载", lastUpdatedDate = "2026-02-03") },
                 directoryResult = { SourceDirectory(identity, chapters) },
                 chapterResult = { _, _ -> document },
             )
@@ -63,10 +65,46 @@ internal class NormalizedSourceReplayInstrumentedTest : SourceFlowInstrumentedTe
         val detail = (offline.detailState as SourceBookState.Content).value
         val directory = (offline.directoryState as SourceBookState.Content).value
         assertEquals("规范详情", detail.summary.title)
+        assertEquals("2026-02-03", detail.lastUpdatedDate)
         assertEquals("10001", directory.chapters.single().chapterId)
         assertEquals("第一卷", directory.chapters.single().volumeTitle)
         assertEquals(document, offlineReader.document)
         assertNull(offlineReader.failure)
         offline.close()
+    }
+
+    @Test
+    fun normalized_detail_preserves_update_date_and_decodes_legacy_detail() {
+        val storedIdentity = BookIdentity(SOURCE_FLOW_TEST_SOURCE_ID, "1234")
+        val legacyIdentity = BookIdentity(SOURCE_FLOW_TEST_SOURCE_ID, "5678")
+        val store = NormalizedSourceStore(context)
+        store.writeDetail(
+            SourceBookDetail(
+                summary = summary(storedIdentity.sourceId, storedIdentity.remoteBookId, "缓存详情"),
+                description = null,
+                tags = emptyList(),
+                status = null,
+                lastUpdatedDate = "2026-02-03",
+            ),
+        )
+
+        legacyDetailFile(legacyIdentity).apply {
+            parentFile?.mkdirs()
+            writeText(
+                """{"schema":1,"kind":"detail","summary":{"identity":{"sourceId":"org.tsuyomi.wenku8","remoteBookId":"5678"},"title":"旧缓存详情","author":null,"coverUrl":null,"canonicalUrl":"https://www.wenku8.net/book/5678.htm"},"description":null,"tags":[],"status":null}""",
+            )
+        }
+
+        assertEquals("2026-02-03", store.readDetail(storedIdentity)?.lastUpdatedDate)
+        val legacy = store.readDetail(legacyIdentity)
+        assertEquals("旧缓存详情", legacy?.summary?.title)
+        assertNull(legacy?.lastUpdatedDate)
+    }
+
+    private fun legacyDetailFile(identity: BookIdentity): File {
+        val key = MessageDigest.getInstance("SHA-256")
+            .digest("${identity.sourceId}\u0000${identity.remoteBookId}\u0000".toByteArray(Charsets.UTF_8))
+            .joinToString("") { byte -> "%02x".format(byte.toInt() and 0xff) }
+        return File(context.noBackupFilesDir, "normalized-source-content/detail/$key.json")
     }
 }

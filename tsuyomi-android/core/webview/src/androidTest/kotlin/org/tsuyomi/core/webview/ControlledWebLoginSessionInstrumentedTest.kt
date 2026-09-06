@@ -227,6 +227,22 @@ class ControlledWebLoginSessionInstrumentedTest {
     }
 
     @Test
+    fun explicit_verified_page_binding_accepts_an_already_settled_exact_page() {
+        val tracker = VerifiedPageNavigationTracker()
+        val requestUrl = "https://allowed.example/index.php"
+
+        tracker.start(requestUrl, settledPageUrl = requestUrl)
+        tracker.onMainFrameNavigation(requestUrl, isRedirect = false, hasGesture = false)
+        tracker.onPageStarted(requestUrl)
+        tracker.onPageFinished(requestUrl)
+
+        assertEquals(
+            VerifiedPageNavigationBinding(requestUrl, requestUrl),
+            tracker.bindingFor(requestUrl),
+        )
+    }
+
+    @Test
     fun cancel_discards_webview_cookie() = runBlocking(Dispatchers.Main) {
         val session = ControlledWebLoginSession(context, "fixture.source", setOf(origin), credentials)
         session.open("https://allowed.example/login")

@@ -28,12 +28,12 @@ class HostNetworkGatewayRemotePolicyTest {
         )
         val gateway = HostNetworkGateway(transport)
         val failure = assertHostFailure {
-            gateway.request(grant, request(url = "https://www.wenku8.net/remote/shelf?mode=add"), context)
+            gateway.request(grant.copy(remoteReadPolicy = context.policy), request(url = "https://www.wenku8.net/remote/shelf?mode=add"), context)
         }
 
         assertEquals(HostNetworkError.INVALID_REQUEST, failure.error)
         assertEquals(0, transport.requests.size)
-        gateway.request(grant, request(url = "https://www.wenku8.net/remote/shelf?mode=list"), context)
+        gateway.request(grant.copy(remoteReadPolicy = context.policy), request(url = "https://www.wenku8.net/remote/shelf?mode=list"), context)
         assertEquals(1, transport.requests.size)
     }
 
@@ -64,7 +64,7 @@ class HostNetworkGatewayRemotePolicyTest {
         )
 
         val result = HostNetworkGateway(transport).request(
-            grant,
+            grant.copy(remoteReadPolicy = policy),
             request(url = "https://www.wenku8.net/remote/shelf?mode=list"),
             remoteLibraryReadContext(policy, cursor = null),
         )
@@ -88,7 +88,7 @@ class HostNetworkGatewayRemotePolicyTest {
 
         val failure = assertHostFailure {
             HostNetworkGateway(transport).request(
-                grant,
+                grant.copy(remoteReadPolicy = policy),
                 request(url = "https://www.wenku8.net/remote/shelf?mode=list"),
                 remoteLibraryReadContext(policy, cursor = null),
             )
@@ -234,7 +234,7 @@ class HostNetworkGatewayRemotePolicyTest {
 
         val failure = assertHostFailure {
             HostNetworkGateway(transport).request(
-                grant.copy(remoteAddPolicy = protectedAddPolicy),
+                grant.copy(remoteReadPolicy = readPolicy, remoteAddPolicy = protectedAddPolicy),
                 request(url = "https://www.wenku8.net/remote/list?mode=list"),
                 remoteLibraryReadContext(readPolicy, cursor = null),
             )
@@ -243,4 +243,31 @@ class HostNetworkGatewayRemotePolicyTest {
         assertEquals(HostNetworkError.INVALID_REQUEST, failure.error)
         assertEquals(1, requests.size)
     }
+    @Test
+    fun target_list_requires_its_exact_signed_operation_context() = runBlocking {
+        val policy = RemoteOperationRequestPolicy(
+            origin = HttpsOrigin("https://www.wenku8.net"),
+            method = NetworkMethod.GET,
+            path = "/modules/article/bookcase.php",
+            fixedParameters = mapOf("action" to "targets"),
+        )
+        val genericTransport = RecordingTransport()
+        val genericFailure = assertHostFailure {
+            HostNetworkGateway(genericTransport).request(
+                grant.copy(remoteTargetsPolicy = policy),
+                request(url = "https://www.wenku8.net/modules/article/bookcase.php?action=targets"),
+            )
+        }
+        assertEquals(HostNetworkError.INVALID_REQUEST, genericFailure.error)
+        assertEquals(0, genericTransport.requests.size)
+
+        val signedTransport = RecordingTransport()
+        HostNetworkGateway(signedTransport).request(
+            grant.copy(remoteTargetsPolicy = policy),
+            request(url = "https://www.wenku8.net/modules/article/bookcase.php?action=targets"),
+            remoteLibraryTargetsContext(policy),
+        )
+        assertEquals(1, signedTransport.requests.size)
+    }
+
 }

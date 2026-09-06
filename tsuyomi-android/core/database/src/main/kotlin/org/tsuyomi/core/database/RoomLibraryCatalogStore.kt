@@ -60,8 +60,11 @@ internal class RoomLibraryCatalogStore(
         val entry = dao.libraryEntry(identity.sourceId, identity.remoteBookId) ?: return@mapNotNull null
         val availability = dao.sourceAvailability(identity.sourceId)?.available == true
         val tags = dao.localTags(identity.sourceId, identity.remoteBookId).mapTo(linkedSetOf()) { it.displayTag }
-        val reconciliation = dao.latestReconciliation(identity.sourceId, identity.remoteBookId)?.state
+        val currentReconciliation = dao.activeReconciliation(identity.sourceId, identity.remoteBookId)
+            ?: dao.latestReconciliation(identity.sourceId, identity.remoteBookId)
+        val reconciliation = currentReconciliation?.state
             ?.let { runCatching { RemoteReconciliationState.valueOf(it) }.getOrNull() }
+        val reconciliationOperation = currentReconciliation?.operation
         LibraryEntry(
             book = book.toDomain(),
             libraryAddedAt = Instant.ofEpochSecond(entry.addedAtEpochSecond, entry.addedAtNano.toLong()),
@@ -71,6 +74,7 @@ internal class RoomLibraryCatalogStore(
             localTags = tags,
             sourceAvailable = availability,
             reconciliation = reconciliation,
+            reconciliationOperation = reconciliationOperation,
         )
     }
 
@@ -156,7 +160,7 @@ private fun LibraryBook.toEntity(): BookEntity {
     )
 }
 
-private fun BookEntity.toDomain(): LibraryBook {
+internal fun BookEntity.toDomain(): LibraryBook {
     val authors = decodeStringSet(authorsJson)
     return LibraryBook(
         identity = BookIdentity(sourceId, remoteBookId),

@@ -1,0 +1,835 @@
+{
+  "schema": "tsuyomi-review-node-catalog-v1",
+  "version": 9,
+  "nodes": [
+    {
+      "id": "L01",
+      "title": "混合书架",
+      "family": "library",
+      "kind": "surface",
+      "route": "library",
+      "requiredStates": [
+        "loading",
+        "content",
+        "empty",
+        "error",
+        "offline",
+        "selection",
+        "mutation",
+        "modal"
+      ],
+      "operations": [
+        "在 production root 验证 AppBar、快捷书架和三列封面流由真实 Room/Navigation 驱动",
+        "切换全部、继续、最近、稍后再读、追更、收藏夹与镜像并切换三种布局",
+        "使用快捷书架 + 创建；拖动单本和多选批次进入快捷书架根、现有收藏夹与直接书籍快捷项；在未锁定滚动模式和锁定固定模式分别重排快捷项、移除快捷项并验证所有目标等价；打开同步、搜索、排序、标签和书籍行菜单并确认对应触发身份",
+        "拖动后立即验证布局匹配预览、批次数量、源项降权、目标高亮、插入间隙和结果说明；拖向书籍卡中心的紧凑内区只显示与此书新建收藏夹目标，拖向卡片外缘只显示前/后插入间隙，两区之间有中性分隔且同一时刻只表达一种意图；插入、placement、尺寸和高亮使用共享克制 ease-out，reduced motion 立即替换；打开全部快捷书架时验证 220ms 顶锚展开、规则手机三列 3:4 根书架同构卡片以及 216×64dp 横向拖拽摘要；向下滚动使未锁定快捷栏收为 48dp chevron，并分别通过点击、反向滚动和拖拽悬停展开；锁定后完整快捷栏固定在 AppBar 下并持续接受根插入、收藏夹、直接书籍、重排与移除；中途解锁保持当前书籍锚点到下一次向下滚动；离开并返回根书架时验证快捷栏、根投影和已解析封面同时稳定恢复；进入子节点时验证计数和内容只属于当前投影",
+        "从 Search/Home 无封面摘要进入 canonical Detail，验证 Detail 返回的真实封面在本地 pin/read-later 后写入 Library；对既有无封面条目打开 Detail 后返回并保存进度，封面必须修复且不再被清空"
+      ],
+      "visualChecks": [
+        "AppBar、快捷书架、三列封面流和动作位置符合当前生产合同",
+        "静止态内联快捷书架保持 80×116dp、76dp 封面/图标区和单行标题；全部快捷书架改用与根书架一致的规则手机三列、3:4 封面卡和 8dp 间距，不得把压缩内联结构放大复用",
+        "拖动预览只在长按后移动超过 touch slop 才出现；快捷项使用不遮挡目标的 216×64dp 横向摘要，其他布局预览匹配来源；根插入位从零宽横向展开并通过 stable-key placement 动画把相邻快捷项连续挤开；收藏夹目标使用 1.05 缩放、primary 容器/2dp 描边和 8dp 阴影且离开后完整复原；批次数量和落点效果文案与实际结果一致",
+        "书籍卡中心的新建收藏夹高亮与外缘插入间隙互斥；不得同时显示目标卡高亮和挤开预览，也不得在中性分隔带快速抖动切换；Standard 动画连续克制，reduced motion 与 E-ink 一帧提交",
+        "锁定只固定完整快捷栏的位置，不能改变任何快捷项操作或放置目标；未锁定离屏后只显示居中的 48dp chevron，完整栏从点击、反向滚动或拖拽悬停以同一 220ms 顶锚动画展开；解锁中途不得使书籍网格跳动；reduced motion 立即替换",
+        "不得出现 interim 本地藏书标题、混合系统节点卡、AppBar + 或首字封面",
+        "三点菜单使用统一 tonal Material 容器、48dp 条目；正常空间从按钮下方展开，受限空间仅允许 Material 安全视口 fallback，不漂移到父布局原点"
+      ],
+      "humanOnlyChecks": [
+        "信息密度与扫描速度",
+        "快捷书架创建、展开、锁定固定语义和长按选择的可发现性",
+        "固定栏在大书架拖放时是否始终可靠可达",
+        "锁定与未锁定的操作等价性",
+        "菜单动作层级与锚点是否自然",
+        "E-ink 分页节奏"
+      ],
+      "evidenceStage": "production_ui"
+    },
+    {
+      "id": "L02",
+      "title": "书架系统视图",
+      "family": "library",
+      "kind": "surface",
+      "route": "library",
+      "requiredStates": [
+        "content",
+        "empty",
+        "selection",
+        "mutation"
+      ],
+      "operations": [
+        "进入继续、最近、稍后再读和休眠视图",
+        "隐藏并重建系统节点",
+        "修改稍后再读 membership 并验证其他节点保持自动",
+        "验证最近阅读只包含持久进度，并按 progress.updatedAt 从新到旧排列；未开始书籍不得进入"
+      ],
+      "visualChecks": [
+        "空态原因和恢复动作明确",
+        "自动节点无虚假编辑入口"
+      ],
+      "humanOnlyChecks": [
+        "系统节点与普通收藏夹的心理模型",
+        "自动与手工 membership 是否无需教程即可理解"
+      ],
+      "evidenceStage": "production_ui"
+    },
+    {
+      "id": "L03",
+      "title": "历史",
+      "family": "library",
+      "kind": "surface",
+      "route": "library_history",
+      "requiredStates": [
+        "loading",
+        "content",
+        "empty",
+        "error",
+        "selection",
+        "mutation",
+        "modal"
+      ],
+      "operations": [
+        "打开并删除单项",
+        "清空后取消，再次清空并确认",
+        "检查七天边界以及 Back 后的位置恢复"
+      ],
+      "visualChecks": [
+        "相对时间和精确时间分组清晰",
+        "危险操作层级正确且不暗示清除阅读进度"
+      ],
+      "humanOnlyChecks": [
+        "时间表达是否自然",
+        "清空操作是否制造不必要焦虑"
+      ],
+      "evidenceStage": "production_ui"
+    },
+    {
+      "id": "L04",
+      "title": "追更",
+      "family": "library",
+      "kind": "surface",
+      "route": "library_updates",
+      "requiredStates": [
+        "loading",
+        "content",
+        "empty",
+        "error",
+        "offline",
+        "selection",
+        "mutation",
+        "modal"
+      ],
+      "operations": [
+        "运行 slow、success、offline 和 error",
+        "观察部分结果并确认已看过",
+        "切换选择与布局"
+      ],
+      "visualChecks": [
+        "只有一个工作指示且新项目增量出现",
+        "日期、章节和动作对齐",
+        "E-ink 使用静态工作 glyph"
+      ],
+      "humanOnlyChecks": [
+        "已看过的语义",
+        "大量更新时的扫描效率",
+        "等待反馈是否可信"
+      ],
+      "evidenceStage": "production_ui"
+    },
+    {
+      "id": "L05",
+      "title": "收藏夹",
+      "family": "library",
+      "kind": "surface",
+      "route": "library_collection",
+      "requiredStates": [
+        "loading",
+        "content",
+        "empty",
+        "selection",
+        "mutation",
+        "modal"
+      ],
+      "operations": [
+        "进入根和子收藏夹",
+        "创建、编辑、选择、移动 membership 与删除",
+        "尝试创建第三层并切换三种布局"
+      ],
+      "visualChecks": [
+        "子收藏夹和书籍作为 peers",
+        "最大两层明确且创建管理动作不重复"
+      ],
+      "humanOnlyChecks": [
+        "是否符合文件夹心智模型",
+        "进入目标收藏夹的步骤成本"
+      ],
+      "evidenceStage": "production_ui"
+    },
+    {
+      "id": "L06",
+      "title": "智能规则",
+      "family": "library",
+      "kind": "surface",
+      "route": "library_collection_rule",
+      "requiredStates": [
+        "content",
+        "mutation",
+        "modal"
+      ],
+      "operations": [
+        "操作 picker、dropdown、checkbox、range 和自由文本",
+        "制造非法规则并修正",
+        "带未保存修改返回并检查草稿恢复"
+      ],
+      "visualChecks": [
+        "内置数据使用选择器且错误就地显示",
+        "上限、适用范围和保存状态可见"
+      ],
+      "humanOnlyChecks": [
+        "用户能否预测规则结果",
+        "错误文案是否帮助修正而非暴露内部实现"
+      ],
+      "evidenceStage": "production_ui"
+    },
+    {
+      "id": "L07",
+      "title": "标签",
+      "family": "library",
+      "kind": "surface",
+      "route": "library_tags",
+      "requiredStates": [
+        "loading",
+        "content",
+        "empty",
+        "mutation",
+        "modal"
+      ],
+      "operations": [
+        "切换本地和来源",
+        "搜索、排序和切换布局",
+        "编辑本地标签并通过对应稳定触发身份打开每个标签行的锚定三点菜单；尝试操作来源标签"
+      ],
+      "visualChecks": [
+        "所有权不纵向混排",
+        "compact chip 无计数而 list row 有计数",
+        "来源操作清晰只读",
+        "标签行菜单在正常空间位于对应按钮下方；受限空间仅允许 Material 安全视口 fallback，删除项使用错误色并继续要求确认"
+      ],
+      "humanOnlyChecks": [
+        "上百标签时的扫描效率",
+        "所有权能否不逐字阅读即识别",
+        "行级菜单是否与目标标签保持明确归属"
+      ],
+      "evidenceStage": "production_ui"
+    },
+    {
+      "id": "L08",
+      "title": "网站镜像",
+      "family": "library",
+      "kind": "surface",
+      "route": "library_mirror",
+      "requiredStates": [
+        "loading",
+        "content",
+        "empty",
+        "error",
+        "offline",
+        "selection",
+        "mutation",
+        "unresolved",
+        "modal"
+      ],
+      "operations": [
+        "从 Library 根固定镜像根并从 Browse 来源主页进入同一路由；验证新来源默认只显示聚合的全部网站收藏",
+        "从镜像更多菜单使用完整文字固定/移出快捷书架，再按来源启用网站分组；验证文件夹节点、独立 folder pin、专页与排序；关闭后隐藏但保留 pin/顺序/membership，再启用恢复；有既存 folder pin 的迁移自动保留分组模式，仅有 target 数据不自动开启",
+        "简单模式把本地单本拖到镜像根并直接 ADD 至网站默认目标，且不出现 target picker/MOVE；网站书籍静止长按只进入选择，继续移动超过 touch slop 后才出现拖拽摘要和两个瞬态目标；验证复制到本地、确认从网站收藏移除及其保留项说明；多选 AppBar 仅提供全选、批量本地复制和适用的单本网站动作，三点菜单不重复复制所选；分组模式再验证根 target picker、精确文件夹 ADD→MOVE 与远端文件夹间 MOVE；多选批次尝试网站目标并验证拒绝原因",
+        "验证 COPY 首次说明并保存按来源/能力指纹绑定的 receipt，随后通过单本拖放、所选复制和全部复制重复执行均不再弹确认且产生零网站写请求；从旧版升级时不得依据持久网站镜像与本地书架重叠、快捷书架 pin 或 prior ADD 推断 COPY receipt，缺少显式 receipt 的来源仍保留首次说明；验证 ADD/MOVE 首次分别授权、后续精确动作不重复确认但仍生成新 token/reconciliation；Wenku8 ADD 使用身份绑定的幂等 GET 端点，模糊响应保留 ADD unresolved，重试继续同一 ADD；accepted unresolved ADD 不提供本地解除锁定，只能由精确幂等重试关闭，token 接受前取消的 ADD 可作为新的显式动作再次发起；MOVE/REMOVE acknowledge 取消同一身份与操作的全部 unresolved retry rows，只释放本地锁且不声称网站成功；MOVE 入口只在分组模式出现；制造 ADD 已确认且 MOVE unresolved 后只重试 MOVE 或保留默认组；刷新后让已固定 targetId 消失并验证冻结修复入口",
+        "从无封面的网站收藏进入 canonical Detail 获取封面后返回；镜像必须立即显示该封面，随后再次刷新缺少封面的远端列表也不得退回占位图"
+      ],
+      "visualChecks": [
+        "默认简单模式完全复用 Library 的书籍 grid/list/compact 卡片、封面、间距、选择态和方向 FAB，只显示全部网站收藏且无 folder/picker/MOVE chrome",
+        "镜像更多菜单以完整动词清楚提供固定/移出快捷书架和按来源启用/停用网站分组；镜像管理从不以图标-only + 或垃圾桶表达，切换也不声称或触发远端合并",
+        "分组模式的镜像根先显示远端文件夹节点再显示全部远端书籍；文件夹子页有自己的 AppBar、刷新、图钉、布局和排序，且不递归显示 Library 根快捷栏",
+        "镜像根和分组模式文件夹快捷项保持 80×116dp 静止结构；独立固定且同来源相邻插入；停用时隐藏保留，失效目标冻结而非静默消失",
+        "MOVE、复制到本地书架、从网站收藏移除使用不同完整文案、语义和视觉层级；本地复制明确网站收藏保留，网站移除使用 error 角色并明确本地数据保留；镜像页不显示本地移出书架底部目标；简单模式不显示 MOVE；网站移除始终进入明确确认",
+        "确认成功立即更新镜像本地投影和快捷计数；部分完成显示书籍位于默认网站书架并提供继续移动/保留默认书架"
+      ],
+      "humanOnlyChecks": [
+        "默认入口是否像一个普通网站书架而非分组管理器",
+        "未使用网站分组的用户是否无需理解目标分类",
+        "启用分组后的三种拖放结果是否可预测",
+        "切换分组是否可信地保留用户布局和网站数据",
+        "持久授权后的直接 ADD/MOVE 是否仍有足够目标反馈",
+        "远端目标失效与部分完成是否可信可恢复"
+      ],
+      "evidenceStage": "production_ui"
+    },
+    {
+      "id": "B01",
+      "title": "书籍详情",
+      "family": "book_reader",
+      "kind": "surface",
+      "route": "book_detail",
+      "requiredStates": [
+        "loading",
+        "content",
+        "error",
+        "offline",
+        "mutation",
+        "unresolved",
+        "selection",
+        "modal"
+      ],
+      "operations": [
+        "验证 135×180dp 封面、最多两行的默认 Title-role 书名、仅真实第三行溢出时的圆形 Material Info 图标和完整书名原位展开/收起；封面右栏按标题一/二行、独立作者行、状态+来源更新行、评分、SplitButton 的顺序铺满同高区域；不得出现 Badge/chip 或把作者合并进状态日期行；旧扩展缺失字段时不伪造日期",
+        "点击作者后立即显示同来源作者搜索结果，不再点搜索；进入结果详情再 Back 不重复请求，普通草稿恢复仍不查询",
+        "验证官方 Material 3 SplitButton 主段直接加入本地根，入库后禁用；副段始终打开锚定下拉菜单而非 Sheet",
+        "下拉菜单分别操作稍后再读、快捷书架、本地收藏夹和简单/分组网站目标；保持本地与远端边界、精确目标与部分 MOVE 恢复；当且仅当当前书籍存在于持久网站镜像时，Detail 顶栏提供完整文字的网站 MOVE 与从网站收藏移除，MOVE 仍受分组模式约束，移除保留本地书架与阅读数据并要求明确确认",
+        "验证长简介三行预览与展开/收起，以及分卷展开、以标准 Material 3 FilterChip 显示仅看未读筛选；未选中使用普通 filter 图标，选中使用主题 selected container、leading check 与 selected/stateDescription 语义；保留 48dp action lane、独立排序、精确章节 Reader 导航和跨入口 canonical Detail；完成章节只来自持久 BookIdentity + chapterId 集合，跳到后续章节不得把此前章节推断为已读；拖动或惯性滚动目录时方向 FAB 隐藏，停止后按最后方向恢复",
+        "在 1080×2400@420、字体 1.0 的常用竖屏，只按书名本身判断两行溢出；刚好两行完整显示且无 Info。作者独占标题后的下一行；状态和日期同用下一行；评分和 SplitButton 依次纵向排列。首块贴右栏顶部、按钮贴封面底部，四个块间剩余高度均匀分配，不得集中为空白区域",
+        "评分使用无外框的 36dp 布局带，星形 20dp、中心距 28dp；第一颗可见星形的左边缘必须与标题、作者、状态日期和 SplitButton 外框左边缘在 1px 内对齐，不能只对齐不可见布局带。不得有 Surface 填充、描边、胶囊、分隔线或阴影。五个键盘/TalkBack 动作、选中/禁用、相邻边界选择与重复清除不变",
+        "将同一 Standard 手机转为横屏，按实际系统栏与 cutout 后的安全宽度检查完整 split 副段和阅读 FAB；不得被侧边系统导航栏遮挡，也不得重复消费 inset",
+        "验证 Detail 的权威 summary 升级同一 BookIdentity 的 Library 元数据；加入书架、稍后再读和后续进度保存均保留 cover/author/canonical 字段",
+        "日期只来自归一化源站更新字段；来源或旧扩展缺失时不显示占位日期，升级扩展并刷新后恢复；不动持久阅读进度、继续阅读或目录当前章节标记；作者链接支持键盘/TalkBack，失败不得静默回退书名搜索"
+      ],
+      "visualChecks": [
+        "标题一/二行、作者独立行、状态+日期行、评分、SplitButton 从上到下占满封面右栏；按钮底与封面底对齐，剩余高度均分而非留在某一处",
+        "状态与日期共享普通 metadata 行且无 Badge/chip；作者独占上一行、无下划线并使用低饱和蓝色",
+        "评分区域没有外框、填充、胶囊、分隔线或阴影，只保留五颗星；第一颗可见星形与标题/作者/状态日期/SplitButton 左缘严格对齐，评分与按钮不视觉粘连",
+        "刚好两行书名完整显示且无 Info；真实第三行溢出才显示文字同尺度圆形 i，展开/收起不遮挡书名",
+        "下拉菜单始终锚定在按钮下方，不从屏幕底部弹出；稍后再读、快捷书架、手动收藏夹、网站目标与恢复动作具有完整标签和状态",
+        "正文不再显示独立稍后再读按钮；标签区仅实际标签与行内加号",
+        "简介三行预览与贴尾展开保持紧凑；分卷目录保留三角 disclosure；仅看未读使用标准 Material 3 FilterChip，未选中显示 filter 图标，选中显示主题 selected container 和 leading check，并具有 selected/stateDescription 语义；相邻排序保持独立图标按钮，未读投影只排除精确完成的 chapterId，不使用当前位置前缀",
+        "本地移出书架与网站收藏移除保持不同完整动词和作用域；只有持久网站镜像成员的 Detail 顶栏显示网站移除，确认文案明确保留本地书架和阅读数据；MOVE 仅对镜像成员且分组模式出现；目录活动滚动期间 FAB 完全隐藏，停止后恢复且不遮挡右侧章节数；无本地详情中间页"
+      ],
+      "humanOnlyChecks": [
+        "六个视觉行是否自然填满封面右侧而不显拥挤或留底部空洞",
+        "SplitButton 主/副动作是否无需试错即可预测",
+        "本地多位置与网站单目标是否边界清楚",
+        "上方身份区信息密度是否平衡",
+        "三行简介是否足够且展开动作是否自然",
+        "主操作优先级与页面密度",
+        "数百章按分卷扫描效率",
+        "卷展开与目录排序能否无需试错即区分",
+        "评分可发现性",
+        "章节状态与排序方向能否一眼识别",
+        "二级动作是否无重复且作用域明确"
+      ],
+      "evidenceStage": "production_ui"
+    },
+    {
+      "id": "B02",
+      "title": "Reader 基础阅读",
+      "family": "book_reader",
+      "kind": "surface",
+      "route": "book_reader",
+      "requiredStates": [
+        "loading",
+        "content",
+        "error",
+        "offline"
+      ],
+      "operations": [
+        "中心点击无波纹地双向显示或隐藏 chrome，并验证 chrome 可见时正文中央目标仍可收起；连续滚动拖拽不得误触 toggle",
+        "使用左右点击区和分页键逐页移动，从章末继续前进进入紧邻下一章并只将刚完成的当前章写入完成集合；未到真实章末时前进、直接目录跳章或打开后续章均不得标记当前章或此前章节，再用上章、目录、设置和下章执行显式章节动作",
+        "验证分页器按实际视口连续装入多个短段落、在测量行边界拆分长段落，并分别验证分页正文和连续滚动末尾完整避开常驻阅读信息/进度栏；遍历纯文本、纯插图、图文混排、回复流、搜索、书签和大图，验证每张插图独立加载、缓存、失败和有界重试"
+      ],
+      "visualChecks": [
+        "140ms 淡入位移不打断正文",
+        "正文仅避让常驻阅读信息/进度栏，顶部与展开式底部命令 chrome 继续覆盖且不触发重排",
+        "连续滚动末块可完整滚到信息栏上方",
+        "分页正文按视口填充而非每块独占一页，且不被信息栏裁切",
+        "纯插图章节不被误判 wrong-page，图片按原比例呈现且单图失败不替换整章",
+        "顶部仅返回、标题、书签和搜索",
+        "底部 Material Slider、章节位置和四个动作层级清楚",
+        "E-ink 冻结页面无变化"
+      ],
+      "humanOnlyChecks": [
+        "连续阅读舒适度",
+        "点击区滚动仲裁与误触",
+        "章末连续翻页是否自然",
+        "信息栏是否遮挡阅读终点",
+        "插图清晰度、加载反馈与重试成本",
+        "图文和回复流是否仍像一个阅读器",
+        "chrome 是否打断注意力"
+      ],
+      "evidenceStage": "production_ui"
+    },
+    {
+      "id": "B03",
+      "title": "Reader 跳转与设置",
+      "family": "book_reader",
+      "kind": "high_risk",
+      "route": "book_reader",
+      "requiredStates": [
+        "content",
+        "modal"
+      ],
+      "operations": [
+        "直接点按 Material Slider 轨道或拖动都预览，并以最终目标只提交一次语义章节",
+        "验证连续滚动保持连续 seek，分页和双页只提供实际页或跨页的离散 stop",
+        "打开目录并确认默认部分态把当前章节置于相邻章节中间；以显式 展开全部 章 action 或上拉进入同一 Sheet 的全高目录，再选择非当前章节并确认精确进入所选章",
+        "在目录、书签、搜索三页签间切换",
+        "Standard 设置部分态在首屏同时显示四条加长 Slider 的排版快捷项和完整 2×2 快速动作网格；触发全高后观察一次同 Sheet 重组动画：四条排版控件留在上方并展开为完整行，快速 Chip 收起消失，对应设置迁移到下方页面、导航和设备完整控件；完整态向下拖动直接关闭，Back 反向恢复快速层"
+      ],
+      "visualChecks": [
+        "track tap 与 drag preview 都和 commit 分离且只提交一次",
+        "连续 seek 与离散页/跨页 stop 的模式差异明确",
+        "目录从底部打开；部分态当前章节位于邻近章节中间，完整目录仅在显式展开后显示",
+        "Standard 初始部分态无需滚动即可看到四条排版快捷项和两行四个有边界动作；Slider 使用扣除紧凑标签和值栏后的全部剩余宽度",
+        "全高重组时排版控件保持空间连续并展开，快速网格以共享 200ms 以内 ease-out 动画收起，下方完整分组展开；reduced motion 立即完成",
+        "稳定全高态只有上方四条完整排版行和下方页面/导航/设备控件，不同时出现快速 Chip；Back 恢复快速层且值不丢失",
+        "全高下拉直接关闭且层级明确",
+        "双页窗口约束明确"
+      ],
+      "humanOnlyChecks": [
+        "seek 信心和取消安全感",
+        "四页等短章节的离散目标是否不再误导",
+        "附近章节跳转与全目录展开的成本",
+        "2×2 Chip 网格是否清晰、不过重且首屏完整",
+        "上拉扩展与全高下拉关闭是否符合直觉",
+        "真实设备触感与动画舒适度",
+        "设置密度与可理解性"
+      ],
+      "evidenceStage": "production_ui"
+    },
+    {
+      "id": "S01",
+      "title": "浏览",
+      "family": "source",
+      "kind": "surface",
+      "route": "browse",
+      "requiredStates": [
+        "loading",
+        "content",
+        "empty",
+        "error",
+        "mutation"
+      ],
+      "operations": [
+        "从来源卡主 surface 一次点按进入 Home 并自动加载首屏",
+        "点按四个等宽主 tab 和左右滑动 Pager，验证首次页面请求一次、已缓存页面零请求恢复且每页滚动位置独立",
+        "推荐页直接显示源站首页按源顺序提供的当季新番、新书风云榜和本周会员推荐榜，不显示总推荐等指标筛选胶囊",
+        "点按推荐分栏后的这本轻小说真厉害年度专题卡，验证只请求一次专题、显示文库与单行本两个源顺序分栏且不显示主 tabs；Toolbar Up 与 Android Back 都零请求恢复推荐页原滚动锚点",
+        "展开 Tag 胶囊并观察标准动效，再选择另一项，验证面板关闭且恰好一次 scoped replacement；展开排序胶囊并选择另一项，验证相同行为或匹配缓存恢复；reduced motion 立即替换",
+        "在 Tag 面板滚动到顶部或底部后继续同一拖动/甩动，验证手势仍由面板消费且父目录位置不变",
+        "快速继续切换时旧请求被取消或失效；replacement/refresh 保留目录并显示 inline working/error",
+        "向下滚动目录时验证共享 FAB 提供末尾；向上滚动时验证提供顶部；停止后保持最新目标",
+        "滚动接近目录末尾并自动追加下一 cursor；验证 footer working/error-retry、Search、网站书架、登录验证和刷新保持可达；当真实 Home GET 仍被验证页拒绝时，进入 Home 专用验证路由，显式打开同一暂停 GET 并仅通过使用当前页面返回解析后的 Home，且不追加第二次原生请求",
+        "选择真实网格条目进入 canonical Detail；离开后返回，验证已完成/进行中的请求不重复且封面命中 host cache"
+      ],
+      "visualChecks": [
+        "Standard AppBar 只有单行来源标题、Search 和 scoped overflow；没有永久副标题或横向快捷操作带",
+        "四个主 tabs 在整行内等宽分配，首尾 cell 关于屏幕中心镜像；filter bar、展开面板、section 标题和封面网格统一使用左右各 16dp gutter",
+        "主 tabs 与 HorizontalPager 位置一致，切换不闪白、不回顶、不串用另一页滚动位置",
+        "推荐页按源站顺序显示多个全宽标题加封面网格，不出现总推荐/总收藏/月推荐等 toplist 筛选",
+        "年度专题使用推荐内容后的单个全宽 Material 导航卡而非第五主 tab；专题页 AppBar 标题切换、主 tabs 隐藏，并以两个全宽部门标题配自适应封面网格",
+        "分类页由标准 Material 3 Surface、FilterChip、按钮与 IconButton 组成一个宽 Tag 胶囊和一个紧凑排序胶囊；选中项优先可见且 48dp 触控边界明确",
+        "胶囊下方只展开当前筛选器的有界选项面板；每个换行的 FilterChip 组在可用宽度内水平居中且左右余量镜像，不满整行的尾行也居中而非贴左；展开/收起及箭头旋转使用不超过 200ms 的单一 ease-out 动效，reduced motion 立即完成；没有草稿、取消、查看结果或 modal filter sheet",
+        "每个来源 section 使用全宽标题加自适应封面主导网格；标题和可选作者位于稳定元数据栏，禁止横向书单或一行一本列表",
+        "replacement loading/error 保留当前目录并使用 scoped indicator；自动 append 保留已加载卡片并只在 footer 显示进度或重试",
+        "共享控件为稳定尺寸的标准 Material 3 icon-only FAB；向下滚动显示末尾，向上滚动显示顶部，停止不反跳且不伸缩说明文字",
+        "首屏封面自动加载且回访稳定",
+        "宽屏仅增加网格列数，不切换到另一套 side rail 交互",
+        "缺少 Home 能力时仍保留 Search/网站书架/登录验证"
+      ],
+      "humanOnlyChecks": [
+        "一次点击意图是否明确",
+        "初始视口中 chrome 与真实目录内容的比例",
+        "四栏及目录左右留白是否严格对称",
+        "tab 点按和左右滑动是否一致且不误触纵向网格",
+        "缓存页面返回是否流畅可信",
+        "推荐页源站分栏是否易于扫描",
+        "年度专题卡是否足够可发现但不过度抢占推荐内容；专题返回是否保持上下文",
+        "双胶囊的层级、展开范围、行内标签居中对称、动效、边界滚动隔离与即时提交是否清楚",
+        "icon-only FAB 的方向切换是否符合滚动意图且不抖动",
+        "自动续页是否无感且失败可恢复",
+        "大量封面扫描效率",
+        "刷新/登录/网站书架的作用域是否清楚"
+      ],
+      "evidenceStage": "actual_online_scenario"
+    },
+    {
+      "id": "S02",
+      "title": "聚合搜索",
+      "family": "source",
+      "kind": "surface",
+      "route": "search",
+      "requiredStates": [
+        "loading",
+        "content",
+        "empty",
+        "error",
+        "offline",
+        "modal"
+      ],
+      "operations": [
+        "输入但不提交并确认结果不变",
+        "点击唯一 Search 并观察本地与真实线上结果增量",
+        "从详情作者链接直接提交一次同来源作者搜索并应用结果；结果详情再返回仍保留结果且零重放；验证作者模式的手动验证、离线和显式重试",
+        "制造线上单来源失败、去重、空态和离线；再用签名 fixture 重放"
+      ],
+      "visualChecks": [
+        "只有一个提交动作和一个聚合进度",
+        "无多 lane、高级筛选或教学文字",
+        "重复结果合并清楚"
+      ],
+      "humanOnlyChecks": [
+        "去重是否符合预期",
+        "在线结果标识是否足够",
+        "等待过程是否可信"
+      ],
+      "evidenceStage": "actual_online_scenario"
+    },
+    {
+      "id": "S03",
+      "title": "网站收藏",
+      "family": "source",
+      "kind": "surface",
+      "route": "browse_source_remote_library",
+      "requiredStates": [
+        "loading",
+        "content",
+        "empty",
+        "error",
+        "selection",
+        "mutation",
+        "modal"
+      ],
+      "operations": [
+        "显式刷新真实线上收藏并复制全部或选择项到本地",
+        "确认 route entry、登录返回和恢复均不自动拉取，复制产生零网站写请求",
+        "比较 Standard swipe 和可见等价动作并遍历 read capability、credential 与 source gate"
+      ],
+      "visualChecks": [
+        "trailing 对齐和 selection bar 明确",
+        "E-ink 间距与分页可读",
+        "无重复来源 banner"
+      ],
+      "humanOnlyChecks": [
+        "复制到本地是否会被误解为修改网站",
+        "批量操作信心",
+        "swipe 可发现性"
+      ],
+      "evidenceStage": "actual_online_scenario"
+    },
+    {
+      "id": "S04",
+      "title": "登录验证",
+      "family": "source",
+      "kind": "surface",
+      "route": "source_verification",
+      "requiredStates": [
+        "content",
+        "error"
+      ],
+      "operations": [
+        "在真实 WebView 完成、取消、错误、Back、同来源重入，并从暂停的搜索、详情、目录和章节操作依次显式选择打开对应页面和使用当前页面",
+        "确认重入在首个页面加载前恢复同一来源/声明 origin 的 cookie+exact-UA 会话；打开动作加载精确暂停 GET，只允许同 origin HTTPS 顶层重定向保留来源绑定，后续非重定向导航使绑定失效；当前页以原请求精确匹配一次、以最终页面 URL 作为响应元数据，经签名 parser 验证后返回，且不自动重试、导入、刷新或写网站",
+        "验证 session 过期后的显式登录恢复、cookie+exact-UA handoff、bounded live retry，以及 raw snapshot 不持久化/不记录/不自动 replay 的边界"
+      ],
+      "visualChecks": [
+        "宿主提示与网站区域边界明确",
+        "来源身份仅在必要处出现",
+        "状态和退出动作清晰"
+      ],
+      "humanOnlyChecks": [
+        "登录信任感和钓鱼感",
+        "凭据边界",
+        "WebView Back 语义"
+      ],
+      "evidenceStage": "actual_online_scenario"
+    },
+    {
+      "id": "M01",
+      "title": "更多主页",
+      "family": "more",
+      "kind": "surface",
+      "route": "more",
+      "requiredStates": [
+        "content"
+      ],
+      "operations": [
+        "逐项进入显示、阅读、数据、帮助和关于",
+        "逐项返回并检查恢复"
+      ],
+      "visualChecks": [
+        "分组紧凑、标题准确且无假入口",
+        "宽屏内容不过宽"
+      ],
+      "humanOnlyChecks": [
+        "信息架构和命名的可发现性"
+      ],
+      "evidenceStage": "production_ui"
+    },
+    {
+      "id": "M02",
+      "title": "显示设置",
+      "family": "more",
+      "kind": "surface",
+      "route": "more_display",
+      "requiredStates": [
+        "content",
+        "mutation",
+        "modal"
+      ],
+      "operations": [
+        "切换 profile、theme、dynamic color 和 E-ink redraw",
+        "检查 unknown-newer、reset 和写入失败重试",
+        "重启后比较 persisted 与 effective"
+      ],
+      "visualChecks": [
+        "依赖、禁用和错误 banner 明确",
+        "stored 与 effective 不混淆",
+        "fontScale 2.0 可达"
+      ],
+      "humanOnlyChecks": [
+        "profile 与 theme 边界",
+        "重置风险",
+        "设置是否过度技术化"
+      ],
+      "evidenceStage": "production_ui"
+    },
+    {
+      "id": "M03",
+      "title": "Reader 默认设置",
+      "family": "more",
+      "kind": "surface",
+      "route": "more_reader",
+      "requiredStates": [
+        "content",
+        "mutation"
+      ],
+      "operations": [
+        "遍历排版、页面、导航和设备",
+        "制造依赖组合并重启检查",
+        "查看 E-ink 有效约束"
+      ],
+      "visualChecks": [
+        "分组紧凑且无非法组合",
+        "禁用原因不过度重复",
+        "fontScale 2.0 无不可达项"
+      ],
+      "humanOnlyChecks": [
+        "功能完整度与认知负担",
+        "高级设置层级"
+      ],
+      "evidenceStage": "production_ui"
+    },
+    {
+      "id": "M04",
+      "title": "数据",
+      "family": "more",
+      "kind": "surface",
+      "route": "more_data",
+      "requiredStates": [
+        "content",
+        "modal"
+      ],
+      "operations": [
+        "查看首次介绍",
+        "执行 Tsuyomi/Hikari 导入、picker cancel 和导出选项",
+        "打开报告并制造 cancel 或 error"
+      ],
+      "visualChecks": [
+        "导入、导出和报告入口独立",
+        "包含与排除项明确",
+        "cancel 无成功假象"
+      ],
+      "humanOnlyChecks": [
+        "隐私预期和迁移信心",
+        "不可逆风险",
+        "导入影响是否清楚"
+      ],
+      "evidenceStage": "production_ui"
+    },
+    {
+      "id": "M05",
+      "title": "导入报告",
+      "family": "more",
+      "kind": "surface",
+      "route": "more_data_report",
+      "requiredStates": [
+        "content",
+        "modal"
+      ],
+      "operations": [
+        "展开并折叠超过 50 条警告",
+        "打开恢复 modal",
+        "未解决时尝试导航并完成恢复"
+      ],
+      "visualChecks": [
+        "计数、冲突、警告和结果层级清晰",
+        "敏感内容脱敏且恢复 gate 可见"
+      ],
+      "humanOnlyChecks": [
+        "用户能否据此决定下一步",
+        "错误数量的压迫感"
+      ],
+      "evidenceStage": "production_ui"
+    },
+    {
+      "id": "M06",
+      "title": "帮助",
+      "family": "more",
+      "kind": "surface",
+      "route": "more_help",
+      "requiredStates": [
+        "content",
+        "modal"
+      ],
+      "operations": [
+        "搜索并展开折叠帮助项",
+        "重播五个 introduction",
+        "开关全局介绍、重置 seen versions 并跳转界面重置"
+      ],
+      "visualChecks": [
+        "搜索和 accordion 避免长列表",
+        "介绍内容与实际首次入口一致"
+      ],
+      "humanOnlyChecks": [
+        "帮助能否快速回答问题",
+        "是否用教程掩盖本应自解释的 UI"
+      ],
+      "evidenceStage": "production_ui"
+    },
+    {
+      "id": "M07",
+      "title": "关于",
+      "family": "more",
+      "kind": "surface",
+      "route": "more_about",
+      "requiredStates": [
+        "content",
+        "modal"
+      ],
+      "operations": [
+        "查看版本和许可证",
+        "返回并检查状态恢复"
+      ],
+      "visualChecks": [
+        "无假条目且长许可证可阅读",
+        "版本信息稳定"
+      ],
+      "humanOnlyChecks": [
+        "合法性和产品信任感"
+      ],
+      "evidenceStage": "production_ui"
+    },
+    {
+      "id": "X01",
+      "title": "导航与状态恢复",
+      "family": "cross_cutting",
+      "kind": "cross_cutting",
+      "route": null,
+      "requiredStates": [],
+      "operations": [
+        "在生产包按 20-surface inventory 对照活动合同和真实状态所有权；测试滚动、选择和编辑状态下的 Up、系统 Back、根切换、旋转、分屏、后台和进程重启"
+      ],
+      "visualChecks": [
+        "无错误转场、跳顶和焦点漂移；生产页不保留 fixture-only 控件、占位状态或原型命名"
+      ],
+      "humanOnlyChecks": [
+        "Back 是否令人意外",
+        "恢复位置是否符合任务语义",
+        "真实数据结合后任务层级是否仍然自然"
+      ],
+      "evidenceStage": "actual_online_scenario"
+    },
+    {
+      "id": "X02",
+      "title": "Modal、键盘与无障碍",
+      "family": "cross_cutting",
+      "kind": "cross_cutting",
+      "route": null,
+      "requiredStates": [],
+      "operations": [
+        "在生产包遍历 modal、键盘开闭、DPAD、TalkBack、Switch Access、危险操作默认焦点和 dismiss"
+      ],
+      "visualChecks": [
+        "safe area、fontScale 2.0、焦点环、遮罩和 E-ink 全屏容器正确"
+      ],
+      "humanOnlyChecks": [
+        "朗读是否简洁",
+        "焦点顺序是否自然",
+        "所有手势是否有等价动作"
+      ],
+      "evidenceStage": "actual_online_scenario"
+    },
+    {
+      "id": "X03",
+      "title": "Standard 与 E-ink 对等",
+      "family": "cross_cutting",
+      "kind": "cross_cutting",
+      "route": null,
+      "requiredStates": [],
+      "operations": [
+        "E-ink restoration 后在 Standard 与真实 E-ink 设备执行相同生产任务并比较分页、选择、工作、modal、错误和设置"
+      ],
+      "visualChecks": [
+        "功能对等且 E-ink 无不必要动画、透明叠层或颜色独占语义"
+      ],
+      "humanOnlyChecks": [
+        "真实面板残影、刷新等待感、阅读疲劳和物理按键"
+      ],
+      "evidenceStage": "actual_online_scenario"
+    },
+    {
+      "id": "X04",
+      "title": "长内容与自适应",
+      "family": "cross_cutting",
+      "kind": "cross_cutting",
+      "route": null,
+      "requiredStates": [],
+      "operations": [
+        "在生产包测试长中文、日文、Latin、emoji、RTL、无封面、fontScale 1.3/2.0、窄宽屏、分屏和 cutout"
+      ],
+      "visualChecks": [
+        "无裁切和不可达动作，长标题可进入完整内容"
+      ],
+      "humanOnlyChecks": [
+        "扫描节奏和文字压迫感"
+      ],
+      "evidenceStage": "actual_online_scenario"
+    },
+    {
+      "id": "X05",
+      "title": "失败与等待",
+      "family": "cross_cutting",
+      "kind": "cross_cutting",
+      "route": null,
+      "requiredStates": [],
+      "operations": [
+        "对真实线上服务运行 slow、offline、recoverable-error、cancelled、unresolved、retry 和进程中断恢复；再用签名 fixture 重放"
+      ],
+      "visualChecks": [
+        "working、error 和 result 不重复，E-ink 结果持续且 retry 不制造并发"
+      ],
+      "humanOnlyChecks": [
+        "等待是否焦虑",
+        "状态是否可信",
+        "文案是否过度解释"
+      ],
+      "evidenceStage": "actual_online_scenario"
+    },
+    {
+      "id": "X06",
+      "title": "审阅系统自身",
+      "family": "cross_cutting",
+      "kind": "cross_cutting",
+      "route": null,
+      "requiredStates": [],
+      "operations": [
+        "验证 UI-R1 基线与范围、单一证据所有者、暂停/恢复、人工意见回传、输入变化失效和最终交接；AI 不得写入人工审阅或批准状态"
+      ],
+      "visualChecks": [
+        "范围、证据来源、目标 build、保存状态和人工待办明确"
+      ],
+      "humanOnlyChecks": [
+        "意见是否丢失",
+        "AI 是否越权批准",
+        "能否从当前节点和证据继续"
+      ],
+      "evidenceStage": "actual_online_scenario"
+    }
+  ]
+}

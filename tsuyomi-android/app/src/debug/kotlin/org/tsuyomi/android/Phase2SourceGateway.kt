@@ -32,6 +32,7 @@ internal object Phase2SourceGateway {
     private val chapterRequests = AtomicInteger()
     private val liveTransportRequests = AtomicInteger()
     private val remoteLibraryReads = AtomicInteger()
+    private val requireNextHomeVerification = AtomicBoolean()
     private val requireNextDetailVerification = AtomicBoolean()
     private val requireNextChapterVerification = AtomicBoolean()
     private val websiteMutations = AtomicInteger()
@@ -45,6 +46,7 @@ internal object Phase2SourceGateway {
         chapterRequests.set(0)
         liveTransportRequests.set(0)
         remoteLibraryReads.set(0)
+        requireNextHomeVerification.set(false)
         requireNextDetailVerification.set(false)
         requireNextChapterVerification.set(false)
         websiteMutations.set(0)
@@ -61,6 +63,10 @@ internal object Phase2SourceGateway {
     fun chapterRequestCount(): Int = chapterRequests.get()
     fun liveTransportRequestCount(): Int = liveTransportRequests.get()
     fun websiteMutationCount(): Int = websiteMutations.get()
+
+    fun requireVerificationForNextHomeRequest() {
+        requireNextHomeVerification.set(true)
+    }
 
     fun requireVerificationForNextDetailRequest() {
         requireNextDetailVerification.set(true)
@@ -120,15 +126,20 @@ internal object Phase2SourceGateway {
                 liveTransportRequests.incrementAndGet()
                 return@HostHttpTransport liveTransport.execute(request)
             }
-            if (request.url.path == "/modules/article/bookcase.php") {
-                if (request.method == NetworkMethod.POST) {
+            when {
+                request.url.path == "/modules/article/addbookcase.php" -> websiteMutations.incrementAndGet()
+                request.url.path == "/modules/article/bookcase.php" && request.method == NetworkMethod.POST ->
                     websiteMutations.incrementAndGet()
-                } else {
-                    remoteLibraryReads.incrementAndGet()
-                }
+                request.url.path == "/modules/article/bookcase.php" -> remoteLibraryReads.incrementAndGet()
             }
             if (Settings.Global.getInt(context.contentResolver, Settings.Global.AIRPLANE_MODE_ON, 0) == 1) {
                 throw HostNetworkException(HostNetworkError.OFFLINE)
+            }
+            if (
+                request.url.path == "/index.php" &&
+                requireNextHomeVerification.compareAndSet(true, false)
+            ) {
+                return@HostHttpTransport fixtureResponse(context, request.url, "challenge.html")
             }
             if (
                 request.url.path.startsWith("/book/") &&
@@ -140,6 +151,7 @@ internal object Phase2SourceGateway {
                 return@HostHttpTransport fixtureResponse(context, request.url, "challenge.html")
             }
             val fixture = when {
+                request.url.path == "/modules/article/addbookcase.php" -> "remote-add-applied.html"
                 request.url.path == "/modules/article/bookcase.php" && request.method == NetworkMethod.POST ->
                     "remote-add-applied.html"
                 request.url.path == "/modules/article/bookcase.php" &&
@@ -153,6 +165,8 @@ internal object Phase2SourceGateway {
                 request.url.path == "/index.php" -> "home-index.html"
                 request.url.path == "/zt/sugoi/2026.php" -> "home-sugoi-2026.html"
                 request.url.path in setOf("/modules/article/toplist.php", "/modules/article/tags.php") -> "home.html"
+                request.url.path.contains("search.php") &&
+                    request.url.rawQuery.orEmpty().split('&').contains("searchtype=author") -> "search-author.html"
                 request.url.path.contains("search.php") -> "search.html"
                 request.url.path == "/modules/article/articleinfo.php" -> "detail.html"
                 request.url.path == "/modules/article/reader.php" &&

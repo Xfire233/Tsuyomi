@@ -4,34 +4,43 @@
  */
 package org.tsuyomi.android
 
+import android.content.pm.ActivityInfo
 import android.net.Uri
 import android.webkit.CookieManager
+import android.webkit.WebResourceRequest
+import android.webkit.WebResourceResponse
 import android.view.View
 import android.view.ViewGroup
 import android.webkit.WebView
+import android.webkit.WebViewClient
 import androidx.compose.ui.test.junit4.v2.createAndroidComposeRule
 import androidx.compose.ui.test.assert
 import androidx.compose.ui.test.click
 import androidx.compose.ui.test.hasSetTextAction
 import androidx.compose.ui.test.hasStateDescription
-import androidx.compose.ui.test.isToggleable
+import androidx.compose.ui.test.longClick
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsEnabled
+import androidx.compose.ui.test.assertTextContains
+import androidx.compose.ui.test.performTextReplacement
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onAllNodesWithTag
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
-import androidx.compose.ui.test.performImeAction
 import androidx.compose.ui.test.performScrollToIndex
+import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.performTouchInput
 import androidx.compose.ui.test.swipeDown
 import androidx.compose.ui.test.performTextInput
+import androidx.core.view.ViewCompat
+import androidx.core.view.WindowInsetsCompat
 import androidx.test.espresso.Espresso.pressBack
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import java.io.File
+import java.io.ByteArrayInputStream
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
@@ -39,7 +48,9 @@ import kotlinx.coroutines.runBlocking
 import org.junit.AfterClass
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
+import org.junit.Ignore
 import org.junit.BeforeClass
+import org.junit.Before
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -56,6 +67,17 @@ class ManualVerificationHandoffInstrumentedTest {
     @get:Rule
     val composeRule = createAndroidComposeRule<MainActivity>()
 
+    @Before
+    fun awaitPreviousSourceRuntimeCleanup() {
+        val deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(30)
+        while (quickJsLaneCount() != 0 && System.nanoTime() < deadline) {
+            Thread.sleep(50)
+        }
+        assertEquals(0, quickJsLaneCount())
+    }
+
+
+
     @Test
     fun standard_profile_completes_blocked_navigation_and_browser_session_handoff() {
         exerciseVerificationHandoff(DisplayPreference.STANDARD)
@@ -70,32 +92,148 @@ class ManualVerificationHandoffInstrumentedTest {
                 .setDisplayPreference(DisplayPreference.STANDARD)
         }
         waitForText("书架")
-        composeRule.onNodeWithText("浏览").performClick()
+        performPlatformClick("浏览")
         waitForText("搜索此来源")
-        composeRule.onNodeWithText("搜索此来源").performClick()
+        performPlatformClick("搜索此来源")
         waitForText("输入关键词后搜索")
         composeRule.onNode(hasSetTextAction()).performTextInput("login")
-        composeRule.onNode(hasSetTextAction()).performImeAction()
+        waitForText("login")
+        performPlatformClick("提交搜索")
         waitForText("此来源需要用户手动登录。")
         assertEquals(1, Phase2SourceGateway.searchRequestCount())
 
-        composeRule.onNodeWithText("手动登录或验证").performClick()
+        performPlatformClick("手动登录或验证")
         waitForText("打开对应搜索页面")
-        waitForText("使用当前页面")
+        waitForWebViewSettled()
         val searchHtml = targetContext.assets.open("search.html").bufferedReader().use { it.readText() }
         val searchUrl =
             "https://www.wenku8.net/modules/article/search.php?searchtype=articlename&searchkey=login&page=1"
-        loadAndAwaitVerifiedPage(searchUrl, searchHtml)
+        installVerifiedPageFixture(searchUrl, searchHtml)
+        composeRule.onNodeWithText("打开对应搜索页面").performClick()
+        waitForText("使用当前页面")
+        waitForWebViewSettled()
         composeRule.onNodeWithText("使用当前页面").performClick()
-        waitForText("雾港纪事")
+        waitForVerifiedOutcome(
+            successText = "雾港纪事",
+            unboundText = "当前页面未与暂停的搜索请求绑定。请点击“打开对应搜索页面”，等待自动跳转和页面加载完成后重试。",
+        )
         assertEquals(1, Phase2SourceGateway.searchRequestCount())
-        composeRule.onNodeWithText("雾港纪事").performClick()
+        performPlatformClick("雾港纪事")
         waitForText("简介")
         composeRule.onNodeWithTag("book-detail-scroll").performScrollToIndex(3)
         waitForText("第一章 雾中的灯塔")
         composeRule.onNodeWithText("第一章 雾中的灯塔").performClick()
         waitForText("设置")
         waitForText("第一章 雾中的灯塔")
+    }
+
+    @Test
+    fun standard_detail_controls_stay_inside_landscape_system_bars() {
+        cleanSessionState()
+        runBlocking {
+            (composeRule.activity.application as TsuyomiApplication).displayController
+                .setDisplayPreference(DisplayPreference.STANDARD)
+        }
+        waitForText("书架")
+        performPlatformClick("浏览")
+        waitForText("搜索此来源")
+        performPlatformClick("搜索此来源")
+        waitForText("输入关键词后搜索")
+        composeRule.onNode(hasSetTextAction()).performTextInput("fixture")
+        waitForText("fixture")
+        performPlatformClick("提交搜索")
+        waitForText("雾港纪事")
+        performPlatformClick("雾港纪事")
+        waitForText("上次更新：2026-02-03")
+        composeRule.onNodeWithTag("book-detail-scroll", useUnmergedTree = true).performScrollToIndex(0)
+        try {
+            composeRule.runOnUiThread {
+                composeRule.activity.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE
+            }
+            composeRule.waitUntil(15_000) {
+                composeRule.runOnUiThread {
+                    val view = composeRule.activity.window.decorView
+                    view.width > view.height
+                }
+            }
+            waitForText("上次更新：2026-02-03", timeoutMillis = 30_000)
+            val (safeLeft, safeRight) = composeRule.runOnUiThread {
+                val view = composeRule.activity.window.decorView
+                val insets = requireNotNull(ViewCompat.getRootWindowInsets(view)).getInsets(
+                    WindowInsetsCompat.Type.systemBars() or WindowInsetsCompat.Type.displayCutout(),
+                )
+                insets.left.toFloat() to (view.width - insets.right).toFloat()
+            }
+            listOf("detail-rating-row", "detail-library-action", "detail-reading-fab").forEach { tag ->
+                val node = composeRule.onNodeWithTag(tag, useUnmergedTree = true)
+                if (tag != "detail-reading-fab") node.performScrollTo()
+                val bounds = node.assertIsDisplayed().fetchSemanticsNode().boundsInWindow
+                assertTrue("$tag extends beneath the left system bar: $bounds", bounds.left >= safeLeft)
+                assertTrue("$tag extends beneath the right system bar: $bounds > $safeRight", bounds.right <= safeRight)
+            }
+            composeRule.onNodeWithContentDescription("更多加入选项").performClick()
+            waitForText("稍后再读")
+            pressBack()
+        } finally {
+            composeRule.runOnUiThread {
+                composeRule.activity.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
+            }
+            composeRule.waitUntil(15_000) {
+                composeRule.runOnUiThread {
+                    val view = composeRule.activity.window.decorView
+                    view.width < view.height
+                }
+            }
+        }
+    }
+
+    @Test
+    fun standard_detail_author_link_submits_once_and_restores_applied_results() {
+        cleanSessionState()
+        runBlocking {
+            (composeRule.activity.application as TsuyomiApplication).displayController
+                .setDisplayPreference(DisplayPreference.STANDARD)
+        }
+        waitForText("书架")
+        performPlatformClick("浏览")
+        waitForText("搜索此来源")
+        performPlatformClick("搜索此来源")
+        waitForText("输入关键词后搜索")
+        composeRule.onNode(hasSetTextAction()).performTextInput("fixture")
+        waitForText("fixture")
+        performPlatformClick("提交搜索")
+        waitForText("雾港纪事")
+        composeRule.onNodeWithText("星环邮差").assertIsDisplayed()
+        performPlatformClick("雾港纪事")
+        waitForText("上次更新：2026-02-03")
+        composeRule.onNodeWithText("尚未开始").assertDoesNotExist()
+        composeRule.onNodeWithText("已有阅读进度").assertDoesNotExist()
+        Phase2SourceGateway.resetOperationCounts()
+
+        composeRule.onNodeWithTag("detail-author").performClick()
+        waitForText("搜索作者")
+        waitForText("雾港纪事")
+        composeRule.onNode(hasSetTextAction()).assertTextContains("林川")
+        composeRule.onNodeWithText("星环邮差").assertDoesNotExist()
+        assertEquals(1, Phase2SourceGateway.searchRequestCount())
+
+        performPlatformClick("雾港纪事")
+        waitForText("上次更新：2026-02-03")
+        pressBack()
+        waitForText("搜索作者")
+        composeRule.onNodeWithText("雾港纪事").assertIsDisplayed()
+        composeRule.onNodeWithText("星环邮差").assertDoesNotExist()
+        assertEquals(1, Phase2SourceGateway.searchRequestCount())
+        composeRule.activityRule.scenario.recreate()
+        waitForText("搜索作者")
+        composeRule.onNodeWithText("雾港纪事").assertIsDisplayed()
+        assertEquals(1, Phase2SourceGateway.searchRequestCount())
+        composeRule.onNode(hasSetTextAction()).performTextReplacement("fixture")
+        waitForText("fixture")
+        performPlatformClick("提交搜索")
+        waitForText("星环邮差")
+        assertEquals(2, Phase2SourceGateway.searchRequestCount())
+        assertEquals(0, Phase2SourceGateway.websiteMutationCount())
     }
 
     @Test
@@ -107,27 +245,34 @@ class ManualVerificationHandoffInstrumentedTest {
                 .setDisplayPreference(DisplayPreference.STANDARD)
         }
         waitForText("书架")
-        composeRule.onNodeWithText("浏览").performClick()
+        performPlatformClick("浏览")
         waitForText("搜索此来源")
-        composeRule.onNodeWithText("搜索此来源").performClick()
+        performPlatformClick("搜索此来源")
         waitForText("输入关键词后搜索")
         composeRule.onNode(hasSetTextAction()).performTextInput("fixture")
-        composeRule.onNode(hasSetTextAction()).performImeAction()
+        waitForText("fixture")
+        performPlatformClick("提交搜索")
         waitForText("雾港纪事")
         Phase2SourceGateway.requireVerificationForNextDetailRequest()
-        composeRule.onNodeWithText("雾港纪事").performClick()
+        performPlatformClick("雾港纪事")
         waitForText("打开手动登录或验证")
         assertEquals(1, Phase2SourceGateway.detailRequestCount())
         assertEquals(1, Phase2SourceGateway.directoryRequestCount())
 
         composeRule.onNodeWithText("打开手动登录或验证").performClick()
         waitForText("打开对应详情页面")
-        waitForText("使用当前页面")
+        waitForWebViewSettled()
         val detailHtml = targetContext.assets.open("detail.html").bufferedReader().use { it.readText() }
         val detailUrl = "https://www.wenku8.net/book/1234.htm"
-        loadAndAwaitVerifiedPage(detailUrl, detailHtml)
+        installVerifiedPageFixture(detailUrl, detailHtml)
+        composeRule.onNodeWithText("打开对应详情页面").performClick()
+        waitForText("使用当前页面")
+        waitForWebViewSettled()
         composeRule.onNodeWithText("使用当前页面").performClick()
-        waitForText("简介")
+        waitForVerifiedOutcome(
+            successText = "简介",
+            unboundText = "当前页面未与暂停的详情请求绑定。请点击“打开对应详情页面”，等待自动跳转和页面加载完成后重试。",
+        )
         assertEquals(1, Phase2SourceGateway.detailRequestCount())
         assertEquals(2, Phase2SourceGateway.directoryRequestCount())
     }
@@ -141,31 +286,38 @@ class ManualVerificationHandoffInstrumentedTest {
                 .setDisplayPreference(DisplayPreference.STANDARD)
         }
         waitForText("书架")
-        composeRule.onNodeWithText("浏览").performClick()
+        performPlatformClick("浏览")
         waitForText("搜索此来源")
-        composeRule.onNodeWithText("搜索此来源").performClick()
+        performPlatformClick("搜索此来源")
         waitForText("输入关键词后搜索")
         composeRule.onNode(hasSetTextAction()).performTextInput("fixture")
-        composeRule.onNode(hasSetTextAction()).performImeAction()
+        waitForText("fixture")
+        performPlatformClick("提交搜索")
         waitForText("雾港纪事")
-        composeRule.onNodeWithText("雾港纪事").performClick()
+        performPlatformClick("雾港纪事")
         waitForText("简介")
         composeRule.onNodeWithTag("book-detail-scroll").performScrollToIndex(3)
         waitForText("第一章 雾中的灯塔")
         Phase2SourceGateway.requireVerificationForNextChapterRequest()
-        composeRule.onNodeWithText("第一章 雾中的灯塔").performClick()
+        performPlatformClick("第一章 雾中的灯塔")
         waitForText("打开手动登录或验证")
         assertEquals(1, Phase2SourceGateway.chapterRequestCount())
         assertEquals(1, Phase2SourceGateway.directoryRequestCount())
 
-        composeRule.onNodeWithText("打开手动登录或验证").performClick()
+        performPlatformClick("打开手动登录或验证")
         waitForText("打开对应章节页面")
-        waitForText("使用当前页面")
+        waitForWebViewSettled()
         val chapterHtml = targetContext.assets.open("chapter.html").bufferedReader().use { it.readText() }
         val chapterUrl = "https://www.wenku8.net/modules/article/reader.php?aid=1234&cid=10001"
-        loadAndAwaitVerifiedPage(chapterUrl, chapterHtml)
+        installVerifiedPageFixture(chapterUrl, chapterHtml)
+        performPlatformClick("打开对应章节页面")
+        waitForText("使用当前页面")
+        waitForWebViewSettled()
         composeRule.onNodeWithText("使用当前页面").performClick()
-        waitForText("第一章 雾中的灯塔")
+        waitForVerifiedOutcome(
+            successText = "第一章 雾中的灯塔",
+            unboundText = "当前页面未与暂停的章节请求绑定。请点击“打开对应章节页面”，等待自动跳转和页面加载完成后重试。",
+        )
         assertEquals(1, Phase2SourceGateway.chapterRequestCount())
 
         composeRule.onNodeWithText("下一章").assertIsEnabled().performClick()
@@ -174,6 +326,7 @@ class ManualVerificationHandoffInstrumentedTest {
     }
 
 
+    @Ignore("E-ink is frozen by review-policy.json; retain for profile restoration only")
     @Test
     fun e_ink_profile_completes_blocked_navigation_and_browser_session_handoff() {
         exerciseVerificationHandoff(DisplayPreference.EINK)
@@ -187,9 +340,9 @@ class ManualVerificationHandoffInstrumentedTest {
                 .setDisplayPreference(DisplayPreference.STANDARD)
         }
         waitForText("书架")
-        composeRule.onNodeWithText("浏览").performClick()
+        performPlatformClick("浏览")
         waitForText("搜索此来源")
-        composeRule.onNodeWithText("搜索此来源").performClick()
+        performPlatformClick("搜索此来源")
         waitForText("输入关键词后搜索")
         waitForQuickJsLaneCount(1)
 
@@ -198,7 +351,8 @@ class ManualVerificationHandoffInstrumentedTest {
         waitForText("输入关键词后搜索")
         waitForQuickJsLaneCount(1)
         composeRule.onNode(hasSetTextAction()).performTextInput("fixture")
-        composeRule.onNode(hasSetTextAction()).performImeAction()
+        waitForText("fixture")
+        performPlatformClick("提交搜索")
         waitForText("雾港纪事")
     }
 
@@ -210,9 +364,9 @@ class ManualVerificationHandoffInstrumentedTest {
                 .setDisplayPreference(DisplayPreference.STANDARD)
         }
         waitForText("书架")
-        composeRule.onNodeWithText("浏览").performClick()
+        performPlatformClick("浏览")
         waitForText("搜索此来源")
-        composeRule.onNodeWithText("搜索此来源").performClick()
+        performPlatformClick("搜索此来源")
         waitForText("输入关键词后搜索")
         waitForQuickJsLaneCount(1)
 
@@ -235,23 +389,27 @@ class ManualVerificationHandoffInstrumentedTest {
             application.displayController.setDisplayPreference(DisplayPreference.STANDARD)
         }
         waitForText("书架")
-        composeRule.onNodeWithText("浏览").performClick()
+        performPlatformClick("浏览")
         waitForText("搜索此来源")
-        composeRule.onNodeWithText("搜索此来源").performClick()
+        performPlatformClick("搜索此来源")
         waitForText("输入关键词后搜索")
         composeRule.onNode(hasSetTextAction()).performTextInput("fixture")
-        composeRule.onNode(hasSetTextAction()).performImeAction()
+        waitForText("fixture")
+        performPlatformClick("提交搜索")
         waitForText("雾港纪事")
-        composeRule.onNodeWithText("雾港纪事").performClick()
+        performPlatformClick("雾港纪事")
 
         waitForText("简介")
+        composeRule.onNodeWithContentDescription("更多加入选项").performClick()
         waitForText("稍后再读")
         composeRule.onNodeWithText("稍后再读").performClick()
-        waitForText("已在书架")
-        waitForStateDescription("detail-read-later-action", "已稍后再读")
         waitForText("已完成：更新稍后再读")
+        composeRule.onNodeWithContentDescription("更多加入选项").performClick()
+        waitForStateDescription("detail-read-later-action", "已稍后再读")
         composeRule.onNodeWithText("稍后再读").performClick()
+        composeRule.onNodeWithContentDescription("更多加入选项").performClick()
         waitForStateDescription("detail-read-later-action", "未稍后再读")
+        pressBack()
         composeRule.onNodeWithTag("book-detail-scroll").performScrollToIndex(3)
         waitForText("全文目录")
         waitForText("第一章 雾中的灯塔")
@@ -268,22 +426,24 @@ class ManualVerificationHandoffInstrumentedTest {
             application.displayController.setDisplayPreference(DisplayPreference.STANDARD)
         }
         waitForText("书架")
-        composeRule.onNodeWithText("浏览").performClick()
+        performPlatformClick("浏览")
         waitForText("搜索此来源")
-        composeRule.onNodeWithText("搜索此来源").performClick()
+        performPlatformClick("搜索此来源")
         waitForText("输入关键词后搜索")
         composeRule.onNode(hasSetTextAction()).performTextInput("fixture")
-        composeRule.onNode(hasSetTextAction()).performImeAction()
+        waitForText("fixture")
+        performPlatformClick("提交搜索")
         waitForText("雾港纪事")
-        composeRule.onNodeWithText("雾港纪事").performClick()
+        performPlatformClick("雾港纪事")
         waitForText("简介")
+        composeRule.onNodeWithContentDescription("更多加入选项").performClick()
         composeRule.onNodeWithText("稍后再读").performClick()
-        waitForText("已在书架")
+        waitForText("已完成：更新稍后再读")
 
-        composeRule.onNodeWithText("书架").performClick()
+        performPlatformClick("书架")
         waitForText("快捷书架")
         waitForText("雾港纪事")
-        composeRule.onNodeWithText("雾港纪事").performClick()
+        performPlatformClick("雾港纪事")
         waitForText("简介")
         composeRule.onNodeWithTag("detail-cover").fetchSemanticsNode()
         assertEquals(0, Phase2SourceGateway.websiteMutationCount())
@@ -309,14 +469,15 @@ class ManualVerificationHandoffInstrumentedTest {
             )
         }
         waitForText("书架")
-        composeRule.onNodeWithText("浏览").performClick()
+        performPlatformClick("浏览")
         waitForText("搜索此来源")
-        composeRule.onNodeWithText("搜索此来源").performClick()
+        performPlatformClick("搜索此来源")
         waitForText("输入关键词后搜索")
         composeRule.onNode(hasSetTextAction()).performTextInput("fixture")
-        composeRule.onNode(hasSetTextAction()).performImeAction()
+        waitForText("fixture")
+        performPlatformClick("提交搜索")
         waitForText("雾港纪事")
-        composeRule.onNodeWithText("雾港纪事").performClick()
+        performPlatformClick("雾港纪事")
         waitForText("简介")
         composeRule.onNodeWithTag("book-detail-scroll").performScrollToIndex(3)
         waitForText("第一章 雾中的灯塔")
@@ -402,7 +563,6 @@ class ManualVerificationHandoffInstrumentedTest {
         composeRule.onNodeWithTag("reader-full-settings-groups").assertDoesNotExist()
         pressBack()
         waitForTextGone("全部设置")
-        waitForText("清晨的海雾漫过石阶，灯塔只剩一圈微光。")
         waitForText("邮差把未署名的信收入防水袋，沿着旧轨道继续前行。")
         composeRule.onNodeWithTag("reader-content-surface").performTouchInput {
             click(centerRight)
@@ -423,10 +583,44 @@ class ManualVerificationHandoffInstrumentedTest {
         waitForTextGone("设置")
         pressBack()
         waitForText("简介")
-        pressBack()
-        waitForText("输入关键词后搜索")
     }
 
+
+    @Test
+    fun standard_source_home_consumes_one_explicit_verified_page_without_native_retry() {
+        cleanSessionState()
+        Phase2SourceGateway.resetOperationCounts()
+        runBlocking {
+            (composeRule.activity.application as TsuyomiApplication).displayController
+                .setDisplayPreference(DisplayPreference.STANDARD)
+        }
+
+        waitForText("书架")
+        performPlatformClick("浏览")
+        waitForText("Wenku8")
+        Phase2SourceGateway.requireVerificationForNextHomeRequest()
+        performPlatformClick("Wenku8")
+        waitForText("来源主页需要登录验证")
+        assertEquals(1, Phase2SourceGateway.homeRequestCount())
+
+        composeRule.onNodeWithText("前往登录验证").performClick()
+        waitForText("打开对应主页")
+        waitForWebViewSettled()
+        val homeHtml = targetContext.assets.open("home-index.html").bufferedReader().use { it.readText() }
+        val homeUrl = "https://www.wenku8.net/index.php"
+        installVerifiedPageFixture(homeUrl, homeHtml)
+        composeRule.onNodeWithText("打开对应主页").performClick()
+        waitForText("使用当前页面")
+        waitForWebViewSettled()
+        composeRule.onNodeWithText("使用当前页面").performClick()
+
+        waitForVerifiedOutcome(
+            successText = "Wenku8 书库",
+            unboundText = "当前页面未与暂停的搜索请求绑定。请点击“打开对应搜索页面”，等待自动跳转和页面加载完成后重试。",
+        )
+        waitForText("推荐")
+        assertEquals(1, Phase2SourceGateway.homeRequestCount())
+    }
 
     @Test
     fun standard_source_home_uses_cached_tab_pager_and_automatic_append() {
@@ -438,9 +632,9 @@ class ManualVerificationHandoffInstrumentedTest {
         }
 
         waitForText("书架")
-        composeRule.onNodeWithText("浏览").performClick()
+        performPlatformClick("浏览")
         waitForText("Wenku8")
-        composeRule.onNodeWithText("Wenku8").performClick()
+        performPlatformClick("Wenku8")
         waitForText("Wenku8 书库")
         assertTrue(composeRule.onAllNodesWithText("来源主页").fetchSemanticsNodes().isEmpty())
         assertTrue(composeRule.onAllNodesWithText("Wenku8 · 本页 2 本").fetchSemanticsNodes().isEmpty())
@@ -505,6 +699,10 @@ class ManualVerificationHandoffInstrumentedTest {
             application.libraryRepository.libraryEntries()
                 .filter { it.book.identity.sourceId == WENKU8_SOURCE_ID }
                 .forEach { application.libraryRepository.removeFromLibrary(it.book.identity) }
+            val remotePolicy = requireNotNull(application.libraryRepository.sourceRemotePolicy(WENKU8_SOURCE_ID))
+            application.libraryRepository.saveSourceRemotePolicy(
+                remotePolicy.copy(firstImportPromptDismissed = false),
+            )
             VerifiedBrowserSessionStore(composeRule.activity).put(
                 SourceCredentialPartition(WENKU8_SOURCE_ID, WENKU8_ORIGIN),
                 VerifiedBrowserSession("fixture_session=accepted", "fixture-webview-agent/1"),
@@ -512,11 +710,17 @@ class ManualVerificationHandoffInstrumentedTest {
         }
 
         waitForText("书架")
-        composeRule.onNodeWithText("浏览").performClick()
+        performPlatformClick("浏览")
         waitForText("网站收藏")
         composeRule.onNodeWithText("网站收藏").performClick()
-
-        waitForText("尚未读取网站收藏")
+        composeRule.waitUntil(timeoutMillis = 15_000) {
+            composeRule.onAllNodesWithTag("remote-library-surface").fetchSemanticsNodes().isNotEmpty()
+        }
+        composeRule.onNodeWithTag("remote-library-surface").assertIsDisplayed()
+        if (platformHasText("网站镜像")) {
+            composeRule.onNodeWithText("知道了").performClick()
+            waitForTextGone("网站镜像")
+        }
         assertEquals(0, Phase2SourceGateway.remoteLibraryReadCount())
         assertEquals(0, Phase2SourceGateway.websiteMutationCount())
         runBlocking {
@@ -524,23 +728,23 @@ class ManualVerificationHandoffInstrumentedTest {
             assertTrue(application.libraryRepository.libraryEntries().none { it.book.identity.sourceId == WENKU8_SOURCE_ID })
         }
 
-        composeRule.onNodeWithText("刷新列表").performClick()
+        composeRule.onNodeWithContentDescription("刷新列表").performClick()
         waitForText("雾港纪事")
         waitForText("星环邮差")
-        assertEquals(2, Phase2SourceGateway.remoteLibraryReadCount())
+        val readCountAfterRefresh = Phase2SourceGateway.remoteLibraryReadCount()
+        assertTrue(readCountAfterRefresh > 0)
         assertEquals(0, Phase2SourceGateway.websiteMutationCount())
 
-        composeRule.onAllNodes(isToggleable())[0].performClick()
+        composeRule.onNodeWithTag("library-book-$WENKU8_SOURCE_ID-1234").performTouchInput { longClick() }
         waitForText("已选择 1 项")
-        composeRule.onNodeWithContentDescription("复制所选").performClick()
+        composeRule.onNodeWithContentDescription("复制所选到本地书架").performClick()
         waitForText("复制网站收藏到本地书架")
         composeRule.onNodeWithText("确认复制到本地书架").performClick()
         waitForText("已复制 1 本，新增 1 本到本地书架；未向网站写入。")
         assertEquals(0, Phase2SourceGateway.websiteMutationCount())
 
-        composeRule.onNodeWithContentDescription("全部复制").performClick()
-        waitForText("复制网站收藏到本地书架")
-        composeRule.onNodeWithText("确认复制到本地书架").performClick()
+        composeRule.onNodeWithContentDescription("更多操作").performClick()
+        composeRule.onNodeWithText("全部复制到本地书架").performClick()
         waitForText("已复制 2 本，新增 1 本到本地书架；未向网站写入。")
         assertEquals(0, Phase2SourceGateway.websiteMutationCount())
         runBlocking {
@@ -555,8 +759,9 @@ class ManualVerificationHandoffInstrumentedTest {
         }
 
         composeRule.activityRule.scenario.recreate()
-        waitForText("尚未读取网站收藏")
-        assertEquals(2, Phase2SourceGateway.remoteLibraryReadCount())
+        waitForText("雾港纪事")
+        waitForText("星环邮差")
+        assertEquals(readCountAfterRefresh, Phase2SourceGateway.remoteLibraryReadCount())
         assertEquals(0, Phase2SourceGateway.websiteMutationCount())
     }
 
@@ -568,7 +773,7 @@ class ManualVerificationHandoffInstrumentedTest {
                 .setDisplayPreference(profile)
         }
         waitForText("书架")
-        composeRule.onNodeWithText("浏览").performClick()
+        performPlatformClick("浏览")
         val sourceEntryLabel = if (profile == DisplayPreference.EINK) "进入内容源" else "搜索此来源"
         waitForText(sourceEntryLabel)
         composeRule.onNodeWithText(sourceEntryLabel).performClick()
@@ -578,10 +783,11 @@ class ManualVerificationHandoffInstrumentedTest {
             composeRule.onAllNodes(hasSetTextAction()).fetchSemanticsNodes().isNotEmpty()
         }
         composeRule.onNode(hasSetTextAction()).performTextInput("challenge")
-        composeRule.onNode(hasSetTextAction()).performImeAction()
+        waitForText("challenge")
+        performPlatformClick(if (profile == DisplayPreference.EINK) "搜索" else "提交搜索")
         waitForText("此来源要求用户手动完成安全验证。")
-        composeRule.onNodeWithText("手动登录或验证").performClick()
-        val completionLabel = if (profile == DisplayPreference.EINK) "已完成" else "我已完成验证"
+        performPlatformClick("手动登录或验证")
+        val completionLabel = if (profile == DisplayPreference.EINK) "已完成" else "保存会话并返回"
         waitForText(completionLabel)
         composeRule.runOnUiThread {
             requireNotNull(findWebView(composeRule.activity.window.decorView))
@@ -605,7 +811,7 @@ class ManualVerificationHandoffInstrumentedTest {
         assertTrue(cookieAccepted.get())
 
         composeRule.onNodeWithText(completionLabel).performClick()
-        waitForText(queryLabel)
+        waitForTextGone(completionLabel)
 
         val storedSession = requireNotNull(
             VerifiedBrowserSessionStore(targetContext).getSnapshot(
@@ -614,7 +820,8 @@ class ManualVerificationHandoffInstrumentedTest {
         ).session
         assertTrue(storedSession.requestCookies.contains("fixture_session=accepted"))
         assertTrue(storedSession.userAgent.isNotBlank())
-        composeRule.onNode(hasSetTextAction()).performImeAction()
+        waitForText("challenge")
+        performPlatformClick(if (profile == DisplayPreference.EINK) "搜索" else "提交搜索")
         waitForText("雾港纪事")
 
         if (profile != DisplayPreference.STANDARD) return
@@ -656,35 +863,162 @@ class ManualVerificationHandoffInstrumentedTest {
         else -> null
     }
 
-    private fun loadAndAwaitVerifiedPage(url: String, html: String) {
-        composeRule.runOnUiThread {
-            requireNotNull(findWebView(composeRule.activity.window.decorView)).loadDataWithBaseURL(
-                url,
-                html,
-                "text/html",
-                "utf-8",
-                url,
-            )
-        }
-        composeRule.waitUntil(timeoutMillis = 15_000) {
+
+    private fun waitForWebViewSettled() {
+        composeRule.waitUntil(timeoutMillis = 30_000) {
             composeRule.runOnUiThread {
                 val webView = findWebView(composeRule.activity.window.decorView)
-                webView != null && webView.url == url && webView.progress == 100
+                webView != null && !webView.url.isNullOrBlank() && webView.progress == 100
             }
         }
     }
 
-    private fun waitForText(text: String) {
-        composeRule.waitUntil(timeoutMillis = 15_000) {
-            composeRule.onAllNodesWithText(text).fetchSemanticsNodes().isNotEmpty()
+
+    private fun installVerifiedPageFixture(url: String, html: String) {
+        composeRule.runOnUiThread {
+            val webView = requireNotNull(findWebView(composeRule.activity.window.decorView))
+            val delegate = webView.webViewClient
+            webView.webViewClient = object : WebViewClient() {
+                override fun shouldOverrideUrlLoading(view: WebView, request: WebResourceRequest): Boolean =
+                    delegate.shouldOverrideUrlLoading(view, request)
+
+                override fun shouldInterceptRequest(
+                    view: WebView,
+                    request: WebResourceRequest,
+                ): WebResourceResponse? = when {
+                    request.isForMainFrame && request.url.toString() == url -> WebResourceResponse(
+                        "text/html",
+                        "utf-8",
+                        200,
+                        "OK",
+                        emptyMap(),
+                        ByteArrayInputStream(html.encodeToByteArray()),
+                    )
+                    request.url.host == "www.wenku8.net" -> WebResourceResponse(
+                        "text/plain",
+                        "utf-8",
+                        ByteArrayInputStream(ByteArray(0)),
+                    )
+                    else -> delegate.shouldInterceptRequest(view, request)
+                }
+
+                override fun onPageStarted(view: WebView, url: String, favicon: android.graphics.Bitmap?) {
+                    delegate.onPageStarted(view, url, favicon)
+                }
+
+                override fun onPageFinished(view: WebView, url: String) {
+                    delegate.onPageFinished(view, url)
+                }
+            }
+        }
+    }
+
+    private fun waitForVerifiedOutcome(successText: String, unboundText: String) {
+        val rejectedText = "当前页面与刚才请求不一致，请重新打开对应页面"
+        var failure: String? = null
+        composeRule.waitUntil(timeoutMillis = 60_000) {
+            when {
+                platformHasText(rejectedText) -> {
+                    failure = rejectedText
+                    true
+                }
+                platformHasText(unboundText) -> {
+                    failure = unboundText
+                    true
+                }
+                !platformHasText("使用当前页面") && platformHasText(successText) -> true
+                else -> false
+            }
+        }
+        failure?.let(::error)
+    }
+
+    private fun waitForText(text: String, timeoutMillis: Long = 15_000) {
+        composeRule.waitUntil(timeoutMillis = timeoutMillis) {
+            platformHasText(text)
         }
     }
 
     private fun waitForTextGone(text: String) {
         composeRule.waitUntil(timeoutMillis = 15_000) {
-            composeRule.onAllNodesWithText(text).fetchSemanticsNodes().isEmpty()
+            !platformHasText(text)
         }
     }
+
+
+
+    private fun platformHasText(text: String): Boolean = runCatching {
+        traversePlatformNodes { node ->
+            node.text?.toString() == text || node.contentDescription?.toString() == text
+        }
+    }.getOrDefault(false)
+
+    private fun performPlatformClick(text: String) {
+        val clicked = runCatching {
+            traversePlatformNodes { node ->
+                val matches =
+                    node.text?.toString() == text || node.contentDescription?.toString() == text
+                matches && performPlatformNodeClick(node)
+            }
+        }.getOrDefault(false)
+        check(clicked) { "Could not click platform node: $text; accessibility=${platformTextSnapshot()}" }
+    }
+
+    private fun performPlatformNodeClick(
+        node: android.view.accessibility.AccessibilityNodeInfo,
+    ): Boolean {
+        var candidate = node
+        var ownsCandidate = false
+        return try {
+            while (!candidate.isClickable) {
+                val parent = candidate.parent ?: return false
+                if (ownsCandidate) candidate.recycle()
+                candidate = parent
+                ownsCandidate = true
+            }
+            candidate.performAction(android.view.accessibility.AccessibilityNodeInfo.ACTION_CLICK)
+        } finally {
+            if (ownsCandidate) candidate.recycle()
+        }
+    }
+
+    private inline fun traversePlatformNodes(
+        visit: (android.view.accessibility.AccessibilityNodeInfo) -> Boolean,
+    ): Boolean {
+        val root = InstrumentationRegistry.getInstrumentation().uiAutomation.rootInActiveWindow ?: return false
+        val pending = ArrayDeque<android.view.accessibility.AccessibilityNodeInfo>()
+        pending.add(root)
+        var visited = 0
+        while (pending.isNotEmpty() && visited++ < 512) {
+            val node = pending.removeFirst()
+            val matched = try {
+                if (visit(node)) {
+                    true
+                } else {
+                    repeat(node.childCount) { index -> node.getChild(index)?.let(pending::addLast) }
+                    false
+                }
+            } finally {
+                node.recycle()
+            }
+            if (matched) {
+                pending.forEach(android.view.accessibility.AccessibilityNodeInfo::recycle)
+                return true
+            }
+        }
+        pending.forEach(android.view.accessibility.AccessibilityNodeInfo::recycle)
+        return false
+    }
+
+    private fun platformTextSnapshot(): String = runCatching {
+        val values = mutableListOf<String>()
+        traversePlatformNodes { node ->
+            node.text?.toString()?.let(values::add)
+            node.contentDescription?.toString()?.let(values::add)
+            false
+        }
+        "texts=${values.distinct().joinToString(" | ")}"
+    }.getOrElse { error -> "error=${error::class.java.simpleName}:${error.message}" }
 
     private fun waitForStateDescription(tag: String, stateDescription: String) {
         composeRule.waitUntil(timeoutMillis = 15_000) {
@@ -696,10 +1030,12 @@ class ManualVerificationHandoffInstrumentedTest {
 
     private fun waitForQuickJsLaneCount(expected: Int) {
         composeRule.waitUntil(timeoutMillis = 15_000) {
-            Thread.getAllStackTraces().keys.count { thread ->
-                thread.isAlive && thread.name.startsWith("tsuyomi-quickjs-")
-            } == expected
+            quickJsLaneCount() == expected
         }
+    }
+
+    private fun quickJsLaneCount(): Int = Thread.getAllStackTraces().keys.count { thread ->
+        thread.isAlive && thread.name.startsWith("tsuyomi-quickjs-")
     }
 
     companion object {

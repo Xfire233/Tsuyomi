@@ -172,14 +172,17 @@ internal class SourceRemoteLibraryPullInstrumentedTest : SourceFlowInstrumentedT
         val packageInfo = installFixture()
         val sourceId = packageInfo.manifest.sourceId.value
         val oversized = summary(sourceId, "oversized", "超大收藏").copy(
-            canonicalUrl = "https://www.wenku8.net/book/" + "a".repeat(8 * 1024 * 1024),
+            canonicalUrl = "https://www.wenku8.net/book/" + "a".repeat(2_048),
         )
         val controller = controller {
             FakeSession(listRemote = { RemoteLibraryPage(listOf(oversized), null, true) })
         }
         try {
             controller.open(packageInfo)
-            assertEquals(RemoteLibraryPullResult.Failure("aggregate-limit"), controller.pullRemoteLibrary(packageInfo))
+            assertEquals(
+                RemoteLibraryPullResult.Failure("aggregate-limit"),
+                controller.pullRemoteLibrary(packageInfo, aggregateLimitBytes = 1_024),
+            )
             assertTrue(library.libraryEntries().isEmpty())
         } finally {
             controller.close()

@@ -24,30 +24,30 @@ SDK package 和 emulator 的实际 revision 必须记录在 `docs/phases/PHASE_N
 
 E-ink AVD 只证明 Android/Compose profile 行为，不证明实体面板 ghosting、waveform 或全刷能力。发布 E-ink 声明仍需物理设备证据。
 
-## 不可替代的竖屏基线
+## Policy 选择的竖屏基线
 
-每个 Phase exit/admission gate 或 PR 的运行期 AVD 验收必须在同一目标 head 上分别完成并记录以下两次独立验证：
+每个 Phase exit/admission gate 或 PR 的运行期验收读取 `.agents/skills/tsuyomi-android-review/review-policy.json`，并在同一目标 head 上为每个 `activeProfiles` 项分别完成独立 portrait 验证：
 
-| 验证 | AVD | 物理分辨率与方向 | profile | 最低证据 |
-|---|---|---|---|---|
-| 标准手机竖屏 | `Tsuyomi_API29` | `1080×2400` portrait | forced Standard | 受影响用户流完成；记录 `wm size`、`wm density`、方向、`font_scale` 和至少一张截图 SHA-256 |
-| E-ink 竖屏 | `Tsuyomi_EInk_API29` | `1264×1680` portrait | forced E-ink | 同一受影响用户流完成；记录 `wm size`、`wm density`、方向、`font_scale` 和至少一张截图 SHA-256 |
+| Profile | AVD | 物理分辨率与方向 | 最低证据 |
+|---|---|---|---|
+| `STANDARD`（active 时） | `Tsuyomi_API29` | `1080×2400` portrait | 受影响用户流完成；记录 `wm size`、`wm density`、方向、`font_scale` 和至少一张截图 SHA-256 |
+| `EINK`（active 时） | `Tsuyomi_EInk_API29` | `1264×1680` portrait | 同一受影响用户流完成；记录相同设备事实和截图 SHA-256；发布 E-ink 声明另需物理面板证据 |
 
-两条记录必须分别列入 `docs/phases/PHASE_N.md`，不能用同一 AVD、profile 切换、Layoutlib golden、横屏、分屏或另一种分辨率替代。横屏与分屏仍是附加必测窗口；它们不抵扣上述两次竖屏验收。缺少任一竖屏基线即阻塞对应 admission gate / PR 准入。
+active profile 的记录不能用另一 profile、同一 AVD 内切换、Layoutlib golden、横屏、分屏或其他分辨率替代。当前 policy 若把 `EINK` 标为 `FROZEN`/deferred，日常 gate 不要求 E-ink AVD：保留实现与合同，只运行 policy 允许的 direct-change 最小检查；恢复 active 时重跑完整 retained matrix。
 
 用 `tools/avd/Create-ReviewAvds.ps1` 创建；脚本只读取 `ANDROID_SDK_ROOT`/`ANDROID_HOME`，不写入用户路径到仓库。
 
-## 每次验收矩阵
+## 每次 active-profile 验收矩阵
 
-每个 AVD 都执行下列附加矩阵；其中 portrait 结果必须满足上一节的两条独立证据记录：
+每个 active profile 的 AVD 都执行适用于受影响表面的附加矩阵；portrait 结果必须满足上一节的独立证据记录：
 
 1. portrait 与 landscape，且 landscape 不得替代 portrait；
 2. `font_scale = 1.0` 与 `2.0`；
 3. touch、TalkBack 语义检查、键盘/DPAD 焦点；
-4. standard、手动 E-ink、auto/fallback 的适用状态；
+4. 当前 active profile 及其 auto/fallback 适用状态；
 5. clean install、进程重建、应用重启后的持久化；
 6. route、滚动、焦点和可恢复失败状态；
-7. 无裁切、重叠、不可达操作、残留焦点或无效选项。
+7. 无裁切、重叠、不可达操作、残留焦点或无效选项；
 8. 受控 WebView：分别记录 fixture host transport、真实 declared-origin 页面、blocked navigation、完成/取消 cookie handoff。WebView 的 `ERR_CACHE_MISS`、offline、403 或错误页只证明失败恢复，不得当作手动验证成功。
 
 执行前记录：
@@ -61,4 +61,4 @@ adb shell settings get system font_scale
 adb shell getprop ro.build.version.sdk
 ```
 
-执行后把命令、结果摘要和截图 SHA-256 写入 Phase evidence；标准手机竖屏和 E-ink 竖屏必须使用独立小节或表格行。`build/acceptance` 只作本地暂存。
+执行后把命令、结果摘要和截图 SHA-256 写入 Phase evidence；每个 active profile 使用独立小节或表格行，并记录 deferred profile 的 policy 状态与恢复触发条件。`build/acceptance` 只作本地暂存。

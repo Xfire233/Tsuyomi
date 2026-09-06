@@ -202,11 +202,12 @@ private fun HxpRemoteParameter.canonicalKind(): String = when (this) {
     is HxpRemoteParameter.Fixed -> "fixed"
     is HxpRemoteParameter.RemoteBookId -> "remote-book-id"
     is HxpRemoteParameter.Cursor -> "cursor"
+    is HxpRemoteParameter.TargetId -> "target-id"
 }
 
 private fun HxpRemoteParameter.canonicalValue(): String = when (this) {
     is HxpRemoteParameter.Fixed -> value
-    is HxpRemoteParameter.RemoteBookId, is HxpRemoteParameter.Cursor -> ""
+    is HxpRemoteParameter.RemoteBookId, is HxpRemoteParameter.Cursor, is HxpRemoteParameter.TargetId -> ""
 }
 
 data class PreparedExtensionInstall(

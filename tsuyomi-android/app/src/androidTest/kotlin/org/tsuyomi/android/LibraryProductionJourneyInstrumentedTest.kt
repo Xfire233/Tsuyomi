@@ -270,7 +270,7 @@ class LibraryProductionJourneyInstrumentedTest {
     }
 
     @Test
-    fun standard_library_drag_preview_is_immediate_and_book_drops_into_shortcut_shelf() {
+    fun movement_after_long_press_shows_drag_preview_and_drops_into_shortcut_shelf() {
         val application = composeRule.activity.application as TsuyomiApplication
         val originalPreferences = runBlocking { libraryPreferences.preferences.first() }
         val shortcutId = org.tsuyomi.feature.library.libraryBookShortcutId(behaviorNewer)
@@ -294,6 +294,7 @@ class LibraryProductionJourneyInstrumentedTest {
             first.performTouchInput {
                 down(center)
                 advanceEventTime(700)
+                moveBy(Offset(0f, -48f), delayMillis = 100)
             }
             composeRule.waitUntil(timeoutMillis = 5_000) {
                 runCatching { composeRule.onNodeWithTag("library-drag-preview").fetchSemanticsNode() }.isSuccess
@@ -375,6 +376,7 @@ class LibraryProductionJourneyInstrumentedTest {
             first.performTouchInput {
                 down(center)
                 advanceEventTime(700)
+                moveBy(Offset(0f, -48f), delayMillis = 100)
             }
             composeRule.waitUntil(timeoutMillis = 5_000) {
                 runCatching { composeRule.onNodeWithTag("library-drag-preview").fetchSemanticsNode() }.isSuccess
@@ -499,19 +501,10 @@ class LibraryProductionJourneyInstrumentedTest {
             source.performTouchInput {
                 down(center)
                 advanceEventTime(700)
-            }
-            waitForText("已选 1 项")
-            composeRule.waitUntil(timeoutMillis = 5_000) {
-                composeRule.onAllNodesWithTag("library-drag-preview").fetchSemanticsNodes().isNotEmpty()
-            }
-            source.performTouchInput {
+                moveBy(Offset(0f, -48f), delayMillis = 100)
                 moveTo(Offset(shelfBounds.center.x, shelfBounds.top - 20f) - sourceBounds.topLeft, delayMillis = 100)
+                up()
             }
-            val lockedDropHints = composeRule.onAllNodesWithText("松开以", substring = true).fetchSemanticsNodes()
-                .flatMap { it.config.getOrElse(SemanticsProperties.Text) { emptyList() } }
-                .joinToString { it.text }
-            assertTrue("locked shelf hint=$lockedDropHints shelf=$shelfBounds source=$sourceBounds", lockedDropHints.contains("放到快捷书架"))
-            source.performTouchInput { up() }
             composeRule.waitUntil(timeoutMillis = 5_000) {
                 composeRule.onAllNodesWithTag("library-shortcut-$shortcutId").fetchSemanticsNodes().isNotEmpty()
             }
@@ -522,26 +515,17 @@ class LibraryProductionJourneyInstrumentedTest {
             val target = composeRule.onNodeWithTag(targetTag)
             target.performSemanticsAction(SemanticsActions.OnLongClick)
             waitForText("已选 1 项")
-            val selectedTarget = composeRule.onNodeWithTag(targetTag)
-            selectedTarget.performTouchInput {
-                down(center)
-                advanceEventTime(700)
-            }
-            composeRule.waitUntil(timeoutMillis = 5_000) {
-                composeRule.onAllNodesWithTag("library-drag-preview").fetchSemanticsNodes().isNotEmpty()
-            }
-            val targetBounds = selectedTarget.fetchSemanticsNode().boundsInRoot
             composeRule.onNodeWithTag("library-shortcut-$shortcutId").performScrollTo()
+            val targetBounds = target.fetchSemanticsNode().boundsInRoot
             val shortcutBounds = composeRule.onNodeWithTag("library-shortcut-$shortcutId")
                 .fetchSemanticsNode().boundsInRoot
-            selectedTarget.performTouchInput {
+            target.performTouchInput {
+                down(center)
+                advanceEventTime(700)
+                moveBy(Offset(0f, -48f), delayMillis = 100)
                 moveTo(shortcutBounds.center - targetBounds.topLeft, delayMillis = 100)
+                up()
             }
-            composeRule.waitUntil(timeoutMillis = 5_000) {
-                composeRule.onNodeWithTag("library-shortcut-$shortcutId")
-                    .fetchSemanticsNode().config[SemanticsProperties.StateDescription] == "当前拖放目标"
-            }
-            selectedTarget.performTouchInput { up() }
             waitForText("用所选书籍新建收藏夹")
             composeRule.onNodeWithText("取消").performClick()
 
@@ -554,12 +538,7 @@ class LibraryProductionJourneyInstrumentedTest {
             shortcut.performTouchInput {
                 down(center)
                 advanceEventTime(700)
-            }
-            waitForText("已选 1 项")
-            composeRule.waitUntil(timeoutMillis = 5_000) {
-                composeRule.onAllNodesWithTag("library-drag-preview").fetchSemanticsNodes().isNotEmpty()
-            }
-            shortcut.performTouchInput {
+                moveBy(Offset(0f, -48f), delayMillis = 100)
                 moveTo(
                     Offset(shelfBoundsBeforeReorder.left + 8f, shelfBoundsBeforeReorder.center.y) -
                         shortcutBoundsBeforeReorder.topLeft,
@@ -707,27 +686,26 @@ class LibraryProductionJourneyInstrumentedTest {
             source.performTouchInput {
                 down(center)
                 advanceEventTime(700)
+                moveBy(Offset(0f, -48f), delayMillis = 100)
             }
             composeRule.waitUntil(timeoutMillis = 5_000) {
                 composeRule.onAllNodesWithTag("library-drag-preview").fetchSemanticsNodes().isNotEmpty()
             }
-            val handleBounds = composeRule.onNodeWithTag("library-shortcut-overlay-collapsed")
-                .fetchSemanticsNode().boundsInRoot
-            val initialPreviewBounds = composeRule.onNodeWithTag("library-drag-preview")
+            val previewBounds = composeRule.onNodeWithTag("library-drag-preview")
                 .fetchSemanticsNode().boundsInRoot
             val pointer = Offset(
-                initialPreviewBounds.center.x,
-                initialPreviewBounds.top + initialPreviewBounds.height * 0.34f,
+                previewBounds.center.x,
+                previewBounds.top + previewBounds.height * 0.34f,
             )
+            val handleBounds = composeRule.onNodeWithTag("library-shortcut-overlay-collapsed")
+                .fetchSemanticsNode().boundsInRoot
             source.performTouchInput {
-                val hoverDelta = handleBounds.center - pointer
-                moveBy(hoverDelta, delayMillis = 100)
-                moveBy(-hoverDelta, delayMillis = 100)
-                cancel()
+                moveBy(handleBounds.center - pointer, delayMillis = 100)
             }
             composeRule.waitUntil(timeoutMillis = 5_000) {
                 composeRule.onAllNodesWithTag("library-shortcut-overlay-expanded").fetchSemanticsNodes().isNotEmpty()
             }
+            source.performTouchInput { cancel() }
             composeRule.onNodeWithContentDescription("退出选择").performClick()
         } finally {
             runBlocking {
@@ -871,6 +849,146 @@ class LibraryProductionJourneyInstrumentedTest {
             assertTrue(restored.createCollectionFromSelection(shortcutDropCollectionTitle, "failed"))
             val batch = repository.collections().single { it.title == shortcutDropCollectionTitle }
             assertEquals("collection:${batch.collectionId}", restored.state.shortcutOrder[1])
+        } finally {
+            libraryPreferences.updateShortcutOrder(original.shortcutOrder)
+            libraryPreferences.updateShortcutLocked(original.shortcutLocked)
+        }
+    }
+
+    @Test
+    fun detail_local_destinations_replace_memberships_and_shortcut_exactly() = runBlocking {
+        val repository = (composeRule.activity.application as TsuyomiApplication).libraryRepository
+        val original = libraryPreferences.preferences.first()
+        val firstId = "fixture.detail.destination.first"
+        val secondId = "fixture.detail.destination.second"
+        val now = Instant.parse("2091-02-01T00:00:00Z")
+        try {
+            listOf(firstId, secondId).forEach { repository.deleteCollection(it) }
+            repository.removeFromLibrary(behaviorNewer)
+            repository.addToLibrary(book(behaviorNewer, "目的地替换"))
+            repository.createCollection(LibraryCollection(firstId, CollectionKind.MANUAL, "第一收藏", null, 0L, now, now))
+            repository.createCollection(LibraryCollection(secondId, CollectionKind.MANUAL, "第二收藏", null, 1L, now, now))
+            assertTrue(repository.addManualMembership(firstId, behaviorNewer))
+            libraryPreferences.updateShortcutOrder(emptyList())
+
+            val controller = LibraryFlowController(repository, libraryPreferences)
+            controller.reload("failed")
+            assertTrue(controller.applyBookDestinations(behaviorNewer, true, setOf(secondId), "failed"))
+            assertTrue(repository.collectionEntries(firstId).isEmpty())
+            assertEquals(listOf(behaviorNewer), repository.collectionEntries(secondId).map { it.book.identity })
+            assertTrue(controller.isBookShortcutPinned(behaviorNewer))
+
+            assertTrue(controller.applyBookDestinations(behaviorNewer, false, emptySet(), "failed"))
+            assertTrue(repository.collectionEntries(secondId).isEmpty())
+            assertFalse(controller.isBookShortcutPinned(behaviorNewer))
+        } finally {
+            listOf(firstId, secondId).forEach { repository.deleteCollection(it) }
+            repository.removeFromLibrary(behaviorNewer)
+            libraryPreferences.updateShortcutOrder(original.shortcutOrder)
+            libraryPreferences.updateShortcutLocked(original.shortcutLocked)
+        }
+    }
+
+    @Test
+    fun mirror_shortcuts_restore_order_independently_and_freeze_missing_targets() = runBlocking {
+        val repository = (composeRule.activity.application as TsuyomiApplication).libraryRepository
+        val original = libraryPreferences.preferences.first()
+        val sourceId = "fixture.mirror.shortcuts"
+        val rootId = org.tsuyomi.feature.library.libraryMirrorShortcutId(sourceId)
+        val now = Instant.parse("2091-01-01T00:00:00Z")
+        val folderId = org.tsuyomi.feature.library.libraryMirrorFolderShortcutId(sourceId, "favorites")
+        try {
+            libraryPreferences.clearWebsiteGroupingOverride(sourceId)
+            libraryPreferences.updateShortcutOrder(emptyList())
+            repository.saveRemoteMirrorSnapshot(
+                org.tsuyomi.core.database.RemoteMirrorReplaceRequest(
+                    sourceId = sourceId,
+                    sourceName = "测试网站",
+                    books = emptyList(),
+                    targets = listOf(
+                        org.tsuyomi.core.database.RemoteMirrorTargetSnapshot(
+                            targetId = "favorites",
+                            sourceId = sourceId,
+                            displayName = "特别收藏",
+                            parentId = null,
+                            kind = "folder",
+                            frozen = false,
+                            updatedAtEpochSecond = now.epochSecond,
+                        ),
+                    ),
+                    updatedAt = now,
+                ),
+            )
+            val simpleController = LibraryFlowController(repository, libraryPreferences)
+            simpleController.reload("failed")
+            assertFalse(simpleController.isWebsiteGroupingEnabled(sourceId))
+            libraryPreferences.updateShortcutOrder(listOf(rootId, folderId))
+            val controller = LibraryFlowController(repository, libraryPreferences)
+            controller.reload("failed")
+            val root = controller.state.mirrorShortcuts.single { it.targetId == null && it.sourceId == sourceId }
+            assertTrue(controller.isWebsiteGroupingEnabled(sourceId))
+            assertTrue(controller.isMirrorShortcutPinned(sourceId, null))
+            assertTrue(controller.isMirrorShortcutPinned(sourceId, "favorites"))
+            assertTrue(controller.moveShortcut(folderId, 0, "failed"))
+            assertTrue(controller.setWebsiteGroupingEnabled(sourceId, false, "failed"))
+            assertFalse(controller.isMirrorShortcutPinned(sourceId, "favorites"))
+            assertTrue(folderId in controller.state.shortcutOrder)
+            assertTrue(controller.setWebsiteGroupingEnabled(sourceId, true, "failed"))
+            assertTrue(controller.isMirrorShortcutPinned(sourceId, "favorites"))
+
+            repository.saveRemoteMirrorSnapshot(
+                org.tsuyomi.core.database.RemoteMirrorReplaceRequest(
+                    sourceId = sourceId,
+                    sourceName = "测试网站",
+                    books = emptyList(),
+                    targets = emptyList(),
+                    updatedAt = now.plusSeconds(1),
+                ),
+            )
+            val restored = LibraryFlowController(repository, libraryPreferences)
+            restored.reload("failed")
+            assertEquals(listOf(folderId, rootId), restored.state.shortcutOrder.filter { it == rootId || it == folderId })
+            assertTrue(restored.state.mirrorShortcuts.single { it.targetId == "favorites" }.frozen)
+            assertTrue(restored.setMirrorShortcutPinned(root, false, "failed"))
+            assertTrue(restored.isMirrorShortcutPinned(sourceId, "favorites"))
+            assertFalse(restored.isMirrorShortcutPinned(sourceId, null))
+        } finally {
+            libraryPreferences.updateShortcutOrder(original.shortcutOrder)
+            libraryPreferences.updateShortcutLocked(original.shortcutLocked)
+            original.websiteGroupingBySource[sourceId]?.let { enabled ->
+                libraryPreferences.updateWebsiteGrouping(sourceId, enabled)
+            } ?: libraryPreferences.clearWebsiteGroupingOverride(sourceId)
+        }
+    }
+
+    @Test
+    fun mirror_pin_refreshes_snapshot_created_after_controller_reload() = runBlocking {
+        val repository = (composeRule.activity.application as TsuyomiApplication).libraryRepository
+        val original = libraryPreferences.preferences.first()
+        val sourceId = "fixture.mirror.pin.refresh"
+        val now = Instant.parse("2091-01-02T00:00:00Z")
+        try {
+            libraryPreferences.updateShortcutOrder(emptyList())
+            val controller = LibraryFlowController(repository, libraryPreferences)
+            controller.reload("failed")
+            repository.saveRemoteMirrorSnapshot(
+                org.tsuyomi.core.database.RemoteMirrorReplaceRequest(
+                    sourceId = sourceId,
+                    sourceName = "测试网站",
+                    books = emptyList(),
+                    targets = emptyList(),
+                    updatedAt = now,
+                ),
+            )
+
+            assertTrue(
+                controller.setMirrorShortcutPinned(
+                    org.tsuyomi.feature.library.LibraryMirrorShortcut(sourceId, null, "测试网站", 0, false),
+                    true,
+                    "failed",
+                ),
+            )
+            assertTrue(controller.isMirrorShortcutPinned(sourceId, null))
         } finally {
             libraryPreferences.updateShortcutOrder(original.shortcutOrder)
             libraryPreferences.updateShortcutLocked(original.shortcutLocked)

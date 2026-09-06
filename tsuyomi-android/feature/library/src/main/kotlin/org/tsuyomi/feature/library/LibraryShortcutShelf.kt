@@ -52,9 +52,12 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.LocalInspectionMode
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalWindowInfo
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.clearAndSetSemantics
@@ -82,6 +85,11 @@ internal const val ShortcutTileWidthDp = 80
 fun libraryBookShortcutId(identity: BookIdentity): String =
     "book:${identity.sourceId.length}:${identity.sourceId}${identity.remoteBookId}"
 
+fun libraryMirrorShortcutId(sourceId: String): String = "mirror:${sourceId.length}:$sourceId"
+
+fun libraryMirrorFolderShortcutId(sourceId: String, targetId: String): String =
+    "mirror-folder:${sourceId.length}:$sourceId${targetId.length}:$targetId"
+
 internal data class ProductionShortcut(
     val id: String,
     val label: String,
@@ -89,6 +97,7 @@ internal data class ProductionShortcut(
     val filter: SystemLibraryFilter? = null,
     val collection: LibraryCollection? = null,
     val entry: LibraryEntry? = null,
+    val mirror: LibraryMirrorShortcut? = null,
 )
 
 internal enum class ShortcutShelfPresentation {
@@ -100,6 +109,7 @@ internal enum class ShortcutShelfPresentation {
 internal fun buildShortcuts(
     entries: List<LibraryEntry>,
     collections: List<LibraryCollection>,
+    mirrors: List<LibraryMirrorShortcut>,
     order: List<String>,
 ): List<ProductionShortcut> = buildList {
     val hiddenIds = order.asSequence()
@@ -134,6 +144,20 @@ internal fun buildShortcuts(
             )
         }
     }
+    mirrors.forEach { mirror ->
+        val id = mirror.targetId?.let { libraryMirrorFolderShortcutId(mirror.sourceId, it) }
+            ?: libraryMirrorShortcutId(mirror.sourceId)
+        if (id in order && id !in hiddenIds) {
+            add(
+                ProductionShortcut(
+                    id = id,
+                    label = mirror.label,
+                    icon = if (mirror.targetId == null) TsuyomiIcons.Mirror else TsuyomiIcons.Folder,
+                    mirror = mirror,
+                ),
+            )
+        }
+    }
     val orderedIds = order.toHashSet()
     entries.forEach { entry ->
         val id = libraryBookShortcutId(entry.book.identity)
@@ -155,11 +179,13 @@ internal fun openShortcut(
     onOpenSystemNode: (SystemLibraryFilter) -> Unit,
     onOpenCollection: (LibraryCollection) -> Unit,
     onOpenBook: (LibraryEntry) -> Unit,
+    onOpenMirror: (LibraryMirrorShortcut) -> Unit,
 ) {
     when {
         shortcut.filter != null -> onOpenSystemNode(shortcut.filter)
         shortcut.collection != null -> onOpenCollection(shortcut.collection)
         shortcut.entry != null -> onOpenBook(shortcut.entry)
+        shortcut.mirror != null -> onOpenMirror(shortcut.mirror)
     }
 }
 
@@ -174,12 +200,28 @@ internal fun orderShortcuts(
 }
 
 @Composable
-internal fun Modifier.optionalAnimateItem(scope: LazyItemScope): Modifier =
-    if (LocalInspectionMode.current) this else with(scope) { this@optionalAnimateItem.animateItem() }
+internal fun Modifier.optionalAnimateItem(scope: LazyItemScope): Modifier {
+    val instant = LocalDisplayEnvironment.current.instantMotion
+    return if (LocalInspectionMode.current) this else with(scope) {
+        this@optionalAnimateItem.animateItem(
+            fadeInSpec = if (instant) snap() else tween(TsuyomiMotion.SWITCH_DURATION_MS, easing = TsuyomiMotion.Easing),
+            placementSpec = if (instant) snap() else tween(TsuyomiMotion.EXPAND_DURATION_MS, easing = TsuyomiMotion.Easing),
+            fadeOutSpec = if (instant) snap() else tween(TsuyomiMotion.SWITCH_DURATION_MS, easing = TsuyomiMotion.Easing),
+        )
+    }
+}
 
 @Composable
-internal fun Modifier.optionalAnimateItem(scope: LazyGridItemScope): Modifier =
-    if (LocalInspectionMode.current) this else with(scope) { this@optionalAnimateItem.animateItem() }
+internal fun Modifier.optionalAnimateItem(scope: LazyGridItemScope): Modifier {
+    val instant = LocalDisplayEnvironment.current.instantMotion
+    return if (LocalInspectionMode.current) this else with(scope) {
+        this@optionalAnimateItem.animateItem(
+            fadeInSpec = if (instant) snap() else tween(TsuyomiMotion.SWITCH_DURATION_MS, easing = TsuyomiMotion.Easing),
+            placementSpec = if (instant) snap() else tween(TsuyomiMotion.EXPAND_DURATION_MS, easing = TsuyomiMotion.Easing),
+            fadeOutSpec = if (instant) snap() else tween(TsuyomiMotion.SWITCH_DURATION_MS, easing = TsuyomiMotion.Easing),
+        )
+    }
+}
 
 @Composable
 internal fun ShortcutShelf(
@@ -197,7 +239,7 @@ internal fun ShortcutShelf(
     onToggleBookSelection: (BookIdentity) -> Unit,
     onLongPressCollection: (String) -> Unit,
     onToggleCollectionSelection: (String) -> Unit,
-    coverState: (LibraryEntry) -> CoverUiState,
+    coverState: @Composable (LibraryEntry) -> CoverUiState,
 ) {
     val dragActive = dragCoordinator.activePayload != null
     val dropActive = dragActive && dragCoordinator.isOverShelf
@@ -207,17 +249,30 @@ internal fun ShortcutShelf(
     val bookTarget = dragCoordinator.bookTargetIdentity?.let { targetIdentity ->
         shortcuts.firstOrNull { it.entry?.book?.identity == targetIdentity }
     }
+    val mirrorTarget = (dragCoordinator.externalDestination as? LibraryDropDestination.RemoteMirror)?.let { target ->
+        shortcuts.firstOrNull { shortcut ->
+            val mirror = shortcut.mirror
+            mirror != null && mirror.sourceId == target.sourceId && mirror.targetId == target.targetId
+        }
+    }
+    val mirrorTargetModel = mirrorTarget?.mirror
     val gapIndex = dragCoordinator.rootInsertionIndex
-        .takeIf { dropActive && collectionTarget == null && bookTarget == null && it >= 0 }
+        .takeIf { dropActive && collectionTarget == null && bookTarget == null && mirrorTarget == null && it >= 0 }
         ?.coerceIn(0, shortcuts.size)
     val batchCount = dragCoordinator.activeBookIds.size
     val dropHint = when {
+        mirrorTargetModel != null -> if (mirrorTargetModel.targetId == null) {
+            "松开以选择「${mirrorTarget.label}」的网站目标"
+        } else {
+            "松开以加入「${mirrorTarget.label}」"
+        }
+        dropActive && batchCount > 1 && shortcuts.any { it.mirror != null } -> "网站操作仅支持单本"
         collectionTarget != null -> "松开以加入「${collectionTarget.label}」"
         bookTarget != null -> "松开以和「${bookTarget.label}」新建收藏夹"
         gapIndex != null && batchCount > 1 -> "松开以新建收藏夹并放到第 ${gapIndex + 1} 位"
         gapIndex != null -> "松开以放到快捷书架第 ${gapIndex + 1} 位"
         dragActive && batchCount > 1 -> "拖到快捷书架空位新建收藏夹，或拖入现有收藏夹"
-        dragActive && dragCoordinator.activeBookIds.isNotEmpty() -> "拖到快捷书架空位、书籍或收藏夹"
+        dragActive && dragCoordinator.activeBookIds.isNotEmpty() -> "拖到快捷书架空位、书籍、收藏夹或网站镜像"
         else -> null
     }
     Column(
@@ -307,8 +362,9 @@ internal fun ShortcutTile(
     onToggleBookSelection: (BookIdentity) -> Unit,
     onLongPressCollection: (String) -> Unit,
     onToggleCollectionSelection: (String) -> Unit,
-    coverState: (LibraryEntry) -> CoverUiState,
+    coverState: @Composable (LibraryEntry) -> CoverUiState,
     modifier: Modifier = Modifier,
+    expanded: Boolean = false,
 ) {
     val collectionId = shortcut.collection?.takeIf { it.kind == CollectionKind.MANUAL }?.collectionId
     val bookIdentity = shortcut.entry?.book?.identity
@@ -318,37 +374,32 @@ internal fun ShortcutTile(
         else -> false
     }
     val targetActive = (collectionId != null && dragCoordinator.collectionTargetId == collectionId) ||
-        (bookIdentity != null && dragCoordinator.bookTargetShortcutId == shortcut.id)
+        (bookIdentity != null && dragCoordinator.bookTargetShortcutId == shortcut.id) ||
+        (shortcut.mirror != null && (dragCoordinator.externalDestination as? LibraryDropDestination.RemoteMirror)?.let {
+            it.sourceId == shortcut.mirror.sourceId && it.targetId == shortcut.mirror.targetId
+        } == true)
     val instant = LocalDisplayEnvironment.current.instantMotion
     val targetScale by animateFloatAsState(
-        targetValue = if (targetActive) 1.05f else 1f,
-        animationSpec = if (instant) snap() else spring(stiffness = 520f, dampingRatio = 0.72f),
+        targetValue = if (targetActive) 1.025f else 1f,
+        animationSpec = if (instant) snap() else tween(TsuyomiMotion.SWITCH_DURATION_MS, easing = TsuyomiMotion.Easing),
         label = "libraryShortcutTargetScale",
     )
     val targetContainer by animateColorAsState(
-        targetValue = if (targetActive || selected) {
-            MaterialTheme.colorScheme.primaryContainer
-        } else {
-            MaterialTheme.colorScheme.surfaceContainerLow
-        },
+        targetValue = if (targetActive || selected) MaterialTheme.colorScheme.primaryContainer
+        else MaterialTheme.colorScheme.surfaceContainerLow,
         animationSpec = if (instant) snap() else tween(TsuyomiMotion.SWITCH_DURATION_MS),
         label = "libraryShortcutTargetContainer",
     )
     val targetOutline by animateColorAsState(
-        targetValue = if (targetActive || selected) {
-            MaterialTheme.colorScheme.primary
-        } else {
-            MaterialTheme.colorScheme.outlineVariant
-        },
+        targetValue = if (targetActive || selected) MaterialTheme.colorScheme.primary
+        else MaterialTheme.colorScheme.outlineVariant,
         animationSpec = if (instant) snap() else tween(TsuyomiMotion.SWITCH_DURATION_MS),
         label = "libraryShortcutTargetOutline",
     )
     val tileClick = {
         when {
-            selectionKind == LibrarySelectionKind.COLLECTION && collectionId != null ->
-                onToggleCollectionSelection(collectionId)
-            selectionKind == LibrarySelectionKind.BOOK && bookIdentity != null ->
-                onToggleBookSelection(bookIdentity)
+            selectionKind == LibrarySelectionKind.COLLECTION && collectionId != null -> onToggleCollectionSelection(collectionId)
+            selectionKind == LibrarySelectionKind.BOOK && bookIdentity != null -> onToggleBookSelection(bookIdentity)
             selectionKind == null -> onOpen()
         }
     }
@@ -361,6 +412,8 @@ internal fun ShortcutTile(
     val dropKind = when {
         collectionId != null -> LibraryShortcutDropKind.COLLECTION
         bookIdentity != null -> LibraryShortcutDropKind.BOOK
+        shortcut.mirror?.targetId != null -> LibraryShortcutDropKind.REMOTE_FOLDER
+        shortcut.mirror != null -> LibraryShortcutDropKind.REMOTE_MIRROR
         else -> LibraryShortcutDropKind.ITEM
     }
     val payload = if (bookIdentity != null) {
@@ -371,7 +424,7 @@ internal fun ShortcutTile(
     Surface(
         modifier = modifier
             .testTag("library-shortcut-${shortcut.id}")
-            .height(116.dp)
+            .then(if (expanded) Modifier.aspectRatio(3f / 4f) else Modifier.height(116.dp))
             .graphicsLayer {
                 scaleX = targetScale
                 scaleY = targetScale
@@ -382,6 +435,7 @@ internal fun ShortcutTile(
                 index = index,
                 kind = dropKind,
                 bookIdentity = bookIdentity,
+                mirror = shortcut.mirror,
             )
             .libraryShortcutGestures(
                 subjectKey = shortcut.id,
@@ -391,7 +445,7 @@ internal fun ShortcutTile(
                 selectionActive = selectionKind != null,
                 dragEnabled = true,
                 canRemove = true,
-                scrollOrientation = Orientation.Horizontal,
+                scrollOrientation = if (expanded) Orientation.Vertical else Orientation.Horizontal,
                 onTap = tileClick,
                 onLongPress = tileLongPress,
             )
@@ -399,54 +453,91 @@ internal fun ShortcutTile(
                 role = Role.Button
                 contentDescription = shortcut.label
                 stateDescription = when {
+                    shortcut.mirror?.frozen == true -> "网站目标不可用，可打开修复或移出快捷书架"
                     targetActive -> "当前拖放目标"
                     locked -> "快捷书架已固定，可拖动"
                     else -> "快捷书架随内容滚动，可拖动"
                 }
                 this.selected = selected
             },
-        shape = MaterialTheme.shapes.small,
+        shape = if (expanded) MaterialTheme.shapes.medium else MaterialTheme.shapes.small,
         color = targetContainer,
         border = BorderStroke(if (selected || targetActive) 2.dp else 1.dp, targetOutline),
         shadowElevation = if (targetActive) 8.dp else 0.dp,
     ) {
-        Column(Modifier.fillMaxWidth().padding(TsuyomiSpacing.Xs)) {
-            Box(
-                modifier = Modifier.fillMaxWidth().height(76.dp)
-                    .testTag("library-shortcut-media-${shortcut.id}")
-                    .background(MaterialTheme.colorScheme.surfaceContainerHigh),
-                contentAlignment = Alignment.Center,
-            ) {
-                shortcut.entry?.let { entry ->
-                    CoverImage(
-                        state = coverState(entry),
-                        modifier = Modifier.fillMaxSize(),
+        if (expanded) {
+            Box(Modifier.fillMaxSize()) {
+                Box(
+                    modifier = Modifier.fillMaxSize()
+                        .testTag("library-shortcut-media-${shortcut.id}")
+                        .background(MaterialTheme.colorScheme.surfaceContainerHigh),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    shortcut.entry?.let { entry ->
+                        CoverImage(state = coverState(entry), modifier = Modifier.fillMaxSize())
+                    } ?: Icon(shortcut.icon, contentDescription = null, modifier = Modifier.size(40.dp))
+                }
+                Column(
+                    modifier = Modifier.align(Alignment.BottomCenter).fillMaxWidth()
+                        .background(Brush.verticalGradient(listOf(Color.Transparent, Color.Black.copy(alpha = 0.82f))))
+                        .padding(start = TsuyomiSpacing.Sm, top = 28.dp, end = TsuyomiSpacing.Sm, bottom = 8.dp),
+                ) {
+                    Text(
+                        shortcut.label,
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis,
+                        style = MaterialTheme.typography.titleSmall,
+                        color = Color.White,
                     )
-                } ?: Icon(shortcut.icon, contentDescription = null, modifier = Modifier.size(28.dp))
+                }
                 if (selected) {
                     Surface(
-                        modifier = Modifier.align(Alignment.TopEnd).padding(TsuyomiSpacing.Xs).size(24.dp),
+                        modifier = Modifier.align(Alignment.TopEnd).padding(6.dp).size(32.dp),
                         shape = MaterialTheme.shapes.extraLarge,
                         color = MaterialTheme.colorScheme.primary,
                     ) {
                         Box(contentAlignment = Alignment.Center) {
-                            Icon(
-                                TsuyomiIcons.Selected,
-                                contentDescription = "已选择",
-                                tint = MaterialTheme.colorScheme.onPrimary,
-                                modifier = Modifier.size(16.dp),
-                            )
+                            Icon(TsuyomiIcons.Selected, contentDescription = "已选择", tint = MaterialTheme.colorScheme.onPrimary)
                         }
                     }
                 }
             }
-            Text(
-                shortcut.label,
-                modifier = Modifier.padding(top = 2.dp),
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-                style = MaterialTheme.typography.labelMedium,
-            )
+        } else {
+            Column(Modifier.fillMaxWidth().padding(TsuyomiSpacing.Xs)) {
+                Box(
+                    modifier = Modifier.fillMaxWidth().height(76.dp)
+                        .testTag("library-shortcut-media-${shortcut.id}")
+                        .background(MaterialTheme.colorScheme.surfaceContainerHigh),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    shortcut.entry?.let { entry ->
+                        CoverImage(state = coverState(entry), modifier = Modifier.fillMaxSize())
+                    } ?: Icon(shortcut.icon, contentDescription = null, modifier = Modifier.size(28.dp))
+                    if (selected) {
+                        Surface(
+                            modifier = Modifier.align(Alignment.TopEnd).padding(TsuyomiSpacing.Xs).size(24.dp),
+                            shape = MaterialTheme.shapes.extraLarge,
+                            color = MaterialTheme.colorScheme.primary,
+                        ) {
+                            Box(contentAlignment = Alignment.Center) {
+                                Icon(
+                                    TsuyomiIcons.Selected,
+                                    contentDescription = "已选择",
+                                    tint = MaterialTheme.colorScheme.onPrimary,
+                                    modifier = Modifier.size(16.dp),
+                                )
+                            }
+                        }
+                    }
+                }
+                Text(
+                    shortcut.label,
+                    modifier = Modifier.padding(top = 2.dp),
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    style = MaterialTheme.typography.labelMedium,
+                )
+            }
         }
     }
 }
@@ -467,14 +558,25 @@ internal fun ShortcutAllPage(
     onToggleBookSelection: (BookIdentity) -> Unit,
     onLongPressCollection: (String) -> Unit,
     onToggleCollectionSelection: (String) -> Unit,
-    coverState: (LibraryEntry) -> CoverUiState,
+    coverState: @Composable (LibraryEntry) -> CoverUiState,
     modifier: Modifier,
 ) {
     val gridState = rememberLazyGridState()
+    val wide = with(LocalDensity.current) { LocalWindowInfo.current.containerSize.width.toDp() >= 600.dp }
     val gapIndex = dragCoordinator.rootInsertionIndex
         .takeIf { dragCoordinator.isOverShelf && it >= 0 }
         ?.coerceIn(0, shortcuts.size)
-    Column(modifier.fillMaxSize()) {
+    var revealed by remember { mutableStateOf(false) }
+    val instant = LocalDisplayEnvironment.current.instantMotion
+    LaunchedEffect(Unit) { revealed = true }
+    AnimatedVisibility(
+        visible = revealed,
+        enter = expandVertically(
+            animationSpec = if (instant) snap() else tween(TsuyomiMotion.EXPAND_DURATION_MS, easing = TsuyomiMotion.Easing),
+            expandFrom = Alignment.Top,
+        ) + fadeIn(if (instant) snap() else tween(TsuyomiMotion.EXPAND_DURATION_MS)),
+    ) {
+        Column(modifier.fillMaxSize()) {
         Row(
             modifier = Modifier.fillMaxWidth().heightIn(min = 56.dp).padding(horizontal = TsuyomiSpacing.Xs),
             verticalAlignment = Alignment.CenterVertically,
@@ -492,10 +594,10 @@ internal fun ShortcutAllPage(
         }
         Box(Modifier.fillMaxSize()) {
             LazyVerticalGrid(
-                columns = GridCells.Adaptive(104.dp),
+                columns = if (wide) GridCells.Adaptive(120.dp) else GridCells.Fixed(3),
                 state = gridState,
                 modifier = Modifier.fillMaxSize().libraryShelfDropTarget(dragCoordinator),
-                contentPadding = PaddingValues(start = 16.dp, top = 16.dp, end = 16.dp, bottom = 96.dp),
+                contentPadding = PaddingValues(start = 8.dp, top = 8.dp, end = 8.dp, bottom = 96.dp),
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
                 verticalArrangement = Arrangement.spacedBy(8.dp),
             ) {
@@ -526,6 +628,7 @@ internal fun ShortcutAllPage(
                             onLongPressCollection = onLongPressCollection,
                             onToggleCollectionSelection = onToggleCollectionSelection,
                             coverState = coverState,
+                            expanded = true,
                             modifier = Modifier.fillMaxWidth().optionalAnimateItem(this),
                         )
                     }
@@ -538,6 +641,7 @@ internal fun ShortcutAllPage(
                 modifier = Modifier.align(Alignment.BottomEnd).padding(TsuyomiSpacing.Md),
             )
         }
+    }
     }
 }
 

@@ -2,6 +2,7 @@
 <!-- SPDX-License-Identifier: Apache-2.0 -->
 <resources>
     <string name="search_query_label">搜索</string>
+    <string name="search_author_query_label">搜索作者</string>
     <string name="search_submit_description">提交搜索</string>
     <string name="search_query_count">%1$d / 100</string>
     <string name="search_action">搜索</string>
@@ -31,4 +32,5 @@
     <string name="search_error_empty_response">来源返回了空内容。</string>
     <string name="search_error_malformed">来源页面结构无法识别。</string>
     <string name="search_error_generic">扩展或来源返回了无法安全处理的结果。</string>
+    <string name="search_error_cancelled">搜索已中断，可重试。</string>
 </resources>

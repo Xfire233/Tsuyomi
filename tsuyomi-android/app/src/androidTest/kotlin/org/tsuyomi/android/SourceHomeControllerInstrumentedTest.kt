@@ -99,6 +99,30 @@ internal class SourceHomeControllerInstrumentedTest {
     }
 
     @Test
+    fun initial_failure_can_explicitly_recover_from_offline_cache() = runBlocking {
+        val controller = SourceHomeController()
+        val online: suspend (Map<String, String>, String?) -> Result<SourceHomePage> = { _, _ ->
+            Result.failure(IllegalStateException("verification-required"))
+        }
+        val offline: suspend (Map<String, String>, String?) -> Result<SourceHomePage> = { _, _ ->
+            Result.success(recommendPage("allvote"))
+        }
+        try {
+            withContext(Dispatchers.Main) { controller.ensureInitial("revision-a", online) }
+            withTimeout(5_000) {
+                while (controller.state !is SourceHomeViewState.Failure) delay(10)
+            }
+
+            withContext(Dispatchers.Main) { controller.useOfflineCache(offline) }
+            awaitContent(controller)
+
+            assertEquals("推荐 allvote", controller.activePage?.sections?.single()?.title)
+        } finally {
+            controller.close()
+        }
+    }
+
+    @Test
     fun feature_page_is_cached_and_back_restores_root_scroll_without_request() = runBlocking {
         val requests = AtomicInteger()
         val feature = SourceHomeFeature(

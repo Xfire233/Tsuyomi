@@ -220,6 +220,8 @@ class SourceInstallController(
                 approvedOrigin = readPolicy?.origin?.canonical.orEmpty(),
                 addWritebackEnabled = preservesPolicy && currentPolicy.addWritebackEnabled,
                 firstImportPromptDismissed = preservesPolicy && currentPolicy.firstImportPromptDismissed,
+                removeWritebackEnabled = preservesPolicy && currentPolicy.removeWritebackEnabled,
+                moveWritebackEnabled = preservesPolicy && currentPolicy.moveWritebackEnabled,
             ),
         )
         libraryRepository.setSourceAvailability(sourceId, packageInfo.manifest.version.original, true, generation)

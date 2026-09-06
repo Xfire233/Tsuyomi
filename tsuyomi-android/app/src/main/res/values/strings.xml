@@ -29,9 +29,10 @@
     <string name="verification_atlas_subtitle">%1$s · %2$s</string>
     <string name="verification_host_notice">此验证由宿主应用发起。页面内容由 %1$s 提供；Tsuyomi 不记录你在页面中的任何输入。</string>
     <string name="verification_status_waiting">状态：等待你在页面中完成验证</string>
-    <string name="verification_webview_caption">受控网页视图仅允许此内容源声明的 HTTPS 站点；完成后只保存匹配站点的加密会话。</string>
-    <string name="verification_complete_action">我已完成验证</string>
+    <string name="verification_webview_caption">受控网页视图仅允许此内容源声明的 HTTPS 站点。“保存会话并返回”只保存匹配站点的加密登录状态，不会重试来源操作；操作失败页可打开对应页面并使用当前页面。</string>
+    <string name="verification_complete_action">保存会话并返回</string>
     <string name="verification_cancel_action">取消验证</string>
+    <string name="verification_open_home_page">打开对应主页</string>
     <string name="verification_open_requested_page">打开对应搜索页面</string>
     <string name="verification_open_detail_page">打开对应详情页面</string>
     <string name="verification_open_directory_page">打开对应目录页面</string>
@@ -61,6 +62,8 @@
     <string name="transfer_applying_file">正在合并本地书库并应用可移植阅读偏好。</string>
     <string name="transfer_apply_failed">导入未完成；已保留可恢复的内部记录。</string>
     <string name="transfer_preparing_export">正在生成确定性导出并检查 32 MiB 上限。</string>
+    <string name="title_reader_settings">阅读</string>
+    <string name="title_help">帮助</string>
     <string name="transfer_export_too_large">导出内容超过 32 MiB，未打开系统保存窗口。</string>
     <string name="transfer_writing_export">正在写入系统选择的文件。</string>
     <string name="transfer_export_failed">系统文件未能写入。</string>

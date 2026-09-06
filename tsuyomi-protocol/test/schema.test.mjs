@@ -21,6 +21,11 @@ for (const { label, schemaPath, fixturePath } of [
     fixturePath: '../fixtures/transfer/valid-minimal.json',
   },
   {
+    label: 'tsuyomi-transfer v2',
+    schemaPath: '../schemas/tsuyomi-transfer-v2.schema.json',
+    fixturePath: '../fixtures/transfer/valid-v2.json',
+  },
+  {
     label: 'hxp manifest v1',
     schemaPath: '../schemas/hxp-manifest-v1.schema.json',
     fixturePath: '../fixtures/hxp/valid-minimal-manifest.json',
@@ -38,6 +43,15 @@ test('tsuyomi-transfer v1 rejects a record without a stable remote identity', as
   const validate = ajv.compile(await loadJson('../schemas/tsuyomi-transfer-v1.schema.json'));
   const document = await loadJson('../fixtures/transfer/valid-minimal.json');
   delete document.library[0].identity.remoteBookId;
+  assert.equal(validate(document), false);
+});
+
+test('tsuyomi-transfer v1 rejects v2-only completion and reader fields', async () => {
+  const ajv = createAjv();
+  const validate = ajv.compile(await loadJson('../schemas/tsuyomi-transfer-v1.schema.json'));
+  const document = await loadJson('../fixtures/transfer/valid-minimal.json');
+  document.library[0].completedChapterIds = ['67889'];
+  document.preferences = { reader: { horizontalMargin: 32 } };
   assert.equal(validate(document), false);
 });
 
@@ -69,15 +83,14 @@ test('hxp manifest v1 keeps source Home optional and rejects source-controlled l
   assert.equal(validate(injectedLayout), false);
 });
 
-test('hxp manifest v1 requires signed policies for remote read and add', async () => {
+test('hxp manifest v1 requires signed policies for remote read, targets, and writes', async () => {
   const ajv = createAjv();
   const validate = ajv.compile(await loadJson('../schemas/hxp-manifest-v1.schema.json'));
-  const manifest = await loadJson('../fixtures/hxp/valid-minimal-manifest.json');
-  delete manifest.capabilities.remoteLibrary.policies.read;
-  assert.equal(validate(manifest), false);
-  manifest.capabilities.remoteLibrary.policies.read = manifest.capabilities.remoteLibrary.policies.add;
-  delete manifest.capabilities.remoteLibrary.policies.add;
-  assert.equal(validate(manifest), false);
+  for (const policy of ['read', 'targets', 'add', 'remove', 'move']) {
+    const manifest = await loadJson('../fixtures/hxp/valid-minimal-manifest.json');
+    delete manifest.capabilities.remoteLibrary.policies[policy];
+    assert.equal(validate(manifest), false, `${policy} policy must be required`);
+  }
 });
 
 test('hxp remote fixed parameter rule requires its exact literal', async () => {
@@ -128,4 +141,27 @@ test('hxp parameter-name length counts astral Unicode code points', async () => 
   const oversized = await loadJson('../fixtures/hxp/valid-minimal-manifest.json');
   oversized.capabilities.remoteLibrary.policies.add.redirects[0].parameters['😀'.repeat(257)] = { kind: 'fixed', value: 'added' };
   assert.equal(validate(oversized), false);
+});
+
+test('hxp manifest v1 validates remove and move remote operation policies', async () => {
+  const ajv = createAjv();
+  const validate = ajv.compile(await loadJson('../schemas/hxp-manifest-v1.schema.json'));
+  const manifest = await loadJson('../fixtures/hxp/valid-minimal-manifest.json');
+  manifest.capabilities.remoteLibrary.policies.remove = {
+    origin: 'https://www.wenku8.net',
+    method: 'POST',
+    path: '/modules/article/bookcase.php',
+    parameters: { action: { kind: 'fixed', value: 'remove' }, aid: { kind: 'remoteBookId' } },
+  };
+  manifest.capabilities.remoteLibrary.policies.move = {
+    origin: 'https://www.wenku8.net',
+    method: 'POST',
+    path: '/modules/article/bookcase.php',
+    parameters: {
+      action: { kind: 'fixed', value: 'move' },
+      aid: { kind: 'remoteBookId' },
+      target: { kind: 'targetId' },
+    },
+  };
+  assert.equal(validate(manifest), true, ajv.errorsText(validate.errors));
 });

@@ -47,6 +47,7 @@ fun ReaderScreen(
     onRetryImage: (ReaderBlock.Image) -> Unit,
     onLocatorChanged: (ReaderLocator, LocatorPrecision) -> Unit,
     modifier: Modifier = Modifier,
+    onChapterCompleted: (String) -> Unit = {},
     preferences: PortableReaderPreferences = PortableReaderPreferences(
         flow = "scroll",
         fontScale = 1.0,
@@ -74,6 +75,7 @@ fun ReaderScreen(
             currentChapterId = currentChapterId,
             onSelectChapter = onSelectChapter,
             onNavigateUp = onNavigateUp,
+            onChapterCompleted = onChapterCompleted,
             imageStates = imageStates,
             onImageVisible = onImageVisible,
             onRetryImage = onRetryImage,

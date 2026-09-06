@@ -5,11 +5,13 @@
 package org.tsuyomi.shared.sourcecontract
 
 import java.net.URI
+import java.time.LocalDate
 import java.util.Locale
 import org.tsuyomi.shared.model.BookIdentity
 
 private val SOURCE_ID = Regex("^[a-z][a-z0-9]*(?:[.-][a-z0-9]+)+$")
 private val SHA_256 = Regex("^[a-f0-9]{64}$")
+private val SOURCE_CALENDAR_DATE = Regex("^\\d{4}-\\d{2}-\\d{2}$")
 
 @JvmInline
 value class SourceId(val value: String) {
@@ -152,10 +154,14 @@ data class SourceBookSummary(
     val author: String?,
     val coverUrl: String?,
     val canonicalUrl: String,
+    val remoteTargetId: String? = null,
 ) {
     init {
         require(title.codePointCount(0, title.length) in 1..512) { "Invalid book title" }
         author?.let { require(it.codePointCount(0, it.length) in 1..256) { "Invalid author" } }
+        remoteTargetId?.let {
+            require(it.isNotBlank() && it.length <= 128) { "Invalid remote target ID" }
+        }
     }
 }
 
@@ -263,15 +269,53 @@ data class RemoteLibraryAddResult(
     val outcome: RemoteLibraryAddOutcome,
 )
 
+enum class RemoteLibraryRemoveOutcome { APPLIED, ALREADY_ABSENT }
+
+data class RemoteLibraryRemoveResult(
+    val identity: BookIdentity,
+    val outcome: RemoteLibraryRemoveOutcome,
+)
+
+enum class RemoteLibraryMoveOutcome { APPLIED, ALREADY_AT_TARGET }
+
+data class RemoteLibraryMoveResult(
+    val identity: BookIdentity,
+    val targetId: String,
+    val outcome: RemoteLibraryMoveOutcome,
+)
+
+data class RemoteTarget(
+    val targetId: String,
+    val displayName: String,
+    val parentId: String? = null,
+    val kind: String = "folder",
+) {
+    init {
+        require(targetId.isNotBlank() && targetId.length <= 128) { "Invalid targetId" }
+        require(displayName.isNotBlank() && displayName.length <= 128) { "Invalid displayName" }
+    }
+}
+
+data class RemoteLibraryTargetsResult(
+    val sourceId: String,
+    val targets: List<RemoteTarget>,
+)
+
 data class SourceBookDetail(
     val summary: SourceBookSummary,
     val description: String?,
     val tags: List<String>,
     val status: String?,
+    val lastUpdatedDate: String? = null,
 ) {
     init {
         require(tags.size <= 128 && tags.distinct() == tags) { "Invalid tags" }
         description?.let { require(it.codePointCount(0, it.length) <= 20_000) { "Description is too long" } }
+        lastUpdatedDate?.let { date ->
+            require(SOURCE_CALENDAR_DATE.matches(date) && runCatching { LocalDate.parse(date) }.isSuccess) {
+                "Invalid source calendar date"
+            }
+        }
     }
 }
 

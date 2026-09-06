@@ -114,6 +114,7 @@ class RoomReadingProgressInstrumentedTest {
                     title = "Imported",
                     updatedAt = importedAt,
                     progress = TransferProgress(chapterId = "imported-chapter", bookProgress = 0.5, updatedAt = importedAt),
+                    completedChapterIds = setOf("imported-chapter-2", "imported-chapter-5"),
                 ),
             ),
             shelves = emptyList(),
@@ -128,8 +129,25 @@ class RoomReadingProgressInstrumentedTest {
         assertEquals("imported-chapter", stored.locator.document.contentId)
         assertEquals(0.5, stored.locator.bookProgress!!, 0.0)
         assertEquals(importedAt, stored.updatedAt)
+        assertEquals(setOf("imported-chapter-2", "imported-chapter-5"), repository.completedChapterIds(identity))
         listOf("fixture.source", "other.source").forEach { sourceId ->
             assertFalse(requireNotNull(repository.sourceRemotePolicy(sourceId)).addWritebackEnabled)
         }
+    }
+
+    @Test
+    fun completedChaptersPersistAsAnExactNonSequentialSet() = runBlocking {
+        val identity = BookIdentity("fixture.source", "non-sequential")
+        repository.addToLibrary(LibraryBook(identity, "章节状态", Instant.EPOCH, Instant.EPOCH))
+
+        assertEquals(true, repository.markChapterCompleted(identity, "chapter-2", Instant.ofEpochSecond(20)))
+        assertEquals(true, repository.markChapterCompleted(identity, "chapter-5", Instant.ofEpochSecond(50)))
+        assertEquals(false, repository.markChapterCompleted(identity, "chapter-2", Instant.ofEpochSecond(60)))
+        assertEquals(setOf("chapter-2", "chapter-5"), repository.completedChapterIds(identity))
+        val exported = RoomTransferRepository(database).exportSnapshot(Instant.ofEpochSecond(70), readerPreferences = null)
+        assertEquals(setOf("chapter-2", "chapter-5"), exported.library.single().completedChapterIds)
+
+        val recreatedRepository = RoomLibraryRepository(database)
+        assertEquals(setOf("chapter-2", "chapter-5"), recreatedRepository.completedChapterIds(identity))
     }
 }

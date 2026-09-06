@@ -26,6 +26,15 @@ class ReaderDocumentSession(
     initialLocator: ReaderLocator?,
     initialPresentation: ReaderPresentation,
 ) {
+    private val blockCodePointLengths = IntArray(document.blocks.size) { index ->
+        document.blocks[index].textLengthCodePoints()
+    }
+    private val cumulativeCodePoints = LongArray(document.blocks.size + 1).also { cumulative ->
+        blockCodePointLengths.indices.forEach { index ->
+            cumulative[index + 1] = cumulative[index] + blockCodePointLengths[index]
+        }
+    }
+    private val totalCodePoints = cumulativeCodePoints.last()
     var presentation: ReaderPresentation = initialPresentation
         private set
     var position: ResolvedReaderPosition = resolve(initialLocator)
@@ -65,11 +74,22 @@ class ReaderDocumentSession(
             val anchorIndex = document.blocks.indexOfFirst { it.anchorDigest() == digest }
             if (anchorIndex >= 0) return degradedAt(anchorIndex, candidate.characterOffset ?: 0)
         }
-        val progress = candidate.chapterProgress
-        val fallbackIndex = if (progress == null) 0 else {
-            (progress * (document.blocks.size - 1)).toInt().coerceIn(document.blocks.indices)
+        val progress = candidate.chapterProgress ?: return degradedAt(0, 0)
+        if (totalCodePoints == 0L) {
+            val fallbackIndex = (progress * (document.blocks.size - 1)).toInt().coerceIn(document.blocks.indices)
+            return degradedAt(fallbackIndex, 0)
         }
-        return degradedAt(fallbackIndex, 0)
+        val target = (progress.coerceIn(0.0, 1.0) * totalCodePoints).toLong().coerceAtMost(totalCodePoints)
+        val search = cumulativeCodePoints.binarySearch(target)
+        val fallbackIndex = if (search >= 0) {
+            search.coerceAtMost(document.blocks.lastIndex)
+        } else {
+            (-search - 2).coerceIn(document.blocks.indices)
+        }
+        val fallbackOffset = (target - cumulativeCodePoints[fallbackIndex])
+            .coerceAtMost(blockCodePointLengths[fallbackIndex].toLong())
+            .toInt()
+        return degradedAt(fallbackIndex, fallbackOffset)
     }
 
     private fun exactPosition(index: Int, offset: Int): ResolvedReaderPosition = positionAt(
@@ -94,7 +114,11 @@ class ReaderDocumentSession(
     ): ResolvedReaderPosition {
         val block = document.blocks[index]
         val boundedOffset = offset.coerceIn(0, block.textLengthCodePoints())
-        val progress = if (document.blocks.size == 1) 0.0 else index.toDouble() / (document.blocks.size - 1)
+        val progress = if (totalCodePoints == 0L) {
+            if (document.blocks.size == 1) 0.0 else index.toDouble() / (document.blocks.size - 1)
+        } else {
+            (cumulativeCodePoints[index] + boundedOffset).toDouble() / totalCodePoints
+        }
         val locator = ReaderLocator(
             document = identity(),
             blockId = block.blockId,

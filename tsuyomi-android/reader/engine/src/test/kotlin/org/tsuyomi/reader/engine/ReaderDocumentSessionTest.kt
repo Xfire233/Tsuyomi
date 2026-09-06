@@ -41,7 +41,18 @@ class ReaderDocumentSessionTest {
 
         assertEquals(LocatorPrecision.DEGRADED, session.position.precision)
         assertEquals(2, session.position.blockIndex)
-        assertEquals(0, session.position.characterOffset)
+        assertEquals(5, session.position.characterOffset)
+    }
+
+    @Test
+    fun entering_final_paragraph_is_not_chapter_completion() {
+        val session = ReaderDocumentSession(document(), null, ReaderPresentation.SCROLL)
+
+        val startOfFinalParagraph = session.navigateToBlock(2, 0).locator.chapterProgress
+        val endOfFinalParagraph = session.navigateToBlock(2, 5).locator.chapterProgress
+
+        assertEquals(11.0 / 16.0, startOfFinalParagraph)
+        assertEquals(1.0, endOfFinalParagraph)
     }
 
     @Test

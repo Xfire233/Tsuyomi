@@ -9,6 +9,7 @@ import androidx.compose.material3.ColorScheme
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.luminance
 
 /** Opaque neutral ramp mandated for the E-ink display profile. */
 object TsuyomiEInkPalette {
@@ -19,6 +20,10 @@ object TsuyomiEInkPalette {
     val N30 = Color(0xFFB3B3B3)
     val Paper = Color(0xFFFFFFFF)
 }
+
+/** Links use a muted blue distinct from both browser-default blue and the ink-teal primary. */
+val ColorScheme.link: Color
+    get() = if (surface.luminance() > 0.5f) Color(0xFF4A6E8A) else Color(0xFFA8C4D8)
 
 /** Standard light scheme: warm paper background with ink-teal primary. Never pure black/white. */
 val TsuyomiLightColorScheme: ColorScheme = lightColorScheme(

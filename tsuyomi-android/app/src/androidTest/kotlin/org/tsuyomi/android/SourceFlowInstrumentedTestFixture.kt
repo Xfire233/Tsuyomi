@@ -14,6 +14,7 @@ import org.junit.Before
 import org.tsuyomi.core.database.RoomLibraryRepository
 import org.tsuyomi.core.database.TsuyomiDatabase
 import org.tsuyomi.core.network.DirectActionTokenRegistry
+import org.tsuyomi.core.webview.CapturedVerifiedPage
 import org.tsuyomi.core.security.SourceCredentialPartition
 import org.tsuyomi.core.security.VerifiedBrowserSession
 import org.tsuyomi.core.security.VerifiedBrowserSessionStore
@@ -22,11 +23,18 @@ import org.tsuyomi.shared.model.BookIdentity
 import org.tsuyomi.shared.sourcecontract.HttpsOrigin
 import org.tsuyomi.shared.sourcecontract.ReaderDocument
 import org.tsuyomi.shared.sourcecontract.RemoteLibraryAddResult
+import org.tsuyomi.shared.sourcecontract.RemoteLibraryRemoveResult
+import org.tsuyomi.shared.sourcecontract.RemoteLibraryMoveResult
+import org.tsuyomi.shared.sourcecontract.RemoteLibraryTargetsResult
 import org.tsuyomi.shared.sourcecontract.RemoteLibraryPage
 import org.tsuyomi.shared.sourcecontract.SourceBookDetail
 import org.tsuyomi.shared.sourcecontract.SourceBookSummary
+import org.tsuyomi.shared.sourcecontract.SourceDiagnostic
+import org.tsuyomi.shared.sourcecontract.SourceErrorCode
+import org.tsuyomi.shared.sourcecontract.SourceException
 import org.tsuyomi.shared.sourcecontract.SourceChapter
 import org.tsuyomi.shared.sourcecontract.SourceDirectory
+import org.tsuyomi.shared.sourcecontract.SourceHomePage
 import org.tsuyomi.source.extensionmanager.VerifiedHxpPackage
 
 internal const val SOURCE_FLOW_TEST_SOURCE_ID = "org.tsuyomi.wenku8"
@@ -83,7 +91,7 @@ internal abstract class SourceFlowInstrumentedTestFixture {
         }
         val install = SourceInstallController(context, library)
         install.prepare(Uri.fromFile(fixture), context.contentResolver)
-        check(install.state is BrowseUiState.Approval)
+        check(install.state is BrowseUiState.Approval) { "Unexpected fixture preparation state: ${install.state}" }
         install.approve(allowDowngrade = false)
         check(install.state is BrowseUiState.Installed)
         return requireNotNull(install.activePackage)
@@ -128,14 +136,49 @@ internal abstract class SourceFlowInstrumentedTestFixture {
 
     protected class FakeSession(
         private val searchResult: suspend (String, Boolean) -> List<SourceBookSummary> = { _, _ -> error("Unexpected search") },
+        private val authorSearchResult: suspend (String, Boolean) -> List<SourceBookSummary> = { _, _ ->
+            throw SourceException(
+                code = SourceErrorCode.EXTENSION_RUNTIME_FAILURE,
+                diagnostic = SourceDiagnostic(
+                    correlationId = "author-search-unavailable",
+                    stage = "author-search",
+                    safeCode = "author-search-unavailable",
+                ),
+            )
+        },
+        private val authorSearchRequestUrl: suspend (String) -> String = { error("Unexpected author search URL") },
+        private val authorSearchVerifiedPage: suspend (String, CapturedVerifiedPage) -> List<SourceBookSummary> = { _, _ -> error("Unexpected author verified-page search") },
+        private val homeResult: suspend (Map<String, String>, String?, Boolean) -> SourceHomePage = { _, _, _ ->
+            error("Unexpected source Home")
+        },
         private val listRemote: suspend (String?) -> RemoteLibraryPage = { error("Unexpected remote list") },
         private val detail: suspend (SourceBookSummary) -> SourceBookDetail = { SourceBookDetail(it, null, emptyList(), null) },
         private val directoryResult: suspend (String) -> SourceDirectory = { error("Unexpected directory") },
         private val chapterResult: suspend (SourceChapter, String) -> ReaderDocument = { _, _ -> error("Unexpected chapter") },
         private val addRemote: suspend (String, String) -> RemoteLibraryAddResult = { _, _ -> error("Unexpected remote add") },
+        private val removeRemote: suspend (String, String) -> RemoteLibraryRemoveResult = { _, _ -> error("Unexpected remote remove") },
+        private val moveRemote: suspend (String, String, String) -> RemoteLibraryMoveResult = { _, _, _ -> error("Unexpected remote move") },
+        private val targetsResult: suspend () -> RemoteLibraryTargetsResult = { RemoteLibraryTargetsResult(SOURCE_FLOW_TEST_SOURCE_ID, emptyList()) },
     ) : SourceFlowSession {
         override suspend fun search(query: String, page: Int, offlineOnly: Boolean): List<SourceBookSummary> =
             searchResult(query, offlineOnly)
+
+        override suspend fun authorSearch(author: String, page: Int, offlineOnly: Boolean): List<SourceBookSummary> =
+            authorSearchResult(author, offlineOnly)
+
+        override suspend fun authorSearchRequestUrl(author: String, page: Int): String = authorSearchRequestUrl.invoke(author)
+
+        override suspend fun authorSearchVerifiedPage(
+            author: String,
+            snapshot: CapturedVerifiedPage,
+            page: Int,
+        ): List<SourceBookSummary> = authorSearchVerifiedPage.invoke(author, snapshot)
+
+        override suspend fun home(
+            selectedFilters: Map<String, String>,
+            cursor: String?,
+            offlineOnly: Boolean,
+        ): SourceHomePage = homeResult(selectedFilters, cursor, offlineOnly)
 
         override suspend fun detail(remoteBookId: String, offlineOnly: Boolean): SourceBookDetail = detail(
             SourceBookSummary(
@@ -160,6 +203,14 @@ internal abstract class SourceFlowInstrumentedTestFixture {
 
         override suspend fun addRemoteLibrary(remoteBookId: String, directActionToken: String): RemoteLibraryAddResult =
             addRemote(remoteBookId, directActionToken)
+
+        override suspend fun removeRemoteLibrary(remoteBookId: String, directActionToken: String): RemoteLibraryRemoveResult =
+            removeRemote(remoteBookId, directActionToken)
+
+        override suspend fun moveRemoteLibrary(remoteBookId: String, targetId: String, directActionToken: String): RemoteLibraryMoveResult =
+            moveRemote(remoteBookId, targetId, directActionToken)
+
+        override suspend fun listRemoteTargets(): RemoteLibraryTargetsResult = targetsResult()
 
         override fun close() = Unit
     }

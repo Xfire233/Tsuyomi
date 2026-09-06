@@ -6,14 +6,21 @@
 package org.tsuyomi.android
 
 import androidx.activity.compose.BackHandler
+import androidx.compose.foundation.layout.Column
 import androidx.compose.runtime.Composable
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.res.stringResource
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.lifecycle.lifecycleScope
 import androidx.navigation.NavGraphBuilder
 import androidx.navigation.NavHostController
 import androidx.navigation.compose.composable
@@ -22,14 +29,19 @@ import org.tsuyomi.core.media.api.CoverRepository
 import org.tsuyomi.core.media.api.CoverRequest
 import org.tsuyomi.core.media.api.CoverUiState
 import org.tsuyomi.core.media.api.FallbackSpec
+import org.tsuyomi.core.database.RemoteReconciliationState
 import org.tsuyomi.feature.book.BookDetailScreen
+import org.tsuyomi.feature.book.BookDestinationMenu
+import org.tsuyomi.feature.book.DetailCollectionDestination
 import org.tsuyomi.feature.book.SourceBookState
 import org.tsuyomi.feature.book.BookDirectoryScreen
 import org.tsuyomi.feature.browse.BrowseInstalledSource
 import org.tsuyomi.feature.browse.BrowseScreen
 import org.tsuyomi.feature.browse.SourceHomeScreen
-import org.tsuyomi.feature.browse.RemoteLibraryScreen
+import org.tsuyomi.feature.library.RemoteLibraryScreen
 import org.tsuyomi.feature.reader.ReaderScreen
+import org.tsuyomi.feature.library.LibraryMirrorShortcut
+import org.tsuyomi.feature.library.RemoteLibraryViewState
 import org.tsuyomi.feature.search.SearchScreen
 import org.tsuyomi.shared.model.BookIdentity
 import org.tsuyomi.shared.backup.PortableReaderPreferences
@@ -37,6 +49,7 @@ import org.tsuyomi.shared.backup.PortableReaderPreferences
 internal fun NavGraphBuilder.sourceRoutes(
     navController: NavHostController,
     owner: SourceRouteOwner,
+    libraryFlow: LibraryFlowController,
     readerPreferences: PortableReaderPreferences,
     onReaderPreferencesChanged: (PortableReaderPreferences) -> Unit,
     coverRepository: CoverRepository?,
@@ -45,7 +58,7 @@ internal fun NavGraphBuilder.sourceRoutes(
 ) {
     browseRoute(navController, owner)
     sourceHomeRoute(navController, owner, coverRepository, packageRevision, credentialRevision)
-    remoteLibraryRoute(navController, owner)
+    remoteLibraryRoute(navController, owner, libraryFlow, coverRepository, packageRevision, credentialRevision)
     searchRoute(
         navController = navController,
         owner = owner,
@@ -53,7 +66,7 @@ internal fun NavGraphBuilder.sourceRoutes(
         packageRevision = packageRevision,
         credentialRevision = credentialRevision,
     )
-    detailRoute(navController, owner, coverRepository, packageRevision, credentialRevision)
+    detailRoute(navController, owner, libraryFlow, coverRepository, packageRevision, credentialRevision)
     directoryRoute(navController, owner)
     readerRoute(
         navController,
@@ -126,15 +139,17 @@ private fun NavGraphBuilder.sourceHomeRoute(
         val flow = owner.flow
         val packageInfo = owner.installer.activePackage
         val activeRevision = packageInfo?.packageSha256
-        val load: suspend (Map<String, String>, String?) -> Result<org.tsuyomi.shared.sourcecontract.SourceHomePage> =
+        fun loader(offlineOnly: Boolean): suspend (Map<String, String>, String?) -> Result<org.tsuyomi.shared.sourcecontract.SourceHomePage> =
             { filters, cursor ->
                 if (packageInfo == null) {
                     Result.failure(IllegalStateException("source-not-installed"))
                 } else {
                     flow.open(packageInfo)
-                    flow.loadHome(filters, cursor)
+                    flow.loadHome(filters, cursor, offlineOnly)
                 }
             }
+        val load = loader(offlineOnly = false)
+        val loadOffline = loader(offlineOnly = true)
 
         LaunchedEffect(activeRevision) {
             flow.home.ensureInitial(activeRevision, load)
@@ -157,6 +172,7 @@ private fun NavGraphBuilder.sourceHomeRoute(
             onRefresh = { flow.home.refresh(load) },
             onLoadMore = { flow.home.append(load) },
             onRetryReplacement = { flow.home.retryReplacement(load) },
+            onUseOfflineCache = { flow.home.useOfflineCache(loadOffline) },
             onSearch = { scope.launch { owner.openInstalledSource() } },
             onOpenRemoteLibrary = { scope.launch { owner.openRemoteLibrary() } },
             onOpenBook = { book ->
@@ -166,7 +182,7 @@ private fun NavGraphBuilder.sourceHomeRoute(
                 }
             },
             onOpenFeature = { feature -> flow.home.openFeature(feature, load) },
-            onOpenVerification = owner::navigateToVerification,
+            onOpenVerification = { navController.navigate(Routes.VerifiedHomePage) },
             onScrollPositionChanged = flow.home::updateScrollPosition,
             coverState = { book ->
                 rememberSourceCoverState(
@@ -181,24 +197,51 @@ private fun NavGraphBuilder.sourceHomeRoute(
 }
 
 
-private fun NavGraphBuilder.remoteLibraryRoute(navController: NavHostController, owner: SourceRouteOwner) {
-    composable(Routes.RemoteLibrary) { entry ->
+private fun NavGraphBuilder.remoteLibraryRoute(
+    navController: NavHostController,
+    owner: SourceRouteOwner,
+    libraryFlow: LibraryFlowController,
+    coverRepository: CoverRepository?,
+    packageRevision: String?,
+    credentialRevision: String?,
+) {
+    listOf(Routes.RemoteLibrary, Routes.LibraryMirror, Routes.LibraryMirrorFolder).forEach { routePattern ->
+        composable(routePattern) { entry ->
         val scope = rememberCoroutineScope()
+        val mirrorBindingId = entry.arguments?.getString("bindingId")
+        val mirrorTargetId = entry.arguments?.getString("targetId")
         val remote = rememberSourceRemoteLibraryRouteOwner(
             entry = entry,
             flow = owner.flow,
-            packageProvider = { owner.installer.activePackage },
+            packageProvider = {
+                owner.installer.activePackage
+                    ?.takeIf { mirrorBindingId == null || it.manifest.sourceId.value == mirrorBindingId }
+            },
         )
+        val groupingEnabled = mirrorBindingId?.let(libraryFlow::isWebsiteGroupingEnabled) == true
+        val visibleTargetId = mirrorTargetId.takeIf { groupingEnabled }
+        val activePackage = owner.installer.activePackage
+        LaunchedEffect(remote, mirrorBindingId, visibleTargetId, activePackage) {
+            activePackage
+                ?.takeIf { mirrorBindingId == null || it.manifest.sourceId.value == mirrorBindingId }
+                ?.let { owner.flow.open(it) }
+            mirrorBindingId?.let {
+                remote.restore(it)
+                remote.selectTarget(visibleTargetId)
+            }
+        }
         val viewState = when (remote.status) {
-            RemoteLibraryRouteStatus.Idle -> org.tsuyomi.feature.browse.RemoteLibraryViewState.IDLE
-            RemoteLibraryRouteStatus.Loading -> org.tsuyomi.feature.browse.RemoteLibraryViewState.LOADING
-            RemoteLibraryRouteStatus.Content -> org.tsuyomi.feature.browse.RemoteLibraryViewState.CONTENT
-            RemoteLibraryRouteStatus.Empty -> org.tsuyomi.feature.browse.RemoteLibraryViewState.EMPTY
-            RemoteLibraryRouteStatus.LoginRequired -> org.tsuyomi.feature.browse.RemoteLibraryViewState.LOGIN_REQUIRED
-            RemoteLibraryRouteStatus.VerificationRequired -> org.tsuyomi.feature.browse.RemoteLibraryViewState.VERIFICATION_REQUIRED
-            RemoteLibraryRouteStatus.Cancelled -> org.tsuyomi.feature.browse.RemoteLibraryViewState.CANCELLED
-            is RemoteLibraryRouteStatus.Failure -> org.tsuyomi.feature.browse.RemoteLibraryViewState.ERROR
-            is RemoteLibraryRouteStatus.Copied -> org.tsuyomi.feature.browse.RemoteLibraryViewState.COPIED
+            RemoteLibraryRouteStatus.Idle -> RemoteLibraryViewState.IDLE
+            RemoteLibraryRouteStatus.Loading -> RemoteLibraryViewState.LOADING
+            RemoteLibraryRouteStatus.Content -> RemoteLibraryViewState.CONTENT
+            RemoteLibraryRouteStatus.Empty -> RemoteLibraryViewState.EMPTY
+            RemoteLibraryRouteStatus.LoginRequired -> RemoteLibraryViewState.LOGIN_REQUIRED
+            RemoteLibraryRouteStatus.VerificationRequired -> RemoteLibraryViewState.VERIFICATION_REQUIRED
+            RemoteLibraryRouteStatus.Cancelled -> RemoteLibraryViewState.CANCELLED
+            is RemoteLibraryRouteStatus.Failure -> RemoteLibraryViewState.ERROR
+            is RemoteLibraryRouteStatus.Copied -> RemoteLibraryViewState.COPIED
+            is RemoteLibraryRouteStatus.Mutation ->
+                if (remote.books.isEmpty()) RemoteLibraryViewState.EMPTY else RemoteLibraryViewState.CONTENT
         }
         val message = when (val status = remote.status) {
             is RemoteLibraryRouteStatus.Failure -> status.safeCode
@@ -207,25 +250,55 @@ private fun NavGraphBuilder.remoteLibraryRoute(navController: NavHostController,
                 status.total,
                 status.added,
             )
+            is RemoteLibraryRouteStatus.Mutation -> {
+                val operation = if (status.operation == "remove") "从网站收藏移除" else "移动网站收藏"
+                when (val result = status.result) {
+                    RemoteMutationUiResult.Confirmed -> status.targetName?.let { "已${operation}至「$it」" } ?: "已完成${operation}"
+                    RemoteMutationUiResult.Unresolved -> "${operation}结果待确认"
+                    RemoteMutationUiResult.Cancelled -> "${operation}已取消"
+                    is RemoteMutationUiResult.Failure -> "${operation}失败：${result.safeCode}"
+                }
+            }
             else -> null
         }
+        val mirrorTarget = remote.targets.firstOrNull { it.targetId == visibleTargetId }
+        val mirrorShortcut = mirrorBindingId?.let { sourceId ->
+            LibraryMirrorShortcut(
+                sourceId = sourceId,
+                targetId = visibleTargetId,
+                label = mirrorTarget?.displayName ?: owner.installer.activePackage?.manifest?.displayName.orEmpty(),
+                count = if (visibleTargetId == null) remote.books.size else remote.visibleBooks.size,
+                frozen = false,
+            )
+        }
+        val mirrorPinned = mirrorShortcut?.let { libraryFlow.isMirrorShortcutPinned(it.sourceId, it.targetId) }
+        val pinFailureMessage = stringResource(R.string.library_read_failure_safe)
         RemoteLibraryScreen(
+            sourceId = mirrorBindingId ?: owner.installer.activePackage?.manifest?.sourceId?.value.orEmpty(),
             sourceName = owner.installer.activePackage?.manifest?.displayName.orEmpty(),
-            books = remote.books,
+            books = if (visibleTargetId == null) remote.books else remote.visibleBooks,
             selectedIds = remote.selectedIds,
             state = viewState,
             message = message,
             copyConfirmationVisible = remote.copyConfirmationVisible,
             onNavigateUp = { navController.navigateUp() },
-            onRefresh = { scope.launch { remote.refresh() } },
+            onRefresh = {
+                scope.launch {
+                    remote.refresh()
+                    libraryFlow.reload(pinFailureMessage)
+                }
+            },
             onToggleSelection = remote::toggleSelection,
             onClearSelection = remote::clearSelection,
-            onRequestCopy = remote::requestCopy,
+            onRequestCopy = {
+                scope.launch {
+                    if (remote.requestCopy() != null) owner.notifyLibraryChanged()
+                }
+            },
             onDismissCopy = remote::dismissCopy,
             onConfirmCopy = {
                 scope.launch {
-                    remote.confirmCopy()
-                    owner.notifyLibraryChanged()
+                    if (remote.confirmCopy() != null) owner.notifyLibraryChanged()
                 }
             },
             onOpenVerification = owner::navigateToVerification,
@@ -235,7 +308,58 @@ private fun NavGraphBuilder.remoteLibraryRoute(navController: NavHostController,
                     navController.navigate(Routes.Detail)
                 }
             },
+            onOpenTarget = { targetId ->
+                if (groupingEnabled) navController.navigate(Routes.libraryMirrorFolder(mirrorBindingId.orEmpty(), targetId))
+            },
+            mirrorPinned = mirrorPinned,
+            onToggleMirrorPinned = {
+                mirrorShortcut?.let { shortcut ->
+                    scope.launch {
+                        libraryFlow.setMirrorShortcutPinned(shortcut, mirrorPinned != true, pinFailureMessage)
+                    }
+                }
+            },
+            groupingEnabled = groupingEnabled,
+            onGroupingEnabledChange = { enabled ->
+                mirrorBindingId?.let { sourceId ->
+                    scope.launch {
+                        libraryFlow.setWebsiteGroupingEnabled(sourceId, enabled, pinFailureMessage)
+                        if (!enabled) remote.selectTarget(null)
+                    }
+                }
+            },
+            targets = remote.targets,
+            selectedTargetId = remote.selectedTargetId,
+            onSelectTarget = remote::selectTarget,
+            unresolvedBookIds = remote.unresolvedBookIds,
+            removeConfirmationBook = remote.removeConfirmationBook,
+            onDismissRemoveConfirmation = remote::dismissRemove,
+            onConfirmRemove = { book ->
+                scope.launch {
+                    remote.confirmRemove(book)
+                    owner.notifyLibraryChanged()
+                }
+            },
+            onRequestRemoveBook = { book -> scope.launch { remote.requestRemove(book) } },
+            onRequestMoveBook = { book ->
+                if (groupingEnabled) scope.launch { remote.requestMove(book) }
+            },
+            moveTargetSelectionBook = remote.moveTargetSelectionBook,
+            onDismissMoveSelection = remote::dismissMove,
+            onConfirmMove = { book, targetId, targetName ->
+                scope.launch {
+                    remote.confirmMove(book, targetId, targetName)
+                    owner.notifyLibraryChanged()
+                }
+            },
+            jitPrompt = remote.jitPrompt,
+            onConfirmJitPrompt = { scope.launch { remote.confirmJitPrompt() } },
+            onDismissJitPrompt = remote::dismissJitPrompt,
+            coverState = { book ->
+                rememberSourceCoverState(book, coverRepository, packageRevision, credentialRevision)
+            },
         )
+        }
     }
 }
 
@@ -267,6 +391,7 @@ private fun NavGraphBuilder.searchRoute(
             query = search.query,
             state = search.state,
             layout = layout,
+            authorSearch = search.authorSearch,
             onQueryChange = search::updateQuery,
             onSearch = { scope.launch { search.submit() } },
             onSelectBook = { book ->
@@ -328,6 +453,7 @@ private fun rememberSourceCoverState(
 private fun NavGraphBuilder.detailRoute(
     navController: NavHostController,
     owner: SourceRouteOwner,
+    libraryFlow: LibraryFlowController,
     coverRepository: CoverRepository?,
     packageRevision: String?,
     credentialRevision: String?,
@@ -370,7 +496,17 @@ private fun NavGraphBuilder.detailRoute(
                 ?: return@LaunchedEffect
             detail.execute(command)
         }
+        val remoteDestinationRequest by remember(entry) {
+            entry.savedStateHandle.getStateFlow(RemoteDestinationRequestKey, 0L)
+        }.collectAsStateWithLifecycle()
+        val remoteRemoveRequest by remember(entry) {
+            entry.savedStateHandle.getStateFlow(RemoteRemoveRequestKey, 0L)
+        }.collectAsStateWithLifecycle()
+        val remoteMoveRequest by remember(entry) {
+            entry.savedStateHandle.getStateFlow(RemoteMoveRequestKey, 0L)
+        }.collectAsStateWithLifecycle()
         val summary = (detail.state as? SourceBookState.Content)?.value?.summary ?: detail.selectedBook
+        val websiteGroupingEnabled = summary?.identity?.sourceId?.let(libraryFlow::isWebsiteGroupingEnabled) == true
         val coverState = summary?.let {
             rememberSourceCoverState(
                 book = it,
@@ -385,6 +521,156 @@ private fun NavGraphBuilder.detailRoute(
                 navController.navigate(Routes.Reader)
             }
         }
+        var destinationMenuExpanded by remember { mutableStateOf(false) }
+        var destinationTargets by remember { mutableStateOf<List<org.tsuyomi.shared.sourcecontract.RemoteTarget>>(emptyList()) }
+        var loadingDestinationTargets by remember { mutableStateOf(false) }
+        var selectedDestinationCollections by remember { mutableStateOf<Set<String>>(emptySet()) }
+        var destinationShortcutPinned by remember(summary?.identity) {
+            mutableStateOf(summary?.identity?.let(libraryFlow::isBookShortcutPinned) == true)
+        }
+        var remoteRemoveConfirmationVisible by remember { mutableStateOf(false) }
+        var remoteMoveTargetSelectionVisible by remember { mutableStateOf(false) }
+        var pendingRemoteMoveOnly by remember { mutableStateOf(false) }
+        var selectedWebsiteTargetId by remember { mutableStateOf<String?>(null) }
+        var destinationMessage by remember { mutableStateOf<String?>(null) }
+        var pendingWebsiteAuthorizationOperation by remember { mutableStateOf<String?>(null) }
+        var pendingWebsiteTargetId by remember { mutableStateOf<String?>(null) }
+        var partialMoveTargetName by remember { mutableStateOf<String?>(null) }
+        LaunchedEffect(summary?.identity) {
+            val identity = summary?.identity
+            if (identity == null) {
+                entry.savedStateHandle[RemoteBookMembershipKey] = false
+                return@LaunchedEffect
+            }
+            entry.savedStateHandle[RemoteBookMembershipKey] = owner.flow.remoteMirrorSnapshot(identity.sourceId)
+                ?.books
+                ?.any { it.book.identity == identity } == true
+            val record = owner.flow.remoteReconciliation(identity) ?: return@LaunchedEffect
+            val pendingTarget = record.targetName ?: record.targetId
+            val continuationPending = pendingTarget != null && when (record.operation.uppercase()) {
+                "ADD" -> record.state == RemoteReconciliationState.CONFIRMED
+                "MOVE" -> record.state in setOf(
+                    RemoteReconciliationState.CANCELLED,
+                    RemoteReconciliationState.UNRESOLVED,
+                )
+                else -> false
+            }
+            if (continuationPending) {
+                partialMoveTargetName = pendingTarget
+                destinationMessage = if (record.state == RemoteReconciliationState.UNRESOLVED) {
+                    "移动结果待确认，可安全重试目标移动"
+                } else {
+                    "已加入默认书架，目标移动尚未完成"
+                }
+            }
+        }
+        LaunchedEffect(remoteRemoveRequest) {
+            if (remoteRemoveRequest <= 0L) return@LaunchedEffect
+            remoteRemoveConfirmationVisible = true
+            entry.savedStateHandle[RemoteRemoveRequestKey] = 0L
+        }
+        LaunchedEffect(remoteMoveRequest) {
+            if (remoteMoveRequest <= 0L) return@LaunchedEffect
+            destinationTargets = owner.flow.listRemoteTargets()
+            if (destinationTargets.isEmpty()) {
+                destinationMessage = "网站目标不可用"
+            } else {
+                remoteMoveTargetSelectionVisible = true
+            }
+            entry.savedStateHandle[RemoteMoveRequestKey] = 0L
+        }
+        val localDestinationFailure = stringResource(R.string.library_read_failure_safe)
+        suspend fun selectedManualDestinations(identity: org.tsuyomi.shared.model.BookIdentity): Set<String> {
+            val manualIds = libraryFlow.collections.asSequence()
+                .filter { it.kind == org.tsuyomi.core.database.CollectionKind.MANUAL }
+                .mapTo(hashSetOf()) { it.collectionId }
+            return libraryFlow.manualCollectionIds(identity).filterTo(linkedSetOf()) { it in manualIds }
+        }
+        suspend fun applyLocalDestinations(
+            book: org.tsuyomi.shared.sourcecontract.SourceBookSummary,
+            shortcutPinned: Boolean,
+            collectionIds: Set<String>,
+        ) {
+            if (!detail.localState.inLibrary) {
+                detail.execute(SourceDetailRouteOwner.Command.ADD_TO_LIBRARY.name)
+                libraryFlow.reload(localDestinationFailure)
+            }
+            val applied = libraryFlow.applyBookDestinations(
+                book.identity,
+                shortcutPinned,
+                collectionIds,
+                localDestinationFailure,
+            )
+            destinationMessage = if (applied) "本地位置已更新" else localDestinationFailure
+        }
+        fun selectedWebsiteTarget(targetId: String?): org.tsuyomi.shared.sourcecontract.RemoteTarget? =
+            if (websiteGroupingEnabled) {
+                destinationTargets.firstOrNull { it.targetId == targetId }
+            } else {
+                defaultRemoteTarget(destinationTargets)
+            }
+        suspend fun applyWebsiteDestination(
+            book: org.tsuyomi.shared.sourcecontract.SourceBookSummary,
+            targetId: String?,
+        ) {
+            partialMoveTargetName = null
+            val target = selectedWebsiteTarget(targetId)
+            val defaultTarget = defaultRemoteTarget(destinationTargets)
+            if (target == null || defaultTarget == null) {
+                destinationMessage = "网站目标不可用"
+                return
+            }
+            when (val result = owner.flow.addBookToWebsiteTarget(
+                book,
+                target.targetId,
+                target.displayName,
+                defaultTarget.targetId,
+            )) {
+                RemoteTargetedAddResult.Confirmed -> {
+                    destinationMessage = if (websiteGroupingEnabled) "已加入${target.displayName}" else "已加入网站收藏"
+                    partialMoveTargetName = null
+                    entry.savedStateHandle[RemoteBookMembershipKey] = true
+                }
+                is RemoteTargetedAddResult.Partial -> {
+                    destinationMessage = "已加入默认书架，移动尚未完成"
+                    partialMoveTargetName = result.requestedTargetName
+                    entry.savedStateHandle[RemoteBookMembershipKey] = true
+                }
+                RemoteTargetedAddResult.Unresolved -> destinationMessage = "网站结果待确认"
+                RemoteTargetedAddResult.Cancelled -> destinationMessage = "操作已取消"
+                is RemoteTargetedAddResult.Failure -> destinationMessage = result.safeCode
+            }
+            owner.notifyLibraryChanged()
+        }
+        suspend fun missingWebsiteAuthorization(
+            book: org.tsuyomi.shared.sourcecontract.SourceBookSummary,
+            targetId: String?,
+        ): String? {
+            if (!owner.flow.writebackAuthorized(book.identity.sourceId, "add")) return "add"
+            val target = selectedWebsiteTarget(targetId)
+            val defaultTarget = defaultRemoteTarget(destinationTargets)
+            return if (
+                websiteGroupingEnabled && target != null && defaultTarget != null && target.targetId != defaultTarget.targetId &&
+                !owner.flow.writebackAuthorized(book.identity.sourceId, "move")
+            ) "move" else null
+        }
+        LaunchedEffect(remoteDestinationRequest) {
+            if (remoteDestinationRequest <= 0L) return@LaunchedEffect
+            destinationMenuExpanded = true
+            destinationShortcutPinned = summary?.identity?.let(libraryFlow::isBookShortcutPinned) == true
+            selectedDestinationCollections = summary?.identity?.let { selectedManualDestinations(it) }.orEmpty()
+            loadingDestinationTargets = true
+            val requestedTargetId = entry.savedStateHandle.remove<String>(RemoteDestinationTargetIdKey)
+            destinationTargets = owner.flow.listRemoteTargets()
+            selectedWebsiteTargetId = if (websiteGroupingEnabled) {
+                requestedTargetId?.takeIf { requested -> destinationTargets.any { it.targetId == requested } }
+                    ?: defaultRemoteTarget(destinationTargets)?.targetId
+            } else {
+                defaultRemoteTarget(destinationTargets)?.targetId
+            }
+            loadingDestinationTargets = false
+            entry.savedStateHandle[RemoteDestinationRequestKey] = 0L
+        }
         BookDetailScreen(
             state = detail.state,
             directoryState = detail.directoryState,
@@ -395,14 +681,106 @@ private fun NavGraphBuilder.detailRoute(
             descending = descending,
             selectedChapterId = detail.selectedChapter?.chapterId,
             onSetRating = { rating -> scope.launch { detail.setRating(rating) } },
+            onSearchAuthor = { author ->
+                navController.navigate(Routes.Search)
+                val searchEntry = requireNotNull(navController.currentBackStackEntry)
+                searchEntry.lifecycleScope.launch {
+                    sourceSearchRouteOwner(searchEntry, owner.flow).submitAuthor(author)
+                }
+            },
             onAddTag = { tag -> scope.launch { detail.addTag(tag) } },
-            onToggleReadLater = { scope.launch { detail.toggleReadLater() } },
             onToggleUnreadOnly = detail::toggleUnreadOnly,
             onToggleOrder = detail::toggleOrder,
             onSelectChapter = ::openChapter,
             onContinueReading = ::openChapter,
             onAddToLibrary = {
                 scope.launch { detail.execute(SourceDetailRouteOwner.Command.ADD_TO_LIBRARY.name) }
+            },
+            onOpenDestinations = {
+                destinationShortcutPinned = summary?.identity?.let(libraryFlow::isBookShortcutPinned) == true
+                loadingDestinationTargets = true
+                scope.launch {
+                    selectedDestinationCollections = summary?.identity?.let { selectedManualDestinations(it) }.orEmpty()
+                    destinationTargets = owner.flow.listRemoteTargets()
+                    selectedWebsiteTargetId = defaultRemoteTarget(destinationTargets)?.targetId
+                    loadingDestinationTargets = false
+                }
+            },
+            destinationMenuExpanded = destinationMenuExpanded,
+            onDestinationMenuExpandedChange = { destinationMenuExpanded = it },
+            destinationMenuContent = { dismissMenu ->
+                BookDestinationMenu(
+                    readLater = detail.localState.readLater,
+                    shortcutPinned = destinationShortcutPinned,
+                    collections = libraryFlow.collections
+                        .filter { it.kind == org.tsuyomi.core.database.CollectionKind.MANUAL }
+                        .map {
+                            DetailCollectionDestination(
+                                it.collectionId,
+                                it.title,
+                                it.collectionId in selectedDestinationCollections,
+                            )
+                        },
+                    remoteTargets = destinationTargets,
+                    selectedRemoteTargetId = selectedWebsiteTargetId,
+                    loadingRemoteTargets = loadingDestinationTargets,
+                    websiteGroupingEnabled = websiteGroupingEnabled,
+                    onToggleReadLater = { scope.launch { detail.toggleReadLater() } },
+                    onToggleShortcut = {
+                        val nextPinned = !destinationShortcutPinned
+                        destinationShortcutPinned = nextPinned
+                        summary?.let { book ->
+                            scope.launch {
+                                applyLocalDestinations(book, nextPinned, selectedDestinationCollections)
+                            }
+                        }
+                    },
+                    onToggleCollection = { id ->
+                        val nextCollections = if (id in selectedDestinationCollections) {
+                            selectedDestinationCollections - id
+                        } else {
+                            selectedDestinationCollections + id
+                        }
+                        selectedDestinationCollections = nextCollections
+                        summary?.let { book ->
+                            scope.launch {
+                                applyLocalDestinations(book, destinationShortcutPinned, nextCollections)
+                            }
+                        }
+                    },
+                    onApplyWebsite = { targetId ->
+                        selectedWebsiteTargetId = targetId
+                        pendingWebsiteTargetId = targetId
+                        summary?.let { book ->
+                            scope.launch {
+                                val missingOperation = missingWebsiteAuthorization(book, targetId)
+                                if (missingOperation != null) {
+                                    pendingWebsiteAuthorizationOperation = missingOperation
+                                } else {
+                                    applyWebsiteDestination(book, targetId)
+                                }
+                            }
+                        }
+                    },
+                    onDismiss = dismissMenu,
+                )
+            },
+            destinationMessage = destinationMessage,
+            partialMoveTargetName = partialMoveTargetName.takeIf { websiteGroupingEnabled },
+            onRetryMoveOnly = {
+                summary?.let { book ->
+                    scope.launch {
+                        when (owner.flow.retryRemoteMutation(book)) {
+                            RemoteMutationUiResult.Confirmed -> {
+                                destinationMessage = "已完成移动"
+                                partialMoveTargetName = null
+                            }
+                            RemoteMutationUiResult.Unresolved -> destinationMessage = "移动结果仍待确认"
+                            RemoteMutationUiResult.Cancelled -> destinationMessage = "移动未执行，可再次重试"
+                            is RemoteMutationUiResult.Failure -> destinationMessage = "移动重试失败"
+                        }
+                    }
+                }
             },
             onRemoveFromLibrary = {
                 scope.launch { detail.execute(SourceDetailRouteOwner.Command.REMOVE_FROM_LIBRARY.name) }
@@ -419,7 +797,132 @@ private fun NavGraphBuilder.detailRoute(
                     },
                 )
             },
+
+            onRetryRemoteReconciliation = {
+                scope.launch {
+                    detail.retryRemoteReconciliation()
+                    owner.notifyLibraryChanged()
+                }
+            },
+            onAcknowledgeRemoteReconciliation = {
+                scope.launch {
+                    detail.acknowledgeRemoteReconciliation()
+                    owner.notifyLibraryChanged()
+                }
+            },
         )
+        val pendingOperation = pendingWebsiteAuthorizationOperation
+        if (pendingOperation != null && summary != null) {
+            val operationLabel = pendingOperation.uppercase()
+            AlertDialog(
+                onDismissRequest = {
+                    pendingWebsiteAuthorizationOperation = null
+                    pendingWebsiteTargetId = null
+                    pendingRemoteMoveOnly = false
+                },
+                title = { Text(if (pendingOperation == "add") "授权加入网站书架" else "授权移动网站书籍") },
+                text = {
+                    Text(
+                        "Tsuyomi 将代表您对《${summary.title}》执行 $operationLabel。此授权仅用于 $operationLabel；后续每次操作仍会重新检查来源、目标并签发单次令牌。",
+                    )
+                },
+                confirmButton = {
+                    TextButton(onClick = {
+                        pendingWebsiteAuthorizationOperation = null
+                        scope.launch {
+                            if (!owner.flow.authorizeWriteback(summary.identity.sourceId, pendingOperation, true)) {
+                                destinationMessage = "$operationLabel 授权未能保存"
+                                return@launch
+                            }
+                            if (pendingRemoteMoveOnly) {
+                                val target = destinationTargets.firstOrNull { it.targetId == pendingWebsiteTargetId }
+                                pendingRemoteMoveOnly = false
+                                pendingWebsiteTargetId = null
+                                if (target == null) {
+                                    destinationMessage = "网站目标不可用"
+                                } else {
+                                    detail.moveSelectedBookOnWebsite(target.targetId, target.displayName)
+                                    owner.notifyLibraryChanged()
+                                }
+                            } else {
+                                val nextOperation = missingWebsiteAuthorization(summary, pendingWebsiteTargetId)
+                                if (nextOperation != null) {
+                                    pendingWebsiteAuthorizationOperation = nextOperation
+                                } else {
+                                    applyWebsiteDestination(summary, pendingWebsiteTargetId)
+                                    pendingWebsiteTargetId = null
+                                }
+                            }
+                        }
+                    }) { Text("授权") }
+                },
+                dismissButton = {
+                    TextButton(onClick = {
+                        pendingWebsiteAuthorizationOperation = null
+                        pendingWebsiteTargetId = null
+                        pendingRemoteMoveOnly = false
+                    }) { Text("取消") }
+                },
+            )
+        }
+        if (remoteMoveTargetSelectionVisible && summary != null) {
+            AlertDialog(
+                onDismissRequest = { remoteMoveTargetSelectionVisible = false },
+                title = { Text("移动网站收藏") },
+                text = {
+                    Column {
+                        destinationTargets.forEach { target ->
+                            TextButton(onClick = {
+                                remoteMoveTargetSelectionVisible = false
+                                pendingWebsiteTargetId = target.targetId
+                                pendingRemoteMoveOnly = true
+                                scope.launch {
+                                    if (!owner.flow.writebackAuthorized(summary.identity.sourceId, "move")) {
+                                        pendingWebsiteAuthorizationOperation = "move"
+                                    } else {
+                                        pendingRemoteMoveOnly = false
+                                        pendingWebsiteTargetId = null
+                                        detail.moveSelectedBookOnWebsite(target.targetId, target.displayName)
+                                        owner.notifyLibraryChanged()
+                                    }
+                                }
+                            }) { Text(target.displayName) }
+                        }
+                    }
+                },
+                confirmButton = {},
+                dismissButton = {
+                    TextButton(onClick = { remoteMoveTargetSelectionVisible = false }) { Text("取消") }
+                },
+            )
+        }
+        if (remoteRemoveConfirmationVisible && summary != null) {
+            AlertDialog(
+                onDismissRequest = { remoteRemoveConfirmationVisible = false },
+                title = { Text("从网站书架移除") },
+                text = { Text("将从当前网站书架移除《${summary.title}》。本地书架与本地阅读数据不会被删除。") },
+                confirmButton = {
+                    TextButton(onClick = {
+                        remoteRemoveConfirmationVisible = false
+                        scope.launch {
+                            val sourceId = summary.identity.sourceId
+                            val admitted = owner.flow.writebackAuthorized(sourceId, "remove") ||
+                                owner.flow.authorizeWriteback(sourceId, "remove", true)
+                            if (admitted) {
+                                detail.removeSelectedBookFromWebsite()
+                                owner.notifyLibraryChanged()
+                                if (detail.mutation?.phase == org.tsuyomi.feature.book.DetailMutationPhase.SUCCESS) {
+                                    entry.savedStateHandle[RemoteBookMembershipKey] = false
+                                }
+                            }
+                        }
+                    }) { Text("确认移除") }
+                },
+                dismissButton = {
+                    TextButton(onClick = { remoteRemoveConfirmationVisible = false }) { Text("取消") }
+                },
+            )
+        }
     }
 }
 
@@ -494,6 +997,11 @@ private fun NavGraphBuilder.readerRoute(
                 reader.loadImage(block, coverRepository, packageRevision, credentialRevision, scope, retry = true)
             },
             onLocatorChanged = { locator, precision -> scope.launch { reader.saveProgress(locator, precision) } },
+            onChapterCompleted = { chapterId ->
+                val activeDocument = reader.document ?: return@ReaderScreen
+                val identity = BookIdentity(activeDocument.sourceId, activeDocument.remoteBookId)
+                scope.launch { owner.flow.markChapterCompleted(identity, chapterId) }
+            },
             preferences = readerPreferences,
             onPreferencesChanged = onReaderPreferencesChanged,
             onRetry = { scope.launch { reader.load(offlineOnly = false) } },
@@ -503,10 +1011,11 @@ private fun NavGraphBuilder.readerRoute(
     }
 }
 
-private enum class VerifiedPageOperation { NONE, SEARCH, DETAIL, DIRECTORY, CHAPTER }
+private enum class VerifiedPageOperation { NONE, HOME, SEARCH, DETAIL, DIRECTORY, CHAPTER }
 
 private fun NavGraphBuilder.verificationRoutes(navController: NavHostController, owner: SourceRouteOwner) {
     verificationRoute(navController, owner, Routes.Verification, VerifiedPageOperation.NONE)
+    verificationRoute(navController, owner, Routes.VerifiedHomePage, VerifiedPageOperation.HOME)
     verificationRoute(navController, owner, Routes.VerifiedPage, VerifiedPageOperation.SEARCH)
     verificationRoute(navController, owner, Routes.VerifiedDetailPage, VerifiedPageOperation.DETAIL)
     verificationRoute(navController, owner, Routes.VerifiedDirectoryPage, VerifiedPageOperation.DIRECTORY)
@@ -527,12 +1036,14 @@ private fun NavGraphBuilder.verificationRoute(
                 operation,
                 owner.flow.query,
                 owner.flow.selectedBook?.identity?.remoteBookId,
+                owner.flow.home.selectedFilters,
                 packageInfo.packageSha256,
                 owner.flow.selectedChapter?.chapterId,
                 owner.flow.selectedChapter?.url,
             ) {
                 value = when (operation) {
                     VerifiedPageOperation.NONE -> null
+                    VerifiedPageOperation.HOME -> owner.homeVerifiedPageRequestUrl()
                     VerifiedPageOperation.SEARCH -> owner.searchVerifiedPageRequestUrl()
                     VerifiedPageOperation.DETAIL -> owner.detailVerifiedPageRequestUrl()
                     VerifiedPageOperation.DIRECTORY -> owner.directoryVerifiedPageRequestUrl()
@@ -542,6 +1053,7 @@ private fun NavGraphBuilder.verificationRoute(
             val openLabel = when (operation) {
                 VerifiedPageOperation.NONE -> null
                 VerifiedPageOperation.SEARCH -> stringResource(R.string.verification_open_requested_page)
+                VerifiedPageOperation.HOME -> stringResource(R.string.verification_open_home_page)
                 VerifiedPageOperation.DETAIL -> stringResource(R.string.verification_open_detail_page)
                 VerifiedPageOperation.DIRECTORY -> stringResource(R.string.verification_open_directory_page)
                 VerifiedPageOperation.CHAPTER -> stringResource(R.string.verification_open_chapter_page)
@@ -550,18 +1062,20 @@ private fun NavGraphBuilder.verificationRoute(
                 VerifiedPageOperation.NONE -> null
                 VerifiedPageOperation.SEARCH -> stringResource(R.string.verification_snapshot_unbound)
                 VerifiedPageOperation.DETAIL -> stringResource(R.string.verification_snapshot_unbound_detail)
+                VerifiedPageOperation.HOME -> stringResource(R.string.verification_snapshot_unbound)
                 VerifiedPageOperation.DIRECTORY -> stringResource(R.string.verification_snapshot_unbound_directory)
                 VerifiedPageOperation.CHAPTER -> stringResource(R.string.verification_snapshot_unbound_chapter)
             }
             ManualVerificationRoute(
                 packageInfo = packageInfo,
                 onCompleted = { scope.launch { owner.completeVerification() } },
-                onVerifiedPageCompleted = { scope.launch { owner.completeVerifiedPage() } },
+                onVerifiedPageCompleted = { owner.completeVerifiedPage() },
                 onCancel = { navController.navigateUp() },
                 verifiedPageRequestUrl = requestUrl,
                 onUseVerifiedPage = when (operation) {
                     VerifiedPageOperation.NONE -> null
                     VerifiedPageOperation.SEARCH -> owner::useSearchVerifiedPage
+                    VerifiedPageOperation.HOME -> owner::useHomeVerifiedPage
                     VerifiedPageOperation.DETAIL -> owner::useDetailVerifiedPage
                     VerifiedPageOperation.DIRECTORY -> owner::useDirectoryVerifiedPage
                     VerifiedPageOperation.CHAPTER -> owner::useChapterVerifiedPage
