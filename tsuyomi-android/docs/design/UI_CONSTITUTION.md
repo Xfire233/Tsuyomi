@@ -667,7 +667,7 @@ Runtime window only, never device model (existing `resolveNavigationLayout` is c
 - Crossing a breakpoint at runtime preserves route, per-root stacks, scroll/page, selection, and focus — same tasks, same mental model; layout changes are pane arrangement only (rendering may change, options/order never).
 - Wide (≥ 600dp): list contexts may add a detail pane **only** where the task benefits (collection browsing, settings); book detail remains full-screen single surface (no forced dual-pane reading flow). Settings content stays 560dp max centered.
 - fontScale 2.0: every screen scrolls; rows grow vertically; chips/filter rows wrap or become a labelled picker; cover thumbs stay fixed; **no clipped text, no unreachable action** (current non-scroll detail/filter/browse columns are P1 defects).
-- Acceptance: dual portrait baselines mandatory — `Tsuyomi_API29` 1080×2400@420 Standard and `Tsuyomi_EInk_API29` 1264×1680@240 E-ink; landscape/split supplement, never replace.
+- Acceptance: a separate portrait baseline is mandatory for every profile selected as active by `.agents/skills/tsuyomi-android-review/review-policy.json`, using that profile's declared AVD geometry; landscape and split-screen supplement but never replace it. When both profiles are active, the retained baselines are `Tsuyomi_API29` 1080×2400@420 Standard and `Tsuyomi_EInk_API29` 1264×1680@240 E-ink. A deferred/frozen profile retains its contract and geometry but does not enter routine acceptance until the policy explicitly restores it.
 
 ### 12.1 System bars, cutouts and immersive scope
 

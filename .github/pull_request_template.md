@@ -20,7 +20,7 @@
 - [ ] Relevant unit/JVM/conformance tests
 - [ ] Android instrumentation where lifecycle/API/storage/security changed
 - [ ] Real composable screenshot/golden diff where UI changed
-- [ ] API 29 and Standard/E-ink matrix where applicable
-- [ ] Separate API 29 portrait evidence for `Tsuyomi_API29` 1080×2400 forced Standard and `Tsuyomi_EInk_API29` 1264×1680 forced E-ink; landscape/goldens do not substitute
+- [ ] API 29 evidence covers every profile selected by `.agents/skills/tsuyomi-android-review/review-policy.json`; deferred/frozen profiles are recorded but not run as routine gates
+- [ ] Each active profile has separate portrait evidence on its declared AVD/geometry; landscape, split-screen and goldens supplement but do not substitute
 - [ ] Dependency locks, verification metadata, notices, REUSE, and repository artifact policy
 - [ ] Documentation, changelog, version, and rollback notes updated
