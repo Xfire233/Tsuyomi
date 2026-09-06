@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 import subprocess
 from dataclasses import dataclass
 from pathlib import Path
@@ -21,12 +22,15 @@ FULL_BUILD_TASKS = (
     ":shared:locator:test",
     ":shared:smart-shelf:test",
     ":shared:backup:test",
+    ":shared:source-contract:test",
     ":reader:engine:test",
     ":app:testDebugUnitTest",
     ":core:display:testDebugUnitTest",
     ":core:files:testDebugUnitTest",
+    ":core:media:testDebugUnitTest",
     ":core:security:testDebugUnitTest",
     ":core:network:testDebugUnitTest",
+    ":feature:library:testDebugUnitTest",
     ":source:extension-manager:testDebugUnitTest",
     ":source:extension-testkit:testDebugUnitTest",
     ":core:ui:validateDebugScreenshotTest",
@@ -36,7 +40,12 @@ FULL_BUILD_TASKS = (
 )
 FULL_INSTRUMENTATION_TASKS = (
     ":app:connectedDebugAndroidTest",
+    ":feature:book:connectedDebugAndroidTest",
+    ":feature:browse:connectedDebugAndroidTest",
+    ":feature:library:connectedDebugAndroidTest",
     ":feature:settings:connectedDebugAndroidTest",
+    ":reader:ui:connectedDebugAndroidTest",
+    ":core:media:connectedDebugAndroidTest",
     ":core:ui:connectedDebugAndroidTest",
     ":core:security:connectedDebugAndroidTest",
     ":core:database:connectedDebugAndroidTest",
@@ -49,11 +58,14 @@ JVM_TASKS = {
     ":shared:locator": ":shared:locator:test",
     ":shared:smart-shelf": ":shared:smart-shelf:test",
     ":shared:backup": ":shared:backup:test",
+    ":shared:source-contract": ":shared:source-contract:test",
     ":reader:engine": ":reader:engine:test",
     ":core:display": ":core:display:testDebugUnitTest",
     ":core:files": ":core:files:testDebugUnitTest",
+    ":core:media": ":core:media:testDebugUnitTest",
     ":core:security": ":core:security:testDebugUnitTest",
     ":core:network": ":core:network:testDebugUnitTest",
+    ":feature:library": ":feature:library:testDebugUnitTest",
     ":source:extension-manager": ":source:extension-manager:testDebugUnitTest",
     ":source:extension-testkit": ":source:extension-testkit:testDebugUnitTest",
 }
@@ -66,30 +78,27 @@ SCREENSHOT_TASKS = {
 INSTRUMENTED_MODULES = {
     ":app",
     ":feature:book",
+    ":feature:browse",
     ":feature:library",
     ":feature:settings",
+    ":reader:ui",
+    ":core:media",
     ":core:ui",
     ":core:security",
     ":core:database",
     ":core:webview",
     ":source:quickjs-runtime",
 }
-APP_INTEGRATION_MODULES = {
-    ":feature:browse",
-    ":feature:search",
-    ":shared:source-contract",
-    ":core:network",
-    ":source:extension-manager",
-    ":source:extension-testkit",
-}
 GLOBAL_ANDROID_INPUTS = {
     ".github/workflows/android-quality.yml",
+    "tools/android_ci_plan.py",
     "tsuyomi-android/build.gradle.kts",
     "tsuyomi-android/settings.gradle.kts",
     "tsuyomi-android/gradle.properties",
     "tsuyomi-android/gradlew",
     "tsuyomi-android/gradlew.bat",
 }
+PROJECT_DEPENDENCY = re.compile(r'project\(\s*"(:[^"]+)"\s*\)')
 DEPENDENCY_INPUT_SUFFIXES = (
     ".gradle.kts",
     "gradle.lockfile",
@@ -164,6 +173,33 @@ def is_android_module(repo_root: Path, module: str) -> bool:
     text = build_file.read_text(encoding="utf-8", errors="ignore")
     return "android" in text or "tsuyomi.android" in text
 
+def reverse_module_dependencies(repo_root: Path) -> dict[str, set[str]]:
+    android_root = repo_root / "tsuyomi-android"
+    reverse: dict[str, set[str]] = {}
+    for build_file in android_root.rglob("build.gradle.kts"):
+        relative = build_file.relative_to(android_root)
+        if "build" in relative.parts or build_file == android_root / "build.gradle.kts":
+            continue
+        module_parts = relative.parent.parts
+        if not module_parts:
+            continue
+        consumer = ":" + ":".join(module_parts)
+        for dependency in PROJECT_DEPENDENCY.findall(build_file.read_text(encoding="utf-8", errors="ignore")):
+            reverse.setdefault(dependency, set()).add(consumer)
+    return reverse
+
+
+def transitive_consumers(reverse: dict[str, set[str]], module: str) -> set[str]:
+    affected = {module}
+    pending = [module]
+    while pending:
+        dependency = pending.pop()
+        for consumer in reverse.get(dependency, ()):
+            if consumer not in affected:
+                affected.add(consumer)
+                pending.append(consumer)
+    return affected
+
 
 def plan_for_paths(repo_root: Path, paths: Iterable[str], force_full: bool = False) -> AndroidCiPlan:
     normalized = tuple(sorted({path.replace("\\", "/") for path in paths if path}))
@@ -173,6 +209,7 @@ def plan_for_paths(repo_root: Path, paths: Iterable[str], force_full: bool = Fal
     production_changed = False
     dependency_changed = False
     full = force_full
+    reverse_dependencies = reverse_module_dependencies(repo_root)
 
     for path in normalized:
         if path in GLOBAL_ANDROID_INPUTS or path.startswith("tsuyomi-android/build-logic/"):
@@ -202,14 +239,14 @@ def plan_for_paths(repo_root: Path, paths: Iterable[str], force_full: bool = Fal
             build_tasks.add(":app:assembleDebug")
             if is_android_module(repo_root, module):
                 build_tasks.add(f"{module}:lintDebug")
-            if module in JVM_TASKS:
-                build_tasks.add(JVM_TASKS[module])
-            if module in SCREENSHOT_TASKS and kind == "main":
-                build_tasks.add(SCREENSHOT_TASKS[module])
-            if module in INSTRUMENTED_MODULES:
-                instrumentation_tasks.add(f"{module}:connectedDebugAndroidTest")
-            elif module in APP_INTEGRATION_MODULES:
-                instrumentation_tasks.add(":app:connectedDebugAndroidTest")
+            affected_modules = transitive_consumers(reverse_dependencies, module)
+            for affected_module in affected_modules:
+                if affected_module in JVM_TASKS:
+                    build_tasks.add(JVM_TASKS[affected_module])
+                if affected_module in SCREENSHOT_TASKS:
+                    build_tasks.add(SCREENSHOT_TASKS[affected_module])
+                if affected_module in INSTRUMENTED_MODULES:
+                    instrumentation_tasks.add(f"{affected_module}:connectedDebugAndroidTest")
         elif kind == "unit" and module in JVM_TASKS:
             build_tasks.add(JVM_TASKS[module])
         elif kind == "screenshot" and module in SCREENSHOT_TASKS:
@@ -245,8 +282,19 @@ def git_paths(repo_root: Path, base: str, head: str) -> tuple[list[str], bool]:
     )
     if exists.returncode != 0:
         return [], True
+    merge_base = subprocess.run(
+        ["git", "-C", str(repo_root), "merge-base", base, head],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        check=False,
+    )
+    if merge_base.returncode != 0:
+        return [], True
+    comparison_base = merge_base.stdout.decode(errors="replace").strip()
+    if not comparison_base:
+        return [], True
     result = subprocess.run(
-        ["git", "-C", str(repo_root), "diff", "--no-renames", "--name-only", base, head, "--"],
+        ["git", "-C", str(repo_root), "diff", "--no-renames", "--name-only", comparison_base, head, "--"],
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
         check=False,

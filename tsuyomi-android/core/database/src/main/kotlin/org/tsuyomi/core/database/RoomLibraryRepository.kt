@@ -48,7 +48,8 @@ class RoomLibraryRepository(database: TsuyomiDatabase) {
     suspend fun saveSourceRemotePolicy(policy: SourceRemotePolicy) = remote.saveSourceRemotePolicy(policy)
     suspend fun beginRemoteAdd(request: RemoteAddRequest, retryingUnresolvedAddId: String? = null): String =
         remote.beginRemoteAdd(request, retryingUnresolvedAddId)
-    suspend fun beginRemoteMutation(request: RemoteMutationRequest): String = remote.beginRemoteMutation(request)
+    suspend fun beginRemoteMutation(request: RemoteMutationRequest, retryingUnresolvedId: String? = null): String =
+        remote.beginRemoteMutation(request, retryingUnresolvedId)
     suspend fun transitionRemoteAdd(
         id: String,
         expected: RemoteReconciliationState,
@@ -62,6 +63,18 @@ class RoomLibraryRepository(database: TsuyomiDatabase) {
         resolvesPriorUnresolved: Boolean,
         now: Instant,
     ): Boolean = remote.confirmRemoteAdd(id, identity, resolvesPriorUnresolved, now)
+    suspend fun confirmRemoteMutation(
+        id: String,
+        identity: BookIdentity,
+        operation: String,
+        resolvesPriorUnresolved: Boolean,
+        now: Instant,
+    ): Boolean = remote.confirmRemoteMutation(id, identity, operation, resolvesPriorUnresolved, now)
+    suspend fun cancelUnresolvedMutations(
+        identity: BookIdentity,
+        operation: String,
+        now: Instant,
+    ): Boolean = remote.cancelUnresolvedMutations(identity, operation, now)
     suspend fun transitionRemoteMutation(
         id: String,
         expected: RemoteReconciliationState,
@@ -116,4 +129,10 @@ class RoomLibraryRepository(database: TsuyomiDatabase) {
 
     suspend fun saveProgress(incoming: ReadingProgress): ProgressWriteResult = progress.saveProgress(incoming)
     suspend fun progress(identity: BookIdentity): ReadingProgress? = progress.progress(identity)
+    suspend fun markChapterCompleted(
+        identity: BookIdentity,
+        chapterId: String,
+        completedAt: Instant = Instant.now(),
+    ): Boolean = progress.markChapterCompleted(identity, chapterId, completedAt)
+    suspend fun completedChapterIds(identity: BookIdentity): Set<String> = progress.completedChapterIds(identity)
 }

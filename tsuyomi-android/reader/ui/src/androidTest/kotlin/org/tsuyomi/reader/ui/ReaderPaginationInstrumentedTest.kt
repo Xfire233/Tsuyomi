@@ -14,6 +14,7 @@ import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.click
 import androidx.compose.ui.test.performTouchInput
+import androidx.compose.ui.test.performScrollToIndex
 import androidx.compose.ui.test.swipeUp
 import java.util.concurrent.atomic.AtomicInteger
 import java.util.concurrent.atomic.AtomicReference
@@ -331,6 +332,94 @@ class ReaderPaginationInstrumentedTest {
         composeRule.waitUntil(5_000) { commitCount.get() == 1 }
         assertTrue(committedLocator.get()?.blockId != blocks.first().blockId)
         composeRule.runOnIdle { assertEquals(1, commitCount.get()) }
+    }
+
+    @Test
+    fun advancingFromChapterEndCompletesOnlyTheCurrentChapter() {
+        val current = SourceChapter("chapter-2", "第二章", "https://example.test/chapter-2")
+        val next = SourceChapter("chapter-3", "第三章", "https://example.test/chapter-3")
+        val completed = mutableListOf<String>()
+        val selected = mutableListOf<String>()
+        val document = ReaderDocument(
+            sourceId = "org.tsuyomi.reader.test",
+            remoteBookId = "non-sequential",
+            contentId = current.chapterId,
+            revision = null,
+            title = current.title,
+            blocks = listOf(ReaderBlock.Paragraph("only-block", "这一章完整显示在当前页面。")),
+        )
+        val environment = standardEnvironment()
+        composeRule.setContent {
+            DisplayEnvironmentProvider(environment) {
+                TsuyomiTheme(environment) {
+                    ReaderSurface(
+                        document = document,
+                        restoredLocator = null,
+                        onLocatorChanged = { _, _ -> },
+                        chapters = listOf(
+                            SourceChapter("chapter-1", "第一章", "https://example.test/chapter-1"),
+                            current,
+                            next,
+                        ),
+                        currentChapterId = current.chapterId,
+                        onSelectChapter = { selected += it.chapterId },
+                        onNavigateUp = {},
+                        onChapterCompleted = { completed += it },
+                        preferences = PortableReaderPreferences(flow = "paged"),
+                    )
+                }
+            }
+        }
+
+        composeRule.onNodeWithText("下一章").performClick()
+        composeRule.runOnIdle {
+            assertEquals(listOf("chapter-2"), completed)
+            assertEquals(listOf("chapter-3"), selected)
+        }
+    }
+
+    @Test
+    fun scroll_bottom_completes_current_chapter_even_when_first_visible_block_is_earlier() {
+        val current = SourceChapter("chapter-2", "第二章", "https://example.test/chapter-2")
+        val next = SourceChapter("chapter-3", "第三章", "https://example.test/chapter-3")
+        val completed = mutableListOf<String>()
+        val selected = mutableListOf<String>()
+        val document = ReaderDocument(
+            sourceId = "org.tsuyomi.reader.test",
+            remoteBookId = "scroll-end",
+            contentId = current.chapterId,
+            revision = null,
+            title = current.title,
+            blocks = (1..20).map { index ->
+                ReaderBlock.Paragraph("block-$index", "第 $index 段。" + "正文".repeat(80))
+            },
+        )
+        val environment = standardEnvironment()
+        composeRule.setContent {
+            DisplayEnvironmentProvider(environment) {
+                TsuyomiTheme(environment) {
+                    ReaderSurface(
+                        document = document,
+                        restoredLocator = null,
+                        onLocatorChanged = { _, _ -> },
+                        chapters = listOf(current, next),
+                        currentChapterId = current.chapterId,
+                        onSelectChapter = { selected += it.chapterId },
+                        onNavigateUp = {},
+                        onChapterCompleted = { completed += it },
+                        preferences = PortableReaderPreferences(flow = "scroll"),
+                    )
+                }
+            }
+        }
+
+        composeRule.onNodeWithTag("reader-document-scroll").performScrollToIndex(document.blocks.lastIndex)
+        composeRule.waitForIdle()
+        composeRule.onNodeWithText("下一章").performClick()
+        composeRule.runOnIdle {
+            assertEquals(listOf("chapter-2"), completed)
+            assertEquals(listOf("chapter-3"), selected)
+        }
     }
 
     @Test

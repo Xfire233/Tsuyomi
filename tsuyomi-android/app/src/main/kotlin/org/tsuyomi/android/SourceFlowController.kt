@@ -18,6 +18,7 @@ import org.tsuyomi.core.network.DirectActionTokenRegistry
 import org.tsuyomi.core.webview.CapturedVerifiedPage
 import org.tsuyomi.feature.book.SourceBookState
 import org.tsuyomi.feature.search.SearchResultState
+import org.tsuyomi.feature.browse.SourceHomeFailure
 import org.tsuyomi.feature.browse.SourceHomeViewState
 import org.tsuyomi.shared.locator.LocatorPrecision
 import org.tsuyomi.shared.locator.ReaderLocator
@@ -63,6 +64,8 @@ internal class SourceFlowController(
     var selectedBook: SourceBookSummary? = null
         private set
     var selectedChapter: SourceChapter? = null
+        private set
+    var completedChapterIds: Set<String> by mutableStateOf(emptySet())
         private set
     private var verifiedChapterLoad: SourceReaderLoad? = null
     private var preparedResumeLoad: SourceReaderLoad? = null
@@ -121,8 +124,25 @@ internal class SourceFlowController(
         return remoteLibrary.pull(packageInfo)
     }
 
+    internal suspend fun pullRemoteLibrary(
+        packageInfo: VerifiedHxpPackage,
+        aggregateLimitBytes: Long,
+    ): RemoteLibraryPullResult {
+        open(packageInfo)
+        return remoteLibrary.pull(packageInfo, aggregateLimitBytes)
+    }
+
     suspend fun copyRemoteLibraryToLocal(books: Collection<SourceBookSummary>): RemoteLibraryCopyResult =
         remoteLibrary.copyToLocal(books)
+
+    suspend fun localCopyConfirmationRequired(sourceId: String): Boolean =
+        library.sourceRemotePolicy(sourceId)?.firstImportPromptDismissed != true
+
+    suspend fun acknowledgeLocalCopyConfirmation(sourceId: String): Boolean {
+        val policy = library.sourceRemotePolicy(sourceId) ?: return false
+        return policy.firstImportPromptDismissed ||
+            library.dismissFirstRemoteImportPrompt(sourceId, policy.capabilitySetFingerprint)
+    }
 
     suspend fun addSelectedBook(importedAt: Instant = Instant.now()): RemoteAddUiResult =
         remoteLibrary.addLocalBook(selectedBook, importedAt)
@@ -172,6 +192,9 @@ internal class SourceFlowController(
 
     suspend fun acknowledgeUnresolved(identity: BookIdentity): Boolean =
         remoteLibrary.acknowledgeUnresolved(identity)
+
+    suspend fun remoteReconciliation(identity: BookIdentity) =
+        library.bookReconciliation(identity.sourceId, identity.remoteBookId)
 
     suspend fun authorizeWriteback(sourceId: String, operation: String, enabled: Boolean): Boolean =
         remoteLibrary.authorizeWriteback(sourceId, operation, enabled)
@@ -238,10 +261,29 @@ internal class SourceFlowController(
     suspend fun loadHome(
         selectedFilters: Map<String, String>,
         cursor: String? = null,
+        offlineOnly: Boolean = false,
     ): Result<SourceHomePage> {
         val source = sessionOwner.requireClientOrNull()
             ?: return Result.failure(IllegalStateException("source-not-open"))
-        return runCatching { source.home(selectedFilters, cursor) }
+        return runCatching { source.home(selectedFilters, cursor, offlineOnly) }
+    }
+
+    suspend fun homeVerifiedPageRequestUrl(): String? {
+        val source = sessionOwner.requireClientOrNull() ?: return null
+        return runCatching { source.homeRequestUrl(home.selectedFilters, cursor = null) }.getOrNull()
+    }
+
+    suspend fun homeVerifiedPage(snapshot: CapturedVerifiedPage): Boolean {
+        val source = sessionOwner.requireClientOrNull() ?: return false
+        return try {
+            home.acceptVerifiedPage(
+                source.homeVerifiedPage(home.selectedFilters, cursor = null, snapshot = snapshot),
+            )
+            true
+        } catch (error: SourceException) {
+            home.rejectVerifiedPage(SourceHomeFailure(error.code, error.diagnostic.safeCode))
+            false
+        }
     }
 
     suspend fun search(offlineOnly: Boolean = false) {
@@ -376,10 +418,30 @@ internal class SourceFlowController(
 
 
     suspend fun prepareBook(book: SourceBookSummary) {
+        if (selectedBook?.identity != book.identity) {
+            detailState = SourceBookState.Loading
+            directoryState = SourceBookState.Loading
+            selectedChapter = null
+            completedChapterIds = emptySet()
+        }
         selectedBook = book
         remoteLibrary.beginSelection(book.identity)
         snapshotStore.saveBook(book)
         remoteLibrary.refreshSelection(book)
+        val persistedCompleted = library.completedChapterIds(book.identity)
+        if (selectedBook?.identity == book.identity) completedChapterIds = persistedCompleted
+    }
+
+    suspend fun prepareLocalDetail(book: SourceBookSummary) {
+        prepareBook(book)
+        detailState = SourceBookState.Content(
+            SourceBookDetail(
+                summary = book,
+                description = null,
+                tags = emptyList(),
+                status = null,
+            ),
+        )
     }
 
     suspend fun selectBook(book: SourceBookSummary, offlineOnly: Boolean = false) {
@@ -516,6 +578,22 @@ internal class SourceFlowController(
         library.saveProgress(ReadingProgress(book.identity, locator))
     }
 
+    suspend fun markChapterCompleted(
+        identity: BookIdentity,
+        chapterId: String,
+        completedAt: Instant = Instant.now(),
+    ) {
+        if (chapterId.isBlank() || chapterId in completedChapterIds && selectedBook?.identity == identity) return
+        if (library.book(identity) == null) {
+            val book = selectedBook?.takeIf { it.identity == identity } ?: return
+            library.saveBook(mergeLibraryBook(existing = null, summary = book, updatedAt = completedAt))
+        }
+        library.markChapterCompleted(identity, chapterId, completedAt)
+        if (selectedBook?.identity == identity) {
+            completedChapterIds = library.completedChapterIds(identity)
+        }
+    }
+
     private suspend fun adoptDetail(detail: SourceBookDetail) {
         val summary = detail.summary
         if (selectedBook?.identity != summary.identity) return
@@ -613,6 +691,7 @@ internal class SourceFlowController(
         directoryState = SourceBookState.Loading
         selectedBook = null
         selectedChapter = null
+        completedChapterIds = emptySet()
         verifiedChapterLoad = null
         preparedResumeLoad = null
     }

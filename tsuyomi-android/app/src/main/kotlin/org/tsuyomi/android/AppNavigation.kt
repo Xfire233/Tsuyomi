@@ -23,22 +23,25 @@ internal object Routes {
     const val Browse = "browse"
     const val Collections = "library/collections"
     const val More = "more"
-    const val Display = "settings/display"
-    const val About = "about"
+    const val Display = "more/display"
+    const val ReaderSettings = "more/reader"
+    const val Help = "more/help"
+    const val About = "more/about"
     const val Search = "source/search"
     const val SourceHome = "source/home"
     const val Detail = "source/detail"
     const val Directory = "source/directory"
     const val Reader = "source/reader"
     const val Verification = "source/verification"
+    const val VerifiedHomePage = "source/verification/verified-home-page"
     const val VerifiedPage = "source/verification/verified-page"
     const val VerifiedDetailPage = "source/verification/verified-detail-page"
     const val VerifiedDirectoryPage = "source/verification/verified-directory-page"
     const val VerifiedChapterPage = "source/verification/verified-chapter-page"
     const val RemoteLibrary = "source/remote-library"
+    const val Transfer = "more/data"
     const val LibraryMirror = "library/mirror/{bindingId}"
     const val LibraryMirrorFolder = "library/mirror/{bindingId}/folder/{targetId}"
-    const val Transfer = "settings/transfer"
 
     fun librarySystem(filter: org.tsuyomi.feature.library.SystemLibraryFilter): String =
         "library/system/${filter.name}"
@@ -63,13 +66,14 @@ internal fun rootRouteFor(route: String): String = when (route) {
     Routes.LibraryMirror,
     Routes.LibraryMirrorFolder,
     -> Routes.Library
-    Routes.Display, Routes.About, Routes.Transfer -> Routes.More
+    Routes.Display, Routes.ReaderSettings, Routes.Help, Routes.About, Routes.Transfer -> Routes.More
     Routes.SourceHome,
     Routes.Search,
     Routes.Detail,
     Routes.Directory,
     Routes.Reader,
     Routes.Verification,
+    Routes.VerifiedHomePage,
     Routes.VerifiedPage,
     Routes.VerifiedDetailPage,
     Routes.VerifiedDirectoryPage,
@@ -118,6 +122,8 @@ internal fun routeTitle(route: String): String = when (route) {
     Routes.Browse -> stringResource(R.string.nav_browse)
     Routes.More -> stringResource(R.string.nav_more)
     Routes.Display -> stringResource(R.string.title_display_settings)
+    Routes.ReaderSettings -> stringResource(R.string.title_reader_settings)
+    Routes.Help -> stringResource(R.string.title_help)
     Routes.About -> stringResource(R.string.title_about)
     Routes.SourceHome -> stringResource(R.string.title_source_home)
     Routes.Search -> stringResource(R.string.title_source_search)
@@ -126,6 +132,7 @@ internal fun routeTitle(route: String): String = when (route) {
     Routes.Transfer -> stringResource(R.string.title_data_transfer)
     Routes.Reader -> stringResource(R.string.title_reader)
     Routes.Verification,
+    Routes.VerifiedHomePage,
     Routes.VerifiedPage,
     Routes.VerifiedDetailPage,
     Routes.VerifiedDirectoryPage,

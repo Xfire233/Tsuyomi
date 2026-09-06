@@ -55,7 +55,7 @@ object TransferCodec {
         val orderedShelves = canonicalShelves(snapshot.shelves)
         val root = buildJsonObject {
             put("format", "tsuyomi-transfer")
-            put("version", 1)
+            put("version", CURRENT_VERSION)
             put("createdAt", snapshot.createdAt.toString())
             put("library", buildJsonArray { orderedBooks.forEach { add(bookJson(it)) } })
             put("shelves", buildJsonArray { orderedShelves.forEach { add(shelfJson(it)) } })
@@ -66,6 +66,13 @@ object TransferCodec {
                         preferences.fontScale?.let { put("fontScale", it) }
                         preferences.lineHeight?.let { put("lineHeight", it) }
                         preferences.theme?.let { put("theme", it) }
+                        preferences.horizontalMargin?.let { put("horizontalMargin", it) }
+                        preferences.paragraphSpacing?.let { put("paragraphSpacing", it) }
+                        preferences.lockPortrait?.let { put("lockPortrait", it) }
+                        preferences.progressVisible?.let { put("progressVisible", it) }
+                        preferences.immersive?.let { put("immersive", it) }
+                        preferences.keepAwake?.let { put("keepAwake", it) }
+                        preferences.volumePaging?.let { put("volumePaging", it) }
                     })
                 })
             }
@@ -88,7 +95,7 @@ object TransferCodec {
         }
         fun encoded(element: JsonElement): String = json.encodeToString(JsonElement.serializer(), element)
 
-        if (!append("{\"format\":\"tsuyomi-transfer\",\"version\":1,\"createdAt\":")) return null
+        if (!append("{\"format\":\"tsuyomi-transfer\",\"version\":$CURRENT_VERSION,\"createdAt\":")) return null
         if (!append(encoded(JsonPrimitive(snapshot.createdAt.toString())))) return null
         if (!append(",\"library\":[")) return null
         orderedBooks.forEachIndexed { index, book ->
@@ -108,6 +115,13 @@ object TransferCodec {
                     preferences.fontScale?.let { put("fontScale", it) }
                     preferences.lineHeight?.let { put("lineHeight", it) }
                     preferences.theme?.let { put("theme", it) }
+                    preferences.horizontalMargin?.let { put("horizontalMargin", it) }
+                    preferences.paragraphSpacing?.let { put("paragraphSpacing", it) }
+                    preferences.lockPortrait?.let { put("lockPortrait", it) }
+                    preferences.progressVisible?.let { put("progressVisible", it) }
+                    preferences.immersive?.let { put("immersive", it) }
+                    preferences.keepAwake?.let { put("keepAwake", it) }
+                    preferences.volumePaging?.let { put("volumePaging", it) }
                 })
             }
             if (!append(",\"preferences\":${encoded(value)}")) return null
@@ -120,7 +134,8 @@ object TransferCodec {
         .digest(bytes).joinToString("") { "%02x".format(it) }
 
     private fun parseTransfer(root: JsonObject): ImportParseResult {
-        if (root.int("version") != 1) return ImportParseResult.Fatal("unsupported-version")
+        val version = root.int("version") ?: return ImportParseResult.Fatal("unsupported-version")
+        if (version !in setOf(1, CURRENT_VERSION)) return ImportParseResult.Fatal("unsupported-version")
         if (!root.keys.all { it in setOf("format", "version", "createdAt", "library", "shelves", "preferences") }) {
             return ImportParseResult.Fatal("unknown-root-field")
         }
@@ -131,7 +146,7 @@ object TransferCodec {
         val books = ArrayList<TransferBook>(library.size)
         val seenBooks = HashSet<BookIdentity>()
         for (item in library) {
-            val book = parseBook(item as? JsonObject ?: return ImportParseResult.Fatal("invalid-book"))
+            val book = parseBook(item as? JsonObject ?: return ImportParseResult.Fatal("invalid-book"), version)
                 ?: return ImportParseResult.Fatal("invalid-book")
             if (!seenBooks.add(book.identity)) return ImportParseResult.Fatal("duplicate-book-identity")
             books += book
@@ -158,7 +173,7 @@ object TransferCodec {
         val readerObject = preferencesObject?.get("reader")?.let { value ->
             value as? JsonObject ?: return ImportParseResult.Fatal("invalid-reader-preferences")
         }
-        val preferences = runCatching { readerObject?.let(::parseReaderPreferences) }
+        val preferences = runCatching { readerObject?.let { parseReaderPreferences(it, version) } }
             .getOrElse { return ImportParseResult.Fatal("invalid-reader-preferences") }
         val snapshot = TransferSnapshot(createdAt, books, shelves, preferences)
         val canonical = runCatching { encode(snapshot) }.getOrElse { return ImportParseResult.Fatal("invalid-transfer") }
@@ -168,8 +183,8 @@ object TransferCodec {
         )
     }
 
-    private fun parseBook(value: JsonObject): TransferBook? = runCatching {
-        require(value.keys.all { it in BOOK_FIELDS })
+    private fun parseBook(value: JsonObject, version: Int): TransferBook? = runCatching {
+        require(value.keys.all { it in if (version == 1) BOOK_FIELDS_V1 else BOOK_FIELDS_V2 })
         val identityObject = requireNotNull(value.obj("identity"))
         require(identityObject.keys == setOf("sourceId", "remoteBookId"))
         val identity = BookIdentity(requireNotNull(identityObject.string("sourceId")), requireNotNull(identityObject.string("remoteBookId")))
@@ -180,6 +195,7 @@ object TransferCodec {
         val remoteTags = value.stringSet("remoteTags", 128, 256)
         val localTags = value.stringSet("localTags", 64, 64)
         val shelfIds = value.stringSet("shelfIds", 512, 128)
+        val completedChapterIds = if (version == 1) emptySet() else value.completedChapterIdSet("completedChapterIds")
         val status = value.string("status") ?: "unknown"; require(status in STATUSES)
         val rating = value.primitive("rating")?.doubleOrNull; require(rating == null || rating in 0.0..5.0)
         val canonicalUrl = value.string("canonicalUrl")?.also(::requireUri)
@@ -195,10 +211,11 @@ object TransferCodec {
             localTags = localTags,
             shelfIds = shelfIds,
             rating = rating,
-            readLater = value.primitive("readLater")?.booleanOrNull ?: false,
+            readLater = version != 1 && (value.primitive("readLater")?.booleanOrNull ?: false),
             addedAt = value.instant("addedAt"),
             updatedAt = updatedAt,
             progress = value.obj("progress")?.let(::parseProgress),
+            completedChapterIds = completedChapterIds,
         )
     }.getOrNull()
 
@@ -227,8 +244,9 @@ object TransferCodec {
         TransferShelf(id, name, parent, position)
     }.getOrNull()
 
-    private fun parseReaderPreferences(value: JsonObject): PortableReaderPreferences {
-        require(value.keys.all { it in setOf("flow", "fontScale", "lineHeight", "theme") })
+    private fun parseReaderPreferences(value: JsonObject, version: Int): PortableReaderPreferences {
+        val allowedFields = if (version == 1) READER_FIELDS_V1 else READER_FIELDS_V2
+        require(value.keys.all { it in allowedFields })
         fun string(name: String, allowed: Set<String>): String? {
             val element = value[name] ?: return null
             require(element is JsonPrimitive && element.isString)
@@ -239,11 +257,23 @@ object TransferCodec {
             require(element is JsonPrimitive && !element.isString)
             return requireNotNull(element.doubleOrNull).also { require(it in range) }
         }
+        fun boolean(name: String): Boolean? {
+            val element = value[name] ?: return null
+            require(element is JsonPrimitive && !element.isString)
+            return requireNotNull(element.booleanOrNull)
+        }
         return PortableReaderPreferences(
             flow = string("flow", setOf("scroll", "paged")),
             fontScale = number("fontScale", 0.5..3.0),
             lineHeight = number("lineHeight", 0.8..3.0),
             theme = string("theme", setOf("paper", "warmGray", "nightInk", "black", "inkGreen")),
+            horizontalMargin = number("horizontalMargin", 12.0..40.0),
+            paragraphSpacing = number("paragraphSpacing", 0.0..32.0),
+            lockPortrait = boolean("lockPortrait"),
+            progressVisible = boolean("progressVisible"),
+            immersive = boolean("immersive"),
+            keepAwake = boolean("keepAwake"),
+            volumePaging = boolean("volumePaging"),
         )
     }
 
@@ -262,6 +292,7 @@ object TransferCodec {
         book.addedAt?.let { put("addedAt", it.toString()) }
         put("updatedAt", book.updatedAt.toString())
         book.progress?.let { put("progress", progressJson(it)) }
+        putStringSet("completedChapterIds", book.completedChapterIds)
     }
 
     private fun progressJson(progress: TransferProgress): JsonObject = buildJsonObject {
@@ -290,7 +321,12 @@ object TransferCodec {
 
     private val SOURCE_ID = Regex("^[a-z0-9](?:[a-z0-9.-]{0,126}[a-z0-9])?$")
     private val STATUSES = setOf("unknown", "ongoing", "completed", "hiatus", "cancelled")
-    private val BOOK_FIELDS = setOf("identity", "title", "authors", "canonicalUrl", "coverUrl", "status", "remoteTags", "localTags", "shelfIds", "rating", "readLater", "addedAt", "updatedAt", "progress")
+    private val BOOK_FIELDS_V1 = setOf("identity", "title", "authors", "canonicalUrl", "coverUrl", "status", "remoteTags", "localTags", "shelfIds", "rating", "addedAt", "updatedAt", "progress")
+    private val BOOK_FIELDS_V2 = BOOK_FIELDS_V1 + setOf("readLater", "completedChapterIds")
+    private val READER_FIELDS_V1 = setOf("flow", "fontScale", "lineHeight", "theme")
+    private val READER_FIELDS_V2 = READER_FIELDS_V1 + setOf("horizontalMargin", "paragraphSpacing", "lockPortrait", "progressVisible", "immersive", "keepAwake", "volumePaging")
+    private const val CURRENT_VERSION = 2
+    internal const val MAX_COMPLETED_CHAPTERS_PER_BOOK = 20_000
     private val PROGRESS_FIELDS = setOf("chapterId", "textAnchor", "characterOffset", "chapterProgress", "bookProgress", "updatedAt")
 }
 
@@ -315,9 +351,22 @@ internal fun JsonObject.primitive(name: String): JsonPrimitive? = this[name] as?
 internal fun JsonObject.stringSet(name: String, maxItems: Int, maxCodePoints: Int): Set<String> {
     val values = array(name) ?: return emptySet()
     require(values.size <= maxItems)
-    val strings = values.map {
+    return values.map {
         requireNotNull((it as? JsonPrimitive)?.contentOrNull).also { value ->
-            require(value.codePointCount(0, value.length) in 1..maxCodePoints)
+            require(value.codePointCount(0, value.length) <= maxCodePoints)
+        }
+    }.toSortedSet()
+}
+internal fun JsonObject.completedChapterIdSet(name: String): Set<String> {
+    val raw = this[name] ?: return emptySet()
+    val values = raw as? JsonArray ?: error("Invalid completed chapter IDs")
+    require(values.size <= TransferCodec.MAX_COMPLETED_CHAPTERS_PER_BOOK)
+    val strings = values.map { element ->
+        val value = element as? JsonPrimitive ?: error("Invalid completed chapter ID")
+        require(value.isString)
+        value.content.also { chapterId ->
+            require(chapterId.isNotBlank())
+            require(chapterId.codePointCount(0, chapterId.length) <= 512)
         }
     }
     require(strings.toSet().size == strings.size)

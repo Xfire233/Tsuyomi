@@ -37,10 +37,12 @@ import androidx.compose.ui.test.assertIsSelected
 import androidx.compose.ui.test.junit4.v2.createComposeRule
 import androidx.compose.ui.test.hasStateDescription
 import androidx.compose.ui.test.onNodeWithContentDescription
+import androidx.compose.ui.test.onAllNodesWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performSemanticsAction
+import androidx.compose.ui.test.performScrollToIndex
 import androidx.compose.ui.test.performTouchInput
 import androidx.compose.ui.test.performKeyInput
 import androidx.compose.ui.test.pressKey
@@ -52,6 +54,13 @@ import org.junit.Rule
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
+import org.tsuyomi.core.display.DisplayDecisionReason
+import org.tsuyomi.core.display.DisplayEnvironment
+import org.tsuyomi.core.display.DisplayEnvironmentProvider
+import org.tsuyomi.core.display.DisplayPreference
+import org.tsuyomi.core.display.DisplayPreferences
+import org.tsuyomi.core.display.DisplayProfile
+import org.tsuyomi.core.display.MotionPolicy
 import org.tsuyomi.core.media.api.CoverUiState
 import org.tsuyomi.core.media.api.FallbackSpec
 import org.tsuyomi.core.ui.theme.TsuyomiTypography
@@ -89,6 +98,7 @@ class BookDetailInstrumentedTest {
                         inLibrary = true,
                         progressChapterId = "v2-c1",
                         progressChapterFraction = 0.4,
+                        completedChapterIds = setOf("v1-c1", "v1-c2"),
                     ),
                     mutation = null,
                     coverState = CoverUiState.Fallback(FallbackSpec(book.title, null)),
@@ -115,13 +125,58 @@ class BookDetailInstrumentedTest {
         compose.onNodeWithText("第一卷").assert(hasStateDescription("已收起"))
         compose.onNodeWithText("第一卷 第一章").assertDoesNotExist()
         compose.onNodeWithContentDescription("当前顺序：正序，点按切换").assertExists()
+        compose.onNodeWithText("仅看未读").assertIsNotSelected().assert(hasStateDescription("当前筛选：全部章节"))
 
         compose.onNodeWithText("第一卷").performClick()
         compose.onNodeWithText("第一卷").assert(hasStateDescription("已展开"))
         compose.onNodeWithText("第一卷 第一章").assertIsDisplayed()
         compose.onNodeWithText("仅看未读").performClick()
+        compose.onNodeWithText("仅看未读").assertIsSelected().assert(hasStateDescription("当前筛选：仅看未读"))
         compose.onNodeWithText("第一卷").assertDoesNotExist()
         compose.onNodeWithText("第二卷 第一章").assertIsDisplayed()
+    }
+
+    @Test
+    fun unresolvedAddCannotBeLocallyUnlocked() {
+        val book = sourceBook()
+        var operation by mutableStateOf("ADD")
+        compose.setContent {
+            DisplayEnvironmentProvider(standardTestEnvironment) {
+                MaterialTheme {
+                    StandardBookDetailScreen(
+                        state = SourceBookState.Content(SourceBookDetail(book, "简介", emptyList(), "连载")),
+                        directoryState = SourceBookState.Loading,
+                        localState = DetailLocalState(
+                            reconciliationOperation = operation,
+                            reconciliation = "UNRESOLVED",
+                        ),
+                        mutation = null,
+                        coverState = CoverUiState.Fallback(FallbackSpec(book.title, null)),
+                        unreadOnly = false,
+                        descending = false,
+                        selectedChapterId = null,
+                        onSetRating = {},
+                        onSearchAuthor = {},
+                        onAddTag = {},
+                        onToggleUnreadOnly = {},
+                        onToggleOrder = {},
+                        onSelectChapter = {},
+                        onContinueReading = {},
+                        onAddToLibrary = {},
+                        onRetry = {},
+                        onUseOfflineCache = {},
+                        onOpenVerification = {},
+                    )
+                }
+            }
+        }
+
+        compose.onNodeWithText("重试加入网站收藏").assertIsDisplayed()
+        compose.onNodeWithText("仅解除锁定").assertDoesNotExist()
+
+        operation = "MOVE"
+        compose.onNodeWithText("重试移动网站收藏").assertIsDisplayed()
+        compose.onNodeWithText("仅解除锁定").assertIsDisplayed()
     }
 
     @OptIn(ExperimentalTestApi::class)
@@ -335,6 +390,46 @@ class BookDetailInstrumentedTest {
     }
 
     @Test
+    fun destinationOutcomeRemainsVisibleAfterMenuDismissal() {
+        var retryCount = 0
+        compose.setContent {
+            MaterialTheme(typography = TsuyomiTypography) {
+                StandardBookDetailScreen(
+                    state = SourceBookState.Content(SourceBookDetail(sourceBook(), "简介", emptyList(), null, null)),
+                    directoryState = SourceBookState.Content(
+                        SourceDirectory(sourceBook().identity, listOf(chapter("c1", "第一章", "第一卷"))),
+                    ),
+                    localState = DetailLocalState(),
+                    mutation = null,
+                    coverState = CoverUiState.Fallback(FallbackSpec("测试", null)),
+                    unreadOnly = false,
+                    descending = false,
+                    selectedChapterId = null,
+                    onSetRating = {},
+                    onSearchAuthor = {},
+                    onAddTag = {},
+                    onToggleUnreadOnly = {},
+                    onToggleOrder = {},
+                    onSelectChapter = {},
+                    onContinueReading = {},
+                    onAddToLibrary = {},
+                    onRetry = {},
+                    onUseOfflineCache = {},
+                    onOpenVerification = {},
+                    destinationMenuExpanded = false,
+                    destinationMessage = "已加入默认书架，目标移动尚未完成",
+                    partialMoveTargetName = "特别收藏",
+                    onRetryMoveOnly = { retryCount += 1 },
+                )
+            }
+        }
+
+        compose.onNodeWithText("已加入默认书架，目标移动尚未完成").assertIsDisplayed()
+        compose.onNodeWithText("继续移至特别收藏").performClick()
+        compose.runOnIdle { assertTrue(retryCount == 1) }
+    }
+
+    @Test
     fun headerAndIntroductionUseCompactDensity() {
         val book = sourceBook().copy(title = "文学少女")
         val description = "文艺社的两位成员调查十年前的人间失格事件。随着线索逐步出现，他们发现每个人都在用自己的方式保护重要的人，也必须面对被隐藏多年的真相。这个过程改变了他们对故事、记忆与彼此关系的理解。"
@@ -376,8 +471,6 @@ class BookDetailInstrumentedTest {
                             selectedRemoteTargetId = null,
                             loadingRemoteTargets = false,
                             websiteGroupingEnabled = false,
-                            message = null,
-                            partialMoveTargetName = null,
                             onToggleReadLater = {
                                 localState = localState.copy(
                                     inLibrary = true,
@@ -387,8 +480,6 @@ class BookDetailInstrumentedTest {
                             onToggleShortcut = {},
                             onToggleCollection = {},
                             onApplyWebsite = {},
-                            onRetryMoveOnly = {},
-                            onKeepDefaultWebsiteShelf = {},
                             onDismiss = dismissMenu,
                         )
                     },
@@ -602,14 +693,10 @@ class BookDetailInstrumentedTest {
                         selectedRemoteTargetId = "default",
                         loadingRemoteTargets = false,
                         websiteGroupingEnabled = false,
-                        message = null,
-                        partialMoveTargetName = null,
                         onToggleReadLater = {},
                         onToggleShortcut = {},
                         onToggleCollection = {},
                         onApplyWebsite = { appliedTargetId = it },
-                        onRetryMoveOnly = {},
-                        onKeepDefaultWebsiteShelf = {},
                         onDismiss = {},
                     )
                 }
@@ -622,6 +709,95 @@ class BookDetailInstrumentedTest {
         compose.onNodeWithText("特别收藏").assertDoesNotExist()
         compose.onNodeWithText("全部网站收藏").performClick()
         assertTrue(appliedTargetId == "default")
+    }
+
+    @Test
+    fun directoryFabHidesDuringScrollAndReturnsWhenScrollStops() {
+        val book = sourceBook()
+        val chapters = (1..80).map { chapter("c$it", "第 $it 章", "第一卷") }
+        compose.setContent {
+            MaterialTheme {
+                StandardBookDetailScreen(
+                    state = SourceBookState.Content(SourceBookDetail(book, "简介", emptyList(), "连载")),
+                    directoryState = SourceBookState.Content(SourceDirectory(book.identity, chapters)),
+                    localState = DetailLocalState(inLibrary = true, progressChapterId = "c1"),
+                    mutation = null,
+                    coverState = CoverUiState.Fallback(FallbackSpec(book.title, null)),
+                    unreadOnly = false,
+                    descending = false,
+                    selectedChapterId = null,
+                    onSetRating = {},
+                    onSearchAuthor = {},
+                    onAddTag = {},
+                    onToggleUnreadOnly = {},
+                    onToggleOrder = {},
+                    onSelectChapter = {},
+                    onContinueReading = {},
+                    onAddToLibrary = {},
+                    onRetry = {},
+                    onUseOfflineCache = {},
+                    onOpenVerification = {},
+                )
+            }
+        }
+
+        val scroll = compose.onNodeWithTag("book-detail-scroll")
+        scroll.performScrollToIndex(12)
+        compose.onNodeWithTag("adaptive-list-fab").assertIsDisplayed()
+        scroll.performTouchInput {
+            down(center)
+            moveBy(Offset(0f, -240f), delayMillis = 120)
+        }
+        compose.waitUntil(5_000) {
+            compose.onAllNodesWithTag("adaptive-list-fab").fetchSemanticsNodes().isEmpty()
+        }
+        scroll.performTouchInput { up() }
+        compose.waitUntil(5_000) {
+            compose.onAllNodesWithTag("adaptive-list-fab").fetchSemanticsNodes().isNotEmpty()
+        }
+    }
+
+    @Test
+    fun detailTopBarExposesWebsiteMoveAndRemoveActions() {
+        var moved = false
+        var removed = false
+        compose.setContent {
+            MaterialTheme {
+                BookDetailTopBar(
+                    title = "网站书籍",
+                    inLibrary = true,
+                    onNavigateUp = {},
+                    onCacheDetail = {},
+                    onRefresh = {},
+                    onRemoveFromLibrary = {},
+                    remoteRemoveAvailable = true,
+                    remoteMoveAvailable = true,
+                    onRemoveFromRemote = { removed = true },
+                    onMoveRemote = { moved = true },
+                )
+            }
+        }
+
+        compose.onNodeWithContentDescription("更多操作").performClick()
+        compose.onNodeWithText("移动网站收藏").performClick()
+        assertTrue(moved)
+        compose.onNodeWithContentDescription("更多操作").performClick()
+        compose.onNodeWithText("从网站收藏移除").performClick()
+        assertTrue(removed)
+    }
+
+    private companion object {
+        val standardTestEnvironment = DisplayEnvironment(
+            preferences = DisplayPreferences(displayPreference = DisplayPreference.STANDARD),
+            effectiveProfile = DisplayProfile.STANDARD,
+            decisionReason = DisplayDecisionReason.MANUAL_STANDARD,
+            detectedDeviceLabel = null,
+            dynamicColorEligible = false,
+            dynamicColorEffective = false,
+            effectiveDarkTheme = false,
+            motionPolicy = MotionPolicy.STANDARD,
+            redrawEpoch = 0,
+        )
     }
 
     private fun sourceBook(): SourceBookSummary = SourceBookSummary(

@@ -103,6 +103,12 @@ An extension with signed `capabilities.home.enabled: true` may export `buildHome
 
 The host owns Material layout, current filter selection, paging commands, cover admission, restoration, local actions, and navigation to canonical Detail. A source Home is read-only: its network request cannot imply website mutation, and the capability does not authorize remote-library writes.
 
+## Remote-library read and target discovery
+
+A source with `capabilities.remoteLibrary.read = true` may export `buildRemoteLibraryRequest(cursor)` / `parseRemoteLibrary(html)` for bounded book pagination and `buildRemoteLibraryTargetsRequest()` / `parseRemoteLibraryTargets(html)` for bounded destination discovery. These are separate host operations. The active manifest must contain exact signed `policies.read` and `policies.targets` request grammars; a generic network call or one operation context used on the other surface is rejected before transport.
+
+`parseRemoteLibraryTargets` returns the source ID plus a nonempty, duplicate-free list of bounded `{targetId, displayName,parentId?,kind}` records. The source must fail closed when the response contains no recognized target evidence. Hosts never synthesize default, favorites, or finished targets. Target IDs remain opaque website identities and become valid MOVE inputs only after the matching signed MOVE policy and explicit user action are independently satisfied.
+
 ## Optional Detail metadata and author search
 
 `parseDetail(html, remoteBookId)` may include `lastUpdatedDate: string | null` in the normalized Detail result. A non-null value is a valid ISO calendar date (`YYYY-MM-DD`) describing the source's last content update, not a fetch timestamp or local reading event. Source adapters normalize their labelled metadata and return null when no valid date is available. The host preserves this field in its normalized Detail cache; older results without the field remain valid. Source HTML, timezone guesses and device-local clock fallbacks are not part of this value.

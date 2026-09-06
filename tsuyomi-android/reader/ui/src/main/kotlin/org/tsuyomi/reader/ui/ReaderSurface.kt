@@ -65,6 +65,7 @@ import androidx.compose.ui.semantics.customActions
 import androidx.compose.ui.semantics.onClick
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.IntSize
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
@@ -99,6 +100,7 @@ fun ReaderSurface(
     onSelectChapter: (SourceChapter) -> Unit,
     onNavigateUp: () -> Unit,
     modifier: Modifier = Modifier,
+    onChapterCompleted: (String) -> Unit = {},
     imageStates: Map<String, CoverUiState> = emptyMap(),
     onImageVisible: (ReaderBlock.Image) -> Unit = {},
     onRetryImage: (ReaderBlock.Image) -> Unit = {},
@@ -114,21 +116,24 @@ fun ReaderSurface(
         FrozenEInkReaderSurface(document, restoredLocator, onLocatorChanged, modifier, preferences)
         return
     }
-    ReaderSurfaceContent(
-        document = document,
-        restoredLocator = restoredLocator,
-        onLocatorChanged = onLocatorChanged,
-        chapters = chapters,
-        currentChapterId = currentChapterId,
-        onSelectChapter = onSelectChapter,
-        onNavigateUp = onNavigateUp,
-        imageStates = imageStates,
-        onImageVisible = onImageVisible,
-        onRetryImage = onRetryImage,
-        preferences = preferences,
-        onPreferencesChanged = onPreferencesChanged,
-        modifier = modifier,
-    )
+    MaterialTheme(colorScheme = readerColorScheme(preferences.theme)) {
+        ReaderSurfaceContent(
+            document = document,
+            restoredLocator = restoredLocator,
+            onLocatorChanged = onLocatorChanged,
+            chapters = chapters,
+            currentChapterId = currentChapterId,
+            onSelectChapter = onSelectChapter,
+            onNavigateUp = onNavigateUp,
+            onChapterCompleted = onChapterCompleted,
+            imageStates = imageStates,
+            onImageVisible = onImageVisible,
+            onRetryImage = onRetryImage,
+            preferences = preferences,
+            onPreferencesChanged = onPreferencesChanged,
+            modifier = modifier,
+        )
+    }
 }
 
 @Composable
@@ -140,6 +145,7 @@ private fun ReaderSurfaceContent(
     currentChapterId: String,
     onSelectChapter: (SourceChapter) -> Unit,
     onNavigateUp: () -> Unit,
+    onChapterCompleted: (String) -> Unit,
     imageStates: Map<String, CoverUiState>,
     onImageVisible: (ReaderBlock.Image) -> Unit,
     onRetryImage: (ReaderBlock.Image) -> Unit,
@@ -160,7 +166,15 @@ private fun ReaderSurfaceContent(
             ReaderSettingsUiState(
                 fontSize = (18.0 * (preferences.fontScale ?: 1.0)).toFloat(),
                 lineHeight = (preferences.lineHeight ?: 1.5).toFloat(),
+                horizontalMargin = (preferences.horizontalMargin ?: 24.0).toFloat(),
+                paragraphSpacing = (preferences.paragraphSpacing ?: 12.0).toFloat(),
                 flow = initialFlow,
+                theme = readerTheme(preferences.theme),
+                lockPortrait = preferences.lockPortrait ?: false,
+                progressVisible = preferences.progressVisible ?: true,
+                immersive = preferences.immersive ?: false,
+                keepAwake = preferences.keepAwake ?: true,
+                volumePaging = preferences.volumePaging ?: true,
             ),
         )
     }
@@ -188,6 +202,12 @@ private fun ReaderSurfaceContent(
     } else {
         ReaderPosition.fromPageIndex(renderedPageIndex, pageLayout.pages.size.coerceAtLeast(1), pageStep)
     }
+    var scrollViewportAtEnd by remember(document.contentId) { mutableStateOf(false) }
+    val atChapterEnd = if (settings.flow == ReaderFlow.SCROLL) {
+        scrollViewportAtEnd
+    } else {
+        readerPosition.page + readerPosition.pageStep - 1 >= readerPosition.pageCount
+    }
     var chromeVisible by rememberSaveable(document.contentId) { mutableStateOf(true) }
     var overlay by rememberSaveable(document.contentId) { mutableStateOf<ReaderOverlay?>(null) }
     var auxiliaryTab by rememberSaveable { mutableStateOf(ReaderAuxiliaryTab.CONTENTS) }
@@ -214,6 +234,7 @@ private fun ReaderSurfaceContent(
 
     fun selectAdjacentChapter(direction: Int): Boolean {
         val target = chapters.getOrNull(currentChapterIndex + direction) ?: return false
+        if (direction > 0 && atChapterEnd) onChapterCompleted(currentChapterId)
         onSelectChapter(target)
         return true
     }
@@ -234,17 +255,27 @@ private fun ReaderSurfaceContent(
             is ReaderSettingsAction.LineHeight -> settings.copy(lineHeight = action.value)
             is ReaderSettingsAction.HorizontalMargin -> settings.copy(horizontalMargin = action.value)
             is ReaderSettingsAction.ParagraphSpacing -> settings.copy(paragraphSpacing = action.value)
+            is ReaderSettingsAction.Theme -> settings.copy(theme = action.value)
             is ReaderSettingsAction.Flow -> settings.copy(flow = action.value)
             is ReaderSettingsAction.LockPortrait -> settings.copy(lockPortrait = action.value)
             is ReaderSettingsAction.ProgressVisible -> settings.copy(progressVisible = action.value)
             is ReaderSettingsAction.Immersive -> settings.copy(immersive = action.value)
             is ReaderSettingsAction.KeepAwake -> settings.copy(keepAwake = action.value)
+            is ReaderSettingsAction.VolumePaging -> settings.copy(volumePaging = action.value)
         }
         onPreferencesChanged(
             preferences.copy(
                 flow = if (settings.flow == ReaderFlow.SCROLL) "scroll" else "paged",
                 fontScale = (settings.fontSize / 18f).toDouble(),
                 lineHeight = settings.lineHeight.toDouble(),
+                horizontalMargin = settings.horizontalMargin.toDouble(),
+                paragraphSpacing = settings.paragraphSpacing.toDouble(),
+                lockPortrait = settings.lockPortrait,
+                theme = settings.theme.portableValue(),
+                progressVisible = settings.progressVisible,
+                immersive = settings.immersive,
+                keepAwake = settings.keepAwake,
+                volumePaging = settings.volumePaging,
             ),
         )
     }
@@ -318,8 +349,10 @@ private fun ReaderSurfaceContent(
             .onPreviewKeyEvent { event ->
                 if (overlay != null || event.type != KeyEventType.KeyUp) false else {
                     when (event.key) {
-                        Key.VolumeUp, Key.DirectionLeft -> turnRenderedPage(-1)
-                        Key.VolumeDown, Key.DirectionRight -> turnRenderedPage(1)
+                        Key.VolumeUp -> settings.volumePaging && turnRenderedPage(-1)
+                        Key.VolumeDown -> settings.volumePaging && turnRenderedPage(1)
+                        Key.DirectionLeft -> turnRenderedPage(-1)
+                        Key.DirectionRight -> turnRenderedPage(1)
                         else -> false
                     }
                 }
@@ -353,6 +386,7 @@ private fun ReaderSurfaceContent(
                             displayPageIndex = displayPageIndex,
                             seeking = seekPreview != null,
                             onSettledIndexChanged = { commitPosition(it) },
+                            onScrollAtEndChanged = { scrollViewportAtEnd = it },
                             imageStates = imageStates,
                             onImageVisible = onImageVisible,
                             onRetryImage = onRetryImage,
@@ -468,6 +502,7 @@ private fun ReaderDocumentBody(
     displayPageIndex: Int,
     seeking: Boolean,
     onSettledIndexChanged: (Int) -> Unit,
+    onScrollAtEndChanged: (Boolean) -> Unit,
     imageStates: Map<String, CoverUiState>,
     onImageVisible: (ReaderBlock.Image) -> Unit,
     onRetryImage: (ReaderBlock.Image) -> Unit,
@@ -481,6 +516,7 @@ private fun ReaderDocumentBody(
             displayIndex = displayIndex,
             seeking = seeking,
             onSettledIndexChanged = onSettledIndexChanged,
+            onAtEndChanged = onScrollAtEndChanged,
             imageStates = imageStates,
             onImageVisible = onImageVisible,
             onRetryImage = onRetryImage,
@@ -519,6 +555,7 @@ private fun ScrollReaderBody(
     displayIndex: Int,
     seeking: Boolean,
     onSettledIndexChanged: (Int) -> Unit,
+    onAtEndChanged: (Boolean) -> Unit,
     imageStates: Map<String, CoverUiState>,
     onImageVisible: (ReaderBlock.Image) -> Unit,
     onRetryImage: (ReaderBlock.Image) -> Unit,
@@ -535,6 +572,15 @@ private fun ScrollReaderBody(
                 .drop(1)
                 .collect(onSettledIndexChanged)
         }
+    }
+    LaunchedEffect(listState) {
+        snapshotFlow {
+            val layout = listState.layoutInfo
+            val lastVisible = layout.visibleItemsInfo.lastOrNull()
+            layout.totalItemsCount > 0 &&
+                lastVisible?.index == layout.totalItemsCount - 1 &&
+                lastVisible.offset + lastVisible.size <= layout.viewportEndOffset
+        }.distinctUntilChanged().collect(onAtEndChanged)
     }
     LazyColumn(
         state = listState,
@@ -713,6 +759,8 @@ private val ReaderSettingsSaver = Saver<ReaderSettingsUiState, List<Any>>(
             state.progressVisible,
             state.immersive,
             state.keepAwake,
+            state.volumePaging,
+            state.theme.name,
         )
     },
     restore = { values ->
@@ -726,9 +774,69 @@ private val ReaderSettingsSaver = Saver<ReaderSettingsUiState, List<Any>>(
             progressVisible = values[6] as Boolean,
             immersive = values[7] as Boolean,
             keepAwake = values[8] as Boolean,
+            volumePaging = values.getOrNull(9) as? Boolean ?: true,
+            theme = values.getOrNull(10)?.let { runCatching { ReaderTheme.valueOf(it as String) }.getOrNull() }
+                ?: ReaderTheme.PAPER,
         )
     },
 )
+@Composable
+private fun readerColorScheme(theme: String?) = MaterialTheme.colorScheme.let { base ->
+    when (readerTheme(theme)) {
+        ReaderTheme.PAPER -> base.copy(
+            background = Color(0xFFFFFBF2),
+            surface = Color(0xFFFFFBF2),
+            onBackground = Color(0xFF292723),
+            onSurface = Color(0xFF292723),
+            onSurfaceVariant = Color(0xFF5F5B53),
+        )
+        ReaderTheme.WARM_GRAY -> base.copy(
+            background = Color(0xFFF0EEE9),
+            surface = Color(0xFFF0EEE9),
+            onBackground = Color(0xFF292825),
+            onSurface = Color(0xFF292825),
+            onSurfaceVariant = Color(0xFF5D5A54),
+        )
+        ReaderTheme.NIGHT_INK -> base.copy(
+            background = Color(0xFF202124),
+            surface = Color(0xFF202124),
+            onBackground = Color(0xFFE8EAED),
+            onSurface = Color(0xFFE8EAED),
+            onSurfaceVariant = Color(0xFFBDC1C6),
+        )
+        ReaderTheme.BLACK -> base.copy(
+            background = Color.Black,
+            surface = Color.Black,
+            onBackground = Color.White,
+            onSurface = Color.White,
+            onSurfaceVariant = Color(0xFFD0D0D0),
+        )
+        ReaderTheme.INK_GREEN -> base.copy(
+            background = Color(0xFFEFF4E8),
+            surface = Color(0xFFEFF4E8),
+            onBackground = Color(0xFF1B2A1F),
+            onSurface = Color(0xFF1B2A1F),
+            onSurfaceVariant = Color(0xFF506055),
+        )
+    }
+}
+
+private fun readerTheme(value: String?): ReaderTheme = when (value) {
+    "warmGray" -> ReaderTheme.WARM_GRAY
+    "nightInk" -> ReaderTheme.NIGHT_INK
+    "black" -> ReaderTheme.BLACK
+    "inkGreen" -> ReaderTheme.INK_GREEN
+    else -> ReaderTheme.PAPER
+}
+
+private fun ReaderTheme.portableValue(): String = when (this) {
+    ReaderTheme.PAPER -> "paper"
+    ReaderTheme.WARM_GRAY -> "warmGray"
+    ReaderTheme.NIGHT_INK -> "nightInk"
+    ReaderTheme.BLACK -> "black"
+    ReaderTheme.INK_GREEN -> "inkGreen"
+}
+
 
 @Composable
 private fun FrozenEInkReaderSurface(

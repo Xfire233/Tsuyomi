@@ -176,11 +176,71 @@ class Phase3MigrationInstrumentedTest {
         }
     }
 
+    @Test
+    fun migration_6_to_7_never_infers_copy_consent_from_mirror_overlap() {
+        helper.createDatabase(LOCAL_COPY_RECEIPT_DATABASE, 6).use { db ->
+            db.execSQL(
+                "INSERT INTO source_remote_policy VALUES " +
+                    "('copied.source','pub-1','cap-1','https://example.com',0,0,0,0)," +
+                    "('unused.source','pub-2','cap-2','https://example.org',0,0,0,0)",
+            )
+            db.execSQL(
+                "INSERT INTO books(source_id,remote_book_id,title,authors_json,remote_tags_json,has_unread_update,added_at_epoch_second,added_at_nano,metadata_updated_at_epoch_second,metadata_updated_at_nano) " +
+                    "VALUES ('copied.source','book-1','既有本地副本','[]','[]',0,10,0,10,0)",
+            )
+            db.execSQL(
+                "INSERT INTO library_entries(source_id,remote_book_id,added_at_epoch_second,added_at_nano,rating,read_later,display_order) " +
+                    "VALUES ('copied.source','book-1',10,0,NULL,0,0)",
+            )
+            db.execSQL(
+                "INSERT INTO remote_mirror_items(source_id,remote_book_id,target_id,updated_at_epoch_second) " +
+                    "VALUES ('copied.source','book-1',NULL,10)",
+            )
+        }
+
+        helper.runMigrationsAndValidate(LOCAL_COPY_RECEIPT_DATABASE, 7, true, MIGRATION_6_7).use { db ->
+            db.query(
+                "SELECT source_id, first_import_prompt_dismissed FROM source_remote_policy ORDER BY source_id",
+            ).use { cursor ->
+                cursor.moveToFirst()
+                assertEquals("copied.source", cursor.getString(0))
+                assertEquals(0, cursor.getInt(1))
+                cursor.moveToNext()
+                assertEquals("unused.source", cursor.getString(0))
+                assertEquals(0, cursor.getInt(1))
+            }
+        }
+    }
+
+    @Test
+    fun migration_7_to_8_adds_exact_completed_chapter_state() {
+        helper.createDatabase(EXACT_CHAPTER_STATE_DATABASE, 7).use { db ->
+            db.execSQL(
+                "INSERT INTO books(source_id,remote_book_id,title,authors_json,remote_tags_json,has_unread_update,added_at_epoch_second,added_at_nano,metadata_updated_at_epoch_second,metadata_updated_at_nano) " +
+                    "VALUES ('fixture.source','book-42','章节状态','[]','[]',0,10,0,10,0)",
+            )
+        }
+
+        helper.runMigrationsAndValidate(EXACT_CHAPTER_STATE_DATABASE, 8, true, MIGRATION_7_8).use { db ->
+            db.execSQL(
+                "INSERT INTO completed_chapters(source_id,remote_book_id,chapter_id,completed_at_epoch_second,completed_at_nano) " +
+                    "VALUES ('fixture.source','book-42','chapter-2',20,0)",
+            )
+            db.query("SELECT chapter_id FROM completed_chapters WHERE source_id='fixture.source' AND remote_book_id='book-42'").use { cursor ->
+                assertEquals(1, cursor.count)
+                cursor.moveToFirst()
+                assertEquals("chapter-2", cursor.getString(0))
+            }
+        }
+    }
+
     private companion object {
         const val DATABASE = "phase3-migration"
         const val READ_LATER_DATABASE = "phase4a-read-later-migration"
         const val LIBRARY_ORDER_DATABASE = "phase4a-library-order-migration"
         const val PHASE4B_DATABASE = "phase4b-remote-writeback-migration"
         const val REMOTE_MIRROR_DATABASE = "phase4b-remote-mirror-migration"
+        const val LOCAL_COPY_RECEIPT_DATABASE = "phase4b-local-copy-receipt-migration"
+        const val EXACT_CHAPTER_STATE_DATABASE = "phase4b-exact-chapter-state-migration"
     }
 }

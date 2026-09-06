@@ -63,6 +63,7 @@
     <string name="source_home_failure_message">本地书架未改动。诊断：%1$s</string>
     <string name="source_home_open_verification">前往登录验证</string>
     <string name="source_home_retry">重新加载</string>
+    <string name="source_home_use_offline_cache">使用已缓存内容</string>
     <string name="source_home_refresh">刷新</string>
     <string name="source_home_load_more">加载下一页</string>
     <string name="source_home_loading_more">正在加载下一页</string>

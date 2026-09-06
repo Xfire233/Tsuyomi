@@ -85,8 +85,8 @@
     <string name="remote_library_selected_title">已选择 %1$d 项</string>
     <string name="remote_library_subtitle">网站收藏 · 共 %1$d 项</string>
     <string name="remote_library_refresh">刷新列表</string>
-    <string name="remote_library_copy_all">全部复制</string>
-    <string name="remote_library_copy_selected">复制所选</string>
+    <string name="remote_library_copy_all">全部复制到本地书架</string>
+    <string name="remote_library_copy_selected">复制所选到本地书架</string>
     <string name="remote_library_idle_title">尚未读取网站收藏</string>
     <string name="remote_library_idle_message">列表只会在你点击“刷新列表”时读取；进入页面、登录返回和恢复页面都不会自动连接网站。</string>
     <string name="remote_library_empty_title">网站收藏为空</string>

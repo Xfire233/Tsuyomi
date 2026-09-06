@@ -28,6 +28,63 @@ class TransferCodecTest {
     }
 
     @Test
+    fun exporter_emits_v2_and_v1_rejects_v2_only_fields() {
+        val instant = Instant.parse("2026-08-08T00:00:00Z")
+        val encoded = TransferCodec.encode(TransferSnapshot(instant, emptyList(), emptyList())).decodeToString()
+        assertTrue("\"version\":2" in encoded)
+
+        val widenedV1 = """{"format":"tsuyomi-transfer","version":1,"createdAt":"2026-08-08T00:00:00Z","library":[{"identity":{"sourceId":"org.tsuyomi.wenku8","remoteBookId":"1"},"title":"A","updatedAt":"2026-08-08T00:00:00Z","completedChapterIds":["chapter"]}],"shelves":[]}""".encodeToByteArray()
+        assertEquals("invalid-book", assertIs<ImportParseResult.Fatal>(TransferCodec.parse(widenedV1)).safeCode)
+    }
+
+    @Test
+    fun v2_rejects_whitespace_only_completed_chapter_ids() {
+        val bytes = """{"format":"tsuyomi-transfer","version":2,"createdAt":"2026-08-08T00:00:00Z","library":[{"identity":{"sourceId":"org.tsuyomi.wenku8","remoteBookId":"1"},"title":"A","updatedAt":"2026-08-08T00:00:00Z","completedChapterIds":["   "]}],"shelves":[]}""".encodeToByteArray()
+        assertEquals("invalid-book", assertIs<ImportParseResult.Fatal>(TransferCodec.parse(bytes)).safeCode)
+    }
+
+    @Test
+    fun v2_requires_completed_chapter_ids_to_be_an_array_of_strings() {
+        val objectValue = """{"format":"tsuyomi-transfer","version":2,"createdAt":"2026-08-08T00:00:00Z","library":[{"identity":{"sourceId":"org.tsuyomi.wenku8","remoteBookId":"1"},"title":"A","updatedAt":"2026-08-08T00:00:00Z","completedChapterIds":{}}],"shelves":[]}""".encodeToByteArray()
+        val numericValue = """{"format":"tsuyomi-transfer","version":2,"createdAt":"2026-08-08T00:00:00Z","library":[{"identity":{"sourceId":"org.tsuyomi.wenku8","remoteBookId":"1"},"title":"A","updatedAt":"2026-08-08T00:00:00Z","completedChapterIds":[123]}],"shelves":[]}""".encodeToByteArray()
+
+        assertEquals("invalid-book", assertIs<ImportParseResult.Fatal>(TransferCodec.parse(objectValue)).safeCode)
+        assertEquals("invalid-book", assertIs<ImportParseResult.Fatal>(TransferCodec.parse(numericValue)).safeCode)
+    }
+
+    @Test
+    fun v1_retains_historical_whitespace_array_values() {
+        val bytes = """{"format":"tsuyomi-transfer","version":1,"createdAt":"2026-08-08T00:00:00Z","library":[{"identity":{"sourceId":"org.tsuyomi.wenku8","remoteBookId":"1"},"title":"A","updatedAt":"2026-08-08T00:00:00Z","authors":[" "]}],"shelves":[]}""".encodeToByteArray()
+
+        assertEquals(setOf(" "), assertIs<ImportParseResult.Ready>(TransferCodec.parse(bytes)).plan.books.single().authors)
+    }
+
+    @Test
+    fun complete_reader_preferences_round_trip_without_breaking_legacy_absence() {
+        val instant = Instant.parse("2026-08-08T00:00:00Z")
+        val preferences = PortableReaderPreferences(
+            flow = "paged",
+            fontScale = 1.25,
+            lineHeight = 1.8,
+            theme = "warmGray",
+            horizontalMargin = 32.0,
+            paragraphSpacing = 16.0,
+            lockPortrait = true,
+            progressVisible = false,
+            immersive = true,
+            keepAwake = false,
+            volumePaging = false,
+        )
+        val snapshot = TransferSnapshot(instant, emptyList(), emptyList(), preferences)
+
+        val parsed = assertIs<ImportParseResult.Ready>(TransferCodec.parse(TransferCodec.encode(snapshot)))
+
+        assertEquals(preferences, parsed.plan.readerPreferences)
+        val legacy = """{"format":"tsuyomi-transfer","version":1,"createdAt":"2026-08-08T00:00:00Z","library":[],"shelves":[],"preferences":{"reader":{"flow":"scroll"}}}""".encodeToByteArray()
+        assertEquals(null, assertIs<ImportParseResult.Ready>(TransferCodec.parse(legacy)).plan.readerPreferences?.volumePaging)
+    }
+
+    @Test
     fun read_later_round_trips_and_defaults_false_when_absent() {
         val instant = Instant.parse("2026-08-08T00:00:00Z")
         val marked = TransferSnapshot(
@@ -51,6 +108,29 @@ class TransferCodecTest {
     }
 
     @Test
+    fun exactCompletedChapterSetRoundTripsAndLegacyAbsenceStaysEmpty() {
+        val instant = Instant.parse("2026-08-08T00:00:00Z")
+        val snapshot = TransferSnapshot(
+            instant,
+            listOf(
+                TransferBook(
+                    identity = BookIdentity("org.tsuyomi.wenku8", "completed"),
+                    title = "章节完成状态",
+                    updatedAt = instant,
+                    completedChapterIds = setOf("chapter-5", "chapter-2"),
+                ),
+            ),
+            emptyList(),
+        )
+
+        val roundTrip = assertIs<ImportParseResult.Ready>(TransferCodec.parse(TransferCodec.encode(snapshot)))
+        assertEquals(setOf("chapter-2", "chapter-5"), roundTrip.plan.books.single().completedChapterIds)
+
+        val legacy = """{"format":"tsuyomi-transfer","version":1,"createdAt":"2026-08-08T00:00:00Z","library":[{"identity":{"sourceId":"org.tsuyomi.wenku8","remoteBookId":"legacy-completed"},"title":"旧备份","updatedAt":"2026-08-08T00:00:00Z"}],"shelves":[]}""".encodeToByteArray()
+        assertTrue(assertIs<ImportParseResult.Ready>(TransferCodec.parse(legacy)).plan.books.single().completedChapterIds.isEmpty())
+    }
+
+    @Test
     fun duplicate_identity_is_fatal_before_mutation() {
         val bytes = """{"format":"tsuyomi-transfer","version":1,"createdAt":"2026-08-08T00:00:00Z","library":[{"identity":{"sourceId":"org.tsuyomi.wenku8","remoteBookId":"1"},"title":"A","updatedAt":"2026-08-08T00:00:00Z"},{"identity":{"sourceId":"org.tsuyomi.wenku8","remoteBookId":"1"},"title":"B","updatedAt":"2026-08-08T00:00:00Z"}],"shelves":[]}""".encodeToByteArray()
         assertEquals("duplicate-book-identity", assertIs<ImportParseResult.Fatal>(TransferCodec.parse(bytes)).safeCode)
@@ -71,6 +151,10 @@ class TransferCodecTest {
             "{\"reader\":{\"lineHeight\":true}}",
             "{\"reader\":{\"theme\":\"neon\"}}",
             "{\"reader\":{\"theme\":false}}",
+            "{\"reader\":{\"horizontalMargin\":60.0}}",
+            "{\"reader\":{\"paragraphSpacing\":-1.0}}",
+            "{\"reader\":{\"volumePaging\":\"false\"}}",
+            "{\"reader\":{\"lockPortrait\":1}}",
         )
 
         malformedPreferences.forEach { preferences ->

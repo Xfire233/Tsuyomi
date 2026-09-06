@@ -140,6 +140,11 @@ internal class SourceRemoteLibraryAddInstrumentedTest : SourceFlowInstrumentedTe
             assertEquals(RemoteAddUiResult.Cancelled, add.await())
             val entry = requireNotNull(library.libraryEntries().single { it.book.identity == selected.identity })
             assertEquals(RemoteReconciliationState.CANCELLED, entry.reconciliation)
+            library.setSourceAvailability(sourceId, availability.verifiedVersion, true, availability.generation + 2)
+            assertEquals(
+                RemoteAddUiResult.Confirmed,
+                controller.addSelectedBookToWebsite(SOURCE_FLOW_TEST_TIME.plusSeconds(1)),
+            )
         } finally {
             releaseAcceptance.complete(Unit)
             controller.close()
@@ -334,10 +339,9 @@ internal class SourceRemoteLibraryAddInstrumentedTest : SourceFlowInstrumentedTe
             )
             assertEquals(RemoteReconciliationState.UNRESOLVED, controller.remoteLibrary.selectedBookReconciliation)
             assertEquals(RemoteReconciliationState.UNRESOLVED, library.libraryEntry(selected.identity)?.reconciliation)
-            val retryResult = controller.remoteLibrary.retryLocalBook(
-                requireNotNull(library.book(selected.identity)),
-                SOURCE_FLOW_TEST_TIME.plusSeconds(2),
-            )
+            val retryResult = withTimeout(2_000) {
+                controller.retryRemoteMutation(selected, SOURCE_FLOW_TEST_TIME.plusSeconds(2))
+            }
             assertEquals(
                 RemoteAddUiResult.Failure("remote-add-not-retryable"),
                 controller.remoteLibrary.retryLocalBook(
@@ -347,7 +351,7 @@ internal class SourceRemoteLibraryAddInstrumentedTest : SourceFlowInstrumentedTe
             )
             assertEquals(RemoteReconciliationState.CONFIRMED.name, reconciliationState(acceptedReconciliationIds.last()))
             assertTrue(library.unresolvedReconciliationsForSource(sourceId).isEmpty())
-            assertEquals(RemoteAddUiResult.Confirmed, retryResult)
+            assertEquals(RemoteMutationUiResult.Confirmed, retryResult)
 
             assertEquals(3, calls)
             assertEquals(2, acceptedReconciliationIds.distinct().size)
@@ -389,6 +393,7 @@ internal class SourceRemoteLibraryAddInstrumentedTest : SourceFlowInstrumentedTe
             assertTrue(library.setMoveWritebackEnabled(sourceId, policy.capabilitySetFingerprint, true))
             controller.open(packageInfo)
 
+            controller.selectBook(selected)
             val initial = controller.addBookToWebsiteTarget(
                 selected,
                 "favorites",
@@ -402,6 +407,8 @@ internal class SourceRemoteLibraryAddInstrumentedTest : SourceFlowInstrumentedTe
                 "default",
                 requireNotNull(library.remoteMirrorSnapshot(sourceId)).books.single().targetId,
             )
+            assertEquals(RemoteReconciliationState.UNRESOLVED, controller.remoteLibrary.selectedBookReconciliation)
+            assertEquals("move", controller.remoteLibrary.selectedBookReconciliationOperation)
 
             assertEquals(
                 RemoteMutationUiResult.Confirmed,
@@ -417,4 +424,56 @@ internal class SourceRemoteLibraryAddInstrumentedTest : SourceFlowInstrumentedTe
             controller.close()
         }
     }
+    @Test
+    fun targetedAddResumesMoveAfterCoordinatorRecreationWithoutRepeatingAdd() = runBlocking {
+        val packageInfo = installFixture()
+        val sourceId = packageInfo.manifest.sourceId.value
+        val selected = summary(sourceId, "7003", "持久目标移动")
+        putCredential(sourceId)
+        var addCalls = 0
+        var moveCalls = 0
+        val session = FakeSession(
+            addRemote = { remoteBookId, token ->
+                addCalls += 1
+                directActionTokens.accept(sourceId, remoteBookId, token)
+                RemoteLibraryAddResult(selected.identity, RemoteLibraryAddOutcome.APPLIED)
+            },
+            moveRemote = { remoteBookId, targetId, token ->
+                moveCalls += 1
+                directActionTokens.accept(sourceId, remoteBookId, token)
+                RemoteLibraryMoveResult(selected.identity, targetId, RemoteLibraryMoveOutcome.APPLIED)
+            },
+        )
+        val policy = requireNotNull(library.sourceRemotePolicy(sourceId))
+        assertTrue(library.setAddWritebackEnabled(sourceId, policy.capabilitySetFingerprint, true))
+
+        controller { session }.use { firstController ->
+            firstController.open(packageInfo)
+            assertTrue(
+                firstController.addBookToWebsiteTarget(
+                    selected,
+                    "favorites",
+                    "特别收藏",
+                    "default",
+                ) is RemoteTargetedAddResult.Partial,
+            )
+        }
+
+        val pendingMove = requireNotNull(library.bookReconciliation(sourceId, selected.identity.remoteBookId))
+        assertEquals("ADD", pendingMove.operation)
+        assertEquals(RemoteReconciliationState.CONFIRMED, pendingMove.state)
+        assertEquals("favorites", pendingMove.targetId)
+        assertEquals(1, addCalls)
+        assertEquals(0, moveCalls)
+
+        assertTrue(library.setMoveWritebackEnabled(sourceId, policy.capabilitySetFingerprint, true))
+        controller { session }.use { restoredController ->
+            restoredController.open(packageInfo)
+            assertEquals(RemoteMutationUiResult.Confirmed, restoredController.retryRemoteMutation(selected))
+        }
+        assertEquals(1, addCalls)
+        assertEquals(1, moveCalls)
+        assertEquals("favorites", requireNotNull(library.remoteMirrorSnapshot(sourceId)).books.single().targetId)
+    }
+
 }

@@ -41,8 +41,20 @@ internal interface SourceFlowSession : Closeable {
         snapshot: CapturedVerifiedPage,
         page: Int = 1,
     ): List<SourceBookSummary> = authorSearchUnavailable()
-    suspend fun home(selectedFilters: Map<String, String>, cursor: String?): SourceHomePage =
-        error("Source Home is unavailable")
+    suspend fun home(
+        selectedFilters: Map<String, String>,
+        cursor: String?,
+        offlineOnly: Boolean = false,
+    ): SourceHomePage = error("Source Home is unavailable")
+    suspend fun homeRequestUrl(
+        selectedFilters: Map<String, String>,
+        cursor: String?,
+    ): String = error("Source Home request inspection is unavailable")
+    suspend fun homeVerifiedPage(
+        selectedFilters: Map<String, String>,
+        cursor: String?,
+        snapshot: CapturedVerifiedPage,
+    ): SourceHomePage = error("Verified-page Source Home is unavailable")
     suspend fun detail(remoteBookId: String, offlineOnly: Boolean = false): SourceBookDetail
     suspend fun detailRequestUrl(remoteBookId: String): String = error("Detail request inspection is unavailable")
     suspend fun detailVerifiedPage(
@@ -102,8 +114,17 @@ private class ExtensionSourceFlowSession(
     ): List<SourceBookSummary> = verifiedPageClient(snapshot).use { client ->
         client.authorSearch(author, page, offlineOnly = false)
     }
-    override suspend fun home(selectedFilters: Map<String, String>, cursor: String?) =
-        delegate.home(selectedFilters, cursor)
+    override suspend fun home(selectedFilters: Map<String, String>, cursor: String?, offlineOnly: Boolean) =
+        delegate.home(selectedFilters, cursor, offlineOnly)
+    override suspend fun homeRequestUrl(selectedFilters: Map<String, String>, cursor: String?) =
+        delegate.homeRequestUrl(selectedFilters, cursor)
+    override suspend fun homeVerifiedPage(
+        selectedFilters: Map<String, String>,
+        cursor: String?,
+        snapshot: CapturedVerifiedPage,
+    ): SourceHomePage = verifiedPageClient(snapshot).use { client ->
+        client.home(selectedFilters, cursor, offlineOnly = false)
+    }
     override suspend fun detail(remoteBookId: String, offlineOnly: Boolean) = delegate.detail(remoteBookId, offlineOnly)
     override suspend fun detailRequestUrl(remoteBookId: String) = delegate.detailRequestUrl(remoteBookId)
     override suspend fun detailVerifiedPage(remoteBookId: String, snapshot: CapturedVerifiedPage) =

@@ -180,8 +180,11 @@ internal interface LibraryDao {
     @Query("UPDATE remote_library_reconciliation SET state = :nextState, updated_at_epoch_second = :updatedAt, diagnostic_id = :diagnosticId WHERE id = :id AND state = :expectedState")
     suspend fun transitionReconciliation(id: String, expectedState: String, nextState: String, updatedAt: Long, diagnosticId: String?): Int
 
-    @Query("UPDATE remote_library_reconciliation SET state = 'CONFIRMED', updated_at_epoch_second = :updatedAt, diagnostic_id = NULL WHERE source_id = :sourceId AND remote_book_id = :remoteBookId AND operation = 'ADD' AND state = 'UNRESOLVED'")
-    suspend fun confirmUnresolvedAdds(sourceId: String, remoteBookId: String, updatedAt: Long): Int
+    @Query("UPDATE remote_library_reconciliation SET state = 'CONFIRMED', updated_at_epoch_second = :updatedAt, diagnostic_id = NULL WHERE source_id = :sourceId AND remote_book_id = :remoteBookId AND UPPER(operation) = UPPER(:operation) AND state = 'UNRESOLVED'")
+    suspend fun confirmUnresolvedMutations(sourceId: String, remoteBookId: String, operation: String, updatedAt: Long): Int
+
+    @Query("UPDATE remote_library_reconciliation SET state = 'CANCELLED', updated_at_epoch_second = :updatedAt, diagnostic_id = NULL WHERE source_id = :sourceId AND remote_book_id = :remoteBookId AND UPPER(operation) = UPPER(:operation) AND state = 'UNRESOLVED'")
+    suspend fun cancelUnresolvedMutations(sourceId: String, remoteBookId: String, operation: String, updatedAt: Long): Int
 
     @Query("SELECT * FROM remote_library_reconciliation WHERE id = :id")
     suspend fun reconciliation(id: String): RemoteLibraryReconciliationEntity?
@@ -341,4 +344,10 @@ internal interface LibraryDao {
 
     @Insert(onConflict = OnConflictStrategy.IGNORE)
     suspend fun insertProgressIfAbsent(entity: ReadingProgressEntity): Long
+
+    @Insert(onConflict = OnConflictStrategy.IGNORE)
+    suspend fun insertCompletedChapter(entity: CompletedChapterEntity): Long
+
+    @Query("SELECT chapter_id FROM completed_chapters WHERE source_id = :sourceId AND remote_book_id = :remoteBookId ORDER BY completed_at_epoch_second, completed_at_nano, chapter_id")
+    suspend fun completedChapterIds(sourceId: String, remoteBookId: String): List<String>
 }

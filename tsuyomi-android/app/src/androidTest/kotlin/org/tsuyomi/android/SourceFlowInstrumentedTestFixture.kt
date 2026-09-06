@@ -34,6 +34,7 @@ import org.tsuyomi.shared.sourcecontract.SourceErrorCode
 import org.tsuyomi.shared.sourcecontract.SourceException
 import org.tsuyomi.shared.sourcecontract.SourceChapter
 import org.tsuyomi.shared.sourcecontract.SourceDirectory
+import org.tsuyomi.shared.sourcecontract.SourceHomePage
 import org.tsuyomi.source.extensionmanager.VerifiedHxpPackage
 
 internal const val SOURCE_FLOW_TEST_SOURCE_ID = "org.tsuyomi.wenku8"
@@ -90,7 +91,7 @@ internal abstract class SourceFlowInstrumentedTestFixture {
         }
         val install = SourceInstallController(context, library)
         install.prepare(Uri.fromFile(fixture), context.contentResolver)
-        check(install.state is BrowseUiState.Approval)
+        check(install.state is BrowseUiState.Approval) { "Unexpected fixture preparation state: ${install.state}" }
         install.approve(allowDowngrade = false)
         check(install.state is BrowseUiState.Installed)
         return requireNotNull(install.activePackage)
@@ -147,6 +148,9 @@ internal abstract class SourceFlowInstrumentedTestFixture {
         },
         private val authorSearchRequestUrl: suspend (String) -> String = { error("Unexpected author search URL") },
         private val authorSearchVerifiedPage: suspend (String, CapturedVerifiedPage) -> List<SourceBookSummary> = { _, _ -> error("Unexpected author verified-page search") },
+        private val homeResult: suspend (Map<String, String>, String?, Boolean) -> SourceHomePage = { _, _, _ ->
+            error("Unexpected source Home")
+        },
         private val listRemote: suspend (String?) -> RemoteLibraryPage = { error("Unexpected remote list") },
         private val detail: suspend (SourceBookSummary) -> SourceBookDetail = { SourceBookDetail(it, null, emptyList(), null) },
         private val directoryResult: suspend (String) -> SourceDirectory = { error("Unexpected directory") },
@@ -169,6 +173,12 @@ internal abstract class SourceFlowInstrumentedTestFixture {
             snapshot: CapturedVerifiedPage,
             page: Int,
         ): List<SourceBookSummary> = authorSearchVerifiedPage.invoke(author, snapshot)
+
+        override suspend fun home(
+            selectedFilters: Map<String, String>,
+            cursor: String?,
+            offlineOnly: Boolean,
+        ): SourceHomePage = homeResult(selectedFilters, cursor, offlineOnly)
 
         override suspend fun detail(remoteBookId: String, offlineOnly: Boolean): SourceBookDetail = detail(
             SourceBookSummary(

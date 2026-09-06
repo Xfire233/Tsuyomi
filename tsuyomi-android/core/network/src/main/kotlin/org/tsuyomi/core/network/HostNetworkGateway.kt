@@ -35,6 +35,8 @@ data class SourceNetworkGrant(
     val maxConcurrentRequests: Int,
     val requestTimeoutMs: Int,
     val maxResponseBytes: Int,
+    val remoteReadPolicy: RemoteOperationRequestPolicy? = null,
+    val remoteTargetsPolicy: RemoteOperationRequestPolicy? = null,
     val remoteAddPolicy: RemoteOperationRequestPolicy? = null,
     val remoteRemovePolicy: RemoteOperationRequestPolicy? = null,
     val remoteMovePolicy: RemoteOperationRequestPolicy? = null,
@@ -47,6 +49,13 @@ data class SourceNetworkGrant(
         require(maxResponseBytes in 1_024..16_777_216)
         require(cookieMode != SourceCookieMode.NONE || cookieOrigins.isEmpty())
         require(cookieOrigins.all { cookieOrigin -> origins.any { it.canonical == cookieOrigin.canonical } })
+        require(remoteReadPolicy == null || remoteReadPolicy.remoteBookIdParameter == null)
+        require(remoteReadPolicy == null || remoteReadPolicy.targetIdParameter == null)
+        require(remoteReadPolicy == null || origins.any { it.canonical == remoteReadPolicy.origin.canonical })
+        require(remoteTargetsPolicy == null || remoteTargetsPolicy.remoteBookIdParameter == null)
+        require(remoteTargetsPolicy == null || remoteTargetsPolicy.targetIdParameter == null)
+        require(remoteTargetsPolicy == null || remoteTargetsPolicy.cursorParameter == null)
+        require(remoteTargetsPolicy == null || origins.any { it.canonical == remoteTargetsPolicy.origin.canonical })
         require(remoteAddPolicy == null || remoteAddPolicy.remoteBookIdParameter != null)
         require(remoteAddPolicy == null || remoteAddPolicy.cursorParameter == null)
         require(remoteAddPolicy == null || origins.any { it.canonical == remoteAddPolicy.origin.canonical })
@@ -350,6 +359,20 @@ class HostNetworkGateway(
         operationContext: SourceOperationContext?,
     ) {
         when (operationContext?.kind) {
+            SourceOperationKind.REMOTE_LIBRARY_READ -> {
+                if (grant.remoteReadPolicy != operationContext.policy || request.cache != NetworkCacheMode.NETWORK_ONLY) {
+                    throw HostNetworkException(HostNetworkError.INVALID_REQUEST)
+                }
+                operationContext.validate(request)
+                return
+            }
+            SourceOperationKind.REMOTE_LIBRARY_TARGETS -> {
+                if (grant.remoteTargetsPolicy != operationContext.policy || request.cache != NetworkCacheMode.NETWORK_ONLY) {
+                    throw HostNetworkException(HostNetworkError.INVALID_REQUEST)
+                }
+                operationContext.validate(request)
+                return
+            }
             SourceOperationKind.REMOTE_LIBRARY_ADD -> {
                 if (grant.remoteAddPolicy != operationContext.policy || request.cache != NetworkCacheMode.NETWORK_ONLY) {
                     throw HostNetworkException(HostNetworkError.INVALID_REQUEST)
@@ -382,6 +405,12 @@ class HostNetworkGateway(
         request: SourceNetworkRequest,
         operationContext: SourceOperationContext?,
     ) {
+        if (operationContext?.kind != SourceOperationKind.REMOTE_LIBRARY_READ && grant.remoteReadPolicy?.matchesSurface(request) == true) {
+            throw HostNetworkException(HostNetworkError.INVALID_REQUEST)
+        }
+        if (operationContext?.kind != SourceOperationKind.REMOTE_LIBRARY_TARGETS && grant.remoteTargetsPolicy?.matchesSurface(request) == true) {
+            throw HostNetworkException(HostNetworkError.INVALID_REQUEST)
+        }
         if (operationContext?.kind != SourceOperationKind.REMOTE_LIBRARY_ADD && grant.remoteAddPolicy?.matchesSurface(request) == true) {
             throw HostNetworkException(HostNetworkError.INVALID_REQUEST)
         }

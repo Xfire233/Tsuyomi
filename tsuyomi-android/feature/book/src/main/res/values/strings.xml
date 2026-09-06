@@ -19,6 +19,8 @@
     <string name="book_remove_from_library">移出书架</string>
     <string name="book_cache_detail">缓存详情与目录</string>
     <string name="book_refresh_detail">刷新来源数据</string>
+    <string name="book_move_remote">移动网站收藏</string>
+    <string name="book_remove_from_remote">从网站收藏移除</string>
     <string name="book_continue_reading">继续阅读</string>
     <string name="book_quick_to_bottom">快速到底</string>
     <string name="book_quick_to_top">快速到顶</string>

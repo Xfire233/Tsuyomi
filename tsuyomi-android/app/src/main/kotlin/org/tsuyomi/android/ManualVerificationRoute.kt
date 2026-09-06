@@ -86,7 +86,7 @@ fun ManualVerificationRoute(
     onCancel: () -> Unit,
     modifier: Modifier = Modifier,
     verifiedPageRequestUrl: String? = null,
-    onVerifiedPageCompleted: () -> Unit = onCompleted,
+    onVerifiedPageCompleted: suspend () -> Unit = { onCompleted() },
     onUseVerifiedPage: (suspend (CapturedVerifiedPage) -> VerifiedPageUseResult)? = null,
     verifiedPageOpenLabel: String? = null,
     verifiedPageUnboundMessage: String? = null,

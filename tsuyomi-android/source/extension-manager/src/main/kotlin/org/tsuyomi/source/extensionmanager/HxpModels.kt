@@ -69,7 +69,7 @@ data class HxpCookieCapability(val sourceScoped: Boolean, val origins: Set<Https
 data class HxpWebLoginCapability(val enabled: Boolean, val origins: Set<HttpsOrigin>)
 data class HxpHomeCapability(val enabled: Boolean)
 
-enum class RemoteOperation { READ, ADD, REMOVE, MOVE }
+enum class RemoteOperation { READ, TARGETS, ADD, REMOVE, MOVE }
 
 sealed interface HxpRemoteParameter {
     val name: String

@@ -17,6 +17,7 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -33,6 +34,7 @@ import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.stateDescription
+import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import org.tsuyomi.core.ui.icons.TsuyomiIcons
@@ -109,12 +111,23 @@ internal fun DetailDirectoryHeader(
             onClick = onToggleUnreadOnly,
             enabled = unreadFilterAvailable,
             modifier = Modifier.heightIn(min = 48.dp).semantics {
+                selected = unreadOnly
                 stateDescription = filterStateDescription
             },
-            contentPadding = PaddingValues(horizontal = TsuyomiSpacing.Xs),
+            colors = ButtonDefaults.textButtonColors(
+                contentColor = if (unreadOnly) {
+                    MaterialTheme.colorScheme.primary
+                } else {
+                    MaterialTheme.colorScheme.onSurfaceVariant
+                },
+                disabledContentColor = MaterialTheme.colorScheme.outline,
+            ),
         ) {
-            Icon(TsuyomiIcons.Filter, contentDescription = null, modifier = Modifier.size(18.dp))
-            Text(stringResource(R.string.book_unread_only), modifier = Modifier.padding(start = TsuyomiSpacing.Xs), maxLines = 1)
+            Text(
+                text = stringResource(R.string.book_unread_only),
+                maxLines = 1,
+                fontWeight = if (unreadOnly) FontWeight.SemiBold else FontWeight.Normal,
+            )
         }
         IconButton(onClick = onToggleOrder, modifier = Modifier.size(48.dp)) {
             Icon(

@@ -51,18 +51,19 @@ internal class VerifiedPageNavigationTracker {
     private var settled = false
     private var automaticRedirectAvailable = false
 
-    fun start(requestUrl: String) {
+    fun start(requestUrl: String, settledPageUrl: String? = null) {
         require(requestUrl.isNotBlank())
         this.requestUrl = requestUrl
-        currentPageUrl = null
-        expectedPageUrl = requestUrl
-        settled = false
+        currentPageUrl = settledPageUrl?.takeIf { it == requestUrl }
+        expectedPageUrl = requestUrl.takeUnless { currentPageUrl != null }
+        settled = currentPageUrl != null
         automaticRedirectAvailable = true
     }
 
     fun onMainFrameNavigation(targetUrl: String, isRedirect: Boolean, hasGesture: Boolean) {
         val request = requestUrl ?: return
         when {
+            settled && currentPageUrl == targetUrl -> Unit
             settled && automaticRedirectAvailable && !hasGesture -> {
                 expectedPageUrl = targetUrl
                 settled = false
@@ -255,7 +256,12 @@ class ControlledWebLoginSession(
         val view = checkNotNull(webView) { "Session is not active" }
         check(active) { "Session is not active" }
         val normalizedRequest = normalizedAllowedUrl(Uri.parse(requestUrl))
-        verifiedPageNavigation.start(normalizedRequest)
+        val settledPageUrl = view.url
+            ?.takeIf { view.progress == 100 }
+            ?.let(Uri::parse)
+            ?.takeIf(::isAllowed)
+            ?.let(::normalizedAllowedUrl)
+        verifiedPageNavigation.start(normalizedRequest, settledPageUrl)
         view.loadUrl(normalizedRequest)
     }
 

@@ -38,6 +38,9 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.semantics.LiveRegionMode
+import androidx.compose.ui.semantics.liveRegion
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import org.tsuyomi.core.media.api.CoverUiState
@@ -58,6 +61,8 @@ data class DetailLocalState(
     val readLater: Boolean = false,
     val progressChapterId: String? = null,
     val progressChapterFraction: Double? = null,
+    val completedChapterIds: Set<String> = emptySet(),
+    val reconciliationOperation: String? = null,
     val reconciliation: String? = null,
     val remoteRemoveEnabled: Boolean = false,
     val remoteMoveEnabled: Boolean = false,
@@ -127,15 +132,24 @@ internal fun StandardBookDetailScreen(
     destinationMenuExpanded: Boolean = false,
     onDestinationMenuExpandedChange: (Boolean) -> Unit = {},
     destinationMenuContent: @Composable ColumnScope.(dismissMenu: () -> Unit) -> Unit = { _ -> },
-    onRemoveFromRemote: () -> Unit = {},
-    onMoveRemote: () -> Unit = {},
+    destinationMessage: String? = null,
+    partialMoveTargetName: String? = null,
+    onRetryMoveOnly: () -> Unit = {},
     onRetryRemoteReconciliation: () -> Unit = {},
     onAcknowledgeRemoteReconciliation: () -> Unit = {},
 ) {
     Column(modifier.fillMaxSize()) {
         mutation?.let { DetailMutationBanner(it) }
+        destinationMessage?.let {
+            DestinationFeedbackBanner(
+                message = it,
+                partialMoveTargetName = partialMoveTargetName,
+                onRetryMoveOnly = onRetryMoveOnly,
+            )
+        }
         if (localState.reconciliation == "UNRESOLVED") {
             UnresolvedReconciliationBanner(
+                operation = localState.reconciliationOperation,
                 onRetry = onRetryRemoteReconciliation,
                 onAcknowledge = onAcknowledgeRemoteReconciliation,
             )
@@ -181,6 +195,33 @@ internal fun StandardBookDetailScreen(
         }
     }
 }
+@Composable
+private fun DestinationFeedbackBanner(
+    message: String,
+    partialMoveTargetName: String?,
+    onRetryMoveOnly: () -> Unit,
+) {
+    Card(
+        modifier = Modifier.fillMaxWidth()
+            .padding(horizontal = 20.dp, vertical = 8.dp)
+            .semantics { liveRegion = LiveRegionMode.Polite },
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
+    ) {
+        Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp)) {
+            Text(message, style = MaterialTheme.typography.bodyMedium)
+            partialMoveTargetName?.let { targetName ->
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.End,
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    TextButton(onClick = onRetryMoveOnly) { Text("继续移至$targetName") }
+                }
+            }
+        }
+    }
+}
+
 
 @Composable
 private fun DetailContent(
@@ -214,31 +255,23 @@ private fun DetailContent(
     }
     val allChapters = (directoryState as? SourceBookState.Content)?.value?.chapters.orEmpty()
     val currentChapterId = selectedChapterId ?: localState.progressChapterId
-    val progressIndex = allChapters.indexOfFirst { it.chapterId == localState.progressChapterId }
     val chapterItems = remember(
         allChapters,
         currentChapterId,
-        localState.progressChapterId,
-        localState.progressChapterFraction,
+        localState.completedChapterIds,
         descending,
     ) {
         allChapters
-            .mapIndexed { index, chapter ->
-                val read = when {
-                    progressIndex < 0 -> false
-                    index < progressIndex -> true
-                    index == progressIndex -> (localState.progressChapterFraction ?: 0.0) >= 1.0
-                    else -> false
-                }
+            .map { chapter ->
                 DetailChapterItem(
                     chapter = chapter,
                     current = chapter.chapterId == currentChapterId,
-                    read = read,
+                    read = chapter.chapterId in localState.completedChapterIds,
                 )
             }
             .let { if (descending) it.reversed() else it }
     }
-    val visibleChapters = if (unreadOnly) chapterItems.filter { !it.read!! } else chapterItems
+    val visibleChapters = if (unreadOnly) chapterItems.filter { it.read != true } else chapterItems
     val unnamedVolume = stringResource(R.string.book_ungrouped_volume)
     val volumeGroups = remember(visibleChapters, unnamedVolume) {
         val grouped = linkedMapOf<String, MutableList<DetailChapterItem>>()
@@ -353,6 +386,7 @@ private fun DetailContent(
                         state = listState,
                         topLabel = stringResource(R.string.book_quick_to_top),
                         endLabel = stringResource(R.string.book_quick_to_bottom),
+                        hideWhileScrolling = true,
                     )
                 } else {
                     ExtendedFloatingActionButton(
@@ -369,10 +403,19 @@ private fun DetailContent(
 
 @Composable
 private fun UnresolvedReconciliationBanner(
+    operation: String?,
     onRetry: () -> Unit,
     onAcknowledge: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
+    val operationKey = operation?.uppercase()
+    val operationLabel = when (operationKey) {
+        "ADD" -> "加入网站收藏"
+        "MOVE" -> "移动网站收藏"
+        "REMOVE" -> "从网站收藏移除"
+        else -> "网站收藏操作"
+    }
+    val canAcknowledge = operationKey != "ADD"
     Card(
         modifier = modifier
             .fillMaxWidth()
@@ -385,12 +428,16 @@ private fun UnresolvedReconciliationBanner(
     ) {
         Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             Text(
-                text = "远程书架状态不同步 (UNRESOLVED)",
+                text = "${operationLabel}结果待确认",
                 style = MaterialTheme.typography.titleSmall,
                 color = MaterialTheme.colorScheme.error,
             )
             Text(
-                text = "上次远端书架操作未能在服务器成功确认。在解除状态前，该书籍的远端变更已锁定。",
+                text = if (canAcknowledge) {
+                    "上次${operationLabel}已发送，但服务器结果未能确认。重试会继续同一操作；解除锁定只允许再次操作，不代表网站已成功更新。"
+                } else {
+                    "上次${operationLabel}已发送，但服务器结果未能确认。请重试同一幂等操作；在网站状态确认前不会解除锁定。"
+                },
                 style = MaterialTheme.typography.bodySmall,
             )
             Row(
@@ -398,12 +445,14 @@ private fun UnresolvedReconciliationBanner(
                 horizontalArrangement = Arrangement.End,
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                TextButton(onClick = onAcknowledge) {
-                    Text("解除锁定")
+                if (canAcknowledge) {
+                    TextButton(onClick = onAcknowledge) {
+                        Text("仅解除锁定")
+                    }
+                    Spacer(Modifier.width(8.dp))
                 }
-                Spacer(Modifier.width(8.dp))
                 FilledTonalButton(onClick = onRetry) {
-                    Text("重试同步")
+                    Text("重试${operationLabel}")
                 }
             }
         }

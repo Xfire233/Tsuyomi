@@ -57,6 +57,23 @@ internal class SourceHomeController : Closeable {
     val activePage: SourceHomePage?
         get() = (state as? SourceHomeViewState.Content)?.activePage
 
+    val selectedFilters: Map<String, String>
+        get() = activeEntry()?.selectedFilters.orEmpty()
+
+    fun acceptVerifiedPage(page: SourceHomePage) {
+        generation += 1L
+        replacementJob?.cancel()
+        replacementJob = null
+        acceptReplacement(queryKey(selectedFilters), page)
+    }
+
+    fun rejectVerifiedPage(failure: SourceHomeFailure) {
+        generation += 1L
+        replacementJob?.cancel()
+        replacementJob = null
+        state = SourceHomeViewState.Failure(failure.code, failure.safeCode)
+    }
+
     fun ensureInitial(
         revision: String?,
         load: suspend (Map<String, String>, String?) -> Result<SourceHomePage>,
@@ -174,6 +191,17 @@ internal class SourceHomeController : Closeable {
                 load = load,
             )
         }
+    }
+
+    fun useOfflineCache(load: suspend (Map<String, String>, String?) -> Result<SourceHomePage>) {
+        val entry = activeEntry()
+        startReplacement(
+            requestedFilters = entry?.selectedFilters.orEmpty(),
+            primary = activePrimary,
+            force = true,
+            initial = entry?.page == null && primaryFilter == null,
+            load = load,
+        )
     }
 
     fun append(load: suspend (Map<String, String>, String?) -> Result<SourceHomePage>) {

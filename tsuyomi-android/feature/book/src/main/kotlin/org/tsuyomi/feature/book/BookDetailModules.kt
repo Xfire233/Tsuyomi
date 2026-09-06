@@ -85,6 +85,10 @@ fun BookDetailTopBar(
     onCacheDetail: () -> Unit,
     onRefresh: () -> Unit,
     onRemoveFromLibrary: () -> Unit,
+    remoteRemoveAvailable: Boolean = false,
+    remoteMoveAvailable: Boolean = false,
+    onRemoveFromRemote: () -> Unit = {},
+    onMoveRemote: () -> Unit = {},
 ) {
     val actions = buildList {
         add(
@@ -104,6 +108,12 @@ fun BookDetailTopBar(
                     onRemoveFromLibrary,
                 ),
             )
+        }
+        if (remoteMoveAvailable) {
+            add(TsuyomiOverflowAction(stringResource(R.string.book_move_remote), onMoveRemote))
+        }
+        if (remoteRemoveAvailable) {
+            add(TsuyomiOverflowAction(stringResource(R.string.book_remove_from_remote), onRemoveFromRemote, destructive = true))
         }
     }
     TsuyomiTopBar(

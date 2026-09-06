@@ -96,6 +96,7 @@ fun SourceHomeScreen(
     onRefresh: () -> Unit,
     onLoadMore: () -> Unit,
     onRetryReplacement: () -> Unit,
+    onUseOfflineCache: () -> Unit,
     onSearch: () -> Unit,
     onOpenRemoteLibrary: () -> Unit,
     onOpenBook: (SourceBookSummary) -> Unit,
@@ -118,6 +119,7 @@ fun SourceHomeScreen(
             failure = SourceHomeFailure(state.code, state.safeCode),
             onRetry = onRetryReplacement,
             onOpenVerification = onOpenVerification,
+            onUseOfflineCache = onUseOfflineCache,
             modifier = modifier,
         )
         is SourceHomeViewState.Content -> if (
@@ -126,7 +128,13 @@ fun SourceHomeScreen(
             val active = state.activePageState
             if (active?.page == null) {
                 active?.replacementFailure?.let { failure ->
-                    SourceHomeFailureView(failure, onRetryReplacement, onOpenVerification, modifier)
+                    SourceHomeFailureView(
+                        failure,
+                        onRetryReplacement,
+                        onUseOfflineCache,
+                        onOpenVerification,
+                        modifier,
+                    )
                 } ?: StateView(
                     kind = TsuyomiStateKind.LOADING,
                     title = stringResource(R.string.source_home_loading),
@@ -158,6 +166,7 @@ fun SourceHomeScreen(
                 onRefresh = onRefresh,
                 onLoadMore = onLoadMore,
                 onRetryReplacement = onRetryReplacement,
+                onUseOfflineCache = onUseOfflineCache,
                 onOpenVerification = onOpenVerification,
                 onOpenBook = onOpenBook,
                 onOpenFeature = onOpenFeature,
@@ -173,6 +182,7 @@ fun SourceHomeScreen(
 private fun SourceHomeFailureView(
     failure: SourceHomeFailure,
     onRetry: () -> Unit,
+    onUseOfflineCache: () -> Unit,
     onOpenVerification: () -> Unit,
     modifier: Modifier,
 ) {
@@ -192,6 +202,8 @@ private fun SourceHomeFailureView(
             else R.string.source_home_retry,
         ),
         onAction = if (verificationRequired) onOpenVerification else onRetry,
+        secondaryActionLabel = stringResource(R.string.source_home_use_offline_cache),
+        onSecondaryAction = onUseOfflineCache,
         modifier = modifier.fillMaxSize(),
     )
 }

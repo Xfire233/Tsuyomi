@@ -259,6 +259,9 @@ class RoomTransferRepository(private val database: TsuyomiDatabase) {
                     library.saveProgress(progress.toReadingProgress(incoming.identity))
                 }
             }
+            incoming.completedChapterIds.sorted().forEach { chapterId ->
+                library.markChapterCompleted(incoming.identity, chapterId, plan.sourceCreatedAt)
+            }
             incoming.shelfIds.sorted().forEach { shelfId ->
                 if (dao.collection(shelfId)?.kind == CollectionKind.MANUAL) {
                     val existingMemberships = dao.manualMemberships(shelfId)
@@ -364,6 +367,7 @@ class RoomTransferRepository(private val database: TsuyomiDatabase) {
                             updatedAt = Instant.ofEpochSecond(progress.updatedAtEpochSecond, progress.updatedAtNano.toLong()),
                         )
                     },
+                    completedChapterIds = dao.completedChapterIds(identity.sourceId, identity.remoteBookId).toSortedSet(),
                 )
             }
             val shelves = dao.allCollections().filter { it.kind == CollectionKind.MANUAL }.map {

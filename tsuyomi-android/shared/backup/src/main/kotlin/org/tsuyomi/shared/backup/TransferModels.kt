@@ -17,6 +17,13 @@ data class PortableReaderPreferences(
     val fontScale: Double? = null,
     val lineHeight: Double? = null,
     val theme: String? = null,
+    val horizontalMargin: Double? = null,
+    val paragraphSpacing: Double? = null,
+    val lockPortrait: Boolean? = null,
+    val progressVisible: Boolean? = null,
+    val immersive: Boolean? = null,
+    val keepAwake: Boolean? = null,
+    val volumePaging: Boolean? = null,
 )
 
 data class TransferProgress(
@@ -43,6 +50,7 @@ data class TransferBook(
     val addedAt: Instant? = null,
     val updatedAt: Instant,
     val progress: TransferProgress? = null,
+    val completedChapterIds: Set<String> = emptySet(),
 )
 
 data class TransferShelf(

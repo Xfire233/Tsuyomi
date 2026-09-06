@@ -103,7 +103,7 @@ internal class RoomRemoteLibraryStore(
                 },
             )
         }
-        request.books.forEach { catalog.saveBook(it.book) }
+        request.books.forEach { saveRemoteBook(it.book) }
         dao.deleteRemoteMirrorItems(request.sourceId)
         if (request.books.isNotEmpty()) {
             dao.upsertRemoteMirrorItems(
@@ -158,7 +158,7 @@ internal class RoomRemoteLibraryStore(
         dao.updateRemoteMirrorBookTarget(identity.sourceId, identity.remoteBookId, targetId, now.epochSecond) == 1
 
     suspend fun upsertRemoteMirrorBook(book: LibraryBook, targetId: String?, now: Instant) = database.withTransaction {
-        catalog.saveBook(book)
+        saveRemoteBook(book)
         dao.upsertRemoteMirrorItems(
             listOf(
                 RemoteMirrorItemEntity(
@@ -192,7 +192,7 @@ internal class RoomRemoteLibraryStore(
         check(leaseValid()) { "Source changed before remote merge" }
         var added = 0
         request.books.forEach { book ->
-            catalog.saveBook(book)
+            saveRemoteBook(book)
             if (
                 dao.insertLibraryEntry(
                     LibraryEntryEntity(
@@ -239,10 +239,10 @@ internal class RoomRemoteLibraryStore(
     }
     suspend fun beginRemoteMutation(
         request: RemoteMutationRequest,
-        retryingUnresolvedAddId: String? = null,
+        retryingUnresolvedId: String? = null,
     ): String = database.withTransaction {
         val book = request.book
-        catalog.saveBook(book)
+        saveRemoteBook(book)
         if (request.operation == "ADD") {
             dao.insertLibraryEntry(
                 LibraryEntryEntity(
@@ -255,15 +255,14 @@ internal class RoomRemoteLibraryStore(
             )
         }
         val active = dao.activeReconciliation(book.identity.sourceId, book.identity.remoteBookId)
-        if (retryingUnresolvedAddId == null) {
+        if (retryingUnresolvedId == null) {
             check(active == null) { "Remote operation already active or unresolved for this book" }
         } else {
             check(
-                request.operation == "ADD" &&
-                    active?.id == retryingUnresolvedAddId &&
+                active?.id == retryingUnresolvedId &&
                     active.state == RemoteReconciliationState.UNRESOLVED.name &&
-                    active.operation.uppercase() == "ADD",
-            ) { "Remote ADD retry does not match the current unresolved operation" }
+                    active.operation.equals(request.operation, ignoreCase = true),
+            ) { "Remote retry does not match the current unresolved operation" }
         }
         val id = UUID.randomUUID().toString()
         dao.insertReconciliation(
@@ -314,9 +313,10 @@ internal class RoomRemoteLibraryStore(
         diagnosticId: String? = null,
     ): Boolean = transitionRemoteMutation(id, expected, next, now, diagnosticId)
 
-    suspend fun confirmRemoteAdd(
+    suspend fun confirmRemoteMutation(
         id: String,
         identity: BookIdentity,
+        operation: String,
         resolvesPriorUnresolved: Boolean,
         now: Instant,
     ): Boolean = database.withTransaction {
@@ -329,12 +329,38 @@ internal class RoomRemoteLibraryStore(
             ) != 1
         ) return@withTransaction false
         if (resolvesPriorUnresolved) {
-            check(dao.confirmUnresolvedAdds(identity.sourceId, identity.remoteBookId, now.epochSecond) > 0) {
-                "Remote ADD retry lost its unresolved predecessor"
-            }
+            check(
+                dao.confirmUnresolvedMutations(
+                    identity.sourceId,
+                    identity.remoteBookId,
+                    operation,
+                    now.epochSecond,
+                ) > 0,
+            ) { "Remote retry lost its unresolved predecessor" }
         }
         true
     }
+
+    suspend fun cancelUnresolvedMutations(
+        identity: BookIdentity,
+        operation: String,
+        now: Instant,
+    ): Boolean = database.withTransaction {
+        require(!operation.equals("ADD", ignoreCase = true)) { "Accepted remote ADD cannot be cancelled" }
+        dao.cancelUnresolvedMutations(
+            identity.sourceId,
+            identity.remoteBookId,
+            operation,
+            now.epochSecond,
+        ) > 0
+    }
+
+    suspend fun confirmRemoteAdd(
+        id: String,
+        identity: BookIdentity,
+        resolvesPriorUnresolved: Boolean,
+        now: Instant,
+    ): Boolean = confirmRemoteMutation(id, identity, "ADD", resolvesPriorUnresolved, now)
 
     suspend fun unresolvedReconciliations(): List<RemoteReconciliationRecord> =
         dao.unresolvedReconciliations().map { it.toDomain() }
@@ -344,6 +370,23 @@ internal class RoomRemoteLibraryStore(
 
     suspend fun bookReconciliation(sourceId: String, remoteBookId: String): RemoteReconciliationRecord? =
         (dao.activeReconciliation(sourceId, remoteBookId) ?: dao.latestReconciliation(sourceId, remoteBookId))?.toDomain()
+    private suspend fun saveRemoteBook(incoming: LibraryBook) {
+        val existing = catalog.book(incoming.identity)
+        val merged = existing?.let { current ->
+            incoming.copy(
+                author = incoming.author ?: current.author,
+                authors = current.authors + incoming.authors,
+                coverUrl = incoming.coverUrl ?: current.coverUrl,
+                canonicalUrl = incoming.canonicalUrl ?: current.canonicalUrl,
+                status = current.status,
+                remoteTags = current.remoteTags,
+                sourceUpdateKey = current.sourceUpdateKey,
+                hasUnreadUpdate = current.hasUnreadUpdate,
+            )
+        } ?: incoming
+        catalog.saveBook(merged)
+    }
+
 }
 
 private fun RemoteReconciliationState.allowedNextStates(): Set<RemoteReconciliationState> = when (this) {

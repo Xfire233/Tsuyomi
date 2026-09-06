@@ -395,12 +395,39 @@ private fun ReaderFullSettings(
                     )
                 }
             }
+            Text(stringResource(R.string.reader_theme_label), style = MaterialTheme.typography.labelLarge)
+            FlowRow(horizontalArrangement = Arrangement.spacedBy(TsuyomiSpacing.Sm)) {
+                ReaderTheme.entries.take(3).forEach { theme ->
+                    FilterChip(
+                        selected = state.theme == theme,
+                        onClick = { onAction(ReaderSettingsAction.Theme(theme)) },
+                        label = {
+                            Text(
+                                stringResource(
+                                    when (theme) {
+                                        ReaderTheme.PAPER -> R.string.reader_theme_paper
+                                        ReaderTheme.WARM_GRAY -> R.string.reader_theme_warm_gray
+                                        ReaderTheme.NIGHT_INK -> R.string.reader_theme_night_ink
+                                        ReaderTheme.BLACK -> R.string.reader_theme_black
+                                        ReaderTheme.INK_GREEN -> R.string.reader_theme_ink_green
+                                    },
+                                ),
+                            )
+                        },
+                    )
+                }
+            }
         }
         ReaderSettingsSection(stringResource(R.string.reader_navigation_group)) {
             ReaderSwitchSetting(
                 title = stringResource(R.string.reader_progress_info),
                 checked = state.progressVisible,
                 onCheckedChange = { onAction(ReaderSettingsAction.ProgressVisible(it)) },
+            )
+            ReaderSwitchSetting(
+                title = stringResource(R.string.reader_volume_paging),
+                checked = state.volumePaging,
+                onCheckedChange = { onAction(ReaderSettingsAction.VolumePaging(it)) },
             )
             ReaderSwitchSetting(
                 title = stringResource(R.string.reader_immersive),

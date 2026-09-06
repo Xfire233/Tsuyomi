@@ -12,6 +12,7 @@ import org.tsuyomi.shared.sourcecontract.SourceNetworkRequest
 /** Host-minted policy for one remote-library transport operation. */
 enum class SourceOperationKind {
     REMOTE_LIBRARY_READ,
+    REMOTE_LIBRARY_TARGETS,
     REMOTE_LIBRARY_ADD,
     REMOTE_LIBRARY_REMOVE,
     REMOTE_LIBRARY_MOVE,
@@ -75,7 +76,8 @@ class SourceOperationContext internal constructor(
         require(!isDirectAction || cursor == null)
         require(kind != SourceOperationKind.REMOTE_LIBRARY_MOVE || !targetId.isNullOrBlank())
         require(kind == SourceOperationKind.REMOTE_LIBRARY_MOVE || targetId == null)
-        require(kind != SourceOperationKind.REMOTE_LIBRARY_READ || remoteBookId == null)
+        require(kind !in setOf(SourceOperationKind.REMOTE_LIBRARY_READ, SourceOperationKind.REMOTE_LIBRARY_TARGETS) || remoteBookId == null)
+        require(kind != SourceOperationKind.REMOTE_LIBRARY_TARGETS || cursor == null)
         require(cursor == null || cursor.isNotBlank())
     }
 
@@ -125,6 +127,9 @@ class SourceOperationContext internal constructor(
 
 fun remoteLibraryReadContext(policy: RemoteOperationRequestPolicy, cursor: String?): SourceOperationContext =
     SourceOperationContext(SourceOperationKind.REMOTE_LIBRARY_READ, policy, cursor = cursor)
+
+fun remoteLibraryTargetsContext(policy: RemoteOperationRequestPolicy): SourceOperationContext =
+    SourceOperationContext(SourceOperationKind.REMOTE_LIBRARY_TARGETS, policy)
 
 fun remoteLibraryAddContext(
     policy: RemoteOperationRequestPolicy,

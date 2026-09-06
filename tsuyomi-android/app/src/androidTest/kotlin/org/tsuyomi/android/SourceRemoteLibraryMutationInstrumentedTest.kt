@@ -137,8 +137,11 @@ internal class SourceRemoteLibraryMutationInstrumentedTest : SourceFlowInstrumen
         putCredential(sourceId)
         val accepted = CompletableDeferred<Unit>()
         val releaseResponse = CompletableDeferred<Unit>()
+        var removeCalls = 0
         val session = FakeSession(
             removeRemote = { remoteBookId, token ->
+                removeCalls++
+                if (removeCalls > 1) error("retry failed before token acceptance")
                 directActionTokens.accept(sourceId, remoteBookId, token)
                 accepted.complete(Unit)
                 releaseResponse.await()
@@ -152,9 +155,8 @@ internal class SourceRemoteLibraryMutationInstrumentedTest : SourceFlowInstrumen
             assertTrue(library.setMoveWritebackEnabled(sourceId, policy.capabilitySetFingerprint, true))
             controller.open(packageInfo)
             controller.selectBook(book)
-            controller.addSelectedBook(SOURCE_FLOW_TEST_TIME)
 
-            // Trigger remote remove and force lease change to produce UNRESOLVED state
+            // Trigger a remote-only remove and force lease change to produce UNRESOLVED state
             val removeJob = async { controller.removeSelectedBookFromWebsite(SOURCE_FLOW_TEST_TIME) }
             withTimeout(5_000) { accepted.await() }
             val availability = requireNotNull(library.sourceAvailability(sourceId))
@@ -163,19 +165,28 @@ internal class SourceRemoteLibraryMutationInstrumentedTest : SourceFlowInstrumen
 
             assertEquals(RemoteMutationUiResult.Unresolved, removeJob.await())
             assertEquals(RemoteReconciliationState.UNRESOLVED, controller.remoteLibrary.selectedBookReconciliation)
+            assertEquals("remove", controller.remoteLibrary.selectedBookReconciliationOperation)
 
             // Restore source availability for subsequent operations
             library.setSourceAvailability(sourceId, availability.verifiedVersion, true, availability.generation + 2)
             controller.open(packageInfo)
             controller.selectBook(book)
 
-            // Attempting another mutation while UNRESOLVED must be BLOCKED (D17)
+            assertEquals(
+                RemoteMutationUiResult.Unresolved,
+                controller.retryRemoteMutation(book, SOURCE_FLOW_TEST_TIME.plusSeconds(1)),
+            )
+            assertEquals(RemoteReconciliationState.UNRESOLVED, controller.remoteLibrary.selectedBookReconciliation)
+            assertEquals(2, removeCalls)
+
+            // A remote-only unresolved record must block every later mutation (D17)
             val blockedResult = controller.moveSelectedBookOnWebsite("favorites", "特别收藏", SOURCE_FLOW_TEST_TIME)
             assertEquals(RemoteMutationUiResult.Failure("remote-mutation-blocked-unresolved"), blockedResult)
 
             // Acknowledge unresolved -> unlocks the book
             assertTrue(controller.acknowledgeUnresolved(book.identity))
             assertEquals(RemoteReconciliationState.CANCELLED, controller.remoteLibrary.selectedBookReconciliation)
+            assertTrue(library.unresolvedReconciliationsForSource(sourceId).isEmpty())
 
             // Now mutations are unblocked
             val unblockedSession = FakeSession(

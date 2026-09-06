@@ -71,6 +71,35 @@ class RepositoryPolicyTest(unittest.TestCase):
     def test_live_repository_has_no_retired_android_prototype(self) -> None:
         self.assertEqual([], check_repository.retired_android_prototype_violations())
 
+    def test_frozen_eink_profile_rejects_registered_screenshot_evidence(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            policy = root / ".agents/skills/tsuyomi-android-review/review-policy.json"
+            policy.parent.mkdir(parents=True)
+            policy.write_text(
+                json.dumps({"deferredProfiles": [{"profile": "EINK", "status": "FROZEN"}]}),
+                encoding="utf-8",
+            )
+            preview = root / "tsuyomi-android/feature/example/src/screenshotTest/kotlin/EInkPreview.kt"
+            preview.parent.mkdir(parents=True)
+            preview.write_text(
+                '@PreviewTest\n@Preview(name = "eink")\n@Composable\nfun EInkScreenshot() = Unit',
+                encoding="utf-8",
+            )
+
+            violations = check_repository.frozen_profile_screenshot_violations(root)
+            preview.write_text(
+                '@Preview(name = "eink")\n@Composable\nfun EInkScreenshot() = Unit',
+                encoding="utf-8",
+            )
+            restored = check_repository.frozen_profile_screenshot_violations(root)
+
+        self.assertEqual(1, len(violations))
+        self.assertEqual([], restored)
+
+    def test_live_repository_has_no_frozen_profile_screenshot_evidence(self) -> None:
+        self.assertEqual([], check_repository.frozen_profile_screenshot_violations())
+
 class ToolingGovernanceTest(unittest.TestCase):
     def create_valid_registry(self, root: Path) -> Path:
         tooling = root / "TOOLING.md"

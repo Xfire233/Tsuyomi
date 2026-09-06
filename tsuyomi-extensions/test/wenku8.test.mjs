@@ -421,20 +421,24 @@ test('remote favourites pagination is explicit bounded and complete', async () =
   assert.throws(() => buildRemoteLibraryRequest(''), /INVALID_REMOTE_CURSOR/);
 });
 
-test('remote add is an exact idempotent typed operation', async () => {
+test('remote add uses the live idempotent endpoint and binds the exact response identity', async () => {
   assert.deepEqual(buildRemoteLibraryAddRequest('1234'), {
-    url: 'https://www.wenku8.net/modules/article/bookcase.php',
-    method: 'POST',
+    url: 'https://www.wenku8.net/modules/article/addbookcase.php',
+    query: [{ name: 'bid', value: '1234' }],
+    queryEncoding: 'utf-8',
+    method: 'GET',
     headers: { Accept: 'text/html,application/xhtml+xml' },
-    form: { action: 'add', aid: '1234' },
     decode: 'gb18030',
     cache: 'network-only',
   });
-  assert.deepEqual(parseRemoteLibraryAdd(await fixture('remote-add-applied'), '1234'), {
+  const exactUrl = 'https://www.wenku8.net/modules/article/addbookcase.php?bid=1234';
+  assert.deepEqual(parseRemoteLibraryAdd(await fixture('remote-add-applied'), '1234', exactUrl), {
     sourceId: 'org.tsuyomi.wenku8', remoteBookId: '1234', outcome: 'applied',
   });
-  assert.equal(parseRemoteLibraryAdd(await fixture('remote-add-already-present'), '1234').outcome, 'already-present');
-  assert.throws(() => parseRemoteLibraryAdd('<html>ok</html>', '1234'), /AMBIGUOUS_REMOTE_ADD/);
+  assert.equal(parseRemoteLibraryAdd(await fixture('remote-add-already-present'), '1234', exactUrl).outcome, 'already-present');
+  assert.throws(() => parseRemoteLibraryAdd('<html>ok</html>', '1234', 'https://www.wenku8.net/modules/article/addbookcase.php?bid=9999'), /REMOTE_ADD_IDENTITY_MISMATCH/);
+  assert.throws(() => parseRemoteLibraryAdd('<div class="blocktitle">出现错误！</div><p>权限不足</p>', '1234', exactUrl), /AMBIGUOUS_REMOTE_ADD/);
+  assert.throws(() => parseRemoteLibraryAdd('<html>ok</html>', '1234', exactUrl), /AMBIGUOUS_REMOTE_ADD/);
 });
 
 test('remote remove is an exact idempotent typed operation', async () => {
@@ -446,10 +450,12 @@ test('remote remove is an exact idempotent typed operation', async () => {
     decode: 'gb18030',
     cache: 'network-only',
   });
-  assert.deepEqual(parseRemoteLibraryRemove('<div data-outcome="applied"></div>', '1234'), {
+  assert.deepEqual(parseRemoteLibraryRemove('<div data-outcome="applied" data-book-id="1234"></div>', '1234'), {
     sourceId: 'org.tsuyomi.wenku8', remoteBookId: '1234', outcome: 'applied',
   });
-  assert.equal(parseRemoteLibraryRemove('<div data-outcome="already-absent"></div>', '1234').outcome, 'already-absent');
+  assert.equal(parseRemoteLibraryRemove('<div data-outcome="already-absent" data-book-id="1234"></div>', '1234').outcome, 'already-absent');
+  assert.throws(() => parseRemoteLibraryRemove('<div data-outcome="applied" data-book-id="9999"></div>', '1234'), /REMOTE_REMOVE_IDENTITY_MISMATCH/);
+  assert.throws(() => parseRemoteLibraryRemove('<table><tr><td><a href="/book/1234.htm">仍在书架</a></td></tr></table>', '1234'), /REMOTE_REMOVE_STILL_PRESENT/);
   assert.throws(() => parseRemoteLibraryRemove('<html>ok</html>', '1234'), /AMBIGUOUS_REMOTE_REMOVE/);
 });
 
@@ -462,10 +468,11 @@ test('remote move is an exact idempotent typed operation with target binding', a
     decode: 'gb18030',
     cache: 'network-only',
   });
-  assert.deepEqual(parseRemoteLibraryMove('<div data-outcome="applied"></div>', '1234', 'finished'), {
+  assert.deepEqual(parseRemoteLibraryMove('<div data-outcome="applied" data-book-id="1234" data-target-id="finished"></div>', '1234', 'finished'), {
     sourceId: 'org.tsuyomi.wenku8', remoteBookId: '1234', targetId: 'finished', outcome: 'applied',
   });
-  assert.equal(parseRemoteLibraryMove('<div data-outcome="already-at-target"></div>', '1234', 'finished').outcome, 'already-at-target');
+  assert.equal(parseRemoteLibraryMove('<div data-outcome="already-at-target" data-book-id="1234" data-target-id="finished"></div>', '1234', 'finished').outcome, 'already-at-target');
+  assert.throws(() => parseRemoteLibraryMove('<div data-outcome="applied" data-book-id="1234" data-target-id="default"></div>', '1234', 'finished'), /REMOTE_MOVE_IDENTITY_MISMATCH/);
   assert.throws(() => parseRemoteLibraryMove('<html>ok</html>', '1234', 'finished'), /AMBIGUOUS_REMOTE_MOVE/);
 });
 
@@ -479,8 +486,8 @@ test('remote targets returns typed folder hierarchy', async () => {
     decode: 'gb18030',
     cache: 'network-only',
   });
-  const defaultTargets = parseRemoteLibraryTargets('<html></html>');
-  assert.equal(defaultTargets.sourceId, 'org.tsuyomi.wenku8');
-  assert.equal(defaultTargets.targets.length, 3);
-  assert.equal(defaultTargets.targets[0].targetId, 'default');
+  const parsedTargets = parseRemoteLibraryTargets(await fixture('remote-library-page-1'));
+  assert.equal(parsedTargets.sourceId, 'org.tsuyomi.wenku8');
+  assert.deepEqual(parsedTargets.targets.map(({ targetId }) => targetId), ['0', '1']);
+  assert.throws(() => parseRemoteLibraryTargets('<html></html>'), /AMBIGUOUS_REMOTE_TARGETS/);
 });

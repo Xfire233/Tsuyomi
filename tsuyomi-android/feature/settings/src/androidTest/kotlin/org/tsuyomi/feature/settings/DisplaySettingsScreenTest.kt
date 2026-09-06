@@ -11,6 +11,9 @@ import androidx.compose.ui.test.assertIsEnabled
 import androidx.compose.ui.test.junit4.v2.createComposeRule
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithText
+import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performScrollTo
+import org.junit.Assert.assertEquals
 import org.junit.Rule
 import org.junit.Test
 import org.tsuyomi.core.display.ColorSchemePreference
@@ -46,14 +49,32 @@ class DisplaySettingsScreenTest {
             .assertHasClickAction()
     }
 
-    private fun render(profile: DisplayProfile) {
+    @Test
+    fun interfaceResetRequiresConfirmationBeforeInvokingCanonicalAction() {
+        var resets = 0
+        render(
+            profile = DisplayProfile.STANDARD,
+            actions = actions(onReset = { resets++ }),
+        )
+
+        composeRule.onNodeWithText("重置界面设置").performScrollTo().performClick()
+        assertEquals(0, resets)
+        composeRule.onNodeWithText("确认重置").performClick()
+
+        assertEquals(1, resets)
+    }
+
+    private fun render(
+        profile: DisplayProfile,
+        actions: DisplaySettingsActions = noOpActions,
+    ) {
         val environment = environment(profile)
         composeRule.setContent {
             DisplayEnvironmentProvider(environment) {
                 TsuyomiTheme(environment) {
                     DisplaySettingsScreen(
                         state = DisplaySettingsUiState(environment),
-                        actions = noOpActions,
+                        actions = actions,
                     )
                 }
             }
@@ -87,6 +108,16 @@ class DisplaySettingsScreenTest {
         redrawEpoch = 0,
     )
 
+
+    private fun actions(onReset: () -> Unit) = DisplaySettingsActions(
+        onDisplayPreferenceChange = {},
+        onColorSchemePreferenceChange = {},
+        onDynamicColorEnabledChange = {},
+        onRefreshNow = {},
+        onRetryWrite = {},
+        onAcknowledgeWriteFailure = {},
+        onResetInterfacePreferences = onReset,
+    )
     private companion object {
         val noOpActions = DisplaySettingsActions(
             onDisplayPreferenceChange = {},
@@ -95,6 +126,7 @@ class DisplaySettingsScreenTest {
             onRefreshNow = {},
             onRetryWrite = {},
             onAcknowledgeWriteFailure = {},
+            onResetInterfacePreferences = {},
         )
     }
 }

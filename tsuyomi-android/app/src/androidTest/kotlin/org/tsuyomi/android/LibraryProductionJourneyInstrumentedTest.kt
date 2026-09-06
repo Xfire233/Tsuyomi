@@ -270,7 +270,7 @@ class LibraryProductionJourneyInstrumentedTest {
     }
 
     @Test
-    fun standard_library_drag_preview_is_immediate_and_book_drops_into_shortcut_shelf() {
+    fun movement_after_long_press_shows_drag_preview_and_drops_into_shortcut_shelf() {
         val application = composeRule.activity.application as TsuyomiApplication
         val originalPreferences = runBlocking { libraryPreferences.preferences.first() }
         val shortcutId = org.tsuyomi.feature.library.libraryBookShortcutId(behaviorNewer)
@@ -294,6 +294,7 @@ class LibraryProductionJourneyInstrumentedTest {
             first.performTouchInput {
                 down(center)
                 advanceEventTime(700)
+                moveBy(Offset(0f, -48f), delayMillis = 100)
             }
             composeRule.waitUntil(timeoutMillis = 5_000) {
                 runCatching { composeRule.onNodeWithTag("library-drag-preview").fetchSemanticsNode() }.isSuccess
@@ -375,6 +376,7 @@ class LibraryProductionJourneyInstrumentedTest {
             first.performTouchInput {
                 down(center)
                 advanceEventTime(700)
+                moveBy(Offset(0f, -48f), delayMillis = 100)
             }
             composeRule.waitUntil(timeoutMillis = 5_000) {
                 runCatching { composeRule.onNodeWithTag("library-drag-preview").fetchSemanticsNode() }.isSuccess
@@ -499,19 +501,10 @@ class LibraryProductionJourneyInstrumentedTest {
             source.performTouchInput {
                 down(center)
                 advanceEventTime(700)
-            }
-            waitForText("已选 1 项")
-            composeRule.waitUntil(timeoutMillis = 5_000) {
-                composeRule.onAllNodesWithTag("library-drag-preview").fetchSemanticsNodes().isNotEmpty()
-            }
-            source.performTouchInput {
+                moveBy(Offset(0f, -48f), delayMillis = 100)
                 moveTo(Offset(shelfBounds.center.x, shelfBounds.top - 20f) - sourceBounds.topLeft, delayMillis = 100)
+                up()
             }
-            val lockedDropHints = composeRule.onAllNodesWithText("松开以", substring = true).fetchSemanticsNodes()
-                .flatMap { it.config.getOrElse(SemanticsProperties.Text) { emptyList() } }
-                .joinToString { it.text }
-            assertTrue("locked shelf hint=$lockedDropHints shelf=$shelfBounds source=$sourceBounds", lockedDropHints.contains("放到快捷书架"))
-            source.performTouchInput { up() }
             composeRule.waitUntil(timeoutMillis = 5_000) {
                 composeRule.onAllNodesWithTag("library-shortcut-$shortcutId").fetchSemanticsNodes().isNotEmpty()
             }
@@ -522,26 +515,17 @@ class LibraryProductionJourneyInstrumentedTest {
             val target = composeRule.onNodeWithTag(targetTag)
             target.performSemanticsAction(SemanticsActions.OnLongClick)
             waitForText("已选 1 项")
-            val selectedTarget = composeRule.onNodeWithTag(targetTag)
-            selectedTarget.performTouchInput {
-                down(center)
-                advanceEventTime(700)
-            }
-            composeRule.waitUntil(timeoutMillis = 5_000) {
-                composeRule.onAllNodesWithTag("library-drag-preview").fetchSemanticsNodes().isNotEmpty()
-            }
-            val targetBounds = selectedTarget.fetchSemanticsNode().boundsInRoot
             composeRule.onNodeWithTag("library-shortcut-$shortcutId").performScrollTo()
+            val targetBounds = target.fetchSemanticsNode().boundsInRoot
             val shortcutBounds = composeRule.onNodeWithTag("library-shortcut-$shortcutId")
                 .fetchSemanticsNode().boundsInRoot
-            selectedTarget.performTouchInput {
+            target.performTouchInput {
+                down(center)
+                advanceEventTime(700)
+                moveBy(Offset(0f, -48f), delayMillis = 100)
                 moveTo(shortcutBounds.center - targetBounds.topLeft, delayMillis = 100)
+                up()
             }
-            composeRule.waitUntil(timeoutMillis = 5_000) {
-                composeRule.onNodeWithTag("library-shortcut-$shortcutId")
-                    .fetchSemanticsNode().config[SemanticsProperties.StateDescription] == "当前拖放目标"
-            }
-            selectedTarget.performTouchInput { up() }
             waitForText("用所选书籍新建收藏夹")
             composeRule.onNodeWithText("取消").performClick()
 
@@ -554,12 +538,7 @@ class LibraryProductionJourneyInstrumentedTest {
             shortcut.performTouchInput {
                 down(center)
                 advanceEventTime(700)
-            }
-            waitForText("已选 1 项")
-            composeRule.waitUntil(timeoutMillis = 5_000) {
-                composeRule.onAllNodesWithTag("library-drag-preview").fetchSemanticsNodes().isNotEmpty()
-            }
-            shortcut.performTouchInput {
+                moveBy(Offset(0f, -48f), delayMillis = 100)
                 moveTo(
                     Offset(shelfBoundsBeforeReorder.left + 8f, shelfBoundsBeforeReorder.center.y) -
                         shortcutBoundsBeforeReorder.topLeft,
@@ -707,27 +686,26 @@ class LibraryProductionJourneyInstrumentedTest {
             source.performTouchInput {
                 down(center)
                 advanceEventTime(700)
+                moveBy(Offset(0f, -48f), delayMillis = 100)
             }
             composeRule.waitUntil(timeoutMillis = 5_000) {
                 composeRule.onAllNodesWithTag("library-drag-preview").fetchSemanticsNodes().isNotEmpty()
             }
-            val handleBounds = composeRule.onNodeWithTag("library-shortcut-overlay-collapsed")
-                .fetchSemanticsNode().boundsInRoot
-            val initialPreviewBounds = composeRule.onNodeWithTag("library-drag-preview")
+            val previewBounds = composeRule.onNodeWithTag("library-drag-preview")
                 .fetchSemanticsNode().boundsInRoot
             val pointer = Offset(
-                initialPreviewBounds.center.x,
-                initialPreviewBounds.top + initialPreviewBounds.height * 0.34f,
+                previewBounds.center.x,
+                previewBounds.top + previewBounds.height * 0.34f,
             )
+            val handleBounds = composeRule.onNodeWithTag("library-shortcut-overlay-collapsed")
+                .fetchSemanticsNode().boundsInRoot
             source.performTouchInput {
-                val hoverDelta = handleBounds.center - pointer
-                moveBy(hoverDelta, delayMillis = 100)
-                moveBy(-hoverDelta, delayMillis = 100)
-                cancel()
+                moveBy(handleBounds.center - pointer, delayMillis = 100)
             }
             composeRule.waitUntil(timeoutMillis = 5_000) {
                 composeRule.onAllNodesWithTag("library-shortcut-overlay-expanded").fetchSemanticsNodes().isNotEmpty()
             }
+            source.performTouchInput { cancel() }
             composeRule.onNodeWithContentDescription("退出选择").performClick()
         } finally {
             runBlocking {

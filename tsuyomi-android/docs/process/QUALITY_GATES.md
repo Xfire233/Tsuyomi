@@ -104,7 +104,7 @@ PR 创建后及最终功能变更后，Adviser 必须对 PR head 再审阅一次
 
 1. UI change 先由 `UI-R1` 以显式 baseline 或 Git merge-base 选择 owning Review Graph nodes、cross-cutting capabilities 和 evidence lanes。
 2. `tools/android_ci_plan.py` 将 changed paths 映射为精确 build、lint、JVM、screenshot、instrumentation 与 dependency-lock tasks。已知 module 不得自动扩张到全 Android；未知 Android source 或无有效 Git base 才使用保守全集。
-3. Gradle 一次构建受影响 production target；普通验证不写 lock。只有 dependency input 改变时才执行明确的 `--write-locks` maintenance，再用普通 strict verification 证明提交结果。
+3. Gradle 一次构建受影响 production target；普通验证和 CI admission 不得使用 `--write-locks`。只有 dependency input 改变时才在独立的本地 maintenance 步骤更新 lock，再以干净 worktree 运行一次普通 strict verification 证明提交结果。CI 直接验证提交中的 lock；先重写 lock 再重复构建既掩盖输入事实，也浪费 admission 时间。
 4. 运行真实证明：Bug 先复现后消失；UI 用 production semantics/layout/behavior、受影响 screenshot assertion 和必要 AVD interaction；持久化/安全覆盖 API 下界、重建、隔离、删除和错误；协议使用 valid/invalid fixtures 与 conformance。
 5. Runtime change 每个 active profile 只部署一次。Android CLI 拥有 isolated AVD、delta install、exact activity launch、layout diff 和 PNG；一个 observable claim 只指定一个 evidence owner。截图不替代 gesture/state-transition test。
 
@@ -143,6 +143,20 @@ Required workflow 的 path detection 必须使用仓库根锚点（例如 `git -
 每个 Phase 结束后更新复盘：问题、根因、源头修复、自动防线、横向/纵向扩展。能复用于未来 Phase 的结论必须进入本文件、架构规则或贡献规则，不能只留在聊天记录。
 
 Design-memory checkpoints are event-driven rather than calendar-driven: after an accepted correction, after a coherent decision cluster, before switching feature families, and before handoff. Stable decisions enter the owning versioned contract; coherent deferred implementation packages may be published through the repository's `to-spec` workflow; local semantic memory and handoff state never replace public authority or evidence.
+
+### Package-review prevention checklist
+
+The Phase 4B retrospective exposed defects that module-local happy-path checks could not catch. Future cross-boundary packages must apply these rules before final Adviser review:
+
+- Review each operation as a complete state machine: authorization, durable intent, transport acceptance, confirmation, cancellation, process loss, explicit retry and UI presentation. A compound action persists its next stage before the first transport and never repeats a confirmed stage.
+- Bind every protected network surface to one exact signed operation context. Listing, target discovery and each mutation are separate capabilities; generic transport and inferred/default target IDs are forbidden.
+- Keep user-visible outcomes outside transient controls that dismiss after dispatch. Success, unresolved, partial and failure states remain observable and recoverable after menus, sheets or dialogs close.
+- Sparse remote projections merge into richer local metadata; they never replace authoritative local/catalog fields with absent summary values.
+- Data migrations never infer consent, authorization or acknowledgement from coincidental data overlap. Security- or privacy-significant receipts require explicit historical evidence; otherwise default to not granted.
+- Version exported transfer/protocol documents whenever the accepted field set changes. Current writers emit one strict version; readers may retain explicitly tested strict legacy versions.
+- Shared preference stores use owner-key allowlists for reset/delete. Whole-store clearing is prohibited unless that store has exactly one owner and the contract explicitly requires it.
+- CI planners accumulate overlapping module ownership, discover every test-bearing module, compare from the merge-base and rebuild changed signed fixtures before dependent instrumentation. CI validates committed dependency locks once and never rewrites them.
+- Screenshot registration follows the active review profile policy. Frozen-profile previews and goldens remain retained but are not registered as routine `PreviewTest` evidence, regenerated or counted toward the active gate; repository governance rejects accidental frozen E-ink registration.
 
 ## Finding 关闭标准
 

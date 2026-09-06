@@ -15,10 +15,14 @@ import org.tsuyomi.core.database.MIGRATION_2_3
 import org.tsuyomi.core.database.MIGRATION_3_4
 import org.tsuyomi.core.database.MIGRATION_4_5
 import org.tsuyomi.core.database.MIGRATION_5_6
+import org.tsuyomi.core.database.MIGRATION_6_7
+import org.tsuyomi.core.database.MIGRATION_7_8
 import org.tsuyomi.core.database.TsuyomiDatabase
 import org.tsuyomi.core.display.DisplayController
 import org.tsuyomi.core.display.LocalDeviceClassifier
 import org.tsuyomi.core.preferences.createAppPreferencesDataStore
+import org.tsuyomi.core.preferences.FeatureIntroductionPreferencesRepository
+import org.tsuyomi.core.preferences.InterfacePreferencesResetter
 import org.tsuyomi.core.preferences.LibraryPreferencesRepository
 import org.tsuyomi.core.preferences.PortableReaderPreferencesRepository
 
@@ -35,7 +39,15 @@ class TsuyomiApplication : Application() {
 
     private val database: TsuyomiDatabase by lazy(LazyThreadSafetyMode.SYNCHRONIZED) {
         Room.databaseBuilder(applicationContext, TsuyomiDatabase::class.java, "tsuyomi.db")
-            .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6)
+            .addMigrations(
+                MIGRATION_1_2,
+                MIGRATION_2_3,
+                MIGRATION_3_4,
+                MIGRATION_4_5,
+                MIGRATION_5_6,
+                MIGRATION_6_7,
+                MIGRATION_7_8,
+            )
             .build()
     }
     val libraryRepository: RoomLibraryRepository by lazy(LazyThreadSafetyMode.SYNCHRONIZED) {
@@ -49,5 +61,11 @@ class TsuyomiApplication : Application() {
     }
     val readerPreferencesRepository: PortableReaderPreferencesRepository by lazy(LazyThreadSafetyMode.SYNCHRONIZED) {
         PortableReaderPreferencesRepository(preferencesDataStore)
+    }
+    val featureIntroductionPreferencesRepository: FeatureIntroductionPreferencesRepository by lazy(LazyThreadSafetyMode.SYNCHRONIZED) {
+        FeatureIntroductionPreferencesRepository(preferencesDataStore)
+    }
+    val interfacePreferencesResetter: InterfacePreferencesResetter by lazy(LazyThreadSafetyMode.SYNCHRONIZED) {
+        InterfacePreferencesResetter(preferencesDataStore)
     }
 }

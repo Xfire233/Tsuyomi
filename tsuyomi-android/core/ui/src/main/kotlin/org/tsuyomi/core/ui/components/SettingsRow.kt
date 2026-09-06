@@ -5,11 +5,13 @@
 
 package org.tsuyomi.core.ui.components
 
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.LocalIndication
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsFocusedAsState
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
@@ -18,6 +20,7 @@ import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
+import androidx.compose.material3.Surface
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
@@ -36,6 +39,25 @@ import org.tsuyomi.core.ui.theme.TsuyomiSpacing
 import org.tsuyomi.core.ui.theme.tsuyomiFocusRing
 import org.tsuyomi.core.ui.theme.TsuyomiEInkPalette
 
+
+@Composable
+fun SettingsGroup(
+    modifier: Modifier = Modifier,
+    content: @Composable ColumnScope.() -> Unit,
+) {
+    val eInk = LocalDisplayEnvironment.current.effectiveProfile == DisplayProfile.EINK
+    Surface(
+        modifier = modifier.fillMaxWidth(),
+        shape = MaterialTheme.shapes.medium,
+        color = MaterialTheme.colorScheme.surfaceContainerLow,
+        border = BorderStroke(
+            width = if (eInk) 1.5.dp else 1.dp,
+            color = if (eInk) TsuyomiEInkPalette.Ink else MaterialTheme.colorScheme.outlineVariant,
+        ),
+    ) {
+        Column(content = content)
+    }
+}
 /**
  * A settings row with button semantics. [disabledReason] is both visible text and part of the
  * accessibility state description, so an unavailable control never relies on color alone.

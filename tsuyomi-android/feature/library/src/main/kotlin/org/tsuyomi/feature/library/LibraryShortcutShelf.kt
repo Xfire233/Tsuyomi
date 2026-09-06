@@ -52,9 +52,12 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.LocalInspectionMode
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalWindowInfo
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.clearAndSetSemantics
@@ -197,12 +200,28 @@ internal fun orderShortcuts(
 }
 
 @Composable
-internal fun Modifier.optionalAnimateItem(scope: LazyItemScope): Modifier =
-    if (LocalInspectionMode.current) this else with(scope) { this@optionalAnimateItem.animateItem() }
+internal fun Modifier.optionalAnimateItem(scope: LazyItemScope): Modifier {
+    val instant = LocalDisplayEnvironment.current.instantMotion
+    return if (LocalInspectionMode.current) this else with(scope) {
+        this@optionalAnimateItem.animateItem(
+            fadeInSpec = if (instant) snap() else tween(TsuyomiMotion.SWITCH_DURATION_MS, easing = TsuyomiMotion.Easing),
+            placementSpec = if (instant) snap() else tween(TsuyomiMotion.EXPAND_DURATION_MS, easing = TsuyomiMotion.Easing),
+            fadeOutSpec = if (instant) snap() else tween(TsuyomiMotion.SWITCH_DURATION_MS, easing = TsuyomiMotion.Easing),
+        )
+    }
+}
 
 @Composable
-internal fun Modifier.optionalAnimateItem(scope: LazyGridItemScope): Modifier =
-    if (LocalInspectionMode.current) this else with(scope) { this@optionalAnimateItem.animateItem() }
+internal fun Modifier.optionalAnimateItem(scope: LazyGridItemScope): Modifier {
+    val instant = LocalDisplayEnvironment.current.instantMotion
+    return if (LocalInspectionMode.current) this else with(scope) {
+        this@optionalAnimateItem.animateItem(
+            fadeInSpec = if (instant) snap() else tween(TsuyomiMotion.SWITCH_DURATION_MS, easing = TsuyomiMotion.Easing),
+            placementSpec = if (instant) snap() else tween(TsuyomiMotion.EXPAND_DURATION_MS, easing = TsuyomiMotion.Easing),
+            fadeOutSpec = if (instant) snap() else tween(TsuyomiMotion.SWITCH_DURATION_MS, easing = TsuyomiMotion.Easing),
+        )
+    }
+}
 
 @Composable
 internal fun ShortcutShelf(
@@ -345,6 +364,7 @@ internal fun ShortcutTile(
     onToggleCollectionSelection: (String) -> Unit,
     coverState: @Composable (LibraryEntry) -> CoverUiState,
     modifier: Modifier = Modifier,
+    expanded: Boolean = false,
 ) {
     val collectionId = shortcut.collection?.takeIf { it.kind == CollectionKind.MANUAL }?.collectionId
     val bookIdentity = shortcut.entry?.book?.identity
@@ -360,8 +380,8 @@ internal fun ShortcutTile(
         } == true)
     val instant = LocalDisplayEnvironment.current.instantMotion
     val targetScale by animateFloatAsState(
-        targetValue = if (targetActive) 1.05f else 1f,
-        animationSpec = if (instant) snap() else spring(stiffness = 520f, dampingRatio = 0.72f),
+        targetValue = if (targetActive) 1.025f else 1f,
+        animationSpec = if (instant) snap() else tween(TsuyomiMotion.SWITCH_DURATION_MS, easing = TsuyomiMotion.Easing),
         label = "libraryShortcutTargetScale",
     )
     val targetContainer by animateColorAsState(
@@ -404,7 +424,7 @@ internal fun ShortcutTile(
     Surface(
         modifier = modifier
             .testTag("library-shortcut-${shortcut.id}")
-            .height(116.dp)
+            .then(if (expanded) Modifier.aspectRatio(3f / 4f) else Modifier.height(116.dp))
             .graphicsLayer {
                 scaleX = targetScale
                 scaleY = targetScale
@@ -425,7 +445,7 @@ internal fun ShortcutTile(
                 selectionActive = selectionKind != null,
                 dragEnabled = true,
                 canRemove = true,
-                scrollOrientation = Orientation.Horizontal,
+                scrollOrientation = if (expanded) Orientation.Vertical else Orientation.Horizontal,
                 onTap = tileClick,
                 onLongPress = tileLongPress,
             )
@@ -440,45 +460,84 @@ internal fun ShortcutTile(
                 }
                 this.selected = selected
             },
-        shape = MaterialTheme.shapes.small,
+        shape = if (expanded) MaterialTheme.shapes.medium else MaterialTheme.shapes.small,
         color = targetContainer,
         border = BorderStroke(if (selected || targetActive) 2.dp else 1.dp, targetOutline),
         shadowElevation = if (targetActive) 8.dp else 0.dp,
     ) {
-        Column(Modifier.fillMaxWidth().padding(TsuyomiSpacing.Xs)) {
-            Box(
-                modifier = Modifier.fillMaxWidth().height(76.dp)
-                    .testTag("library-shortcut-media-${shortcut.id}")
-                    .background(MaterialTheme.colorScheme.surfaceContainerHigh),
-                contentAlignment = Alignment.Center,
-            ) {
-                shortcut.entry?.let { entry ->
-                    CoverImage(state = coverState(entry), modifier = Modifier.fillMaxSize())
-                } ?: Icon(shortcut.icon, contentDescription = null, modifier = Modifier.size(28.dp))
+        if (expanded) {
+            Box(Modifier.fillMaxSize()) {
+                Box(
+                    modifier = Modifier.fillMaxSize()
+                        .testTag("library-shortcut-media-${shortcut.id}")
+                        .background(MaterialTheme.colorScheme.surfaceContainerHigh),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    shortcut.entry?.let { entry ->
+                        CoverImage(state = coverState(entry), modifier = Modifier.fillMaxSize())
+                    } ?: Icon(shortcut.icon, contentDescription = null, modifier = Modifier.size(40.dp))
+                }
+                Column(
+                    modifier = Modifier.align(Alignment.BottomCenter).fillMaxWidth()
+                        .background(Brush.verticalGradient(listOf(Color.Transparent, Color.Black.copy(alpha = 0.82f))))
+                        .padding(start = TsuyomiSpacing.Sm, top = 28.dp, end = TsuyomiSpacing.Sm, bottom = 8.dp),
+                ) {
+                    Text(
+                        shortcut.label,
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis,
+                        style = MaterialTheme.typography.titleSmall,
+                        color = Color.White,
+                    )
+                }
                 if (selected) {
                     Surface(
-                        modifier = Modifier.align(Alignment.TopEnd).padding(TsuyomiSpacing.Xs).size(24.dp),
+                        modifier = Modifier.align(Alignment.TopEnd).padding(6.dp).size(32.dp),
                         shape = MaterialTheme.shapes.extraLarge,
                         color = MaterialTheme.colorScheme.primary,
                     ) {
                         Box(contentAlignment = Alignment.Center) {
-                            Icon(
-                                TsuyomiIcons.Selected,
-                                contentDescription = "已选择",
-                                tint = MaterialTheme.colorScheme.onPrimary,
-                                modifier = Modifier.size(16.dp),
-                            )
+                            Icon(TsuyomiIcons.Selected, contentDescription = "已选择", tint = MaterialTheme.colorScheme.onPrimary)
                         }
                     }
                 }
             }
-            Text(
-                shortcut.label,
-                modifier = Modifier.padding(top = 2.dp),
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-                style = MaterialTheme.typography.labelMedium,
-            )
+        } else {
+            Column(Modifier.fillMaxWidth().padding(TsuyomiSpacing.Xs)) {
+                Box(
+                    modifier = Modifier.fillMaxWidth().height(76.dp)
+                        .testTag("library-shortcut-media-${shortcut.id}")
+                        .background(MaterialTheme.colorScheme.surfaceContainerHigh),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    shortcut.entry?.let { entry ->
+                        CoverImage(state = coverState(entry), modifier = Modifier.fillMaxSize())
+                    } ?: Icon(shortcut.icon, contentDescription = null, modifier = Modifier.size(28.dp))
+                    if (selected) {
+                        Surface(
+                            modifier = Modifier.align(Alignment.TopEnd).padding(TsuyomiSpacing.Xs).size(24.dp),
+                            shape = MaterialTheme.shapes.extraLarge,
+                            color = MaterialTheme.colorScheme.primary,
+                        ) {
+                            Box(contentAlignment = Alignment.Center) {
+                                Icon(
+                                    TsuyomiIcons.Selected,
+                                    contentDescription = "已选择",
+                                    tint = MaterialTheme.colorScheme.onPrimary,
+                                    modifier = Modifier.size(16.dp),
+                                )
+                            }
+                        }
+                    }
+                }
+                Text(
+                    shortcut.label,
+                    modifier = Modifier.padding(top = 2.dp),
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    style = MaterialTheme.typography.labelMedium,
+                )
+            }
         }
     }
 }
@@ -503,10 +562,21 @@ internal fun ShortcutAllPage(
     modifier: Modifier,
 ) {
     val gridState = rememberLazyGridState()
+    val wide = with(LocalDensity.current) { LocalWindowInfo.current.containerSize.width.toDp() >= 600.dp }
     val gapIndex = dragCoordinator.rootInsertionIndex
         .takeIf { dragCoordinator.isOverShelf && it >= 0 }
         ?.coerceIn(0, shortcuts.size)
-    Column(modifier.fillMaxSize()) {
+    var revealed by remember { mutableStateOf(false) }
+    val instant = LocalDisplayEnvironment.current.instantMotion
+    LaunchedEffect(Unit) { revealed = true }
+    AnimatedVisibility(
+        visible = revealed,
+        enter = expandVertically(
+            animationSpec = if (instant) snap() else tween(TsuyomiMotion.EXPAND_DURATION_MS, easing = TsuyomiMotion.Easing),
+            expandFrom = Alignment.Top,
+        ) + fadeIn(if (instant) snap() else tween(TsuyomiMotion.EXPAND_DURATION_MS)),
+    ) {
+        Column(modifier.fillMaxSize()) {
         Row(
             modifier = Modifier.fillMaxWidth().heightIn(min = 56.dp).padding(horizontal = TsuyomiSpacing.Xs),
             verticalAlignment = Alignment.CenterVertically,
@@ -524,10 +594,10 @@ internal fun ShortcutAllPage(
         }
         Box(Modifier.fillMaxSize()) {
             LazyVerticalGrid(
-                columns = GridCells.Adaptive(104.dp),
+                columns = if (wide) GridCells.Adaptive(120.dp) else GridCells.Fixed(3),
                 state = gridState,
                 modifier = Modifier.fillMaxSize().libraryShelfDropTarget(dragCoordinator),
-                contentPadding = PaddingValues(start = 16.dp, top = 16.dp, end = 16.dp, bottom = 96.dp),
+                contentPadding = PaddingValues(start = 8.dp, top = 8.dp, end = 8.dp, bottom = 96.dp),
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
                 verticalArrangement = Arrangement.spacedBy(8.dp),
             ) {
@@ -558,6 +628,7 @@ internal fun ShortcutAllPage(
                             onLongPressCollection = onLongPressCollection,
                             onToggleCollectionSelection = onToggleCollectionSelection,
                             coverState = coverState,
+                            expanded = true,
                             modifier = Modifier.fillMaxWidth().optionalAnimateItem(this),
                         )
                     }
@@ -570,6 +641,7 @@ internal fun ShortcutAllPage(
                 modifier = Modifier.align(Alignment.BottomEnd).padding(TsuyomiSpacing.Md),
             )
         }
+    }
     }
 }
 

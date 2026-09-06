@@ -80,16 +80,21 @@ enum class ReaderAuxiliaryTab(val label: String) {
 }
 
 @Immutable
+enum class ReaderTheme { PAPER, WARM_GRAY, NIGHT_INK, BLACK, INK_GREEN }
+
+@Immutable
 data class ReaderSettingsUiState(
     val fontSize: Float = 18f,
     val lineHeight: Float = 1.6f,
     val horizontalMargin: Float = 24f,
     val paragraphSpacing: Float = 12f,
     val flow: ReaderFlow = ReaderFlow.PAGED,
+    val theme: ReaderTheme = ReaderTheme.PAPER,
     val lockPortrait: Boolean = false,
     val progressVisible: Boolean = true,
     val immersive: Boolean = false,
     val keepAwake: Boolean = true,
+    val volumePaging: Boolean = true,
 )
 
 sealed interface ReaderSettingsAction {
@@ -98,8 +103,10 @@ sealed interface ReaderSettingsAction {
     data class HorizontalMargin(val value: Float) : ReaderSettingsAction
     data class ParagraphSpacing(val value: Float) : ReaderSettingsAction
     data class Flow(val value: ReaderFlow) : ReaderSettingsAction
+    data class Theme(val value: ReaderTheme) : ReaderSettingsAction
     data class LockPortrait(val value: Boolean) : ReaderSettingsAction
     data class ProgressVisible(val value: Boolean) : ReaderSettingsAction
     data class Immersive(val value: Boolean) : ReaderSettingsAction
     data class KeepAwake(val value: Boolean) : ReaderSettingsAction
+    data class VolumePaging(val value: Boolean) : ReaderSettingsAction
 }

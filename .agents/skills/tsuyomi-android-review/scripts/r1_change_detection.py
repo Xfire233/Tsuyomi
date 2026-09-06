@@ -247,6 +247,8 @@ def cross_cutting_nodes(normalized: str, groups: ReviewNodeGroups) -> set[str]:
 
 
 def classify_review_contract(normalized: str, groups: ReviewNodeGroups) -> Classification | None:
+    if normalized == CATALOG_PATH.as_posix():
+        return "contract", groups.all, ["review scope authority changed"]
     if normalized.startswith(SKILL_ROOT.as_posix() + "/"):
         return "workflow", available_nodes(groups, "X06"), ["project review skill changed"]
     if normalized in {path.as_posix() for path in WORKFLOW_FILES}:
@@ -259,8 +261,6 @@ def classify_review_contract(normalized: str, groups: ReviewNodeGroups) -> Class
         return "workflow", available_nodes(groups, "X06"), ["review procedure or historical design record changed"]
     if normalized.endswith(("docs/design/UI_CONSTITUTION.md", "docs/phases/PHASE_4.md")):
         return "contract", groups.all, ["binding product or phase contract changed"]
-    if normalized == CATALOG_PATH.as_posix():
-        return "contract", groups.all, ["review scope authority changed"]
     return None
 
 

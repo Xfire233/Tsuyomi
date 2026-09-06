@@ -47,10 +47,47 @@ import org.tsuyomi.shared.sourcecontract.SourceHomeFilter
 import org.tsuyomi.shared.sourcecontract.SourceHomeFeature
 import org.tsuyomi.shared.sourcecontract.SourceHomeFilterOption
 import org.tsuyomi.shared.sourcecontract.SourceHomePage
+import org.tsuyomi.shared.sourcecontract.SourceErrorCode
 import org.tsuyomi.shared.sourcecontract.SourceHomeSection
 
 @RunWith(AndroidJUnit4::class)
 class SourceHomeScreenInstrumentedTest {
+    @Test
+    fun verification_failure_offers_explicit_cached_content_action() {
+        var cacheRequested = false
+        composeRule.setContent {
+            DisplayEnvironmentProvider(standardEnvironment) {
+                TsuyomiTheme(environment = standardEnvironment) {
+                    SourceHomeScreen(
+                        sourceName = "测试来源",
+                        state = SourceHomeViewState.Failure(
+                            SourceErrorCode.VERIFICATION_REQUIRED,
+                            "verification-required",
+                        ),
+                        remoteLibraryAvailable = true,
+                        verificationAvailable = true,
+                        onSelectPrimary = {},
+                        onSelectFilters = {},
+                        onRefresh = {},
+                        onLoadMore = {},
+                        onRetryReplacement = {},
+                        onUseOfflineCache = { cacheRequested = true },
+                        onSearch = {},
+                        onOpenRemoteLibrary = {},
+                        onOpenBook = {},
+                        onOpenFeature = {},
+                        onOpenVerification = {},
+                        onScrollPositionChanged = { _, _, _, _ -> },
+                        coverState = { CoverUiState.Fallback(FallbackSpec("缓存", "source")) },
+                    )
+                }
+            }
+        }
+
+        composeRule.onNodeWithText("使用已缓存内容").assertIsDisplayed().performClick()
+        composeRule.runOnIdle { assertTrue(cacheRequested) }
+    }
+
     @get:Rule
     val composeRule = createComposeRule()
 
@@ -125,6 +162,7 @@ class SourceHomeScreenInstrumentedTest {
                         onRefresh = {},
                         onLoadMore = { appendRequests.incrementAndGet() },
                         onRetryReplacement = {},
+                        onUseOfflineCache = {},
                         onSearch = {},
                         onOpenRemoteLibrary = {},
                         onOpenBook = {},
@@ -296,6 +334,7 @@ class SourceHomeScreenInstrumentedTest {
                         onRefresh = {},
                         onLoadMore = {},
                         onRetryReplacement = {},
+                        onUseOfflineCache = {},
                         onSearch = {},
                         onOpenRemoteLibrary = {},
                         onOpenFeature = {},
@@ -387,6 +426,7 @@ class SourceHomeScreenInstrumentedTest {
                         onRefresh = {},
                         onLoadMore = {},
                         onRetryReplacement = {},
+                        onUseOfflineCache = {},
                         onSearch = {},
                         onOpenRemoteLibrary = {},
                         onOpenBook = {},

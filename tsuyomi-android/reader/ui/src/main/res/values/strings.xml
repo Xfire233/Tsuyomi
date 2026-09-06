@@ -29,6 +29,13 @@
     <string name="reader_typography_group">排版</string>
     <string name="reader_page_group">页面</string>
     <string name="reader_navigation_group">导航</string>
+    <string name="reader_volume_paging">音量键翻页</string>
+    <string name="reader_theme_label">阅读配色</string>
+    <string name="reader_theme_paper">纸张</string>
+    <string name="reader_theme_warm_gray">暖灰</string>
+    <string name="reader_theme_night_ink">夜间墨色</string>
+    <string name="reader_theme_black">纯黑</string>
+    <string name="reader_theme_ink_green">墨绿</string>
     <string name="reader_device_group">设备</string>
     <string name="reader_progress_info">阅读信息与进度</string>
     <string name="reader_keep_awake">保持屏幕常亮</string>

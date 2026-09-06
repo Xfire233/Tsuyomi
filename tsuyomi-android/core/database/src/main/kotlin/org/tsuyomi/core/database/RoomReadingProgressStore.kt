@@ -60,6 +60,22 @@ internal class RoomReadingProgressStore(
 
     suspend fun progress(identity: BookIdentity): ReadingProgress? =
         dao.progress(identity.sourceId, identity.remoteBookId)?.toDomainOrNull()
+
+    suspend fun markChapterCompleted(identity: BookIdentity, chapterId: String, completedAt: Instant): Boolean {
+        require(chapterId.isNotBlank() && chapterId.codePointCount(0, chapterId.length) <= 512) { "Invalid chapter ID" }
+        return dao.insertCompletedChapter(
+            org.tsuyomi.core.database.room.CompletedChapterEntity(
+                sourceId = identity.sourceId,
+                remoteBookId = identity.remoteBookId,
+                chapterId = chapterId,
+                completedAtEpochSecond = completedAt.epochSecond,
+                completedAtNano = completedAt.nano,
+            ),
+        ) != -1L
+    }
+
+    suspend fun completedChapterIds(identity: BookIdentity): Set<String> =
+        dao.completedChapterIds(identity.sourceId, identity.remoteBookId).toSet()
 }
 
 private fun ReadingProgress.toEntity() = ReadingProgressEntity(

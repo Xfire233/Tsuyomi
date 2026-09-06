@@ -6,8 +6,10 @@ version = 1
 [[annotations]]
 path = [
   "Tsuyomi.code-workspace",
+  "README.md",
   "tsuyomi-android/README.md",
   "tsuyomi-android/app/src/main/res/values/strings.xml",
+  "tsuyomi-android/feature/settings/src/main/res/raw/apache_license_2_0.txt",
   "tsuyomi-android/reader/ui/src/main/res/values/strings.xml",
   "tsuyomi-protocol/package.json",
   "tsuyomi-protocol/package-lock.json",

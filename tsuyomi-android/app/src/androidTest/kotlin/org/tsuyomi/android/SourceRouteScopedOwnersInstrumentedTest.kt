@@ -26,6 +26,8 @@ import org.tsuyomi.core.media.api.CoverUiState
 import org.tsuyomi.core.database.LibraryBook
 import org.tsuyomi.core.database.ReadingProgress
 import org.tsuyomi.shared.sourcecontract.RemoteLibraryPage
+import org.tsuyomi.shared.sourcecontract.RemoteLibraryTargetsResult
+import org.tsuyomi.shared.sourcecontract.RemoteTarget
 import org.tsuyomi.shared.sourcecontract.SourceDiagnostic
 import org.tsuyomi.shared.sourcecontract.SourceErrorCode
 import org.tsuyomi.core.webview.CapturedVerifiedPage
@@ -33,6 +35,7 @@ import org.tsuyomi.shared.sourcecontract.SourceException
 import org.tsuyomi.feature.book.SourceBookState
 import org.tsuyomi.feature.search.SearchResultState
 import org.tsuyomi.feature.search.SearchLayout
+import org.tsuyomi.feature.library.remoteLibrarySelectionId
 import org.tsuyomi.shared.locator.DocumentIdentity
 import org.tsuyomi.shared.locator.LocatorPrecision
 import org.tsuyomi.shared.locator.ReaderLocator
@@ -309,6 +312,61 @@ internal class SourceRouteScopedOwnersInstrumentedTest : SourceFlowInstrumentedT
             assertEquals(false, owner.localState.inLibrary)
         }
     }
+    @Test
+    fun cached_detail_opens_without_network_and_refresh_failure_keeps_content() = runBlocking {
+        val packageInfo = installFixture()
+        val book = summary(SOURCE_FLOW_TEST_SOURCE_ID, "cached-detail", "缓存详情")
+        val chapters = listOf(SourceChapter("cached-1", "缓存章节", "https://www.wenku8.net/novel/2/200/cached-1.htm"))
+        var detailRequests = 0
+        var directoryRequests = 0
+        var failRequests = false
+        controller {
+            FakeSession(
+                detail = { summary ->
+                    detailRequests++
+                    if (failRequests) throw SourceException(
+                        SourceErrorCode.VERIFICATION_REQUIRED,
+                        SourceDiagnostic("cached-detail", "detail", safeCode = "verification-required"),
+                    )
+                    SourceBookDetail(summary, "缓存简介", emptyList(), "连载")
+                },
+                directoryResult = {
+                    directoryRequests++
+                    if (failRequests) throw SourceException(
+                        SourceErrorCode.VERIFICATION_REQUIRED,
+                        SourceDiagnostic("cached-directory", "directory", safeCode = "verification-required"),
+                    )
+                    SourceDirectory(book.identity, chapters)
+                },
+            )
+        }.use { flow ->
+            flow.open(packageInfo)
+            flow.prepareLocalDetail(book)
+            val owner = SourceDetailRouteOwner(flow, SavedStateHandle())
+
+            assertEquals(0, detailRequests)
+            assertEquals(0, directoryRequests)
+            assertNull((owner.state as SourceBookState.Content).value.description)
+            assertTrue(owner.directoryState is SourceBookState.Loading)
+
+            owner.execute(SourceDetailRouteOwner.Command.CACHE_DETAIL.name)
+
+            assertEquals(1, detailRequests)
+            assertEquals(1, directoryRequests)
+            assertEquals("缓存简介", (owner.state as SourceBookState.Content).value.description)
+            assertEquals("缓存章节", (owner.directoryState as SourceBookState.Content).value.chapters.single().title)
+
+            failRequests = true
+            owner.execute(SourceDetailRouteOwner.Command.REFRESH_DETAIL.name)
+
+            assertEquals(2, detailRequests)
+            assertEquals(2, directoryRequests)
+            assertEquals("缓存简介", (owner.state as SourceBookState.Content).value.description)
+            assertEquals("缓存章节", (owner.directoryState as SourceBookState.Content).value.chapters.single().title)
+            assertEquals("source-read-failed", owner.mutation?.safeCode)
+        }
+    }
+
     @Test
     fun canonical_detail_repairs_coverless_existing_library_metadata() = runBlocking {
         val packageInfo = installFixture()
@@ -629,15 +687,24 @@ internal class SourceRouteScopedOwnersInstrumentedTest : SourceFlowInstrumentedT
         val packageInfo = installFixture()
         val sourceId = packageInfo.manifest.sourceId.value
         putCredential(sourceId)
-        val first = summary(sourceId, "401", "网站收藏一")
-        val second = summary(sourceId, "402", "网站收藏二")
         var reads = 0
         var writes = 0
+        val first = summary(sourceId, "401", "网站收藏一").copy(canonicalUrl = "", remoteTargetId = "first")
+        val second = summary(sourceId, "402", "网站收藏二").copy(canonicalUrl = "", remoteTargetId = "second")
         controller {
             FakeSession(
                 listRemote = {
                     reads++
                     RemoteLibraryPage(listOf(first, second), null, true)
+                },
+                targetsResult = {
+                    RemoteLibraryTargetsResult(
+                        sourceId,
+                        listOf(
+                            RemoteTarget("first", "第一分类", null, "folder"),
+                            RemoteTarget("second", "第二分类", null, "folder"),
+                        ),
+                    )
                 },
                 addRemote = { _, _ ->
                     writes++
@@ -663,19 +730,25 @@ internal class SourceRouteScopedOwnersInstrumentedTest : SourceFlowInstrumentedT
 
             owner.toggleSelection(first)
             val restored = SourceRemoteLibraryRouteOwner(flow, { packageInfo }, savedState)
-            assertEquals(setOf(first.canonicalUrl), restored.selectedIds)
+            assertEquals(setOf(remoteLibrarySelectionId(first)), restored.selectedIds)
             assertEquals(RemoteLibraryRouteStatus.Idle, restored.status)
             assertTrue(restored.books.isEmpty())
             assertEquals(1, reads)
 
-            owner.requestCopy()
+            assertNull(owner.requestCopy())
             assertTrue(owner.copyConfirmationVisible)
             assertEquals(RemoteLibraryCopyResult(total = 1, added = 1), owner.confirmCopy())
+            assertTrue(requireNotNull(library.sourceRemotePolicy(sourceId)).firstImportPromptDismissed)
             assertEquals(0, writes)
             assertEquals(setOf(first.identity), library.libraryEntries().map { it.book.identity }.toSet())
 
-            owner.requestCopy()
-            assertEquals(RemoteLibraryCopyResult(total = 2, added = 1), owner.confirmCopy())
+            val restoredAfterConfirmation = SourceRemoteLibraryRouteOwner(flow, { packageInfo }, SavedStateHandle())
+            restoredAfterConfirmation.restore(sourceId)
+            restoredAfterConfirmation.selectTarget("first")
+            assertEquals(RemoteLibraryCopyResult(total = 1, added = 0), restoredAfterConfirmation.requestCopy())
+            restoredAfterConfirmation.selectTarget(null)
+            assertEquals(RemoteLibraryCopyResult(total = 2, added = 1), restoredAfterConfirmation.requestCopy())
+            assertEquals(false, restoredAfterConfirmation.copyConfirmationVisible)
             assertEquals(0, writes)
             assertEquals(setOf(first.identity, second.identity), library.libraryEntries().map { it.book.identity }.toSet())
         }

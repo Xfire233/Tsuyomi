@@ -34,6 +34,7 @@ import org.tsuyomi.feature.book.SourceBookState
 import org.tsuyomi.feature.search.SearchResultState
 import org.tsuyomi.feature.search.SearchLayout
 import org.tsuyomi.feature.library.JitWritebackPrompt
+import org.tsuyomi.feature.library.remoteLibrarySelectionId
 import org.tsuyomi.shared.locator.LocatorPrecision
 import org.tsuyomi.shared.locator.ReaderLocator
 import org.tsuyomi.shared.sourcecontract.RemoteTarget
@@ -132,9 +133,9 @@ internal class SourceDetailRouteOwner(
     private val savedState: SavedStateHandle,
     private val onLibraryChanged: suspend () -> Unit = {},
 ) {
-    var state: SourceBookState<SourceBookDetail> by mutableStateOf(SourceBookState.Loading)
+    var state: SourceBookState<SourceBookDetail> by mutableStateOf(flow.detailState)
         private set
-    var directoryState: SourceBookState<SourceDirectory> by mutableStateOf(SourceBookState.Loading)
+    var directoryState: SourceBookState<SourceDirectory> by mutableStateOf(flow.directoryState)
         private set
     var mutation: DetailMutationStatus? by mutableStateOf(null)
         private set
@@ -155,12 +156,16 @@ internal class SourceDetailRouteOwner(
                 readLater = entry.readLater,
                 progressChapterId = entry.progress?.locator?.document?.contentId,
                 progressChapterFraction = entry.progress?.locator?.chapterProgress,
+                completedChapterIds = flow.completedChapterIds,
+                reconciliationOperation = flow.remoteLibrary.selectedBookReconciliationOperation,
                 reconciliation = flow.remoteLibrary.selectedBookReconciliation?.name,
                 remoteRemoveEnabled = flow.remoteLibrary.selectedBookRemoveWritesRemote,
                 remoteMoveEnabled = flow.remoteLibrary.selectedBookMoveWritesRemote,
             )
         } ?: DetailLocalState(
             reconciliation = flow.remoteLibrary.selectedBookReconciliation?.name,
+            reconciliationOperation = flow.remoteLibrary.selectedBookReconciliationOperation,
+            completedChapterIds = flow.completedChapterIds,
             remoteRemoveEnabled = flow.remoteLibrary.selectedBookRemoveWritesRemote,
             remoteMoveEnabled = flow.remoteLibrary.selectedBookMoveWritesRemote,
         )
@@ -186,20 +191,32 @@ internal class SourceDetailRouteOwner(
         operation: DetailMutationOperation? = null,
     ) {
         val book = selectedBook ?: return
+        val previousDetail = state as? SourceBookState.Content
+        val previousDirectory = directoryState as? SourceBookState.Content
         val libraryBookBefore = flow.remoteLibrary.selectedLibraryEntry?.book
         val generation = ++requestGeneration
         operation?.let { mutation = DetailMutationStatus(it, DetailMutationPhase.WORKING) }
-        state = SourceBookState.Loading
-        directoryState = SourceBookState.Loading
-        val nextDetail = flow.requestDetail(book, offlineOnly)
+        if (previousDetail == null) state = SourceBookState.Loading
+        if (previousDirectory == null) directoryState = SourceBookState.Loading
+        val requestedDetail = flow.requestDetail(book, offlineOnly)
         if (!isCurrent(generation, book)) return
+        val nextDetail = if (requestedDetail is SourceBookState.Failure && previousDetail != null) {
+            previousDetail
+        } else {
+            requestedDetail
+        }
         state = nextDetail
-        val nextDirectory = flow.requestDirectory(book, offlineOnly)
+        val requestedDirectory = flow.requestDirectory(book, offlineOnly)
         if (!isCurrent(generation, book)) return
+        val nextDirectory = if (requestedDirectory is SourceBookState.Failure && previousDirectory != null) {
+            previousDirectory
+        } else {
+            requestedDirectory
+        }
         directoryState = nextDirectory
         if (libraryBookBefore != flow.remoteLibrary.selectedLibraryEntry?.book) onLibraryChanged()
         operation?.let {
-            mutation = if (nextDetail is SourceBookState.Failure || nextDirectory is SourceBookState.Failure) {
+            mutation = if (requestedDetail is SourceBookState.Failure || requestedDirectory is SourceBookState.Failure) {
                 DetailMutationStatus(it, DetailMutationPhase.ERROR, "source-read-failed")
             } else {
                 DetailMutationStatus(it, DetailMutationPhase.SUCCESS)
@@ -236,7 +253,14 @@ internal class SourceDetailRouteOwner(
             Command.REMOVE_FROM_LIBRARY -> mutate(DetailMutationOperation.REMOVE_FROM_LIBRARY) {
                 check(flow.removeSelectedBook()) { "Book is not in library" }
             }
-            Command.CACHE_DETAIL -> loadAll(operation = DetailMutationOperation.CACHE_DETAIL)
+            Command.CACHE_DETAIL -> {
+                mutation = if (state is SourceBookState.Content && directoryState is SourceBookState.Content) {
+                    DetailMutationStatus(DetailMutationOperation.CACHE_DETAIL, DetailMutationPhase.SUCCESS)
+                } else {
+                    loadAll(operation = DetailMutationOperation.CACHE_DETAIL)
+                    mutation
+                }
+            }
             Command.REFRESH_DETAIL -> loadAll(operation = DetailMutationOperation.REFRESH_DETAIL)
         }
     }
@@ -255,19 +279,17 @@ internal class SourceDetailRouteOwner(
 
     suspend fun selectChapter(chapter: SourceChapter) = flow.prepareChapter(chapter)
 
-    suspend fun removeSelectedBookFromWebsite() = mutate(DetailMutationOperation.REMOVE_FROM_REMOTE) {
-        val result = flow.removeSelectedBookFromWebsite()
-        if (result is RemoteMutationUiResult.Failure) error(result.safeCode)
+    suspend fun removeSelectedBookFromWebsite() = mutateRemote(DetailMutationOperation.REMOVE_FROM_REMOTE) {
+        flow.removeSelectedBookFromWebsite()
     }
 
-    suspend fun moveSelectedBookOnWebsite(targetId: String, targetName: String) = mutate(DetailMutationOperation.MOVE_REMOTE) {
-        val result = flow.moveSelectedBookOnWebsite(targetId, targetName)
-        if (result is RemoteMutationUiResult.Failure) error(result.safeCode)
-    }
+    suspend fun moveSelectedBookOnWebsite(targetId: String, targetName: String) =
+        mutateRemote(DetailMutationOperation.MOVE_REMOTE) {
+            flow.moveSelectedBookOnWebsite(targetId, targetName)
+        }
 
-    suspend fun retryRemoteReconciliation() = mutate(DetailMutationOperation.RECONCILE_RETRY) {
-        val result = flow.retryRemoteMutation()
-        if (result is RemoteMutationUiResult.Failure) error(result.safeCode)
+    suspend fun retryRemoteReconciliation() = mutateRemote(DetailMutationOperation.RECONCILE_RETRY) {
+        flow.retryRemoteMutation()
     }
 
     suspend fun acknowledgeRemoteReconciliation() = mutate(DetailMutationOperation.RECONCILE_ACKNOWLEDGE) {
@@ -277,6 +299,31 @@ internal class SourceDetailRouteOwner(
 
     fun dispose() {
         requestGeneration++
+    }
+
+    private suspend fun mutateRemote(
+        operation: DetailMutationOperation,
+        block: suspend () -> RemoteMutationUiResult,
+    ) {
+        if (mutation?.phase == DetailMutationPhase.WORKING) return
+        mutation = DetailMutationStatus(operation, DetailMutationPhase.WORKING)
+        val result = try {
+            block()
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (_: Exception) {
+            RemoteMutationUiResult.Failure("remote-write-failed")
+        }
+        onLibraryChanged()
+        mutation = when (result) {
+            RemoteMutationUiResult.Confirmed -> DetailMutationStatus(operation, DetailMutationPhase.SUCCESS)
+            RemoteMutationUiResult.Unresolved ->
+                DetailMutationStatus(operation, DetailMutationPhase.ERROR, "remote-result-unresolved")
+            RemoteMutationUiResult.Cancelled ->
+                DetailMutationStatus(operation, DetailMutationPhase.ERROR, "remote-operation-cancelled")
+            is RemoteMutationUiResult.Failure ->
+                DetailMutationStatus(operation, DetailMutationPhase.ERROR, result.safeCode)
+        }
     }
 
     private suspend fun mutate(operation: DetailMutationOperation, block: suspend () -> Unit) {
@@ -432,6 +479,7 @@ internal class SourceReaderRouteOwner(
         if (document?.contentId == locator.document.contentId) flow.saveProgress(locator, precision)
     }
 
+
     fun dispose() {
         requestGeneration++
         imageJobs.values.forEach(Job::cancel)
@@ -490,6 +538,7 @@ internal class SourceRemoteLibraryRouteOwner(
         get() = selectedTargetId?.let { targetId -> books.filter { it.remoteTargetId == targetId } } ?: books
 
     suspend fun restore(sourceId: String) {
+        reloadUnresolved(sourceId)
         val snapshot = flow.remoteMirrorSnapshot(sourceId) ?: return
         books = snapshot.books.map { item ->
             SourceBookSummary(
@@ -517,14 +566,11 @@ internal class SourceRemoteLibraryRouteOwner(
         try {
             status = when (val result = flow.pullRemoteLibrary(packageInfo)) {
                 is RemoteLibraryPullResult.Success -> {
-                    val loadedTargets = runCatching { flow.listRemoteTargets() }.getOrDefault(emptyList())
+                    val loadedTargets = flow.listRemoteTargets()
                     if (loadedTargets.isNotEmpty() || targets.isEmpty()) targets = loadedTargets
                     books = flow.saveRemoteMirrorSnapshot(packageInfo.manifest.displayName, result.books, targets)
-                    selectedIds = selectedIds.intersect(books.mapTo(hashSetOf(), SourceBookSummary::canonicalUrl))
+                    selectedIds = selectedIds.intersect(books.mapTo(hashSetOf(), ::remoteLibrarySelectionId))
                     persistSelection()
-                    unresolvedBookIds = runCatching {
-                        flow.unresolvedReconciliations().map { it.remoteBookId }.toSet()
-                    }.getOrDefault(emptySet())
                     if (books.isEmpty()) RemoteLibraryRouteStatus.Empty else RemoteLibraryRouteStatus.Content
                 }
                 RemoteLibraryPullResult.LoginRequired -> RemoteLibraryRouteStatus.LoginRequired
@@ -532,15 +578,17 @@ internal class SourceRemoteLibraryRouteOwner(
                 RemoteLibraryPullResult.Cancelled -> RemoteLibraryRouteStatus.Cancelled
                 is RemoteLibraryPullResult.Failure -> RemoteLibraryRouteStatus.Failure(result.safeCode)
             }
+            reloadUnresolved(packageInfo.manifest.sourceId.value)
         } finally {
             loading = false
         }
     }
     fun toggleSelection(book: SourceBookSummary) {
-        selectedIds = if (book.canonicalUrl in selectedIds) {
-            selectedIds - book.canonicalUrl
+        val selectionId = remoteLibrarySelectionId(book)
+        selectedIds = if (selectionId in selectedIds) {
+            selectedIds - selectionId
         } else {
-            selectedIds + book.canonicalUrl
+            selectedIds + selectionId
         }
         persistSelection()
     }
@@ -550,16 +598,40 @@ internal class SourceRemoteLibraryRouteOwner(
         persistSelection()
     }
 
-    fun requestCopy() {
-        if (books.isNotEmpty()) copyConfirmationVisible = true
+    suspend fun requestCopy(): RemoteLibraryCopyResult? {
+        val selected = selectedBooksForCopy()
+        if (selected.isEmpty()) return null
+        val sourceId = selected.first().identity.sourceId
+        if (selected.any { it.identity.sourceId != sourceId }) {
+            status = RemoteLibraryRouteStatus.Failure("source-identity-mismatch")
+            return null
+        }
+        if (flow.localCopyConfirmationRequired(sourceId)) {
+            copyConfirmationVisible = true
+            return null
+        }
+        return copySelectedBooks(selected)
     }
 
     fun dismissCopy() {
         copyConfirmationVisible = false
     }
 
-    suspend fun confirmCopy(): RemoteLibraryCopyResult {
-        val selected = if (selectedIds.isEmpty()) books else books.filter { it.canonicalUrl in selectedIds }
+    suspend fun confirmCopy(): RemoteLibraryCopyResult? {
+        val selected = selectedBooksForCopy()
+        if (selected.isEmpty()) return null
+        val sourceId = selected.first().identity.sourceId
+        if (!flow.acknowledgeLocalCopyConfirmation(sourceId)) {
+            copyConfirmationVisible = false
+            status = RemoteLibraryRouteStatus.Failure("copy-confirmation-receipt-failed")
+            return null
+        }
+        return copySelectedBooks(selected)
+    }
+
+    private fun selectedBooksForCopy(): List<SourceBookSummary> =
+        if (selectedIds.isEmpty()) visibleBooks else books.filter { remoteLibrarySelectionId(it) in selectedIds }
+    private suspend fun copySelectedBooks(selected: List<SourceBookSummary>): RemoteLibraryCopyResult {
         val result = flow.copyRemoteLibraryToLocal(selected)
         copyConfirmationVisible = false
         status = RemoteLibraryRouteStatus.Copied(result.total, result.added)
@@ -596,9 +668,11 @@ internal class SourceRemoteLibraryRouteOwner(
         val result = flow.removeBookFromWebsite(book)
         if (result is RemoteMutationUiResult.Confirmed) {
             books = books.filterNot { it.identity == book.identity }
-            selectedIds = selectedIds - book.canonicalUrl
+            selectedIds = selectedIds - remoteLibrarySelectionId(book)
             persistSelection()
         }
+        reloadUnresolved(book.identity.sourceId)
+        status = RemoteLibraryRouteStatus.Mutation("remove", result)
         return result
     }
 
@@ -628,6 +702,8 @@ internal class SourceRemoteLibraryRouteOwner(
         if (result is RemoteMutationUiResult.Confirmed) {
             books = books.map { if (it.identity == book.identity) it.copy(remoteTargetId = targetId) else it }
         }
+        reloadUnresolved(book.identity.sourceId)
+        status = RemoteLibraryRouteStatus.Mutation("move", result, targetName)
         return result
     }
 
@@ -653,6 +729,13 @@ internal class SourceRemoteLibraryRouteOwner(
         pendingOperationBook = null
     }
 
+    private suspend fun reloadUnresolved(sourceId: String) {
+        unresolvedBookIds = flow.unresolvedReconciliations()
+            .asSequence()
+            .filter { it.sourceId == sourceId }
+            .mapTo(linkedSetOf()) { it.remoteBookId }
+    }
+
     private fun persistSelection() {
         savedState[SelectedIdsKey] = selectedIds.toList()
     }
@@ -672,6 +755,11 @@ internal sealed interface RemoteLibraryRouteStatus {
     data object Cancelled : RemoteLibraryRouteStatus
     data class Failure(val safeCode: String) : RemoteLibraryRouteStatus
     data class Copied(val total: Int, val added: Int) : RemoteLibraryRouteStatus
+    data class Mutation(
+        val operation: String,
+        val result: RemoteMutationUiResult,
+        val targetName: String? = null,
+    ) : RemoteLibraryRouteStatus
 }
 
 @Composable

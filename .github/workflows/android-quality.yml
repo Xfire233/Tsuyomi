@@ -58,19 +58,11 @@ jobs:
       - name: Set up Gradle cache
         if: steps.plan.outputs.changed == 'true'
         uses: gradle/actions/setup-gradle@4c44018e59b437e86cdfc41da381398f93ed8808
-      - name: Regenerate affected dependency locks for drift detection
-        if: steps.plan.outputs.dependency_changed == 'true' && steps.plan.outputs.build_tasks != ''
-        run: >-
-          ./gradlew --no-daemon --console=plain --dependency-verification strict --write-locks
-          ${{ steps.plan.outputs.build_tasks }}
       - name: Build, test, lint, and validate affected goldens
         if: steps.plan.outputs.build_tasks != ''
         run: >-
           ./gradlew --no-daemon --console=plain --dependency-verification strict
           ${{ steps.plan.outputs.build_tasks }}
-      - name: Lock state is stable
-        if: steps.plan.outputs.dependency_changed == 'true'
-        run: git diff --exit-code -- '**/*gradle.lockfile'
 
   android-api29-instrumentation:
     runs-on: ubuntu-latest

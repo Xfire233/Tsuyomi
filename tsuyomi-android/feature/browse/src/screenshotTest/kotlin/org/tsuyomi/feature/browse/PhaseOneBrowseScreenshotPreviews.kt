@@ -28,7 +28,7 @@ fun BrowseEmptyStandardScreenshot() {
     BrowsePreview(DisplayProfile.STANDARD)
 }
 
-@PreviewTest
+// Retained for IDE review; screenshot evidence resumes only when the EINK profile is unfrozen.
 @Preview(name = "eink", device = "spec:width=843dp,height=1120dp,dpi=240", locale = "zh-rCN")
 @Composable
 fun BrowseEmptyEInkScreenshot() {

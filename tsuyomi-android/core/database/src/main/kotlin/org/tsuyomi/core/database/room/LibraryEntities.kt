@@ -144,6 +144,26 @@ internal data class ReadingProgressEntity(
     @ColumnInfo(name = "updated_at_nano")
     val updatedAtNano: Int,
 )
+@Entity(
+    tableName = "completed_chapters",
+    primaryKeys = ["source_id", "remote_book_id", "chapter_id"],
+    foreignKeys = [
+        ForeignKey(
+            entity = BookEntity::class,
+            parentColumns = ["source_id", "remote_book_id"],
+            childColumns = ["source_id", "remote_book_id"],
+            onDelete = ForeignKey.CASCADE,
+        ),
+    ],
+)
+internal data class CompletedChapterEntity(
+    @ColumnInfo(name = "source_id") val sourceId: String,
+    @ColumnInfo(name = "remote_book_id") val remoteBookId: String,
+    @ColumnInfo(name = "chapter_id") val chapterId: String,
+    @ColumnInfo(name = "completed_at_epoch_second") val completedAtEpochSecond: Long,
+    @ColumnInfo(name = "completed_at_nano") val completedAtNano: Int,
+)
+
 
 @Entity(
     tableName = "library_entries",

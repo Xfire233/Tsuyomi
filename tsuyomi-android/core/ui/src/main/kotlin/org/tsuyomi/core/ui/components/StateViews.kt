@@ -54,6 +54,8 @@ fun StateView(
     message: String? = null,
     actionLabel: String? = null,
     onAction: (() -> Unit)? = null,
+    secondaryActionLabel: String? = null,
+    onSecondaryAction: (() -> Unit)? = null,
 ) {
     val eInk = LocalDisplayEnvironment.current.effectiveProfile == DisplayProfile.EINK
     Column(
@@ -96,6 +98,14 @@ fun StateView(
                 } else {
                     TsuyomiButtonStyle.SECONDARY
                 },
+            )
+        }
+        if (secondaryActionLabel != null && onSecondaryAction != null) {
+            TsuyomiButton(
+                text = secondaryActionLabel,
+                onClick = onSecondaryAction,
+                modifier = Modifier.padding(top = TsuyomiSpacing.Sm),
+                style = TsuyomiButtonStyle.SECONDARY,
             )
         }
     }

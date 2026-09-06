@@ -55,6 +55,14 @@
             "cursor": { "kind": "cursor" }
           }
         },
+        "targets": {
+          "origin": "https://www.wenku8.net",
+          "method": "GET",
+          "path": "/modules/article/bookcase.php",
+          "parameters": {
+            "action": { "kind": "fixed", "value": "targets" }
+          }
+        },
         "add": {
           "origin": "https://www.wenku8.net",
           "method": "POST",
@@ -70,6 +78,25 @@
           "parameters": {
             "action": { "kind": "fixed", "value": "add" },
             "aid": { "kind": "remoteBookId" }
+          }
+        },
+        "remove": {
+          "origin": "https://www.wenku8.net",
+          "method": "POST",
+          "path": "/modules/article/bookcase.php",
+          "parameters": {
+            "action": { "kind": "fixed", "value": "remove" },
+            "aid": { "kind": "remoteBookId" }
+          }
+        },
+        "move": {
+          "origin": "https://www.wenku8.net",
+          "method": "POST",
+          "path": "/modules/article/bookcase.php",
+          "parameters": {
+            "action": { "kind": "fixed", "value": "move" },
+            "aid": { "kind": "remoteBookId" },
+            "target": { "kind": "targetId" }
           }
         }
       }

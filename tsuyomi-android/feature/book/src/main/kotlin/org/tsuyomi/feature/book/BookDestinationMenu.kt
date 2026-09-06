@@ -39,14 +39,10 @@ fun BookDestinationMenu(
     selectedRemoteTargetId: String?,
     loadingRemoteTargets: Boolean,
     websiteGroupingEnabled: Boolean,
-    message: String?,
-    partialMoveTargetName: String?,
     onToggleReadLater: () -> Unit,
     onToggleShortcut: () -> Unit,
     onToggleCollection: (String) -> Unit,
     onApplyWebsite: (String) -> Unit,
-    onRetryMoveOnly: () -> Unit,
-    onKeepDefaultWebsiteShelf: () -> Unit,
     onDismiss: () -> Unit,
 ) {
     DestinationMenuItem(
@@ -123,28 +119,6 @@ fun BookDestinationMenu(
                 },
             )
         }
-    }
-    message?.let { DestinationStatusRow(it) }
-    partialMoveTargetName?.let { targetName ->
-        HorizontalDivider()
-        DestinationMenuItem(
-            label = "保留在默认书架",
-            icon = TsuyomiIcons.Shelf,
-            selected = false,
-            onClick = {
-                onKeepDefaultWebsiteShelf()
-                onDismiss()
-            },
-        )
-        DestinationMenuItem(
-            label = "继续移至$targetName",
-            icon = TsuyomiIcons.MoveToFolder,
-            selected = false,
-            onClick = {
-                onRetryMoveOnly()
-                onDismiss()
-            },
-        )
     }
 }
 

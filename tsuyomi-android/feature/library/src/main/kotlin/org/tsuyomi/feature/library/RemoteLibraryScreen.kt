@@ -27,6 +27,9 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.semantics.LiveRegionMode
+import androidx.compose.ui.semantics.liveRegion
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import org.tsuyomi.core.display.DisplayProfile
@@ -49,6 +52,9 @@ data class JitWritebackPrompt(
     val sourceName: String,
     val bookTitle: String,
 )
+
+fun remoteLibrarySelectionId(book: SourceBookSummary): String =
+    "${book.identity.sourceId.length}:${book.identity.sourceId}${book.identity.remoteBookId}"
 
 enum class RemoteLibraryViewState {
     IDLE,
@@ -114,49 +120,62 @@ fun RemoteLibraryScreen(
 
     val selectedCount = selectedIds.size
     var layout by remember { mutableStateOf(LibraryLayout.GRID) }
-    val selectedBook = books.firstOrNull { it.canonicalUrl in selectedIds }
-    val overflowActions = buildList {
-        mirrorPinned?.let { pinned ->
-            add(
-                TsuyomiOverflowAction(
-                    label = if (pinned) "移出快捷书架" else "固定到快捷书架",
-                    onClick = onToggleMirrorPinned,
-                    icon = TsuyomiIcons.Pin,
-                ),
-            )
-        }
-        if (targets.size > 1 || groupingEnabled) {
-            add(
-                TsuyomiOverflowAction(
-                    label = if (groupingEnabled) "停用网站分组" else "启用网站分组",
-                    onClick = { onGroupingEnabledChange(!groupingEnabled) },
-                    icon = TsuyomiIcons.Folder,
-                ),
-            )
-        }
-        if (books.isNotEmpty()) {
-            add(
-                TsuyomiOverflowAction(
-                    label = stringResource(
-                        if (selectedCount == 0) R.string.remote_library_copy_all else R.string.remote_library_copy_selected,
+    val selectedBook = books.firstOrNull { remoteLibrarySelectionId(it) in selectedIds }
+    val allVisibleSelected = books.isNotEmpty() && books.all { remoteLibrarySelectionId(it) in selectedIds }
+    val overflowActions = if (selectedCount == 0) {
+        buildList {
+            mirrorPinned?.let { pinned ->
+                add(
+                    TsuyomiOverflowAction(
+                        label = if (pinned) "移出快捷书架" else "固定到快捷书架",
+                        onClick = onToggleMirrorPinned,
+                        icon = TsuyomiIcons.Pin,
                     ),
-                    onClick = onRequestCopy,
-                    icon = TsuyomiIcons.Copy,
-                ),
-            )
-        }
-        if (selectedCount == 1 && selectedBook != null) {
-            if (groupingEnabled) {
-                add(TsuyomiOverflowAction("移至网站分类", { onRequestMoveBook(selectedBook) }, TsuyomiIcons.MoveToFolder))
+                )
             }
+            if (targets.size > 1 || groupingEnabled) {
+                add(
+                    TsuyomiOverflowAction(
+                        label = if (groupingEnabled) "停用网站分组" else "启用网站分组",
+                        onClick = { onGroupingEnabledChange(!groupingEnabled) },
+                        icon = TsuyomiIcons.Folder,
+                    ),
+                )
+            }
+            if (books.isNotEmpty()) {
+                add(
+                    TsuyomiOverflowAction(
+                        label = stringResource(R.string.remote_library_copy_all),
+                        onClick = onRequestCopy,
+                        icon = TsuyomiIcons.Copy,
+                    ),
+                )
+            }
+        }
+    } else {
+        emptyList()
+    }
+    val selectionActions = if (selectedCount == 0) {
+        emptyList()
+    } else {
+        buildList {
             add(
-                TsuyomiOverflowAction(
-                    label = "从网站移除",
-                    onClick = { onRequestRemoveBook(selectedBook) },
-                    icon = TsuyomiIcons.Delete,
-                    destructive = true,
+                TsuyomiTopBarAction(
+                    icon = if (allVisibleSelected) TsuyomiIcons.DeselectAll else TsuyomiIcons.SelectAll,
+                    label = if (allVisibleSelected) "取消全选" else "全选",
+                    onClick = {
+                        if (allVisibleSelected) onClearSelection()
+                        else books.filterNot { remoteLibrarySelectionId(it) in selectedIds }.forEach(onToggleSelection)
+                    },
                 ),
             )
+            add(TsuyomiTopBarAction(TsuyomiIcons.Copy, stringResource(R.string.remote_library_copy_selected), onRequestCopy))
+            if (selectedCount == 1 && selectedBook != null) {
+                if (groupingEnabled) {
+                    add(TsuyomiTopBarAction(TsuyomiIcons.MoveToFolder, "移至网站分类") { onRequestMoveBook(selectedBook) })
+                }
+                add(TsuyomiTopBarAction(TsuyomiIcons.Delete, "从网站收藏移除") { onRequestRemoveBook(selectedBook) })
+            }
         }
     }
     Scaffold(
@@ -170,24 +189,32 @@ fun RemoteLibraryScreen(
                 } else {
                     targets.firstOrNull { it.targetId == selectedTargetId }?.displayName ?: sourceName
                 },
-                subtitle = if (!groupingEnabled && selectedTargetId == null && sourceName.isNotBlank()) {
+                subtitle = if (selectedCount != 0) {
+                    "批量复制；网站移动/移除仅限单本"
+                } else if (!groupingEnabled && selectedTargetId == null && sourceName.isNotBlank()) {
                     "$sourceName · ${books.size} 本"
                 } else {
                     stringResource(R.string.remote_library_subtitle, books.size)
                 },
                 onNavigateUp = if (selectedCount == 0) onNavigateUp else onClearSelection,
-                actions = listOf(
-                    TsuyomiTopBarAction(TsuyomiIcons.Refresh, stringResource(R.string.remote_library_refresh), onRefresh),
-                    TsuyomiTopBarAction(
-                        icon = when (layout) {
-                            LibraryLayout.GRID -> TsuyomiIcons.Grid
-                            LibraryLayout.LIST -> TsuyomiIcons.List
-                            LibraryLayout.COMPACT -> TsuyomiIcons.Compact
-                        },
-                        label = "切换布局",
-                        onClick = { layout = layout.next() },
-                    ),
-                ),
+                navigationIcon = if (selectedCount == 0) TsuyomiIcons.Back else TsuyomiIcons.Close,
+                navigationContentDescription = if (selectedCount == 0) null else "退出选择",
+                actions = if (selectedCount != 0) {
+                    selectionActions
+                } else {
+                    listOf(
+                        TsuyomiTopBarAction(TsuyomiIcons.Refresh, stringResource(R.string.remote_library_refresh), onRefresh),
+                        TsuyomiTopBarAction(
+                            icon = when (layout) {
+                                LibraryLayout.GRID -> TsuyomiIcons.Grid
+                                LibraryLayout.LIST -> TsuyomiIcons.List
+                                LibraryLayout.COMPACT -> TsuyomiIcons.Compact
+                            },
+                            label = "切换布局",
+                            onClick = { layout = layout.next() },
+                        ),
+                    )
+                },
                 overflow = overflowActions,
             )
         },
@@ -198,16 +225,10 @@ fun RemoteLibraryScreen(
             message?.let {
                 Text(
                     text = it,
-                    modifier = Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 12.dp),
+                    modifier = Modifier.fillMaxWidth()
+                        .semantics { liveRegion = LiveRegionMode.Polite }
+                        .padding(horizontal = 20.dp, vertical = 12.dp),
                     style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            }
-            if (selectedCount > 1) {
-                Text(
-                    text = "网站操作仅支持单本",
-                    modifier = Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 8.dp),
-                    style = MaterialTheme.typography.labelLarge,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
@@ -263,7 +284,7 @@ fun RemoteLibraryScreen(
                     targets = if (groupingEnabled) targets else emptyList(),
                     selectedTargetId = selectedTargetId.takeIf { groupingEnabled },
                     groupingEnabled = groupingEnabled,
-                    selectedBookIds = books.filter { it.canonicalUrl in selectedIds }.mapTo(linkedSetOf()) { it.identity },
+                    selectedBookIds = books.filter { remoteLibrarySelectionId(it) in selectedIds }.mapTo(linkedSetOf()) { it.identity },
                     unresolvedBookIds = unresolvedBookIds,
                     layout = layout,
                     onOpenTarget = { onOpenTarget(it.targetId) },
@@ -271,7 +292,7 @@ fun RemoteLibraryScreen(
                     onLongPressBook = onToggleSelection,
                     onToggleBookSelection = onToggleSelection,
                     onCopyToLocal = { book ->
-                        if (book.canonicalUrl !in selectedIds) onToggleSelection(book)
+                        if (remoteLibrarySelectionId(book) !in selectedIds) onToggleSelection(book)
                         onRequestCopy()
                     },
                     onMoveToTarget = { book, target ->
@@ -301,11 +322,13 @@ fun RemoteLibraryScreen(
     if (removeConfirmationBook != null) {
         AlertDialog(
             onDismissRequest = onDismissRemoveConfirmation,
-            title = { Text("从远端书架移除") },
-            text = { Text("确定要从远端书架移除《${removeConfirmationBook.title}》吗？\n注意：远端删除仅影响网站书架，不会删除已保存在本地的数据。") },
+            title = { Text("从网站收藏移除") },
+            text = {
+                Text("确定要从网站收藏中移除《${removeConfirmationBook.title}》吗？\n此操作只修改网站收藏；本地书架、稍后再读、评分、标签和阅读进度均保留。")
+            },
             confirmButton = {
                 TextButton(onClick = { onConfirmRemove(removeConfirmationBook) }) {
-                    Text("移除", color = MaterialTheme.colorScheme.error)
+                    Text("从网站收藏移除", color = MaterialTheme.colorScheme.error)
                 }
             },
             dismissButton = { TextButton(onClick = onDismissRemoveConfirmation) { Text("取消") } },

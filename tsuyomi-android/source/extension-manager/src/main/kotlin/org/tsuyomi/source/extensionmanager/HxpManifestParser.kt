@@ -189,7 +189,10 @@ internal object HxpManifestParser {
         writes: Set<String>,
     ): Map<RemoteOperation, HxpRemoteOperationPolicy> {
         val required = buildSet {
-            if (read) add("read")
+            if (read) {
+                add("read")
+                add("targets")
+            }
             if ("add" in writes) add("add")
             if ("remove" in writes) add("remove")
             if ("move" in writes) add("move")
@@ -200,6 +203,7 @@ internal object HxpManifestParser {
         return objectValue.entries.associate { (name, value) ->
             val operation = when (name) {
                 "read" -> RemoteOperation.READ
+                "targets" -> RemoteOperation.TARGETS
                 "add" -> RemoteOperation.ADD
                 "remove" -> RemoteOperation.REMOVE
                 "move" -> RemoteOperation.MOVE
@@ -220,8 +224,9 @@ internal object HxpManifestParser {
         if (origin !in networkOrigins) fail(HxpVerificationError.CAPABILITY_POLICY_VIOLATION)
         val method = runCatching { NetworkMethod.valueOf(value.string("method")) }
             .getOrElse { fail(HxpVerificationError.INVALID_MANIFEST) }
-        if ((operation == RemoteOperation.READ && method != NetworkMethod.GET) ||
-            (operation in setOf(RemoteOperation.ADD, RemoteOperation.REMOVE, RemoteOperation.MOVE) && method != NetworkMethod.POST)
+        if ((operation in setOf(RemoteOperation.READ, RemoteOperation.TARGETS) && method != NetworkMethod.GET) ||
+            (operation == RemoteOperation.ADD && method !in setOf(NetworkMethod.GET, NetworkMethod.POST)) ||
+            (operation in setOf(RemoteOperation.REMOVE, RemoteOperation.MOVE) && method != NetworkMethod.POST)
         ) fail(HxpVerificationError.CAPABILITY_POLICY_VIOLATION)
         val path = value.string("path")
         if (!path.startsWith('/') || '?' in path || '#' in path || path.length > 1024) fail(HxpVerificationError.INVALID_MANIFEST)

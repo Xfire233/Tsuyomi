@@ -12,6 +12,7 @@ import androidx.sqlite.db.SupportSQLiteDatabase
 import org.tsuyomi.core.database.room.BookEntity
 import org.tsuyomi.core.database.room.BrowsingHistoryEntity
 import org.tsuyomi.core.database.room.CollectionEntity
+import org.tsuyomi.core.database.room.CompletedChapterEntity
 import org.tsuyomi.core.database.room.LibraryDao
 import org.tsuyomi.core.database.room.LibraryEntryEntity
 import org.tsuyomi.core.database.room.LocalBookTagEntity
@@ -37,6 +38,7 @@ import org.tsuyomi.core.database.room.SourceRemotePolicyEntity
         LibraryEntryEntity::class,
         LocalBookTagEntity::class,
         ManualCollectionMembershipEntity::class,
+        CompletedChapterEntity::class,
         ReadingProgressEntity::class,
         RemoteLibraryReconciliationEntity::class,
         SourceAvailabilityEntity::class,
@@ -51,7 +53,7 @@ import org.tsuyomi.core.database.room.SourceRemotePolicyEntity
         SmartRuleEntity::class,
         SubscriptionDraftEntity::class,
     ],
-    version = 6,
+    version = 8,
     exportSchema = true,
 )
 @TypeConverters(RoomConverters::class)
@@ -126,5 +128,17 @@ val MIGRATION_5_6 = object : Migration(5, 6) {
         db.execSQL("CREATE TABLE IF NOT EXISTS remote_mirror_targets (source_id TEXT NOT NULL, target_id TEXT NOT NULL, display_name TEXT NOT NULL, parent_id TEXT, kind TEXT NOT NULL, frozen INTEGER NOT NULL, updated_at_epoch_second INTEGER NOT NULL, PRIMARY KEY(source_id, target_id))")
         db.execSQL("CREATE TABLE IF NOT EXISTS remote_mirror_items (source_id TEXT NOT NULL, remote_book_id TEXT NOT NULL, target_id TEXT, updated_at_epoch_second INTEGER NOT NULL, PRIMARY KEY(source_id, remote_book_id), FOREIGN KEY(source_id, remote_book_id) REFERENCES books(source_id, remote_book_id) ON UPDATE NO ACTION ON DELETE CASCADE)")
         db.execSQL("CREATE INDEX IF NOT EXISTS index_remote_mirror_items_source_id_remote_book_id ON remote_mirror_items(source_id, remote_book_id)")
+    }
+}
+
+val MIGRATION_6_7 = object : Migration(6, 7) {
+    override fun migrate(db: SupportSQLiteDatabase) = Unit
+}
+
+val MIGRATION_7_8 = object : Migration(7, 8) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        db.execSQL(
+            "CREATE TABLE IF NOT EXISTS completed_chapters (source_id TEXT NOT NULL, remote_book_id TEXT NOT NULL, chapter_id TEXT NOT NULL, completed_at_epoch_second INTEGER NOT NULL, completed_at_nano INTEGER NOT NULL, PRIMARY KEY(source_id, remote_book_id, chapter_id), FOREIGN KEY(source_id, remote_book_id) REFERENCES books(source_id, remote_book_id) ON UPDATE NO ACTION ON DELETE CASCADE)",
+        )
     }
 }

@@ -33,11 +33,13 @@ fun TsuyomiAdaptiveListFab(
     topLabel: String,
     endLabel: String,
     modifier: Modifier = Modifier,
+    hideWhileScrolling: Boolean = false,
 ) {
     val scope = rememberCoroutineScope()
-    val show by remember(state) {
+    val show by remember(state, hideWhileScrolling) {
         derivedStateOf {
-            state.layoutInfo.totalItemsCount > 0 && (state.canScrollBackward || state.canScrollForward)
+            state.layoutInfo.totalItemsCount > 0 && (state.canScrollBackward || state.canScrollForward) &&
+                (!hideWhileScrolling || !state.isScrollInProgress)
         }
     }
     var movingToEnd by remember(state) { mutableStateOf(true) }
@@ -77,11 +79,13 @@ fun TsuyomiAdaptiveListFab(
     topLabel: String,
     endLabel: String,
     modifier: Modifier = Modifier,
+    hideWhileScrolling: Boolean = false,
 ) {
     val scope = rememberCoroutineScope()
-    val show by remember(state) {
+    val show by remember(state, hideWhileScrolling) {
         derivedStateOf {
-            state.layoutInfo.totalItemsCount > 0 && (state.canScrollBackward || state.canScrollForward)
+            state.layoutInfo.totalItemsCount > 0 && (state.canScrollBackward || state.canScrollForward) &&
+                (!hideWhileScrolling || !state.isScrollInProgress)
         }
     }
     var movingToEnd by remember(state) { mutableStateOf(true) }

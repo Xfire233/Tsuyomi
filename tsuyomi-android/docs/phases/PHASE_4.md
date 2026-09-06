@@ -1,21 +1,21 @@
 <!-- SPDX-FileCopyrightText: 2026 Tsuyomi Contributors -->
 <!-- SPDX-License-Identifier: Apache-2.0 -->
 
-# Phase 4 plan — foundational UX and remaining authorized writeback
+# Phase 4 plan — foundational UX and authorized writeback
 > Terminology supersession: this work scope was formerly named Gate 4. It is now Phase 4. The prior Standard Atlas manual-approval prerequisite was explicitly abandoned by the user on 2026-08-29; Phase 4A production implementation was explicitly authorized the same day.
 
 
 ## Status and review input
 
-- Planner status: **PHASE 4A PRODUCTION IMPLEMENTATION ACTIVE — Standard Atlas manual review abandoned; production defects are corrected during production verification; E-ink remains frozen.**
-- Implementation authorization: **GRANTED FOR PHASE 4A ON 2026-08-29**. Phase 4B, Phase 4C, E-ink restoration, release and tag actions remain separately controlled.
+- Planner status: **PHASE 4B PRODUCTION PACKAGE IMPLEMENTED — package-review findings and local release gates are reconciled; PR checks, final Adviser review on the exact PR head and independent human merge confirmation remain active. Phase 4A foundation is retained and E-ink remains frozen.**
+- Implementation authorization: **GRANTED FOR PHASE 4A ON 2026-08-29 AND PHASE 4B BY EXPLICIT USER DIRECTION ON 2026-09-04–2026-09-06**. Phase 4C, E-ink restoration, release and tag actions remain separately controlled. Phase 4B authorization covers implementation and deterministic/local verification; it does not authorize an unattended or agent-initiated live website mutation.
 - Product-visible authority: `UI_CONSTITUTION.md` Active constraint spine. `DESIGN_DIRECTION_HANDOFF.md` is review provenance/history; this Phase document owns scope, sequencing and risk boundaries; authorization is decided by the separate checkpoints below. D1–D18 remain historical unless the active spine expressly retains their product-visible consequence.
-- Product baseline: `org.tsuyomi.android` `0.2.0` / versionCode `2`; Host API `1.1.0`; HXP manifest v1; Room schema `3` (`read_later` added by the Phase 4A Library slice).
+- Product baseline: `org.tsuyomi.android` `0.2.0` / versionCode `2`; Host API `1.1.0`; HXP manifest v1; deterministic Wenku8 fixture `0.2.28`; Room schema `8`; current transfer output `tsuyomi-transfer` v2 with strict v1/v2 import.
 - Phase 3 baseline: `d3e335a11565ae79e15d374062db637f3f9979d9`; dual-portrait evidence rule: `26bad358ab2ef4afac01b63b30e6c6c3e6de9c1c`
 - UI impact: **YES** — every root and task path, book details, Reader entry, library/collections/history, source and remote-library surfaces, transfer, settings, shared UI semantics and goldens.
 - Security-sensitive impact: **YES** — Phase 4B adds separately signed/capability-gated remote remove/move and remote target selection. Phase 4A must preserve the existing host-only credential, direct-action, reconciliation, redirect and cookie boundaries.
 
-Phase 4 has three ordered work partitions. **Phase 4A is foundational UX**: it repairs the current page model and every confirmed task-flow gap before remote writes are expanded. **Phase 4B is the original roadmap scope**: remaining authorized remote writeback. **Phase 4C is the independent update inbox/schedule scope.** Phase 4A production implementation is now authorized; applicable P1 closure, independent implementation review and production verification remain merge/acceptance requirements. Phase 4B and Phase 4C do not inherit this authorization.
+Phase 4 has three ordered work partitions. **Phase 4A is foundational UX**: it repairs the current page model and every confirmed task-flow gap before remote writes are expanded. **Phase 4B is the authorized website-mirror and remote-writeback partition**: its signed ADD/REMOVE/MOVE/target operations, operation-specific authorization, reconciliation and visible entry points are production scope. **Phase 4C is the independent update inbox/schedule scope.** Phase 4A and Phase 4B production implementation are authorized; applicable P1 closure, independent implementation review and production verification remain merge/acceptance requirements. Phase 4C does not inherit this authorization.
 
 ### Temporary Phase 4 profile sequencing decision — 2026-08-20
 
@@ -35,11 +35,17 @@ The Standard Atlas **UI construction** milestone and actual production scenarios
 
 E-ink remains frozen after the Standard Atlas construction closeout. Resumption still requires a later explicit user decision and the complete restoration scope in the preceding section.
 
-### Phase 4A production-authorization supersession — 2026-08-29
+### Phase 4A production-authorization history — 2026-08-29
 
-The user explicitly abandoned further Standard Atlas review and accepted correcting remaining UI problems during production implementation. This supersedes the former requirement that a fresh manifest-bound Atlas manual approval tuple exist before Phase 4A production work begins. The completed exact-source Atlas automation closeout remains non-approval reference evidence.
+The user explicitly abandoned further Standard Atlas review and accepted correcting remaining UI problems during production implementation. This superseded the former requirement that a fresh manifest-bound Atlas manual approval tuple exist before Phase 4A production work began. The completed exact-source Atlas automation closeout remains non-approval reference evidence.
 
-The user explicitly authorized Phase 4A production implementation. The authorization covers only the clean-cutover 4A scope in this document. It does not approve the UI, close any Review Graph verdict, authorize Phase 4B/4C, resume E-ink, or authorize release/tag operations. All 28 Review Graph nodes become production-stage obligations; `S*`/`X*` still require `org.tsuyomi.android`, real host state, live online services and signed deterministic fixture replay.
+At that date, the authorization covered only the clean-cutover Phase 4A scope and did not yet authorize Phase 4B/4C, E-ink restoration, release or tag operations. The Phase 4B restriction in this historical checkpoint is superseded by the 2026-09-06 Phase 4B authorization reconciliation immediately below. All 28 Review Graph nodes remain production-stage obligations; `S*`/`X*` still require `org.tsuyomi.android`, real host state, live online services and signed deterministic fixture replay.
+
+### Phase 4B production-authorization reconciliation — 2026-09-06
+
+The user's explicit implementation and correction directions from 2026-09-04 through 2026-09-06 authorize Phase 4B production implementation and bounded deterministic/device verification. This supersedes earlier active-boundary prose that left Phase 4B blocked. It does not authorize an agent-initiated live website ADD/MOVE/REMOVE, commit, push, PR, merge, release, tag, credential mutation or data clear.
+
+Phase 4B therefore requires remote ADD capability to be production-ready wherever the active source declares the signed ADD policy and the host has the matching active package, grant, verified credential snapshot and user-controlled per-operation authorization receipt. "Ready" does not mean globally or silently enabled: the ordinary `加入书架` action remains local-only, the website action must be explicitly labelled and user-triggered, the first ADD authorization is default-off/JIT, and every attempt still uses a fresh identity-bound single-use token plus durable reconciliation. Wenku8's accepted ADD contract is the identity-bound idempotent `GET /modules/article/addbookcase.php?bid={remoteBookId}`; an ambiguous response remains `ADD` unresolved rather than being displayed as success.
 
 ### Phase 4A historical direct-takeover decision — 2026-08-29
 
@@ -298,6 +304,8 @@ Every 4A/4B target head passes the mandatory Standard portrait flow on `Tsuyomi_
 
 The retained `Tsuyomi_EInk_API29` (`1264×1680`, 240dpi), compact E-ink, grayscale and physical-panel requirements are non-blocking during the freeze and return together in the restoration pass. Before implementation, independent Designer reviews Standard information architecture, task flows and accessibility; independent Adviser reviews module/persistence/protocol/security/lifecycle/concurrency/test plan. Before merge, both re-review affected final head; all applicable P0/P1 findings close with source fix, regression proof, reusable rule and reversible commit. User explicitly authorizes implementation, PR creation and merge separately.
 
+The final 2026-09-06 local admission run completed against the pre-commit Phase 4B worktree. A cold-booted `Tsuyomi_API29` passed the complete 12-module API 29 instrumentation matrix in 3m 47s (`827` actionable tasks; `125` executed, `38` from cache, `664` up-to-date). The active-profile non-device gate then passed production assembly, lint, JVM/unit tests and all registered Standard screenshot validations in 1m 8s (`1082` actionable tasks; `31` executed, `1051` up-to-date). Repository policy tests passed `21/21`; artifact, tooling, documentation, retired-prototype and frozen-profile policies passed; REUSE covered `568/568` files; protocol conformance passed `29/29`; extensions passed `28/28`. Deterministic Wenku8 fixture `0.2.28` retained SHA-256 `af8c94d85e3e5faa2021c48891cb170198be050df829d7c981a11b1add5ee3ad`. Final UI-R1 remained full scope with Standard active and E-ink deferred; UI-R1 selects scope only and does not grant approval.
+
 ## Independent review closure and user decision register
 
 ### Review conclusions bound to this draft
@@ -437,7 +445,7 @@ Phase 4 的最终审阅必须把产品操作逻辑与代码正确性作为两个
 
 - Completed reference evidence: the exact-source Standard Atlas automation closeout accounts for 18 `L*`/`B*`/`M*` nodes, 16 surfaces and 84 obligations; it is not human approval.
 - Superseded manual evidence: the user abandoned further Standard Atlas review on 2026-08-29. Missing Atlas human verdicts do not block the authorized Phase 4A production implementation and must not be fabricated or marked approved.
-- **Active boundary:** Phase 4A production work may proceed. Phase 4B, Phase 4C and E-ink restoration remain blocked pending separate explicit authorization. Production acceptance still requires applicable P1 proof, all 28 production-stage Review Graph obligations, and live-service plus signed-fixture evidence for `S*`/`X*`.
+- **Active boundary:** Phase 4A and Phase 4B production work may proceed. Phase 4C and E-ink restoration remain blocked pending separate explicit authorization. Phase 4B verification may use deterministic fixtures, local state and the authorized canonical deployment, but no agent-initiated live website mutation. Production acceptance still requires applicable P1 proof, all 28 production-stage Review Graph obligations, and live-service plus signed-fixture evidence for `S*`/`X*` where those nodes apply.
 ### D19–D32：经冲突归并的 Foundation 决定；D31：非搜索 source-contract 闭合；D33：延期历史草案
 
 | ID | 已确认决定 | 约束范围 |
@@ -471,7 +479,7 @@ Phase 4 的最终审阅必须把产品操作逻辑与代码正确性作为两个
 
 **持久 UI preference。** `core:preferences` 拥有单一 UI preference schema、逐版 deterministic migrator、unknown-newer payload 的 byte-for-byte 只读保留与唯一的“更多 > 显示 > 重置界面设置”。未知较新 schema 时所有 preference 写入被阻止并解释；内存 effective defaults 不可覆盖原 payload。迁移/重置绝不触碰领域、来源、调度、镜像或远程操作数据。
 
-### 4A、4B、4C 的有序执行计划（4A 已获准；4B/4C 未获准）
+### 4A、4B、4C 的有序执行计划（4A/4B 已获准；4C 未获准）
 
 | 阶段 | 仅在前置阻断解除后可实施的 clean-cutover 工作 | 不可违反的完成条件 |
 |---|---|---|
@@ -516,7 +524,7 @@ HXP manifest v2 / Host API 1.2 base envelope、parser/dispatcher negotiation 仅
 
 `Tsuyomi UI Constitution` 是唯一 active product-visible UI contract。2026-08-29 的用户决定废止了 Phase 4A 开工前的 Atlas 人工签署要求；Atlas automation、AI triage 和既有截图始终不是人工批准。
 
-Phase 4A production implementation 已获明确授权。production modules、strings、state owners、screenshot tests、instrumentation 和独立 Review Graph catalog 现在拥有实现与证据。Standard semantic components 使用 real Material 3；发现问题直接在 production 修正，不建立第二套 fixture UI。
+Phase 4A and Phase 4B production implementation 已获明确授权。production modules、strings、state owners、screenshot tests、instrumentation 和独立 Review Graph catalog 现在拥有实现与证据。Standard semantic components 使用 real Material 3；发现问题直接在 production 修正，不建立第二套 fixture UI。Phase 4B 的授权不等于允许 agent 自行执行 live website mutation。
 
 临时 `:prototype:ui-atlas` 及 in-app reviewer 已于 2026-09-06 删除。采用的 fixture/evidence obligations 已迁入 production test source、`UI_ATLAS.md` 与 standalone catalog；settings inclusion、prototype-specific CI/build、bridge、component forks 与 review authority 已移除。后续 static checks 必须继续拒绝 prototype namespace、fixture UI、DAG violation、forbidden import 与 compatibility alias。
 
@@ -525,8 +533,8 @@ Phase 4A production implementation 已获明确授权。production modules、str
 | 类别 | 可自动验证 | 必须人工/显式确认 | 对生产实现的效果 |
 |---|---|---|---|
 | Foundation contracts | schema/migration、ports/DAG、static forbidden edges、source/transport adversarial tests、transfer allowlist、route/recreation、P1 proof | 不适用 | 未全部通过即阻断对应实现 slice 的合并/接受。 |
-| UI Constitution conformance | production screenshot/golden、semantics、fontScale、Standard profile/window/locale matrix、deterministic fixture hash | 生产使用体验和高风险文案可在实现过程中纠正；历史 Atlas 不构成人工批准 | Phase 4A 可实现，但 production acceptance 只由 production evidence 与明确人工结论支持。 |
+| UI Constitution conformance | production screenshot/golden、semantics、fontScale、Standard profile/window/locale matrix、deterministic fixture hash | 生产使用体验和高风险文案可在实现过程中纠正；历史 Atlas 不构成人工批准 | Phase 4A/4B 可实现，但 production acceptance 只由 production evidence 与明确人工结论支持。 |
 | `S*`/`X*` actual-online | 签名、脱敏、确定性 fixture replay | 真实 production package、真实 host state、live online service；无 secret/private payload evidence | 两种证据缺一均不得 finalize 对应节点。 |
-| Production authorization | 当前 Phase 4A 已明确授权 | Phase 4B、Phase 4C、E-ink、release/tag 各自另行授权 | 不得跨越当前 4A 范围。 |
+| Production authorization | 当前 Phase 4A 与 Phase 4B 已明确授权 | Phase 4C、E-ink、release/tag 各自另行授权；live website mutation 仍须当前用户直接触发或另行明确授权 | 不得跨越当前 4A/4B 范围。 |
 
-本节记录的 2026-08-29 用户决定授权 Phase 4A production code。它不授权 commit、push、PR、merge、release 或 tag；这些操作仍按当前会话中的明确指令执行。
+本节记录 Phase 4A 与 Phase 4B production code 已获授权。它不授权 commit、push、PR、merge、release、tag 或 agent 主动执行 live website mutation；这些操作仍按当前会话中的明确指令执行。

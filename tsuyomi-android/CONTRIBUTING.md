@@ -12,3 +12,4 @@
 - Every named admission or review gate approval and finding closure must bind to immutable Git input and be recorded under `docs/phases` / `docs/reviews`.
 - Dependency changes must update the version catalog, Gradle lock state, verification metadata, `THIRD_PARTY_NOTICES.md`, and validation evidence in one reviewable change.
 - Run `python ../tools/check_repository.py --scope android` before release; build output, local SDK state, dumps, credentials, and unknown root files are forbidden.
+- A manifest, extension parser, Host API or signed-policy change must rebuild and verify the deterministic public HXP fixture before Android instrumentation; stale signed fixtures are invalid evidence, not a runtime fallback.

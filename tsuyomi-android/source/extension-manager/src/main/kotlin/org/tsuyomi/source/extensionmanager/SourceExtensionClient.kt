@@ -31,6 +31,7 @@ import org.tsuyomi.core.network.RemoteOperationRedirectPolicy
 import org.tsuyomi.core.network.SourceOperationContext
 import org.tsuyomi.core.network.remoteLibraryAddContext
 import org.tsuyomi.core.network.remoteLibraryReadContext
+import org.tsuyomi.core.network.remoteLibraryTargetsContext
 import org.tsuyomi.core.network.remoteLibraryRemoveContext
 import org.tsuyomi.core.network.remoteLibraryMoveContext
 import org.tsuyomi.shared.model.BookIdentity
@@ -91,6 +92,8 @@ class SourceExtensionClient private constructor(
         },
         cookieOrigins = manifest.capabilities.cookies.origins,
         maxResponseBytes = manifest.capabilities.network.maxResponseBytes,
+        remoteReadPolicy = manifest.capabilities.remoteLibrary.policies[RemoteOperation.READ]?.toNetworkPolicy(),
+        remoteTargetsPolicy = manifest.capabilities.remoteLibrary.policies[RemoteOperation.TARGETS]?.toNetworkPolicy(),
         remoteAddPolicy = manifest.capabilities.remoteLibrary.policies[RemoteOperation.ADD]?.toNetworkPolicy(),
         remoteRemovePolicy = manifest.capabilities.remoteLibrary.policies[RemoteOperation.REMOVE]?.toNetworkPolicy(),
         remoteMovePolicy = manifest.capabilities.remoteLibrary.policies[RemoteOperation.MOVE]?.toNetworkPolicy(),
@@ -141,9 +144,19 @@ class SourceExtensionClient private constructor(
         ).jsonObject
         return root.requiredArray("items").map { parseSummary(it.jsonObject) }
     }
+    suspend fun homeRequestUrl(
+        selectedFilters: Map<String, String> = emptyMap(),
+        cursor: String? = null,
+    ): String = requestUrl(
+        "buildHomeRequest",
+        arrayOf<Any?>(cursor, selectedFilters),
+        "home-network",
+    )
+
     suspend fun home(
         selectedFilters: Map<String, String> = emptyMap(),
         cursor: String? = null,
+        offlineOnly: Boolean = false,
     ): SourceHomePage {
         if (!manifest.capabilities.home.enabled) {
             fail(SourceErrorCode.MALFORMED_SOURCE_RESPONSE, "home", "home-not-granted")
@@ -156,7 +169,7 @@ class SourceExtensionClient private constructor(
             fail(SourceErrorCode.MALFORMED_SOURCE_RESPONSE, "home", "invalid-home-filters")
         }
         val arguments = arrayOf<Any?>(cursor, selectedFilters)
-        val response = invokeNetwork("buildHomeRequest", arguments, "home-network", offlineOnly = false)
+        val response = invokeNetwork("buildHomeRequest", arguments, "home-network", offlineOnly)
         classify(response, "home-classify", "home")
         return try {
             parseHomePage(
@@ -251,7 +264,11 @@ class SourceExtensionClient private constructor(
             operationContext = remoteLibraryAddContext(policy.toNetworkPolicy(), remoteBookId, directActionToken),
         )
         classify(response, "remote-library-add-classify")
-        val root = call("parseRemoteLibraryAdd", arrayOf<Any?>(response.text.orEmpty(), remoteBookId), "remote-library-add-parse").jsonObject
+        val root = call(
+            "parseRemoteLibraryAdd",
+            arrayOf<Any?>(response.text.orEmpty(), remoteBookId, response.finalUrl),
+            "remote-library-add-parse",
+        ).jsonObject
         val identity = BookIdentity(root.requiredString("sourceId"), root.requiredString("remoteBookId"))
         if (identity.sourceId != manifest.sourceId.value || identity.remoteBookId != remoteBookId) {
             fail(SourceErrorCode.MALFORMED_SOURCE_RESPONSE, "remote-library-add-parse", "identity-mismatch")
@@ -314,29 +331,30 @@ class SourceExtensionClient private constructor(
     }
 
     suspend fun listRemoteTargets(): RemoteLibraryTargetsResult {
+        val policy = manifest.capabilities.remoteLibrary.policies[RemoteOperation.TARGETS]
+            ?: fail(SourceErrorCode.MALFORMED_SOURCE_RESPONSE, "remote-library-targets", "remote-targets-not-granted")
         val response = invokeNetwork(
             "buildRemoteLibraryTargetsRequest",
             emptyArray(),
             "remote-library-targets-network",
             offlineOnly = false,
+            operationContext = remoteLibraryTargetsContext(policy.toNetworkPolicy()),
         )
         classify(response, "remote-library-targets-classify")
-        val root = call("parseRemoteLibraryTargets", arrayOf<Any?>(response.text.orEmpty()), "remote-library-targets-parse").jsonObject
-        val sourceId = root.requiredString("sourceId")
-        if (sourceId != manifest.sourceId.value) {
-            fail(SourceErrorCode.MALFORMED_SOURCE_RESPONSE, "remote-library-targets-parse", "source-id-mismatch")
-        }
-        val rawTargets = root.requiredArray("targets")
-        val targets = rawTargets.map { elem ->
-            val obj = elem.jsonObject
-            RemoteTarget(
-                targetId = obj.requiredString("targetId"),
-                displayName = obj.requiredString("displayName"),
-                parentId = obj.optionalString("parentId"),
-                kind = obj.optionalString("kind") ?: "folder",
+        return try {
+            decodeRemoteTargets(
+                call(
+                    "parseRemoteLibraryTargets",
+                    arrayOf<Any?>(response.text.orEmpty()),
+                    "remote-library-targets-parse",
+                ).jsonObject,
+                manifest.sourceId.value,
             )
+        } catch (error: SourceException) {
+            throw error
+        } catch (_: IllegalArgumentException) {
+            fail(SourceErrorCode.MALFORMED_SOURCE_RESPONSE, "remote-library-targets-parse", "invalid-targets")
         }
-        return RemoteLibraryTargetsResult(sourceId, targets)
     }
 
     private suspend fun invokeNetwork(
@@ -602,6 +620,45 @@ private fun HxpRemoteOperationPolicy.toNetworkPolicy(): RemoteOperationRequestPo
         )
     },
 )
+
+private const val MAX_REMOTE_LIBRARY_TARGETS = 128
+
+internal fun decodeRemoteTargets(root: JsonObject, expectedSourceId: String): RemoteLibraryTargetsResult {
+    val sourceId = root.requiredLiteralString("sourceId")
+    require(sourceId == expectedSourceId) { "Remote target source mismatch" }
+    val rawTargets = root.requiredArray("targets")
+    require(rawTargets.isNotEmpty() && rawTargets.size <= MAX_REMOTE_LIBRARY_TARGETS) {
+        "Invalid remote target count"
+    }
+    val targets = rawTargets.map { element ->
+        val value = element.jsonObject
+        RemoteTarget(
+            targetId = value.requiredLiteralString("targetId"),
+            displayName = value.requiredLiteralString("displayName"),
+            parentId = value.optionalLiteralString("parentId"),
+            kind = value.requiredLiteralString("kind"),
+        ).also { target -> require(target.kind == "folder") { "Invalid remote target kind" } }
+    }
+    val targetIds = targets.mapTo(hashSetOf(), RemoteTarget::targetId)
+    require(targetIds.size == targets.size) { "Duplicate remote target" }
+    require(targets.all { target ->
+        target.parentId == null || target.parentId != target.targetId && target.parentId in targetIds
+    }) { "Invalid remote target parent" }
+    return RemoteLibraryTargetsResult(sourceId, targets)
+}
+
+private fun JsonObject.requiredLiteralString(name: String): String {
+    val value = requireNotNull(this[name] as? JsonPrimitive) { "Missing string: $name" }
+    require(value.isString) { "Invalid string: $name" }
+    return value.content
+}
+
+private fun JsonObject.optionalLiteralString(name: String): String? {
+    val value = this[name] ?: return null
+    if (value is JsonNull) return null
+    require(value is JsonPrimitive && value.isString) { "Invalid string: $name" }
+    return value.content
+}
 
 private fun JsonObject.requiredString(name: String): String = requireNotNull(this[name]?.jsonPrimitive?.contentOrNull)
 private fun JsonObject.optionalString(name: String): String? = this[name]?.takeUnless { it is JsonNull }?.jsonPrimitive?.contentOrNull

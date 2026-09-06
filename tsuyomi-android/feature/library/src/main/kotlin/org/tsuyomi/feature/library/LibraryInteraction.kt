@@ -427,11 +427,12 @@ internal class LibraryDragCoordinator {
                 delta.x * delta.x + delta.y * delta.y
             }
         libraryInsertionIndex = target?.let {
-            if (requireNotNull(pointer).y < it.bounds.center.y || requireNotNull(pointer).x < it.bounds.center.x) {
-                it.index
+            val before = if (it.bounds.width > it.bounds.height * 1.5f) {
+                requireNotNull(pointer).y < it.bounds.center.y
             } else {
-                it.index + 1
+                requireNotNull(pointer).x < it.bounds.center.x
             }
+            if (before) it.index else it.index + 1
         } ?: 0
     }
 
@@ -485,7 +486,7 @@ internal fun Modifier.libraryBookGestures(
             dragEnabled = dragEnabled,
             canRemove = canRemove,
             reorderSource = reorderSource,
-            startDragOnLongPress = { !currentSelectionActive || currentSelected },
+            startDragOnLongPress = { false },
             payload = {
                 LibraryDragPayload.Books(
                     identities = if (currentSelectionActive && currentSelected) currentSelectedBookIds else setOf(identity),
@@ -510,8 +511,6 @@ internal fun Modifier.libraryShortcutGestures(
     onTap: () -> Unit,
     onLongPress: () -> Unit,
 ): Modifier {
-    val currentSelected by rememberUpdatedState(selected)
-    val currentSelectionActive by rememberUpdatedState(selectionActive)
     return graphicsLayer {
         alpha = if (coordinator.activeSubjectKey == subjectKey) 0.34f else 1f
     }.libraryPointerDragGestures(
@@ -520,7 +519,7 @@ internal fun Modifier.libraryShortcutGestures(
         dragEnabled = dragEnabled,
         canRemove = canRemove,
         reorderSource = false,
-        startDragOnLongPress = { !currentSelectionActive || currentSelected },
+        startDragOnLongPress = { false },
         payload = payload,
         scrollOrientation = scrollOrientation,
         onTap = onTap,
@@ -704,12 +703,16 @@ internal fun Modifier.libraryDeleteDropTarget(coordinator: LibraryDragCoordinato
 
 private fun BookIdentity.stableKey(): String = "$sourceId\u0000$remoteBookId"
 
-private fun Rect.collectionDropBounds(): Rect = Rect(
-    left = left + width * 0.18f,
-    top = top + height * 0.10f,
-    right = right - width * 0.18f,
-    bottom = bottom - height * 0.10f,
-)
+private fun Rect.collectionDropBounds(): Rect {
+    val horizontalInset = if (width > height * 1.5f) 0.20f else 0.28f
+    val verticalInset = if (width > height * 1.5f) 0.28f else 0.26f
+    return Rect(
+        left = left + width * horizontalInset,
+        top = top + height * verticalInset,
+        right = right - width * horizontalInset,
+        bottom = bottom - height * verticalInset,
+    )
+}
 
 private fun Offset.isDominantScrollMovement(orientation: Orientation, touchSlop: Float): Boolean {
     val primary = abs(if (orientation == Orientation.Horizontal) x else y)

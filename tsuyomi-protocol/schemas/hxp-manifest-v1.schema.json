@@ -112,6 +112,7 @@
               "additionalProperties": false,
               "properties": {
                 "read": { "$ref": "#/$defs/remoteOperationPolicy" },
+                "targets": { "$ref": "#/$defs/remoteOperationPolicy" },
                 "add": { "$ref": "#/$defs/remoteOperationPolicy" },
                 "remove": { "$ref": "#/$defs/remoteOperationPolicy" },
                 "move": { "$ref": "#/$defs/remoteOperationPolicy" }
@@ -121,11 +122,19 @@
           "allOf": [
             {
               "if": { "properties": { "read": { "const": true } }, "required": ["read"] },
-              "then": { "required": ["policies"], "properties": { "policies": { "type": "object", "required": ["read"], "properties": { "read": { "$ref": "#/$defs/remoteOperationPolicy" } } } } }
+              "then": { "required": ["policies"], "properties": { "policies": { "type": "object", "required": ["read", "targets"], "properties": { "read": { "$ref": "#/$defs/remoteOperationPolicy" }, "targets": { "$ref": "#/$defs/remoteOperationPolicy" } } } } }
             },
             {
               "if": { "properties": { "writeOperations": { "type": "array", "contains": { "const": "add" } } }, "required": ["writeOperations"] },
               "then": { "required": ["policies"], "properties": { "policies": { "type": "object", "required": ["add"], "properties": { "add": { "$ref": "#/$defs/remoteOperationPolicy" } } } } }
+            },
+            {
+              "if": { "properties": { "writeOperations": { "type": "array", "contains": { "const": "remove" } } }, "required": ["writeOperations"] },
+              "then": { "required": ["policies"], "properties": { "policies": { "type": "object", "required": ["remove"], "properties": { "remove": { "$ref": "#/$defs/remoteOperationPolicy" } } } } }
+            },
+            {
+              "if": { "properties": { "writeOperations": { "type": "array", "contains": { "const": "move" } } }, "required": ["writeOperations"] },
+              "then": { "required": ["policies"], "properties": { "policies": { "type": "object", "required": ["move"], "properties": { "move": { "$ref": "#/$defs/remoteOperationPolicy" } } } } }
             }
           ]
         },

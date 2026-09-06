@@ -51,6 +51,13 @@ class ScopeClassificationTest(unittest.TestCase):
         self.assertEqual(set(NODE_IDS), selected)
         self.assertEqual(["binding product or phase contract changed"], reasons)
 
+    def test_review_catalog_change_remains_full_contract_scope(self) -> None:
+        category, selected, reasons = r1.classify_change(r1.CATALOG_PATH.as_posix(), NODE_IDS)
+
+        self.assertEqual("contract", category)
+        self.assertEqual(set(NODE_IDS), selected)
+        self.assertEqual(["review scope authority changed"], reasons)
+
     def test_historical_and_procedural_design_docs_select_review_system_only(self) -> None:
         for path in (
             "tsuyomi-android/docs/design/UI_ATLAS.md",
@@ -186,7 +193,7 @@ class PolicyCatalogConsistencyTest(unittest.TestCase):
         catalog_version, node_ids = r1.parse_catalog(root)
         catalog = json.loads((root / r1.CATALOG_PATH).read_text(encoding="utf-8"))
 
-        self.assertEqual(7, catalog_version)
+        self.assertEqual(9, catalog_version)
         self.assertEqual(28, len(node_ids))
         self.assertEqual(
             {"production_ui", "actual_online_scenario"},

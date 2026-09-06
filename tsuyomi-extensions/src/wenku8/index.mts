@@ -863,19 +863,36 @@ export const parseRemoteLibrary = (html: string): { items: BookSummary[]; nextCu
 export const buildRemoteLibraryAddRequest = (remoteBookId: string): NetworkRequest => {
   if (!/^\d{1,12}$/.test(remoteBookId)) throw new Error('INVALID_BOOK_ID');
   return {
-    url: `${ORIGIN}/modules/article/bookcase.php`,
-    method: 'POST',
+    url: `${ORIGIN}/modules/article/addbookcase.php`,
+    query: [{ name: 'bid', value: remoteBookId }],
+    queryEncoding: 'utf-8',
+    method: 'GET',
     headers: { Accept: 'text/html,application/xhtml+xml' },
-    form: { action: 'add', aid: remoteBookId },
     decode: 'gb18030',
     cache: 'network-only',
   };
 };
 
-export const parseRemoteLibraryAdd = (html: string, remoteBookId: string) => {
-  const outcome = /data-outcome=["'](applied|already-present)["']/i.exec(html)?.[1];
-  if (outcome !== 'applied' && outcome !== 'already-present') throw new Error('AMBIGUOUS_REMOTE_ADD');
-  return { sourceId: SOURCE_ID, remoteBookId, outcome };
+export const parseRemoteLibraryAdd = (html: string, remoteBookId: string, finalUrl?: string) => {
+  if (!/^\d{1,12}$/.test(remoteBookId)) throw new Error('INVALID_BOOK_ID');
+  const escapedBookId = remoteBookId.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const exactUrl = finalUrl !== undefined && new RegExp(
+    `^https://www\\.wenku8\\.net/modules/article/addbookcase\\.php\\?(?:[^#]*&)?bid=${escapedBookId}(?:&[^#]*)?(?:#.*)?$`,
+    'i',
+  ).test(decodeEntities(finalUrl));
+  if (!exactUrl) throw new Error('REMOTE_ADD_IDENTITY_MISMATCH');
+  const title = firstText(html, [/<[^>]+\bclass=["'][^"']*\bblocktitle\b[^"']*["'][^>]*>([\s\S]*?)<\/[^>]+>/i]);
+  const message = stripTags(html);
+  if (title === '出现错误！' || title === '出現錯誤！') {
+    if (/(?:已经|已經|已)(?:加入|存在|在)[^。！!]{0,16}(?:书架|書架|收藏)/u.test(message)) {
+      return { sourceId: SOURCE_ID, remoteBookId, outcome: 'already-present' };
+    }
+    throw new Error('AMBIGUOUS_REMOTE_ADD');
+  }
+  if (/^操作成功[！!]?$/.test(title ?? '') && /(?:小说|小說).{0,12}(?:已加入|加入成功).{0,8}(?:书架|書架)/u.test(message)) {
+    return { sourceId: SOURCE_ID, remoteBookId, outcome: 'applied' };
+  }
+  throw new Error('AMBIGUOUS_REMOTE_ADD');
 };
 export const buildRemoteLibraryRemoveRequest = (remoteBookId: string): NetworkRequest => {
   if (!/^\d{1,12}$/.test(remoteBookId)) throw new Error('INVALID_BOOK_ID');
@@ -890,14 +907,25 @@ export const buildRemoteLibraryRemoveRequest = (remoteBookId: string): NetworkRe
 };
 
 export const parseRemoteLibraryRemove = (html: string, remoteBookId: string) => {
-  const outcome = /data-outcome=["'](applied|already-absent)["']/i.exec(html)?.[1];
-  if (outcome) {
+  if (!/^\d{1,12}$/.test(remoteBookId)) throw new Error('INVALID_BOOK_ID');
+  const evidenceTag = /<[^>]*\bdata-outcome=["'](?:applied|already-absent)["'][^>]*>/i.exec(html)?.[0];
+  if (evidenceTag) {
+    const outcome = /\bdata-outcome=["'](applied|already-absent)["']/i.exec(evidenceTag)?.[1];
+    const evidencedBookId = /\bdata-book-id=["']([^"']+)["']/i.exec(evidenceTag)?.[1];
+    if (evidencedBookId !== remoteBookId || !outcome) throw new Error('REMOTE_REMOVE_IDENTITY_MISMATCH');
     return { sourceId: SOURCE_ID, remoteBookId, outcome };
   }
-  if (/(?:bookcase|书架)/i.test(html) && /<table\b/i.test(html)) {
-    const books = parseSearch(html).items;
-    const stillPresent = books.some((b) => b.remoteBookId === remoteBookId);
-    return { sourceId: SOURCE_ID, remoteBookId, outcome: stillPresent ? 'already-absent' : 'applied' };
+  const title = firstText(html, [/<[^>]+\bclass=["'][^"']*\bblocktitle\b[^"']*["'][^>]*>([\s\S]*?)<\/[^>]+>/i]);
+  const message = stripTags(html);
+  if ((title === '出现错误！' || title === '出現錯誤！') && /(?:不在|不存在|已经移除|已經移除).{0,12}(?:书架|書架|收藏)/u.test(message)) {
+    return { sourceId: SOURCE_ID, remoteBookId, outcome: 'already-absent' };
+  }
+  if (/^操作成功[！!]?$/.test(title ?? '') && /(?:移出|移除|删除|刪除).{0,12}(?:书架|書架|收藏)/u.test(message)) {
+    return { sourceId: SOURCE_ID, remoteBookId, outcome: 'applied' };
+  }
+  const escapedBookId = remoteBookId.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  if (new RegExp(`href=["'][^"']*/book/${escapedBookId}\\.htm(?:[?#][^"']*)?["']`, 'i').test(html)) {
+    throw new Error('REMOTE_REMOVE_STILL_PRESENT');
   }
   throw new Error('AMBIGUOUS_REMOTE_REMOVE');
 };
@@ -915,12 +943,26 @@ export const buildRemoteLibraryMoveRequest = (remoteBookId: string, targetId: st
 };
 
 export const parseRemoteLibraryMove = (html: string, remoteBookId: string, targetId: string) => {
-  const outcome = /data-outcome=["'](applied|already-at-target)["']/i.exec(html)?.[1];
-  if (outcome) {
+  if (!/^\d{1,12}$/.test(remoteBookId)) throw new Error('INVALID_BOOK_ID');
+  if (!/^[a-zA-Z0-9_-]{1,64}$/.test(targetId)) throw new Error('INVALID_TARGET_ID');
+  const evidenceTag = /<[^>]*\bdata-outcome=["'](?:applied|already-at-target)["'][^>]*>/i.exec(html)?.[0];
+  if (evidenceTag) {
+    const outcome = /\bdata-outcome=["'](applied|already-at-target)["']/i.exec(evidenceTag)?.[1];
+    const evidencedBookId = /\bdata-book-id=["']([^"']+)["']/i.exec(evidenceTag)?.[1];
+    const evidencedTargetId = /\bdata-target-id=["']([^"']+)["']/i.exec(evidenceTag)?.[1];
+    if (evidencedBookId !== remoteBookId || evidencedTargetId !== targetId || !outcome) {
+      throw new Error('REMOTE_MOVE_IDENTITY_MISMATCH');
+    }
     return { sourceId: SOURCE_ID, remoteBookId, targetId, outcome };
   }
-  if (/(?:bookcase|书架)/i.test(html) && /<table\b/i.test(html)) {
-    return { sourceId: SOURCE_ID, remoteBookId, targetId, outcome: 'applied' };
+  const escapedBookId = remoteBookId.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  for (const row of html.matchAll(/<tr\b[^>]*>([\s\S]*?)<\/tr>/gi)) {
+    const rowHtml = row[1] ?? '';
+    if (!new RegExp(`href=["'][^"']*/book/${escapedBookId}\\.htm(?:[?#][^"']*)?["']`, 'i').test(rowHtml)) continue;
+    const select = /<select\b[^>]*name=["']classlist["'][^>]*>([\s\S]*?)<\/select>/i.exec(rowHtml)?.[1];
+    const selected = select && /<option\b(?=[^>]*\bselected(?:\s*=\s*(?:["']selected["']|selected))?)[^>]*\bvalue\s*=\s*["']([^"']+)["'][^>]*>/i.exec(select)?.[1]?.trim();
+    if (selected === targetId) return { sourceId: SOURCE_ID, remoteBookId, targetId, outcome: 'applied' };
+    if (selected) throw new Error('REMOTE_MOVE_TARGET_MISMATCH');
   }
   throw new Error('AMBIGUOUS_REMOTE_MOVE');
 };
@@ -938,33 +980,41 @@ export const buildRemoteLibraryTargetsRequest = (): NetworkRequest => {
 
 export const parseRemoteLibraryTargets = (html: string) => {
   const rawJson = /data-targets=["']([^"']+)["']/i.exec(html)?.[1];
-  let targets: Array<{ targetId: string; displayName: string; parentId?: string; kind?: string }> = [];
+  const targets: Array<{ targetId: string; displayName: string; parentId?: string; kind?: string }> = [];
   if (rawJson) {
+    let decoded: unknown;
     try {
-      targets = JSON.parse(decodeURIComponent(rawJson));
+      decoded = JSON.parse(decodeURIComponent(rawJson));
     } catch {
       throw new Error('MALFORMED_TARGETS');
+    }
+    if (!Array.isArray(decoded)) throw new Error('MALFORMED_TARGETS');
+    for (const item of decoded) {
+      if (typeof item !== 'object' || item === null) throw new Error('MALFORMED_TARGETS');
+      const candidate = item as Record<string, unknown>;
+      const targetId = typeof candidate.targetId === 'string' ? candidate.targetId.trim() : '';
+      const displayName = typeof candidate.displayName === 'string' ? candidate.displayName.trim() : '';
+      const parentId = typeof candidate.parentId === 'string' ? candidate.parentId.trim() : undefined;
+      const kind = typeof candidate.kind === 'string' ? candidate.kind.trim() : 'folder';
+      if (!/^[a-zA-Z0-9_-]{1,64}$/.test(targetId) || !displayName || displayName.length > 128 ||
+          (parentId !== undefined && !/^[a-zA-Z0-9_-]{1,64}$/.test(parentId)) || kind !== 'folder') {
+        throw new Error('MALFORMED_TARGETS');
+      }
+      targets.push({ targetId, displayName, ...(parentId ? { parentId } : {}), kind });
     }
   } else {
     const selectMatch = /<select\b[^>]*name=["']classlist["'][^>]*>([\s\S]*?)<\/select>/i.exec(html);
     if (selectMatch?.[1]) {
-      const options = /<option\b[^>]*value=["']([^"']+)["'][^>]*>([\s\S]*?)<\/option>/gi;
-      const content = selectMatch[1];
-      for (let m = options.exec(content); m; m = options.exec(content)) {
-        const id = (m[1] ?? '').trim();
-        const name = stripTags(m[2] ?? '').trim();
-        if (id && name) {
-          targets.push({ targetId: id, displayName: name, kind: 'folder' });
-        }
+      for (const option of selectMatch[1].matchAll(/<option\b[^>]*value=["']([^"']+)["'][^>]*>([\s\S]*?)<\/option>/gi)) {
+        const targetId = (option[1] ?? '').trim();
+        const displayName = stripTags(option[2] ?? '').trim();
+        if (!/^[a-zA-Z0-9_-]{1,64}$/.test(targetId) || !displayName || displayName.length > 128) throw new Error('MALFORMED_TARGETS');
+        targets.push({ targetId, displayName, kind: 'folder' });
       }
     }
-    if (!targets.length) {
-      targets = [
-        { targetId: 'default', displayName: '默认书架', kind: 'folder' },
-        { targetId: 'favorites', displayName: '特别收藏', kind: 'folder' },
-        { targetId: 'finished', displayName: '已读完', kind: 'folder' },
-      ];
-    }
+  }
+  if (!targets.length || new Set(targets.map((target) => target.targetId)).size !== targets.length) {
+    throw new Error('AMBIGUOUS_REMOTE_TARGETS');
   }
   return { sourceId: SOURCE_ID, targets };
 };

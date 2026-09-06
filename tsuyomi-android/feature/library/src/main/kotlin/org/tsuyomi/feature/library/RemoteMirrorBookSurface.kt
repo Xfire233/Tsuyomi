@@ -4,6 +4,12 @@
  */
 package org.tsuyomi.feature.library
 
+import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.snap
+import androidx.compose.animation.core.spring
+import androidx.compose.animation.core.tween
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -16,18 +22,28 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.role
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.stateDescription
 import java.time.Instant
 import org.tsuyomi.core.database.LibraryBook
 import org.tsuyomi.core.database.LibraryEntry
 import org.tsuyomi.core.database.RemoteReconciliationState
+import org.tsuyomi.core.display.LocalDisplayEnvironment
 import org.tsuyomi.core.media.api.CoverUiState
 import org.tsuyomi.core.media.api.FallbackSpec
 import org.tsuyomi.core.ui.icons.TsuyomiIcons
+import org.tsuyomi.core.ui.theme.TsuyomiMotion
+import org.tsuyomi.core.ui.theme.instantMotion
 import org.tsuyomi.shared.model.BookIdentity
 import org.tsuyomi.shared.sourcecontract.RemoteTarget
 import org.tsuyomi.shared.sourcecontract.SourceBookSummary
@@ -122,6 +138,7 @@ fun RemoteMirrorBookSurface(
             onToggleBookSelection = { identity -> summariesByIdentity[identity]?.let(onToggleBookSelection) },
             dragCoordinator = coordinator,
             dragEnabled = true,
+            canRemove = false,
             reorderEnabled = false,
             coverState = { entry ->
                 val summary = summariesByIdentity[entry.book.identity]
@@ -148,6 +165,7 @@ fun RemoteMirrorBookSurface(
             entries = entries,
             shortcuts = emptyList(),
             layout = layout,
+            showRemoveTarget = false,
             coverState = { entry ->
                 val summary = summariesByIdentity[entry.book.identity]
                 if (summary != null) coverState(summary)
@@ -184,8 +202,9 @@ private fun RemoteMirrorDestinationHeader(
         if (draggingBooks) {
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 RemoteDropAction(
-                    label = "复制到本地",
-                    icon = TsuyomiIcons.Shelf,
+                    label = "复制到本地书架",
+                    supporting = "网站收藏保持不变",
+                    icon = TsuyomiIcons.Copy,
                     kind = LibraryShortcutDropKind.LOCAL_COPY,
                     id = "remote-local-copy",
                     index = 0,
@@ -193,7 +212,8 @@ private fun RemoteMirrorDestinationHeader(
                     modifier = Modifier.weight(1f),
                 )
                 RemoteDropAction(
-                    label = "从网站移除",
+                    label = "从网站收藏移除",
+                    supporting = "本地书籍与数据保留",
                     icon = TsuyomiIcons.Delete,
                     kind = LibraryShortcutDropKind.REMOTE_REMOVE,
                     id = "remote-remove",
@@ -256,6 +276,7 @@ private fun RemoteMirrorDestinationHeader(
 @Composable
 private fun RemoteDropAction(
     label: String,
+    supporting: String,
     icon: androidx.compose.ui.graphics.vector.ImageVector,
     kind: LibraryShortcutDropKind,
     id: String,
@@ -263,18 +284,66 @@ private fun RemoteDropAction(
     coordinator: LibraryDragCoordinator,
     modifier: Modifier,
 ) {
+    val targetActive = when (kind) {
+        LibraryShortcutDropKind.LOCAL_COPY -> coordinator.externalDestination == LibraryDropDestination.LocalCopy
+        LibraryShortcutDropKind.REMOTE_REMOVE -> coordinator.externalDestination == LibraryDropDestination.RemoteRemove
+        else -> false
+    }
+    val destructive = kind == LibraryShortcutDropKind.REMOTE_REMOVE
+    val instant = LocalDisplayEnvironment.current.instantMotion
+    val scale by animateFloatAsState(
+        targetValue = if (targetActive) 1.025f else 1f,
+        animationSpec = if (instant) snap() else tween(TsuyomiMotion.SWITCH_DURATION_MS, easing = TsuyomiMotion.Easing),
+        label = "remoteDropTargetScale",
+    )
+    val container by animateColorAsState(
+        targetValue = when {
+            destructive -> MaterialTheme.colorScheme.errorContainer
+            targetActive -> MaterialTheme.colorScheme.secondaryContainer
+            else -> MaterialTheme.colorScheme.surfaceContainerHigh
+        },
+        animationSpec = if (instant) snap() else tween(TsuyomiMotion.SWITCH_DURATION_MS),
+        label = "remoteDropTargetContainer",
+    )
+    val content = if (destructive) MaterialTheme.colorScheme.onErrorContainer else MaterialTheme.colorScheme.onSurface
+    val outline = when {
+        destructive -> MaterialTheme.colorScheme.error
+        targetActive -> MaterialTheme.colorScheme.secondary
+        else -> MaterialTheme.colorScheme.outlineVariant
+    }
     Surface(
-        modifier = modifier.libraryShortcutDropTarget(coordinator, id, index, kind, null, null),
-        shape = MaterialTheme.shapes.small,
-        color = MaterialTheme.colorScheme.surfaceContainerHigh,
+        modifier = modifier
+            .graphicsLayer {
+                scaleX = scale
+                scaleY = scale
+            }
+            .libraryShortcutDropTarget(coordinator, id, index, kind, null, null)
+            .testTag(id)
+            .semantics(mergeDescendants = true) {
+                role = Role.Button
+                contentDescription = "$label，$supporting"
+                stateDescription = if (targetActive) "当前拖放目标" else "拖放目标"
+            },
+        shape = MaterialTheme.shapes.medium,
+        color = container,
+        contentColor = content,
+        border = BorderStroke(if (targetActive) 2.dp else 1.dp, outline),
+        shadowElevation = if (targetActive) 8.dp else 0.dp,
     ) {
         Row(
             Modifier.padding(horizontal = 12.dp, vertical = 12.dp),
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Icon(icon, contentDescription = null)
-            Text(label, style = MaterialTheme.typography.labelLarge)
+            Column(Modifier.weight(1f)) {
+                Text(label, style = MaterialTheme.typography.labelLarge)
+                Text(
+                    supporting,
+                    style = MaterialTheme.typography.labelSmall,
+                    color = content.copy(alpha = 0.78f),
+                )
+            }
         }
     }
 }
