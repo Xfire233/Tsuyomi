@@ -114,7 +114,7 @@ fun ReaderSurface(
         FrozenEInkReaderSurface(document, restoredLocator, onLocatorChanged, modifier, preferences)
         return
     }
-    StandardAtlasReaderSurface(
+    ReaderSurfaceContent(
         document = document,
         restoredLocator = restoredLocator,
         onLocatorChanged = onLocatorChanged,
@@ -132,7 +132,7 @@ fun ReaderSurface(
 }
 
 @Composable
-private fun StandardAtlasReaderSurface(
+private fun ReaderSurfaceContent(
     document: ReaderDocument,
     restoredLocator: ReaderLocator?,
     onLocatorChanged: (ReaderLocator, LocatorPrecision) -> Unit,

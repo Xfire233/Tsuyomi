@@ -157,6 +157,36 @@ FORBIDDEN_SUFFIXES = {
     ".trace",
 }
 
+RETIRED_ANDROID_PROTOTYPE = Path("tsuyomi-android/prototype/ui-atlas")
+RETIRED_ANDROID_PACKAGE = "org.tsuyomi.prototype"
+
+
+def retired_android_prototype_violations(repo_root: Path = REPO_ROOT) -> list[str]:
+    violations: list[str] = []
+    retired_root = repo_root / RETIRED_ANDROID_PROTOTYPE
+    if retired_root.exists():
+        violations.append(f"{RETIRED_ANDROID_PROTOTYPE.as_posix()}: retired prototype must not exist")
+
+    settings_path = repo_root / "tsuyomi-android/settings.gradle.kts"
+    if settings_path.is_file() and ":prototype:ui-atlas" in settings_path.read_text(
+        encoding="utf-8", errors="ignore"
+    ):
+        violations.append("tsuyomi-android/settings.gradle.kts: includes retired prototype module")
+
+    android_root = repo_root / "tsuyomi-android"
+    if android_root.is_dir():
+        for path in android_root.rglob("*"):
+            if not path.is_file() or path.suffix not in {".kt", ".java", ".kts", ".xml"}:
+                continue
+            relative = path.relative_to(android_root)
+            if any(part in FORBIDDEN_PARTS or part == "docs" for part in relative.parts):
+                continue
+            if RETIRED_ANDROID_PACKAGE in path.read_text(encoding="utf-8", errors="ignore"):
+                violations.append(
+                    f"{path.relative_to(repo_root).as_posix()}: references retired prototype package"
+                )
+    return violations
+
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Reject local or sensitive repository artifacts")
@@ -408,7 +438,8 @@ def main(argv: list[str] | None = None) -> int:
     artifact_violations = sorted(str(path) for path in paths if violates_policy(path))
     tooling_violations = tooling_governance_violations()
     documentation_violations = documentation_governance_violations()
-    if artifact_violations or tooling_violations or documentation_violations:
+    prototype_violations = retired_android_prototype_violations()
+    if artifact_violations or tooling_violations or documentation_violations or prototype_violations:
         if artifact_violations:
             print(f"Forbidden repository artifacts in scope {args.scope}:", file=sys.stderr)
             for violation in artifact_violations:
@@ -421,10 +452,15 @@ def main(argv: list[str] | None = None) -> int:
             print("Documentation governance violations:", file=sys.stderr)
             for violation in documentation_violations:
                 print(f"- {violation}", file=sys.stderr)
+        if prototype_violations:
+            print("Retired Android prototype violations:", file=sys.stderr)
+            for violation in prototype_violations:
+                print(f"- {violation}", file=sys.stderr)
         return 1
     print(f"Repository artifact policy passed for {len(paths)} candidate files in scope {args.scope}.")
     print("Tooling governance policy passed.")
     print("Documentation governance policy passed.")
+    print("Retired Android prototype policy passed.")
     return 0
 
 

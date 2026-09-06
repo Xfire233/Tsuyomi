@@ -79,7 +79,7 @@ internal fun entryKey(entry: LibraryEntry): String =
     "${entry.book.identity.sourceId}\u0000${entry.book.identity.remoteBookId}"
 
 @Composable
-internal fun AtlasBookSurface(
+internal fun LibraryBookSurface(
     entries: List<LibraryEntry>,
     state: LibraryUiState,
     onOpenBook: (LibraryEntry) -> Unit,
@@ -144,7 +144,7 @@ internal fun AtlasBookSurface(
                         } else {
                             val index = if (libraryGapIndex != null && visualIndex > libraryGapIndex) visualIndex - 1 else visualIndex
                             val entry = entries[index]
-                            AtlasBookGridCard(
+                            LibraryBookGridCard(
                                 entry = entry,
                                 index = index,
                                 selected = entry.book.identity in state.selectedBookIds,
@@ -197,7 +197,7 @@ internal fun AtlasBookSurface(
                         } else {
                             val index = if (libraryGapIndex != null && visualIndex > libraryGapIndex) visualIndex - 1 else visualIndex
                             val entry = entries[index]
-                            AtlasBookListRow(
+                            LibraryBookListRow(
                                 entry = entry,
                                 index = index,
                                 selected = entry.book.identity in state.selectedBookIds,
@@ -251,7 +251,7 @@ internal fun AtlasBookSurface(
                         } else {
                             val index = if (libraryGapIndex != null && visualIndex > libraryGapIndex) visualIndex - 1 else visualIndex
                             val entry = entries[index]
-                            AtlasCompactBookRow(
+                            LibraryCompactBookRow(
                                 entry = entry,
                                 index = index,
                                 selected = entry.book.identity in state.selectedBookIds,
@@ -323,7 +323,7 @@ internal fun ObserveLibraryViewport(
 }
 
 @Composable
-internal fun AtlasBookGridCard(
+internal fun LibraryBookGridCard(
     entry: LibraryEntry,
     index: Int,
     selected: Boolean,
@@ -404,7 +404,7 @@ internal fun AtlasBookGridCard(
 }
 
 @Composable
-internal fun AtlasBookListRow(
+internal fun LibraryBookListRow(
     entry: LibraryEntry,
     index: Int,
     selected: Boolean,
@@ -457,7 +457,7 @@ internal fun AtlasBookListRow(
 }
 
 @Composable
-internal fun AtlasCompactBookRow(
+internal fun LibraryCompactBookRow(
     entry: LibraryEntry,
     index: Int,
     selected: Boolean,
@@ -522,7 +522,7 @@ internal fun ProductionBookCover(
 }
 
 @Composable
-internal fun AtlasLibrarySortDialog(
+internal fun LibrarySortDialog(
     state: LibraryUiState,
     onDismiss: () -> Unit,
     onSelectSort: (LibrarySortMode) -> Unit,

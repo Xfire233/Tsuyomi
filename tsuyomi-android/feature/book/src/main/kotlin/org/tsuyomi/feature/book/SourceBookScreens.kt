@@ -85,7 +85,7 @@ fun BookDetailScreen(
         )
         return
     }
-    StandardAtlasBookDetailScreen(
+    StandardBookDetailScreen(
         state = state,
         directoryState = directoryState,
         localState = localState,

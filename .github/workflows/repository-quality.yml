@@ -24,6 +24,8 @@ jobs:
         run: python -m reuse lint
       - name: Repository policy tests
         run: python -m unittest tools/check_repository_test.py
+      - name: Android CI planning tests
+        run: python -m unittest tools/android_ci_plan_test.py
       - name: Reject repository artifacts
         run: python tools/check_repository.py
       - name: Review workflow tests

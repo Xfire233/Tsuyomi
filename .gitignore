@@ -21,6 +21,9 @@
 **/.vscode/
 **/.fleet/
 **/.run/
+!tsuyomi-android/.run/
+!tsuyomi-android/.run/*.run.xml
+
 *.swp
 *.tmp
 *.bak

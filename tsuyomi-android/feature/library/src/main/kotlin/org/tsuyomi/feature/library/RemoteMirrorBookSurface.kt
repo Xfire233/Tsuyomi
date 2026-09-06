@@ -114,7 +114,7 @@ fun RemoteMirrorBookSurface(
         selectedBookIds = selectedBookIds,
     )
     Box(modifier.fillMaxSize().libraryDragOverlayHost(coordinator)) {
-        AtlasBookSurface(
+        LibraryBookSurface(
             entries = entries,
             state = state,
             onOpenBook = { entry -> summariesByIdentity[entry.book.identity]?.let(onOpenBook) },

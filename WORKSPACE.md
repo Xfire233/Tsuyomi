@@ -22,7 +22,7 @@ Set `ANDROID_SDK_ROOT` (or `ANDROID_HOME`) locally, then run `tsuyomi-android/to
 
 ## Android UI review workflow
 
-Android UI, navigation, interaction, prototype, display-profile, accessibility, and Review Graph work starts with `.agents/skills/tsuyomi-android-review/SKILL.md`; its adjacent `review-policy.json` alone selects active/deferred profiles. Product contracts and human approval authority remain in Android design/Phase documents and explicit gate outcomes.
+Android UI, navigation, interaction, display-profile, accessibility, screenshot and Review Graph work starts with `.agents/skills/tsuyomi-android-review/SKILL.md`; its adjacent `review-policy.json` alone selects active/deferred profiles. Product contracts and human approval authority remain in Android design/Phase documents and explicit gate outcomes.
 
 ## Development tooling
 

@@ -71,11 +71,11 @@ def _summarize_changes(context: ReportBuildContext) -> ChangeSummary:
     current_stage_nodes = [node for node in affected_nodes if node.startswith(active_prefixes)]
     deferred_nodes = [node for node in affected_nodes if node.startswith(deferred_prefixes)]
     active_runtime_change = bool(current_stage_nodes) and bool(
-        classes & {"runtime", "review-runtime", "prototype-build", "build", "unknown"}
+        classes & {"runtime", "build", "unknown"}
     )
     build_required = context.force_full_review or active_runtime_change
     device_required = context.force_full_review or (
-        bool(current_stage_nodes) and bool(classes & {"runtime", "review-runtime", "prototype-build", "unknown"})
+        bool(current_stage_nodes) and bool(classes & {"runtime", "unknown"})
     )
     product_runtime_changed = bool(current_stage_nodes) and (
         context.force_full_review or bool(classes & {"runtime", "unknown"})
@@ -193,7 +193,7 @@ def _next_section(
             "Do not edit Review Graph progress or verdicts during UI-R1",
             "Do not build, deploy, capture, or start an emulator for workflow-only changes",
             "Do not execute deferred profile matrices until the policy resume trigger",
-            "Do not finalize S/X nodes from the isolated Atlas; they require actual online production scenarios",
+            "Do not finalize S/X nodes from fixture-only evidence; they require actual online production scenarios",
             "Do not run Android Studio analysis when compiler or lint already answers the question",
         ],
     }

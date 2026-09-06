@@ -9,7 +9,7 @@ description: Runs Tsuyomi Android UI change detection and evidence-driven Review
 
 ## When to use
 
-Use this Skill for any Android UI, navigation, interaction, accessibility, display-profile, prototype, screenshot, or Review Graph change in this repository. Workflow-only edits to this Skill, its policy, review scripts, or tooling registry use `UI-R1` change detection without a device pass unless the report selects runtime evidence.
+Use this Skill for any Android UI, navigation, interaction, accessibility, display-profile, screenshot, or Review Graph change in this repository. Workflow-only edits to this Skill, its policy, catalog, review scripts, or tooling registry use `UI-R1` change detection without a device pass unless the report selects runtime evidence.
 
 ## Do not use
 
@@ -22,16 +22,16 @@ Use this Skill for any Android UI, navigation, interaction, accessibility, displ
 Read the installed `android-cli` Skill first. Then read:
 
 1. `.agents/skills/tsuyomi-android-review/review-policy.json` — current executable profile/stage selection;
-2. only the affected sections of `UI_CONSTITUTION.md`, `UI_ATLAS.md`, and `INTERACTIVE_PROTOTYPE_PLAN.md`;
-3. affected nodes from `ReviewNodeCatalog.kt`.
+2. only the affected sections of `UI_CONSTITUTION.md` and `UI_ATLAS.md`;
+3. affected nodes from `.agents/skills/tsuyomi-android-review/review-node-catalog.json`.
 
-`ReviewNodeCatalog.kt` alone owns node identities and their required states. Never copy that catalog into another checklist.
+`review-node-catalog.json` alone owns node identities and required states. Never copy that catalog into another checklist.
 
 ## Mandatory UI design source stack
 
 Every visible UI creation or refactor must use the following sources together. They are complementary, not interchangeable:
 
-1. `UI_CONSTITUTION.md`, the current human review revision, `review-policy.json`, and Review Graph obligations define product intent and approval boundaries.
+1. `UI_CONSTITUTION.md`, `review-policy.json`, and the standalone Review Graph catalog define product intent, execution selection and approval boundaries.
 2. Claude Code official `frontend-design` supplies an intentional visual direction, differentiation, composition, and self-critique.
 3. Google `android/skills` and current Android documentation supply Compose, Material 3, accessibility, adaptive-layout, edge-to-edge, and testing correctness.
 4. This Skill owns Tsuyomi implementation review on policy-selected devices, evidence routing, and human handoff.
@@ -54,14 +54,13 @@ human review + UI_CONSTITUTION
 
 Before editing visible UI:
 
-1. Read the latest live-review revision before any other implementation work.
-2. Read the affected constitution/Atlas/catalog sections and active profile policy.
-3. Read the official Claude `frontend-design` skill and the applicable official Android skills or docs.
-4. State two compact design directions. Critique both against the user request, Tsuyomi identity, information density, touch ergonomics, accessibility, implementation cost, and the current active-profile policy. Select one direction; do not blend incompatible ideas.
-5. For Material 3 Expressive, default to **Foundational** intensity. Permit at most one deliberate hero moment on a screen, preserve standard navigation and labels, and use semantic `MaterialTheme` roles rather than hard-coded visual tokens.
-6. Implement only on `Tsuyomi_Review_Work_API29` until a `batch_ready` submission authorizes replacement of the human-review APK. Resolve the running serial by AVD name; serial numbers are not ownership. Its size, density, orientation and baseline font scale must match the agreed Standard phone profile before visual evidence is captured.
-7. Verify the actual changed surface: interaction, semantics/layout, PNG at 1:1 where visual judgment matters, relevant state restoration, and the exact API 29 window. Screenshot assertions never prove behavior.
-8. Read the latest live-review revision again before handoff. Continue the watcher; a deployment is not the end of the review loop.
+1. Read the affected Constitution, production evidence specification and catalog nodes before implementation.
+2. Read the official Claude `frontend-design` skill and the applicable official Android skills or docs.
+3. State two compact design directions. Critique both against the user request, Tsuyomi identity, information density, touch ergonomics, accessibility, implementation cost, and the current active-profile policy. Select one direction; do not blend incompatible ideas.
+4. For Material 3 Expressive, default to **Foundational** intensity. Permit at most one deliberate hero moment on a screen, preserve standard navigation and labels, and use semantic `MaterialTheme` roles rather than hard-coded visual tokens.
+5. Implement only on `Tsuyomi_Review_Work_API29` unless the user explicitly authorizes canonical replacement. Resolve the running serial by AVD name; serial numbers are not ownership. Its size, density, orientation and baseline font scale must match the agreed Standard phone profile before visual evidence is captured.
+6. Verify the actual changed production surface: interaction, semantics/layout, PNG at 1:1 where visual judgment matters, relevant state restoration, and the exact API 29 window. Screenshot assertions never prove behavior.
+7. Hand off the exact production APK/build identity, evidence and pending human-only claims. Deployment is not approval.
 
 ### Project-filtered Google guidance
 
@@ -98,7 +97,7 @@ The policy selects review work; it does not grant Phase implementation authoriza
 ## Invariants
 
 - Gradle Wrapper owns build, compiler, lint, unit, instrumentation, screenshot tests, dependencies, and CI correctness.
-- `:prototype:ui-atlas` is the only interactive prototype/reviewer. Never create a second review app.
+- Production Composables, strings, state owners, screenshot tests and instrumentation are the only current review surface. A second fixture UI or in-app review application is forbidden.
 - Android CLI owns official docs, AVD lifecycle, APK deployment, layout inspection/diff, and PNG capture.
 - Android Studio is escalation for targeted IDE diagnostics, Layout Inspector, debugger, profiler, Preview, and human visual judgment—not a second build/deploy path.
 - UIAutomator2 is fallback input/system-UI automation. Never duplicate an Android CLI screenshot or successful hierarchy.
@@ -107,37 +106,44 @@ The policy selects review work; it does not grant Phase implementation authoriza
 
 ## Fast review path
 
+### Native edit loop — no formal evidence
+
+Use Android Studio before a formal review pass for the smallest interactive feedback loop:
+
+1. Run the current test method/class from the editor gutter; do not launch an unrelated suite.
+2. Use production Compose Preview, Live Edit/Apply Changes, targeted debugger editor analysis, debugger, profiler or Layout Inspector only for the question each tool owns.
+3. Use the checked-in `tsuyomi-android/.run/` Gradle configurations for app compilation, app JVM tests or the bounded app assemble+lint admission smoke. For another module, select that module's exact Gradle task in the Gradle tool window rather than adding another permanent configuration.
+4. Android Studio output is iteration feedback. Gradle still owns compiler, lint and test proof; Layout Inspector does not replace behavioral instrumentation or accessibility review.
+
 ### UI-R0 — Reconcile
 
-1. Select an exact previous UI-R1 report/baseline. No baseline marks every current catalog node affected; `review-policy.json` then partitions them into current and deferred execution stages.
+1. Prefer an exact previous UI-R1 report/baseline. Without one, UI-R1 derives a content-hash baseline from Git `origin/main`, then `main`; use `--base-ref=<checkpoint-or-target>` when the active change packet starts elsewhere. Only an unavailable file baseline and unavailable Git merge-base cause conservative cold-start full scope.
 2. Read and validate `review-policy.json`; record its mode, active/deferred profiles, selected node stages, actual-online lane, resume conditions, and SHA-256.
-3. Confirm `ReviewNodeCatalog.VERSION`, exact source build ID, locale, active contracts, and the policy-derived node partition. Never compare against counts copied into this Skill.
-4. Preflight the canonical active AVD before deployment: observed size, density, API, orientation, locale, font scale, and profile must match the contract. Stop on drift; repair the AVD once rather than capturing invalid evidence.
+3. Confirm the standalone catalog schema/version, exact production review build ID, locale, active contracts, and the policy-derived node partition. Never compare against counts copied into this Skill.
+4. Preflight the active isolated AVD before deployment: observed size, density, API, orientation, locale, font scale, and profile must match the contract. Stop on drift; repair the AVD once rather than capturing invalid evidence.
 
 ### UI-R1 — Detect before building
 
-Run from the monorepo root:
+Run from the monorepo root with the best available baseline:
 
 ```text
 python .agents/skills/tsuyomi-android-review/scripts/r1_change_detection.py \
   --baseline .local/ai-reviews/<previous-r1>.json \
   --output .local/ai-reviews/r1-<run-id>.json
-```
 
-For a requested complete AI review, use:
-
-```text
 python .agents/skills/tsuyomi-android-review/scripts/r1_change_detection.py \
-  --baseline .local/ai-reviews/<previous-r1>.json \
-  --force-full-review \
+  --base-ref=<change-packet-checkpoint-or-target> \
   --output .local/ai-reviews/r1-<run-id>.json
 ```
 
-UI-R1 compares file hashes, recomputes the prototype build ID, applies the profile policy, and selects Review Graph nodes. It never edits review progress.
+Omit both baseline options only when the default `origin/main`/`main` merge-base is the correct change-packet boundary. For a requested complete AI review, add `--force-full-review`.
+
+UI-R1 compares content hashes, recomputes the production review build ID, applies the profile policy, and selects Review Graph nodes. It never edits review progress.
 
 Rules:
 
-- Contract, catalog, shared theme/scaffold, or unknown Android changes expand conservatively.
+- Product/Phase contracts, catalog schema, shared theme/scaffold, or genuinely unknown Android changes expand conservatively.
+- Historical design records and review procedures select `X06`; module/file mappings select the owning surface family, and cross-cutting `X*` nodes are added only for named capabilities.
 - Workflow-only changes stop after UI-R1: no Gradle, emulator, APK, layout, or PNG work.
 - Empty scope never upgrades pending review state.
 - `--force-full-review` means every current catalog node is impact-accounted. Runtime evidence uses the package and evidence lanes selected by policy; any node prefix in `actualOnlineRequirements` receives both required evidence lanes before finalization.
@@ -146,45 +152,48 @@ Rules:
 
 When UI-R1 requires runtime evidence:
 
-1. Build once with Gradle.
-2. Deploy the resulting APK once to each active profile device with Android CLI.
+1. Build the affected production APK/test target once with Gradle.
+2. Deploy once to each active isolated profile device with Android CLI delta install/run. Never replace the canonical package as part of routine review.
 3. Account for every affected current-stage node/state obligation, but do not automatically create one PNG per obligation:
    - deterministic static geometry/copy → existing screenshot assertion;
-   - bounds, semantics, focusability, or overlap → `android layout`;
-   - changed transition/persistence → Journey;
-   - visual judgment → Android CLI PNG;
+   - bounds, semantics, focusability, or overlap → `android layout --diff`;
+   - changed transition/persistence → focused instrumentation or Journey;
+   - visual judgment → one Android CLI PNG;
    - qualitative experience → human-only pending item.
 4. Batch deterministic route/state launches only as state selection. They do not prove that a visible user control reaches the route.
 5. For visual batches, generate a contact sheet, inspect every frame there, then inspect changed, suspicious, high-risk, modal, and Reader frames at 1:1.
 6. Write an AI `PENDING` draft and leave control `PAUSED`.
 
-Primary commands:
+Primary production commands:
 
 ```text
-tsuyomi-android/gradlew.bat -p tsuyomi-android -Ptsuyomi.prototype=true \
-  :prototype:ui-atlas:assembleDebug --no-daemon --console=plain
+tsuyomi-android/gradlew.bat -p tsuyomi-android \
+  :app:assembleDebug --console=plain --dependency-verification strict
+
+android install --use-delta-install \
+  --apks=tsuyomi-android/app/build/outputs/apk/debug/app-debug.apk \
+  --device=<isolated-serial>
 
 android run \
-  --apks=tsuyomi-android/prototype/ui-atlas/build/outputs/apk/debug/ui-atlas-debug.apk \
-  --device=<serial> \
-  --activity=org.tsuyomi.prototype.uiatlas.MainActivity
+  --apks=tsuyomi-android/app/build/outputs/apk/debug/app-debug.apk \
+  --device=<isolated-serial> \
+  --activity=org.tsuyomi.android.MainActivity
 
-android layout --device=<serial> --pretty -o=.local/<node>-layout.json
-android screen capture --device=<serial> -o=.local/<node>.png
+android layout --device=<isolated-serial> --diff --pretty -o=.local/<node>-layout.json
+android screen capture --device=<isolated-serial> -o=.local/<node>.png
 ```
 
 Bounded fallback:
 
 - If `android layout --diff` fails, retry one full `android layout`.
 - If the full layout also fails while the device remains healthy, record the CLI failure and use one UIAutomator2 hierarchy. Do not loop retries or capture a duplicate screenshot.
-- Android CLI does not currently expose prototype intent extras. Device-shell `am start` may select deterministic route/profile/state extras, but this is fixture setup only; Journeys still start from visible controls.
-- Intent extras are strings. Use `--es capture true` rather than `--ez capture true`; the Atlas parser reads string extras.
+- Do not run `android describe` in the edit/review loop. It resolves the whole Android project model rather than proving the changed behavior; use Gradle tasks and known APK paths.
+- Deterministic fixture state selection may use explicit debug/test seams in `org.tsuyomi.android.fixture`; it must not introduce a second UI implementation. Journeys still start from visible production controls.
 
 ### UI-R3 — Journeys only for changed transitions
 
 Select only Journeys whose transition, persistence, input, or high-risk contract changed. Established candidates are:
 
-- `X06-review-autosave-export`
 - `L01-layout-selection`
 - `S02-search-single-submit`
 - `B01-detail-reader-return`
@@ -195,7 +204,7 @@ Select only Journeys whose transition, persistence, input, or high-risk contract
 
 Each action is one interaction or one assertion, executed in order. A failure marks remaining actions `SKIPPED`; never rewrite the Journey to obtain a pass. Hash normalized interaction traces separately from PNG bytes.
 
-Journeys selected by `actualOnlineRequirements.nodePrefixes` execute only with the policy-required package, real host controllers/storage/navigation, and every policy-required live/fixture lane. Redact credentials, cookies, verification answers, private content and raw WebView payloads. Never execute or close a production-only node from the isolated Atlas.
+Journeys selected by `actualOnlineRequirements.nodePrefixes` execute only with the policy-required package, real host controllers/storage/navigation, and every policy-required live/fixture lane. Redact credentials, cookies, verification answers, private content and raw WebView payloads. Fixture-only execution never closes an actual-online node.
 
 ### UI-R4 — Human handoff
 
@@ -203,23 +212,16 @@ Hand off the same APK, node, route, state, active profile, and evidence. Human-o
 
 Qualitative and full-matrix items for every deferred profile remain explicitly deferred. When the policy's resume trigger is satisfied, its retained physical-device and human evidence requirements become mandatory again.
 
-### UI-R4.1 — Live AVD review loop
+### UI-R4.1 — Production-device human review
 
-For same-host human review, manual SAF/share transfer is fallback. Start the checked-in watcher from the monorepo root and keep it under the OMP-managed long-running process lifecycle:
-
-```text
-python .agents/skills/tsuyomi-android-review/scripts/review_bridge.py \
-  watch --device=<human-review-serial>
-```
-
-The reviewer enters comments in the app and explicitly chooses `提交当前意见给 OMP` or `提交本批并允许更新`. The app flushes the current node and whole-prototype comments, writes the current-build export plus a monotonic signal envelope to private no-backup storage, and logs only `revision/session/build/node/hash`. The watcher performs a startup pull, then uses the marker only as a wake-up signal; it reads both files with debuggable `adb exec-out run-as`, validates policy/schema/build/hash, stores content-addressed artifacts under `.local/ai-reviews/live/`, and emits `TSUYOMI_REVIEW_EVENT` for OMP.
+Human review uses the exact production APK, build ID, route, state, active profile and evidence already produced by UI-R2/UI-R3. Review comments are recorded in the owning gate/checkpoint or ignored local handoff; there is no in-app reviewer, bridge daemon or app-private approval channel.
 
 Use two Standard AVDs when human review and code iteration overlap:
 
-- human-review AVD: stable exact APK, manual comments, final canonical evidence;
+- human-review AVD: stable exact production APK and final human observation;
 - development AVD: assistant install/debug/layout/PNG/Journey work.
 
-`node` submissions may be processed while the human continues reviewing the stable APK. Only `batch_ready` permits replacing the APK on the human-review AVD. Install with data preservation, create a new build lineage, and require the human to re-review affected nodes on the exact replacement APK. A bridge event or comment never implies `humanReviewedAt`, `approvedAt`, `ACCEPT`, production authorization, or E-ink approval.
+Only explicit user authorization permits replacing the APK on the human-review or canonical AVD. Preserve app data unless the authorized scenario explicitly requires clearing it. A comment, screenshot or automation event never implies `humanReviewedAt`, `approvedAt`, `ACCEPT`, production authorization or E-ink approval.
 
 If the non-canonical development AVD is absent, create only that AVD without recreating either canonical review device:
 
@@ -230,14 +232,7 @@ C:/Windows/System32/WindowsPowerShell/v1.0/powershell.exe \
   -ReviewWorkOnly
 ```
 
-`Tsuyomi_Review_Work_API29` mirrors the Standard profile from `UI_ATLAS.md`: API 29, portrait 1080×2400, 420dpi and baseline font scale 1.0. A Pixel 2/default 1080×1920 profile is not interchangeable. Before every visual review, verify the effective device geometry and font scale, not just the AVD name/API. If the non-canonical profile has drifted, stop that AVD, repair its persistent configuration without clearing app data, and verify the effective values after restart; a temporary `wm` override alone does not repair the persistent baseline. Deliberate landscape/large-font/forced-window tests are additional evidence, not substitutes for the matching portrait capture. This AVD never owns final human approval evidence.
-
-Capture is automatic; model execution is immediate only while an OMP live-review turn is waiting on the managed watcher. If no such turn is waiting, the watcher still persists the event and the next OMP turn reads `latest`/`pull` before doing other work. The app-private submission remains durable:
-
-```text
-python .agents/skills/tsuyomi-android-review/scripts/review_bridge.py \
-  pull --device=<human-review-serial>
-```
+`Tsuyomi_Review_Work_API29` mirrors the Standard profile from `UI_ATLAS.md`: API 29, portrait 1080×2400, 420dpi and baseline font scale 1.0. Verify effective geometry and font scale before visual review. Deliberate landscape, large-font and forced-window tests are additional evidence, not substitutes for the matching portrait capture. This AVD never owns final human approval.
 
 ## Tool ownership and escalation
 
@@ -247,7 +242,7 @@ python .agents/skills/tsuyomi-android-review/scripts/review_bridge.py \
 | Official guidance | `android docs search/fetch` | direct official URL is already known |
 | Deploy/AVD/layout/PNG | Android CLI | documented command fails while device remains healthy |
 | Input/system surface | layout coordinates, then UIAutomator2 | Android CLI cannot perform the interaction |
-| Human review transport | `review_bridge.py` + app-private atomic JSON | SAF/share is needed for cross-host or bridge recovery |
+| Human review record | owning gate/checkpoint plus ignored local handoff | cross-host evidence transfer needs an explicitly authorized channel |
 | Kotlin diagnostics | compiler/lint/LSP | `android studio analyze-file` answers a remaining targeted IDE question |
 | Runtime composition | Android Studio Layout Inspector/debugger/profiler | layout/trace cannot expose the state |
 | Final qualitative verdict | human | never delegated to AI |
@@ -270,13 +265,13 @@ Run `android studio check` once per IDE-assisted session. Successful compiler/li
 ## Scope selection
 
 - Workflow/docs-only → UI-R1 only.
-- Review runtime/storage/export/live bridge → affected production build/deploy and policy-selected current-stage nodes.
+- Review workflow/catalog changes → UI-R1; add runtime evidence only when production behavior or the evidence mechanism changed.
 - Product static geometry → affected production screenshot assertion plus affected current-stage node on every active profile.
 - Navigation/persistence/state transition → affected contract test plus selected current-stage Journey.
 - Direct deferred-profile source change → the minimal direct-change exception from `review-policy.json`; no full matrix.
 - Full AI review → every current catalog node impact-accounted according to the active/deferred partition; policy-selected actual-online prefixes receive their additional evidence lanes.
 - Deferred-profile restoration → the policy's complete retained graph, inventory, Journeys, adaptive matrix, and physical human review.
-- Actual-online review → policy-required package, real host controllers/storage/navigation, live and controlled-fixture lanes, redacted evidence, and no Atlas verdict substitution.
+- Actual-online review → policy-required package, real host controllers/storage/navigation, live and controlled-fixture lanes, redacted evidence, and no fixture-only verdict substitution.
 
 ## Evidence and handoff
 

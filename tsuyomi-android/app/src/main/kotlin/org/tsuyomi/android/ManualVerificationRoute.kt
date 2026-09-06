@@ -155,7 +155,7 @@ fun ManualVerificationRoute(
             onComplete = { scope.launch { session.finish(); onCompleted() } },
             modifier = modifier,
         )
-        else -> StandardAtlasVerificationContent(
+        else -> VerificationContent(
             sourceName = packageInfo.manifest.displayName,
             webView = requireNotNull(webView),
             blockedNavigation = blockedNavigation,
@@ -215,7 +215,7 @@ fun ManualVerificationRoute(
 }
 
 @Composable
-private fun StandardAtlasVerificationContent(
+private fun VerificationContent(
     sourceName: String,
     webView: WebView,
     blockedNavigation: Boolean,

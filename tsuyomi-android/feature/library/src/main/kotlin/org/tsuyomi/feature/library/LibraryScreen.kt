@@ -189,7 +189,7 @@ fun LibraryScreen(
             onOpenBook = onOpenBook,
             modifier = modifier.fillMaxSize(),
         )
-        else -> AtlasLibraryPresentation(
+        else -> LibraryPresentation(
             state = state,
             collections = collections,
             showNavigationNodes = showNavigationNodes,

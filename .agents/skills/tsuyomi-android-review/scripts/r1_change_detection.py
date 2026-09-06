@@ -8,6 +8,8 @@ import argparse
 import hashlib
 import json
 import re
+import subprocess
+
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterable
@@ -20,6 +22,8 @@ SUPPORTED_BASELINE_SCHEMAS = {
     "tsuyomi-r1-baseline-v1",
 }
 SKILL_ROOT = Path(".agents/skills/tsuyomi-android-review")
+CATALOG_PATH = SKILL_ROOT / "review-node-catalog.json"
+CATALOG_SCHEMA = "tsuyomi-review-node-catalog-v1"
 POLICY_PATH = SKILL_ROOT / "review-policy.json"
 POLICY_SCHEMA = "tsuyomi-android-review-policy-v1"
 WORKFLOW_FILES = {
@@ -113,11 +117,7 @@ def is_scoped_android_file(path: Path, android_root: Path) -> bool:
     if any(part in EXCLUDED_DIRECTORIES or part == "screenshotTestDebug" for part in relative.parts):
         return False
     relative_text = relative.as_posix()
-    if relative.parts and relative.parts[0].startswith("buildinteractive-prototype"):
-        return False
-    if relative_text.startswith("prototype/ui-atlas/tools/"):
-        return False
-    if path.name in {"local.properties", "render-browser-atlas.bat"} or path.suffix == ".pyc":
+    if path.name == "local.properties" or path.suffix == ".pyc":
         return False
     if path.name.startswith("tsuyomi-atlas-review-bundle"):
         return False
@@ -144,51 +144,48 @@ def collect_files(repo_root: Path) -> dict[str, str]:
     return files
 
 
-def parse_build_versions(build_file: Path) -> tuple[int, int]:
-    text = build_file.read_text(encoding="utf-8")
-    data_match = re.search(r"prototypeDataSchemaVersion\s*=\s*(\d+)", text)
-    review_match = re.search(r"prototypeReviewSchemaVersion\s*=\s*(\d+)", text)
-    if data_match is None or review_match is None:
-        raise SystemExit("Could not parse prototype schema versions")
-    return int(data_match.group(1)), int(review_match.group(1))
+def is_review_build_identity_path(path: str) -> bool:
+    if path in {
+        "tsuyomi-android/docs/design/UI_CONSTITUTION.md",
+        CATALOG_PATH.as_posix(),
+    }:
+        return True
+    if not path.startswith("tsuyomi-android/"):
+        return False
+    if "/docs/" in path:
+        return False
+    if any(marker in path for marker in ("/src/test/", "/src/androidTest/", "/src/screenshotTest/")):
+        return False
+    return path.endswith((".kt", ".kts", ".java", ".xml", ".toml", ".properties", ".lockfile"))
 
 
-def compute_prototype_build_id(repo_root: Path) -> str:
-    android_root = repo_root / "tsuyomi-android"
-    prototype_root = android_root / "prototype/ui-atlas"
-    data_version, review_version = parse_build_versions(prototype_root / "build.gradle.kts")
+def compute_review_build_id(current_files: dict[str, str]) -> str:
     digest = hashlib.sha256()
-    paths = sorted(
-        (path for path in prototype_root.rglob("*") if is_scoped_android_file(path, android_root)),
-        key=lambda path: path.relative_to(prototype_root).as_posix(),
-    )
-    for path in paths:
-        relative = path.relative_to(prototype_root).as_posix()
-        if relative.startswith("build/") or relative.startswith(".gradle/"):
+    for path, content_hash in sorted(current_files.items()):
+        if not is_review_build_identity_path(path):
             continue
-        digest.update(relative.encode())
+        digest.update(path.encode())
         digest.update(b"\0")
-        digest.update(path.read_bytes())
+        digest.update(content_hash.encode())
         digest.update(b"\0")
-    digest.update((android_root / "docs/design/UI_CONSTITUTION.md").read_bytes())
-    digest.update(str(data_version).encode())
-    digest.update(str(review_version).encode())
     return digest.hexdigest()
 
 
 def parse_catalog(repo_root: Path) -> tuple[int, list[str]]:
-    catalog_path = repo_root / (
-        "tsuyomi-android/prototype/ui-atlas/src/main/kotlin/"
-        "org/tsuyomi/prototype/uiatlas/review/ReviewNodeCatalog.kt"
-    )
-    text = catalog_path.read_text(encoding="utf-8")
-    version_match = re.search(r"const val VERSION\s*=\s*(\d+)", text)
-    if version_match is None:
-        raise SystemExit("Could not parse ReviewNodeCatalog.VERSION")
-    node_ids = sorted(set(re.findall(r'\b(?:node|cross)\(\s*"([LBMSX]\d{2})"', text)))
-    if len(node_ids) != 28:
-        raise SystemExit(f"Expected 28 review nodes, found {len(node_ids)}")
-    return int(version_match.group(1)), node_ids
+    catalog_path = repo_root / CATALOG_PATH
+    data = json.loads(catalog_path.read_text(encoding="utf-8"))
+    if data.get("schema") != CATALOG_SCHEMA or not isinstance(data.get("version"), int):
+        raise SystemExit("Unsupported Review Graph catalog schema")
+    nodes = data.get("nodes")
+    if not isinstance(nodes, list):
+        raise SystemExit("Review Graph catalog must contain a node list")
+    node_ids = [node.get("id") for node in nodes if isinstance(node, dict)]
+    if len(node_ids) != 28 or len(set(node_ids)) != 28 or not all(
+        isinstance(node_id, str) and re.fullmatch(r"[LBMSX]\d{2}", node_id)
+        for node_id in node_ids
+    ):
+        raise SystemExit("Review Graph catalog must contain 28 unique valid node IDs")
+    return data["version"], sorted(node_ids)
 
 
 def nodes_with_prefix(node_ids: Iterable[str], *prefixes: str) -> set[str]:
@@ -213,102 +210,144 @@ def review_node_groups(node_ids: list[str]) -> ReviewNodeGroups:
     return ReviewNodeGroups(
         all=set(node_ids),
         surface=nodes_with_prefix(node_ids, "L", "B", "S", "M"),
-        library=nodes_with_prefix(node_ids, "L") | {"B01"},
+        library=nodes_with_prefix(node_ids, "L"),
         book_reader=book_reader,
         source=nodes_with_prefix(node_ids, "S"),
         more=nodes_with_prefix(node_ids, "M"),
     )
 
 
+def available_nodes(groups: ReviewNodeGroups, *node_ids: str) -> set[str]:
+    return set(node_ids) & groups.all
+
+
+def cross_cutting_nodes(normalized: str, groups: ReviewNodeGroups) -> set[str]:
+    """Select cross-cutting review nodes only when the path names their capability."""
+    lowered = normalized.lower()
+    file_name = lowered.rsplit("/", 1)[-1]
+    nodes: set[str] = set()
+    if any(token in file_name for token in ("navigation", "route", "backstack", "mainactivity")):
+        nodes |= available_nodes(groups, "X01")
+    if any(token in file_name for token in ("dialog", "menu", "input", "semantic", "accessibility", "interaction")):
+        nodes |= available_nodes(groups, "X02")
+    if any(token in file_name for token in ("theme", "display", "eink", "color", "motion")):
+        nodes |= available_nodes(groups, "X03", "X04")
+    if (
+        "/src/main/res/" in lowered
+        or any(token in file_name for token in (
+            "screen", "surface", "presentation", "component", "modules", "scaffold", "layout",
+        ))
+    ):
+        nodes |= available_nodes(groups, "X04")
+    if any(token in file_name for token in (
+        "remote", "source", "network", "coordinator", "session", "gateway", "webview", "retry", "mutation",
+    )):
+        nodes |= available_nodes(groups, "X05")
+    return nodes
+
+
 def classify_review_contract(normalized: str, groups: ReviewNodeGroups) -> Classification | None:
     if normalized.startswith(SKILL_ROOT.as_posix() + "/"):
-        return "workflow", {"X06"}, ["project review skill changed"]
+        return "workflow", available_nodes(groups, "X06"), ["project review skill changed"]
     if normalized in {path.as_posix() for path in WORKFLOW_FILES}:
-        return "workflow", {"X06"}, ["repository Android workflow changed"]
-    if normalized.endswith("docs/design/INTERACTIVE_PROTOTYPE_PLAN.md"):
-        return "workflow", {"X06"}, ["interactive review operating contract changed"]
+        return "workflow", available_nodes(groups, "X06"), ["repository Android workflow changed"]
     if normalized.endswith((
-        "docs/design/UI_CONSTITUTION.md",
         "docs/design/UI_ATLAS.md",
         "docs/design/DESIGN_DIRECTION_HANDOFF.md",
         "docs/design/DESIGN_REFERENCE_REVIEW.md",
-        "docs/phases/PHASE_4.md",
     )):
-        return "contract", groups.all, ["binding UI/review contract changed"]
-    if normalized.endswith("ReviewNodeCatalog.kt"):
+        return "workflow", available_nodes(groups, "X06"), ["review procedure or historical design record changed"]
+    if normalized.endswith(("docs/design/UI_CONSTITUTION.md", "docs/phases/PHASE_4.md")):
+        return "contract", groups.all, ["binding product or phase contract changed"]
+    if normalized == CATALOG_PATH.as_posix():
         return "contract", groups.all, ["review scope authority changed"]
-    if "/prototype/ui-atlas/review/" in normalized:
-        category = "review-runtime" if normalized.endswith(".kt") else "evidence"
-        return category, {"X06"}, ["review storage/export contract changed"]
-    if "/prototype/ui-atlas/src/main/kotlin/" in normalized and "/review/" in normalized:
-        return "review-runtime", {"X06"}, ["in-app reviewer runtime changed"]
     return None
 
 
-def classify_prototype(normalized: str, groups: ReviewNodeGroups) -> Classification | None:
-    if "/prototype/ui-atlas/src/screenshotTest" in normalized:
-        return "evidence", groups.surface | {"X02", "X03", "X04", "X05"}, ["Atlas static evidence definition changed"]
-    if normalized.endswith(("LibraryAtlasScreens.kt", "LibraryAtlasFixtures.kt")):
-        nodes = nodes_with_prefix(groups.all, "L") | groups.book_reader | {"X01", "X02", "X04", "X05"}
-        return "runtime", nodes, ["Library/Book/Reader prototype surface changed"]
-    if normalized.endswith(("SourceAtlasScreens.kt", "SourceAtlasFixtures.kt")):
-        return "runtime", groups.source | {"B01", "L08", "X01", "X02", "X04", "X05"}, ["source/search prototype surface changed"]
-    if normalized.endswith(("MoreAtlasScreens.kt", "MoreAtlasFixtures.kt")):
-        return "runtime", groups.more | {"X01", "X02", "X04", "X05"}, ["More/settings prototype surface changed"]
-    if "/prototype/ui-atlas/src/main/kotlin/" in normalized:
-        if "/theme/" in normalized:
-            return "runtime", groups.surface | {"X02", "X03", "X04"}, ["shared Atlas theme/motion changed"]
-        if "/navigation/" in normalized or normalized.endswith(("AtlasApp.kt", "MainActivity.kt")):
-            return "runtime", groups.surface | {"X01", "X02"}, ["shared Atlas navigation/host changed"]
-        if "/runtime/" in normalized:
-            return "runtime", groups.surface | {"X01", "X05", "X06"}, ["shared Atlas state/scenario runtime changed"]
-        return "runtime", groups.all, ["shared or unclassified Atlas runtime changed"]
-    if "/prototype/ui-atlas/" in normalized:
-        return "prototype-build", groups.all, ["prototype build/resource input changed"]
+
+
+def production_domain_nodes(normalized: str, groups: ReviewNodeGroups) -> tuple[set[str], str] | None:
+    if not normalized.endswith((".kt", ".java", ".xml")):
+        return None
+
+    name = normalized.rsplit("/", 1)[-1]
+    l_nodes = groups.library
+    b_nodes = groups.book_reader
+    s_nodes = groups.source
+    m_nodes = groups.more
+
+    if "RemoteLibrary" in name or "RemoteMirror" in name:
+        return available_nodes(groups, "L08", "S03", "B01"), "website mirror implementation changed"
+    if "/feature/book/" in normalized:
+        return available_nodes(groups, "B01"), "production Book Detail feature changed"
+    if "/feature/search/" in normalized:
+        return available_nodes(groups, "S02"), "production Search feature changed"
+    if "/feature/library/" in normalized:
+        return l_nodes | available_nodes(groups, "B01"), "production Library feature changed"
+    if "/feature/browse/" in normalized:
+        return s_nodes | available_nodes(groups, "B01"), "production Browse/source feature changed"
+    if "/feature/settings/" in normalized:
+        return m_nodes | available_nodes(groups, "B03"), "production More/settings feature changed"
+    if "/feature/backup/" in normalized:
+        return available_nodes(groups, "M04", "M05", "X05"), "production backup/transfer feature changed"
+    if "/feature/extensions/" in normalized:
+        return available_nodes(groups, "S01", "S04", "M07"), "production extension-management feature changed"
+    if "/feature/reader/" in normalized or "/reader/" in normalized:
+        return b_nodes | available_nodes(groups, "M03"), "Reader implementation changed"
+    if "/core/ui/" in normalized:
+        return groups.surface | available_nodes(groups, "X02", "X04"), "shared production UI changed"
+    if "/core/display/" in normalized:
+        return available_nodes(groups, "M02", "M03", "B02", "B03", "X03", "X04"), "display/profile behavior changed"
+    if "/core/database/" in normalized:
+        return l_nodes | available_nodes(groups, "B01", "M04", "M05"), "library persistence behavior changed"
+    if "/core/preferences/" in normalized:
+        return available_nodes(groups, "L01", "L02", "L05", "L06", "M02", "M03"), "persisted UI preference behavior changed"
+    if "/core/files/" in normalized or "/shared/backup/" in normalized:
+        return available_nodes(groups, "M04", "M05", "X05"), "data transfer/file behavior changed"
+    if "/core/media/" in normalized:
+        return l_nodes | available_nodes(groups, "B01", "S01", "S02", "S03"), "cover/media behavior changed"
+    if "/shared/locator/" in normalized:
+        return b_nodes | available_nodes(groups, "X01"), "reader locator semantics changed"
+    if "/shared/smart-shelf/" in normalized:
+        return available_nodes(groups, "L01", "L02", "L04", "L05", "L06", "X01"), "shelf membership/rule behavior changed"
+    if "/shared/source-contract/" in normalized or "/source/" in normalized or "/core/network/" in normalized:
+        return s_nodes | available_nodes(groups, "B01", "L08", "X05"), "source/network contract or runtime changed"
+    if "/core/security/" in normalized or "/core/webview/" in normalized:
+        return available_nodes(groups, "S04", "M04", "M05", "X02", "X05"), "security or controlled WebView boundary changed"
+    if "/shared/model/" in normalized:
+        return groups.surface, "shared presentation model changed"
+    if "/app/" in normalized:
+        if name.startswith("Library"):
+            return l_nodes | available_nodes(groups, "B01"), "application Library owner changed"
+        if name.startswith("Source") or name.startswith("NormalizedSource") or name.startswith("VerifiedPage"):
+            return s_nodes | available_nodes(groups, "B01", "L08"), "application source owner changed"
+        return groups.surface, "application host or navigation changed"
     return None
 
 
 def classify_test_source(normalized: str, groups: ReviewNodeGroups) -> Classification | None:
     if not any(marker in normalized for marker in ("/src/test/", "/src/androidTest/", "/src/screenshotTest/")):
         return None
-    if "/feature/library/" in normalized:
-        nodes = groups.library | {"X01", "X02", "X04", "X05"}
-    elif "/feature/browse/" in normalized:
-        nodes = groups.source | {"B01", "X01", "X02", "X04", "X05"}
-    elif "/feature/settings/" in normalized:
-        nodes = groups.more | {"B03", "X01", "X02", "X04", "X05"}
-    elif "/reader/" in normalized or "/shared/locator/" in normalized:
-        nodes = groups.book_reader | {"M03", "X01", "X05"}
-    elif "/core/ui/" in normalized:
-        nodes = groups.surface | {"X02", "X03", "X04", "X05"}
-    else:
-        nodes = groups.all
-    return "evidence", nodes, ["automated contract/evidence source changed"]
+    domain = production_domain_nodes(normalized, groups)
+    if domain is None:
+        return "evidence", groups.all, ["unclassified automated evidence source changed"]
+    nodes, reason = domain
+    return "evidence", nodes | cross_cutting_nodes(normalized, groups), [f"automated evidence for {reason}"]
 
 
 def classify_production(normalized: str, groups: ReviewNodeGroups) -> Classification | None:
-    rules: tuple[tuple[bool, Classification], ...] = (
-        ("/feature/library/" in normalized, ("runtime", groups.library | {"X01", "X02", "X04", "X05"}, ["production Library feature changed"])),
-        ("/feature/browse/" in normalized, ("runtime", groups.source | {"B01", "X01", "X02", "X04", "X05"}, ["production Browse/Search feature changed"])),
-        ("/feature/settings/" in normalized, ("runtime", groups.more | {"B03", "X01", "X02", "X04", "X05"}, ["production More/settings feature changed"])),
-        ("/reader/" in normalized, ("runtime", groups.book_reader | {"M03", "X01", "X02", "X03", "X04", "X05"}, ["Reader implementation changed"])),
-        ("/core/ui/" in normalized, ("runtime", groups.surface | {"X02", "X03", "X04", "X05"}, ["shared production UI changed"])),
-        ("/core/display/" in normalized, ("runtime", {"M02", "M03", "B02", "B03", "X03", "X04"}, ["display/profile behavior changed"])),
-        ("/core/files/" in normalized or "/shared/backup/" in normalized, ("runtime", {"M04", "M05", "X01", "X05"}, ["data transfer/file behavior changed"])),
-        ("/shared/locator/" in normalized, ("runtime", groups.book_reader | {"X01", "X05"}, ["reader locator semantics changed"])),
-        ("/shared/smart-shelf/" in normalized, ("runtime", nodes_with_prefix(groups.all, "L") | {"X01", "X05"}, ["shelf membership/rule behavior changed"])),
-        ("/source/" in normalized or "/core/network/" in normalized, ("runtime", groups.source | {"B01", "L08", "X05"}, ["source/network state behavior changed"])),
-        ("/core/security/" in normalized, ("runtime", {"S04", "M04", "M05", "X02", "X05"}, ["security boundary or failure behavior changed"])),
-        ("/app/" in normalized, ("runtime", groups.surface | {"X01", "X02", "X05"}, ["application navigation/host changed"])),
-    )
-    return next((classification for matches, classification in rules if matches), None)
+    domain = production_domain_nodes(normalized, groups)
+    if domain is None:
+        return None
+    nodes, reason = domain
+    return "runtime", nodes | cross_cutting_nodes(normalized, groups), [reason]
 
 
 def classify_repository_input(normalized: str, groups: ReviewNodeGroups) -> Classification:
     if normalized.endswith((".gradle.kts", ".toml", ".properties", ".lockfile")) or "/gradle/" in normalized:
         return "build", set(), ["build or dependency input changed"]
     if "/docs/" in normalized or normalized.endswith(".md"):
-        return "workflow", {"X06"}, ["non-binding process/documentation changed"]
+        return "workflow", available_nodes(groups, "X06"), ["non-binding process/documentation changed"]
     if normalized.endswith((".kt", ".java", ".xml")) and normalized.startswith("tsuyomi-android/"):
         return "runtime", groups.all, ["unknown Android source change; conservative full scope"]
     return "other", set(), ["non-UI repository input changed"]
@@ -317,7 +356,7 @@ def classify_repository_input(normalized: str, groups: ReviewNodeGroups) -> Clas
 def classify_change(path: str, node_ids: list[str]) -> Classification:
     normalized = path.replace("\\", "/")
     groups = review_node_groups(node_ids)
-    for classifier in (classify_review_contract, classify_prototype, classify_test_source, classify_production):
+    for classifier in (classify_review_contract, classify_test_source, classify_production):
         classification = classifier(normalized, groups)
         if classification is not None:
             return classification
@@ -348,6 +387,10 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Detect Tsuyomi Android Review Graph impact")
     parser.add_argument("--root", type=Path, default=Path.cwd(), help="monorepo root or a child path")
     parser.add_argument("--baseline", type=Path, help="previous UI-R1 report or baseline JSON")
+    parser.add_argument(
+        "--base-ref",
+        help="Git ref used when no file-hash baseline is supplied; defaults to origin/main then main",
+    )
     parser.add_argument("--output", type=Path, required=True, help="output UI-R1 report JSON")
     parser.add_argument(
         "--force-full-review",
@@ -362,6 +405,7 @@ class BaselineState:
     data: dict | None
     files: dict[str, str]
     build_id: str | None
+    label: str | None
 
 
 @dataclass
@@ -371,14 +415,98 @@ class ChangeAnalysis:
     changed_kotlin_files: list[str]
 
 
-def load_baseline(args: argparse.Namespace, repo_root: Path) -> BaselineState:
+def is_review_scope_path(path: str) -> bool:
+    normalized = path.replace("\\", "/")
+    if normalized in {item.as_posix() for item in WORKFLOW_FILES}:
+        return True
+    if normalized.startswith(SKILL_ROOT.as_posix() + "/"):
+        return "__pycache__" not in normalized and not normalized.endswith(".pyc")
+    prefix = "tsuyomi-android/"
+    if not normalized.startswith(prefix):
+        return False
+    relative = normalized[len(prefix):]
+    parts = relative.split("/")
+    if any(part in EXCLUDED_DIRECTORIES or part == "screenshotTestDebug" for part in parts):
+        return False
+    name = parts[-1]
+    if name == "local.properties" or name.endswith(".pyc"):
+        return False
+    return not name.startswith("tsuyomi-atlas-review-bundle")
+
+
+def run_git(repo_root: Path, *args: str) -> subprocess.CompletedProcess[bytes]:
+    return subprocess.run(
+        ["git", *args],
+        cwd=repo_root,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        check=False,
+    )
+
+
+def resolve_merge_base(repo_root: Path, requested_ref: str | None) -> str | None:
+    candidates = [requested_ref] if requested_ref is not None else ["origin/main", "main"]
+    for candidate in candidates:
+        result = run_git(repo_root, "merge-base", "HEAD", candidate)
+        if result.returncode == 0:
+            value = result.stdout.decode().strip()
+            if value:
+                return value
+    if requested_ref is not None:
+        raise SystemExit(f"Could not resolve Git merge-base for {requested_ref}")
+    return None
+
+
+def load_git_baseline(
+    repo_root: Path,
+    current_files: dict[str, str],
+    requested_ref: str | None,
+) -> BaselineState | None:
+    merge_base = resolve_merge_base(repo_root, requested_ref)
+    if merge_base is None:
+        return None
+
+    changed = run_git(repo_root, "diff", "--no-renames", "--name-only", merge_base, "--")
+    untracked = run_git(repo_root, "ls-files", "--others", "--exclude-standard")
+    if changed.returncode != 0 or untracked.returncode != 0:
+        if requested_ref is not None:
+            raise SystemExit("Could not derive Review Graph scope from Git")
+        return None
+
+    paths = {
+        line.strip()
+        for output in (changed.stdout, untracked.stdout)
+        for line in output.decode(errors="replace").splitlines()
+        if line.strip() and is_review_scope_path(line.strip())
+    }
+    files = dict(current_files)
+    for path in paths:
+        previous = run_git(repo_root, "show", f"{merge_base}:{path}")
+        if previous.returncode == 0:
+            files[path] = sha256_bytes(previous.stdout)
+        else:
+            files.pop(path, None)
+
+    data = {
+        "schema": "tsuyomi-r1-baseline-v1",
+        "source": {"gitMergeBase": merge_base},
+    }
+    return BaselineState(data, files, None, f"git:{merge_base}")
+
+
+def load_baseline(
+    args: argparse.Namespace,
+    repo_root: Path,
+    current_files: dict[str, str],
+) -> BaselineState:
     if args.baseline is None:
-        return BaselineState(None, {}, None)
+        git_baseline = load_git_baseline(repo_root, current_files, args.base_ref)
+        return git_baseline or BaselineState(None, {}, None, None)
     baseline_path = args.baseline if args.baseline.is_absolute() else repo_root / args.baseline
     data = json.loads(baseline_path.read_text(encoding="utf-8"))
     if data.get("schema") not in SUPPORTED_BASELINE_SCHEMAS:
         raise SystemExit("Unsupported UI-R1 baseline schema")
-    return BaselineState(data, baseline_files(data), baseline_build_id(data))
+    return BaselineState(data, baseline_files(data), baseline_build_id(data), args.baseline.as_posix())
 
 
 def detect_changes(
@@ -476,13 +604,13 @@ def main() -> int:
     catalog_version, node_ids = parse_catalog(repo_root)
     review_policy, review_policy_hash = load_review_policy(repo_root)
     current_files = collect_files(repo_root)
-    current_build_id = compute_prototype_build_id(repo_root)
-    baseline = load_baseline(args, repo_root)
+    current_build_id = compute_review_build_id(current_files)
+    baseline = load_baseline(args, repo_root, current_files)
     analysis = detect_changes(baseline.files, current_files, node_ids)
     add_synthetic_changes(analysis, baseline.data is not None, args.force_full_review, node_ids)
     report = build_report(
         ReportBuildContext(
-            baseline_path=None if args.baseline is None else args.baseline.as_posix(),
+            baseline_path=baseline.label,
             baseline_build_id=baseline.build_id,
             baseline_available=baseline.data is not None,
             force_full_review=args.force_full_review,

@@ -1,7 +1,7 @@
 {
   "schema": "tsuyomi-android-review-policy-v1",
   "mode": "phase4-production-standard-first",
-  "effectiveFrom": "2026-09-05",
+  "effectiveFrom": "2026-09-06",
   "activeProfiles": [
     "STANDARD"
   ],
@@ -42,7 +42,7 @@
       "requiredPackage": "org.tsuyomi.android",
       "requiresLiveOnlineService": true,
       "requiresControlledFixtureReplay": true,
-      "forbidAtlasFinalization": true,
+      "forbidFixtureOnlyFinalization": true,
       "reason": "S01-S04 and X01-X06 are active only on production surfaces and require both live-service evidence and signed deterministic replay."
     },
     "deferredStages": []

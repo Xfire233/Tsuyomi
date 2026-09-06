@@ -92,34 +92,36 @@ PR 创建后及最终功能变更后，Adviser 必须对 PR head 再审阅一次
 
 ### G5. Verification
 
-按变更类型运行真实证明：
+验证分三层。三层复用同一 Change Packet、Git 边界和 affected-path 计划；Android Studio/Android CLI 只缩短反馈，不建立第二套 proof system。
 
-- Bug：先复现，再确认复现消失。
-- UI：真实 screen 语义测试、golden 和 AVD/设备交互。
-- 持久化/安全：API 下界 instrumentation，覆盖重建、隔离、删除和错误。
-- 协议：valid/invalid fixtures 与 conformance。
-- 功能/API：现有契约测试；只有新增可观察契约时添加测试。
+#### Tier 1 — Fast edit loop
 
-Android Phase exit/admission gate 的最低自动检查：
+- Android Studio editor/gutter、Compose Preview、Live Edit/Apply Changes、Layout Inspector 和 debugger 只回答当前编辑问题，不形成 gate evidence。
+- 使用已签入的 `.run/` Gradle configuration 或 Gradle tool window 的精确 module task；Gradle Wrapper 仍拥有 compiler/lint/test 结论。
+- 不运行全项目 model discovery、全 Android suite、AVD 重建或重复截图。
 
-```text
-assembleDebug
-lintDebug（app + affected Android libraries）
-JVM/unit tests
-受影响 instrumentation tests
-validateDebugScreenshotTest
-python -m reuse lint
-```
+#### Tier 2 — Affected-change proof
 
-跨组件 Phase exit/admission gate 同时要求 protocol `npm ci && npm test`、extensions 的 build/fixture/package determinism 检查（实现后启用）、Android 相关检查，以及根 Monorepo REUSE/制品策略。
+1. UI change 先由 `UI-R1` 以显式 baseline 或 Git merge-base 选择 owning Review Graph nodes、cross-cutting capabilities 和 evidence lanes。
+2. `tools/android_ci_plan.py` 将 changed paths 映射为精确 build、lint、JVM、screenshot、instrumentation 与 dependency-lock tasks。已知 module 不得自动扩张到全 Android；未知 Android source 或无有效 Git base 才使用保守全集。
+3. Gradle 一次构建受影响 production target；普通验证不写 lock。只有 dependency input 改变时才执行明确的 `--write-locks` maintenance，再用普通 strict verification 证明提交结果。
+4. 运行真实证明：Bug 先复现后消失；UI 用 production semantics/layout/behavior、受影响 screenshot assertion 和必要 AVD interaction；持久化/安全覆盖 API 下界、重建、隔离、删除和错误；协议使用 valid/invalid fixtures 与 conformance。
+5. Runtime change 每个 active profile 只部署一次。Android CLI 拥有 isolated AVD、delta install、exact activity launch、layout diff 和 PNG；一个 observable claim 只指定一个 evidence owner。截图不替代 gesture/state-transition test。
 
-Android 运行期验收只执行 `.agents/skills/tsuyomi-android-review/review-policy.json` 当前 `activeProfiles` 选择的 profile。每个 active profile 必须在其独立的 API 29 portrait AVD 上记录同一目标 head、分辨率、density、方向、font scale、用户流结果和截图 SHA-256；横屏、分屏、golden 或在单一 AVD 上切换 profile 不能替代这条 portrait 记录。
+#### Tier 3 — CI admission
 
-`deferredProfiles`/`FROZEN` profile 在日常 gate 中不构成缺失证据：保留其合同、实现、fixture 和 inventory，不新增设计/批准/golden。直接修改 deferred profile 时，只执行 policy 明确允许的最小编译、非视觉契约测试和必要启动 smoke；恢复为 active 时才重新进入完整 retained matrix 和物理设备要求。完整设备配方以 [`AVD_MATRIX.md`](../verification/AVD_MATRIX.md) 为准。
+- `.github/workflows/android-quality.yml` 使用同一 planner 选择 bounded production tasks；documentation-only changes 不启动 Android jobs，known module changes 只跑 owning tasks，invalid/missing base 使用 conservative full plan。
+- 每个 PR/ref 只有一个 active `android-quality` run；required Android jobs 有 18 分钟 hard deadline。Instrumentation APK 可并行编译，device execution 串行。
+- Hosted admission 必须确认目标 head、关键 build/test/instrumentation/package steps 非 `skipped`，并抽查 log 证明命令真实执行。绿色空任务不是证据。
+- Gradle Managed Device 仅是 manual/non-required pilot；未证明 device geometry、稳定性、缓存和 evidence equivalence 前，不替代 required API 29 emulator lane。
 
-Required workflow 的 path detection 必须使用仓库根锚点（例如 `git -C "$GITHUB_WORKSPACE"`），不得依赖 job 默认 `working-directory`。Hosted 准入不仅检查 check conclusion；还必须确认目标 head、关键 build/test/instrumentation/package steps 非 `skipped`，并抽查 job step/log 证明命令真实执行。绿色空任务不是证据。
+最低验证类别保持不变，但由 planner 选择对应 tasks：production assemble、affected lint、affected JVM/unit、affected screenshot validation、affected instrumentation，以及 repository policy/REUSE。跨组件 admission 另加 protocol `npm ci && npm test`、extensions build/fixture/package determinism 和根仓库检查。
 
-Android CI must keep the required production checks bounded without weakening them: each PR/ref may have only one active `android-quality` run, required Android jobs have an 18-minute hard deadline, and production instrumentation APKs are compiled with normal Gradle parallelism before device execution is serialized. The isolated `prototype:ui-atlas` build, lint, and instrumentation graph runs only when that prototype or its shared Gradle/build-logic inputs change; production Android changes must never be gated on rebuilding the dependency-isolated prototype. The required job names remain stable so branch protection cannot silently lose coverage.
+Android 运行期验收只执行 `.agents/skills/tsuyomi-android-review/review-policy.json` 当前 `activeProfiles`。每个 active profile 必须在独立 API 29 portrait AVD 上记录同一目标 head、分辨率、density、方向、font scale、用户流结果和截图 SHA-256；横屏、分屏、golden 或在单一 AVD 上切换 profile 不能替代该 portrait 记录。
+
+`deferredProfiles`/`FROZEN` profile 在日常 gate 中不构成缺失证据：保留合同、实现、fixture 和 inventory，不新增设计/批准/golden。直接修改 deferred profile 时，只执行 policy 允许的最小编译、非视觉契约测试和必要启动 smoke；恢复为 active 时重新进入完整 retained matrix 和物理设备要求。完整设备配方以 [`AVD_MATRIX.md`](../verification/AVD_MATRIX.md) 为准。
+
+Required workflow 的 path detection 必须使用仓库根锚点（例如 `git -C "$GITHUB_WORKSPACE"`），不得依赖 job 默认 `working-directory`。
 
 ### G6. Evidence
 

@@ -3,6 +3,8 @@
 
 # Tsuyomi RC2.1 参考深挖与审阅结论回传
 
+Status: **HISTORY / PROVENANCE ONLY.** Current product behavior lives in `UI_CONSTITUTION.md`; current evidence mechanics live in `UI_ATLAS.md` and the standalone Review Graph catalog. Prototype architecture and authorization statements below are superseded.
+
 - 日期：2026-08-13
 - 输入：`DESIGN_REFERENCE_REVIEW.md`、Flutter 参考项目 `hikari_novel_flutter`、RC2 Atlas `manifestSha256=1013fb35c0b566d2ad60cf8087dd7c3e7815c3995870f1ce2b7cdb184939d3`、`tsuyomi-atlas-review-bundle-0813.json`。
 - 性质：这是 RC2.1 设计与下一轮 fixture Atlas 的约束，不是 Phase 4 生产实现授权。
@@ -131,7 +133,7 @@
 
 ### 1.3 Review → contract → evidence coverage index
 
-Coverage IDs are stable references to non-empty review inputs. `I-*` = initial bundle decisions/frame comments; `R2-*` = RC2 route/module comments; `M-*` = RC2.1 intermediate comments; `L-*` = RC2.1-3 comments. RC2 and intermediate route comments with identical payloads remain listed together rather than silently deduplicated. Every ID below maps to an active contract and at least one executable Atlas assertion; the source JSON remains the verbatim quote authority.
+Coverage IDs are stable references to historical review inputs. `I-*` = initial bundle decisions/frame comments; `R2-*` = RC2 route/module comments; `M-*` = RC2.1 intermediate comments; `L-*` = RC2.1-3 comments. Each retained normalized obligation maps to the current contract and a production evidence seam; historical source JSON remains quote provenance only.
 
 | Review IDs | Normalized obligation / supersession | Active contract | Evidence assertion |
 |---|---|---|---|
@@ -405,7 +407,7 @@ Hikari Flutter 不计入上述 31 个清单项，但作为迁移需求基线单�
 - Browse 的来源 item 统一 M3 ListItem/Card family；按钮层级依据主/次任务统一，不混用无理由的 filled/text/outlined。
 - Help 顶部本地搜索；topic 使用 accordion。非 Help 页面不得把设计解释或内部数据规则常驻显示给用户。
 
-## 6. 下一版 Atlas 证据
+## 6. Historical Atlas evidence plan
 
 RC2.1-3 的 17 张图与绑定审阅保留为 rejected evidence，不在其文件上覆盖。下一版只在 §1.1 验收账本全部闭合后生成，至少证明：
 
@@ -425,6 +427,6 @@ RC2.1-3 的 17 张图与绑定审阅保留为 rejected evidence，不在其文�
 - “不照搬”不代表不深入；每个引用必须落到一个具体合同、fixture 或明确拒绝项，否则从文档删除。
 - 参考发生冲突时优先级：用户审阅决定 → Tsuyomi 本地优先/E-ink/安全边界 → Android/M3/无障碍规范 → 竞品模式。
 
-## 8. 当前授权边界
+## 8. Superseded authorization boundary
 
-本文件授权重新设计 fixture-only `:prototype:ui-atlas` 和同步设计文档；**不授权生产 Phase 4 提取、提交、推送、PR 或合并**。收藏夹模型已明确，不再需要为上述四项重复询问；若实现中出现新的远端写入语义、删除语义或数据迁移选择，再单独询问。
+The original fixture-only redesign authorization in this section is historical. Phase 4 production authorization is owned by `PHASE_4.md` and explicit current gate/user outcomes. The temporary prototype and reviewer were retired on 2026-09-06; this file grants no implementation, repository, device, remote-write, merge or release permission.

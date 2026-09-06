@@ -51,6 +51,26 @@ class RepositoryPolicyTest(unittest.TestCase):
         self.assertTrue(all(check_repository.violates_policy(path) for path in rejected))
         self.assertFalse(check_repository.violates_policy(Path("tsuyomi-extensions/.env.example")))
 
+    def test_retired_android_prototype_is_rejected(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            retired = root / "tsuyomi-android/prototype/ui-atlas"
+            retired.mkdir(parents=True)
+            settings = root / "tsuyomi-android/settings.gradle.kts"
+            settings.write_text('include(":prototype:ui-atlas")', encoding="utf-8")
+            source = root / "tsuyomi-android/app/src/main/kotlin/App.kt"
+            source.parent.mkdir(parents=True)
+            source.write_text("package org.tsuyomi.prototype.app", encoding="utf-8")
+
+            violations = check_repository.retired_android_prototype_violations(root)
+
+        self.assertTrue(any("retired prototype must not exist" in item for item in violations))
+        self.assertTrue(any("includes retired prototype module" in item for item in violations))
+        self.assertTrue(any("references retired prototype package" in item for item in violations))
+
+    def test_live_repository_has_no_retired_android_prototype(self) -> None:
+        self.assertEqual([], check_repository.retired_android_prototype_violations())
+
 class ToolingGovernanceTest(unittest.TestCase):
     def create_valid_registry(self, root: Path) -> Path:
         tooling = root / "TOOLING.md"
