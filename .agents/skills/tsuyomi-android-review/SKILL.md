@@ -272,6 +272,9 @@ Run `android studio check` once per IDE-assisted session. Successful compiler/li
 - Full AI review → every current catalog node impact-accounted according to the active/deferred partition; policy-selected actual-online prefixes receive their additional evidence lanes.
 - Deferred-profile restoration → the policy's complete retained graph, inventory, Journeys, adaptive matrix, and physical human review.
 - Actual-online review → policy-required package, real host controllers/storage/navigation, live and controlled-fixture lanes, redacted evidence, and no fixture-only verdict substitution.
+- Resolve the policy partition before every Gradle/device command. Tests for a profile currently marked deferred/frozen remain retained but ignored from routine instrumentation and screenshot registration; a test's presence in a class never makes that profile active.
+- Journey debugging follows `QUALITY_GATES.md`: exact reproduction, stable affected test, adjacent sequence, affected active-profile group, then at most one required full class/suite. Repeated full-suite reruns, local duplication of the CI matrix, and production changes made only to satisfy Compose idling are review failures.
+- When the same failure signature crosses Journeys or appears only in class order, stop broad execution and classify the shared helper, lifecycle owner, device state, or synchronization boundary before editing. Report the boundary change immediately.
 
 ## Evidence and handoff
 

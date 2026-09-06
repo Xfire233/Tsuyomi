@@ -48,6 +48,7 @@ import kotlinx.coroutines.runBlocking
 import org.junit.AfterClass
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
+import org.junit.Ignore
 import org.junit.BeforeClass
 import org.junit.Before
 import org.junit.Rule
@@ -325,6 +326,7 @@ class ManualVerificationHandoffInstrumentedTest {
     }
 
 
+    @Ignore("E-ink is frozen by review-policy.json; retain for profile restoration only")
     @Test
     fun e_ink_profile_completes_blocked_navigation_and_browser_session_handoff() {
         exerciseVerificationHandoff(DisplayPreference.EINK)

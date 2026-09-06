@@ -223,6 +223,48 @@ def frozen_profile_screenshot_violations(repo_root: Path = REPO_ROOT) -> list[st
     return violations
 
 
+def frozen_profile_instrumentation_violations(repo_root: Path = REPO_ROOT) -> list[str]:
+    policy_path = repo_root / ".agents/skills/tsuyomi-android-review/review-policy.json"
+    if not policy_path.is_file():
+        return []
+    try:
+        policy = json.loads(policy_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return []
+    eink_frozen = any(
+        item.get("profile") == "EINK" and item.get("status") == "FROZEN"
+        for item in policy.get("deferredProfiles", [])
+    )
+    if not eink_frozen:
+        return []
+
+    violations: list[str] = []
+    android_root = repo_root / "tsuyomi-android"
+    if not android_root.is_dir():
+        return violations
+    for path in android_root.rglob("*.kt"):
+        relative = path.relative_to(android_root)
+        if (
+            relative.parts[0] != "app"
+            or "androidTest" not in relative.parts
+            or any(part in FORBIDDEN_PARTS for part in relative.parts)
+        ):
+            continue
+        for block in path.read_text(encoding="utf-8", errors="ignore").split("\n\n"):
+            explicit_eink = (
+                "DisplayPreference.EINK" in block
+                or "DisplayProfile.EINK" in block
+                or re.search(r"fun\s+e_?ink", block, re.IGNORECASE) is not None
+            )
+            if "@Test" in block and explicit_eink and "@Ignore" not in block:
+                relative_path = path.relative_to(repo_root).as_posix()
+                violations.append(
+                    f"{relative_path}: runs routine EINK instrumentation while EINK is frozen"
+                )
+                break
+    return violations
+
+
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Reject local or sensitive repository artifacts")
     parser.add_argument("--scope", choices=tuple(SCOPE_ROOTS), default="all")
@@ -479,7 +521,15 @@ def main(argv: list[str] | None = None) -> int:
     documentation_violations = documentation_governance_violations()
     prototype_violations = retired_android_prototype_violations()
     frozen_screenshot_violations = frozen_profile_screenshot_violations()
-    if artifact_violations or tooling_violations or documentation_violations or prototype_violations or frozen_screenshot_violations:
+    frozen_instrumentation_violations = frozen_profile_instrumentation_violations()
+    if (
+        artifact_violations
+        or tooling_violations
+        or documentation_violations
+        or prototype_violations
+        or frozen_screenshot_violations
+        or frozen_instrumentation_violations
+    ):
         if artifact_violations:
             print(f"Forbidden repository artifacts in scope {args.scope}:", file=sys.stderr)
             for violation in artifact_violations:
@@ -500,12 +550,17 @@ def main(argv: list[str] | None = None) -> int:
             print("Frozen Android profile screenshot violations:", file=sys.stderr)
             for violation in frozen_screenshot_violations:
                 print(f"- {violation}", file=sys.stderr)
+        if frozen_instrumentation_violations:
+            print("Frozen Android profile instrumentation violations:", file=sys.stderr)
+            for violation in frozen_instrumentation_violations:
+                print(f"- {violation}", file=sys.stderr)
         return 1
     print(f"Repository artifact policy passed for {len(paths)} candidate files in scope {args.scope}.")
     print("Tooling governance policy passed.")
     print("Documentation governance policy passed.")
     print("Retired Android prototype policy passed.")
     print("Frozen Android profile screenshot policy passed.")
+    print("Frozen Android profile instrumentation policy passed.")
     return 0
 
 

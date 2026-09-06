@@ -108,6 +108,16 @@ PR 创建后及最终功能变更后，Adviser 必须对 PR head 再审阅一次
 4. 运行真实证明：Bug 先复现后消失；UI 用 production semantics/layout/behavior、受影响 screenshot assertion 和必要 AVD interaction；持久化/安全覆盖 API 下界、重建、隔离、删除和错误；协议使用 valid/invalid fixtures 与 conformance。
 5. Runtime change 每个 active profile 只部署一次。Android CLI 拥有 isolated AVD、delta install、exact activity launch、layout diff 和 PNG；一个 observable claim 只指定一个 evidence owner。截图不替代 gesture/state-transition test。
 
+#### Bounded failure escalation
+
+- Before running Gradle or a device Journey, write the exact change-to-evidence mapping: affected production target, smallest behavioral reproduction, adjacent state sequence if class order matters, active profiles, and the claims delegated to CI. A test merely existing in the same class or module never expands scope.
+- Debug in the fixed order `exact reproduction → affected test repeated until stable → directly adjacent sequence → affected active-profile Journey group → at most one required full class/suite`. A late full-suite failure must return to the smallest failing seam; immediately rerunning the same full suite is prohibited.
+- The same failure signature appearing in two independent Journeys is a shared harness/lifecycle/synchronization incident until disproved. Stop broad reruns, inspect the common helper and state owner, and do not change production behavior merely to make the harness idle.
+- A focused pass followed by a class-order failure is evidence of leaked state, lifecycle ownership, or synchronization—not permission to widen product scope. Test-only helper changes invalidate only the seams they touch; rerun the complete class only when it is itself a required gate and the affected group is already stable.
+- Local Tier 2 proves affected behavior and one active-profile production build. Tier 3 CI owns the complete planner-selected matrix; do not duplicate that matrix locally unless CI cannot execute it or a CI-only failure must be reproduced.
+- Resolve `activeProfiles` and `deferredProfiles` before selecting any test. Routine instrumentation and screenshot registration for a frozen profile must remain disabled/ignored. A direct deferred-profile change runs only the policy's named minimal exception; profile restoration requires an explicit policy change first.
+- After the first repeated failure signature, class-order-only failure, environment/tool blocker, or proposed scope expansion, report the completed proof, current blocker, stopped commands, and next bounded experiment immediately. Do not allow a long-running gate to conceal that the task has changed from product verification to harness debugging.
+
 #### Tier 3 — CI admission
 
 - `.github/workflows/android-quality.yml` 使用同一 planner 选择 bounded production tasks；documentation-only changes 不启动 Android jobs，known module changes 只跑 owning tasks，invalid/missing base 使用 conservative full plan。

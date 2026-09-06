@@ -31,6 +31,7 @@
 - Added exact `BookIdentity + chapterId` completion independent of locator/resume progress, strict `tsuyomi-transfer` v2 output with v1/v2 import compatibility, and interface-only preference reset that preserves source-flow and import state.
 - Expanded the merge-base CI planner to every test-bearing module and overlapping integration owner, removed the duplicate lock-rewriting CI build, fixed Review Graph catalog scope classification, enforced active-profile-only screenshot registration while E-ink is frozen, and recorded the package-review prevention checklist.
 - Retired the UI Atlas prototype, fixture review bridge and duplicate reviewer infrastructure; the production implementation and versioned Review Graph catalog now own Android UI behavior and evidence.
+- Hardened Android verification against scope drift: active/deferred profile selection now precedes every run, frozen-profile instrumentation is mechanically excluded from routine gates, debugging uses an exact-test-to-adjacent-group ladder with one final suite at most, and PR CI owns the complete matrix after bounded local proof.
 
 ## 0.1.0 - 2026-08-09
 
