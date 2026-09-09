@@ -17,6 +17,8 @@ Direct dependencies and checked-in build tools in the Phase 1 baseline are recor
 | AndroidX Lifecycle | 2.10.0 | Apache-2.0 | application runtime |
 | AndroidX Navigation | 2.9.8 | Apache-2.0 | application runtime |
 | AndroidX DataStore | 1.2.1 | Apache-2.0 | application runtime |
+| AndroidX WorkManager | 2.11.2 | Apache-2.0 | application runtime and persistent update scheduling |
+| AndroidX Concurrent Futures | 1.2.0 | Apache-2.0 | application runtime compatibility pin for WorkManager |
 | AndroidX Room | 2.8.4 | Apache-2.0 | application runtime and test tooling |
 | Material3 Adaptive | 1.2.0 | Apache-2.0 | application runtime |
 | actions/checkout | 4.2.2 (`11bd71901bbe5b1630ceea73d27597364c9af683`) | MIT | GitHub Actions source checkout only |

@@ -8,6 +8,7 @@ import java.io.File
 import java.nio.file.Files
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotEquals
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertThrows
 import org.junit.Test
 import org.tsuyomi.core.files.QuotaFileStore
@@ -37,6 +38,32 @@ class HxpArchiveActivationTest {
         val replay = assertThrows(ExtensionInstallException::class.java) { installer.prepare(archive) }
         assertEquals(ExtensionInstallError.REPLAY_REJECTED, replay.error)
         assertEquals(first.candidate.packageSha256, installer.readVerifiedActive(first.candidate.manifest.sourceId)?.packageSha256)
+    }
+
+    @Test
+    fun invalidActivePackageDoesNotBlockVerifiedReplacement() {
+        val installed = signedFixture(version = "0.1.0")
+        val replacement = signedFixture(version = "0.2.0")
+        val verifier = HxpArchiveVerifier(InMemoryPublisherKeyStore(listOf(installed.publisher)))
+        val root = Files.createTempDirectory("hxp-invalid-active").toFile()
+        val installer = newInstaller(root, verifier)
+        val preparedInstalled = installer.prepare(installed.writeToTemporaryFile())
+        installer.activate(preparedInstalled, ExtensionInstallApproval.approve(preparedInstalled))
+        File(root, "no-backup/extensions/active/org.tsuyomi.wenku8.hxp").writeText("tampered")
+
+        val invalid = assertThrows(ExtensionInstallException::class.java) {
+            installer.readVerifiedActive(SourceId("org.tsuyomi.wenku8"))
+        }
+        assertEquals(ExtensionInstallError.INSTALLED_PACKAGE_INVALID, invalid.error)
+
+        val preparedReplacement = installer.prepare(replacement.writeToTemporaryFile())
+        assertNull(preparedReplacement.active)
+        assertEquals("0.2.0", preparedReplacement.candidate.manifest.version.original)
+        installer.activate(preparedReplacement, ExtensionInstallApproval.approve(preparedReplacement))
+        assertEquals(
+            preparedReplacement.candidate.packageSha256,
+            installer.readVerifiedActive(SourceId("org.tsuyomi.wenku8"))?.packageSha256,
+        )
     }
 
     @Test

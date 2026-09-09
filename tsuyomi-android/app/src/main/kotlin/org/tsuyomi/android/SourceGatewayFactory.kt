@@ -18,6 +18,7 @@ import org.tsuyomi.core.files.StorageQuota
 import org.tsuyomi.core.files.StorageRoot
 import org.tsuyomi.core.files.StorageRoots
 import org.tsuyomi.shared.sourcecontract.DecodeMode
+import org.tsuyomi.shared.sourcecontract.NetworkMethod
 import org.tsuyomi.core.network.DirectActionTokenRegistry
 import org.tsuyomi.core.network.FileHostNetworkCache
 import org.tsuyomi.core.network.HostHttpResponse
@@ -26,13 +27,18 @@ import org.tsuyomi.core.network.HostNetworkCache
 import org.tsuyomi.core.network.HostNetworkError
 import org.tsuyomi.core.network.HostNetworkException
 import org.tsuyomi.core.network.HostNetworkGateway
-import org.tsuyomi.core.network.InMemoryHostNetworkCache
 import org.tsuyomi.core.network.SourceNetworkGrant
+import org.tsuyomi.core.network.RemoteOperationRedirectPolicy
+import org.tsuyomi.core.network.RemoteOperationRequestPolicy
 import org.tsuyomi.core.webview.CapturedVerifiedPage
 import org.tsuyomi.shared.sourcecontract.SourceCookieMode
 import org.tsuyomi.core.security.SourceCredentialPartition
 import org.tsuyomi.core.security.VerifiedBrowserSessionStore
 import org.tsuyomi.source.extensionmanager.VerifiedHxpPackage
+import org.tsuyomi.source.extensionmanager.HxpRemoteOperationPolicy
+import org.tsuyomi.source.extensionmanager.HxpRemoteParameter
+import org.tsuyomi.source.extensionmanager.HxpUpdateCheckPolicy
+import org.tsuyomi.source.extensionmanager.RemoteOperation
 
 internal object SourceGatewayFactory {
     fun create(
@@ -98,6 +104,20 @@ internal object SourceGatewayFactory {
         return gateway
     }
 
+    fun createSessionGateways(
+        context: Context,
+        packageInfo: VerifiedHxpPackage,
+        nativeTransport: HostHttpTransport,
+        verifiedGetTransport: HostHttpTransport?,
+        directActionTokens: DirectActionTokenRegistry,
+    ): Pair<HostNetworkGateway, HostNetworkGateway?> {
+        val native = create(context, packageInfo, nativeTransport, directActionTokens)
+        val verifiedGet = verifiedGetTransport?.let { transport ->
+            create(context, packageInfo, transport, directActionTokens)
+        }
+        return native to verifiedGet
+    }
+
     fun networkGrant(packageInfo: VerifiedHxpPackage): SourceNetworkGrant {
         val manifest = packageInfo.manifest
         return SourceNetworkGrant(
@@ -109,8 +129,43 @@ internal object SourceGatewayFactory {
             maxConcurrentRequests = manifest.capabilities.network.maxConcurrentRequests,
             requestTimeoutMs = manifest.capabilities.network.requestTimeoutMs,
             maxResponseBytes = manifest.capabilities.network.maxResponseBytes,
+            remoteReadPolicy = manifest.capabilities.remoteLibrary.policies[RemoteOperation.READ]?.toNetworkPolicy(),
+            remoteTargetsPolicy = manifest.capabilities.remoteLibrary.policies[RemoteOperation.TARGETS]?.toNetworkPolicy(),
+            remoteAddPolicy = manifest.capabilities.remoteLibrary.policies[RemoteOperation.ADD]?.toNetworkPolicy(),
+            remoteRemovePolicy = manifest.capabilities.remoteLibrary.policies[RemoteOperation.REMOVE]?.toNetworkPolicy(),
+            remoteMovePolicy = manifest.capabilities.remoteLibrary.policies[RemoteOperation.MOVE]?.toNetworkPolicy(),
+            updateCheckPolicy = manifest.capabilities.updateCheck?.policy?.toNetworkPolicy(),
         )
     }
+
+    private fun HxpRemoteOperationPolicy.toNetworkPolicy(): RemoteOperationRequestPolicy = RemoteOperationRequestPolicy(
+        origin = origin,
+        method = method,
+        path = path,
+        fixedParameters = parameters.filterIsInstance<HxpRemoteParameter.Fixed>().associate { it.name to it.value },
+        remoteBookIdParameter = parameters.filterIsInstance<HxpRemoteParameter.RemoteBookId>().singleOrNull()?.name,
+        targetIdParameter = parameters.filterIsInstance<HxpRemoteParameter.TargetId>().singleOrNull()?.name,
+        cursorParameter = parameters.filterIsInstance<HxpRemoteParameter.Cursor>().singleOrNull()?.name,
+        referrerPath = referrerPath,
+        redirects = redirects.map { redirect ->
+            RemoteOperationRedirectPolicy(
+                origin = redirect.origin,
+                method = redirect.method,
+                path = redirect.path,
+                fixedParameters = redirect.parameters.associate { it.name to it.value },
+                referrerPath = redirect.referrerPath,
+            )
+        },
+    )
+
+    private fun HxpUpdateCheckPolicy.toNetworkPolicy(): RemoteOperationRequestPolicy = RemoteOperationRequestPolicy(
+        origin = origin,
+        method = NetworkMethod.GET,
+        path = path,
+        fixedParameters = parameters.filterIsInstance<HxpRemoteParameter.Fixed>().associate { it.name to it.value },
+        remoteBookIdParameter = parameters.filterIsInstance<HxpRemoteParameter.RemoteBookId>().singleOrNull()?.name,
+        referrerPath = referrerPath,
+    )
 
     /** Stable opaque revision for display caches; source session bytes never leave this factory. */
     fun mediaCredentialRevision(context: Context, packageInfo: VerifiedHxpPackage): String {
@@ -171,7 +226,6 @@ internal object SourceGatewayFactory {
             packageInfo = packageInfo,
             transport = transport,
             directActionTokens = directActionTokens,
-            cache = InMemoryHostNetworkCache(),
         )
     }
 

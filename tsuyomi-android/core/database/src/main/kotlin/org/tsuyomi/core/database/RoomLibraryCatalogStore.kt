@@ -36,8 +36,6 @@ internal class RoomLibraryCatalogStore(
                 canonicalUrl = entity.canonicalUrl,
                 status = entity.status,
                 remoteTagsJson = entity.remoteTagsJson,
-                sourceUpdateKey = entity.sourceUpdateKey,
-                hasUnreadUpdate = entity.hasUnreadUpdate,
                 metadataUpdatedAtEpochSecond = entity.metadataUpdatedAtEpochSecond,
                 metadataUpdatedAtNano = entity.metadataUpdatedAtNano,
             )
@@ -151,8 +149,8 @@ private fun LibraryBook.toEntity(): BookEntity {
         canonicalUrl = canonicalUrl,
         status = status,
         remoteTagsJson = encodeStringSet(canonicalStringSet(remoteTags)),
-        sourceUpdateKey = sourceUpdateKey,
-        hasUnreadUpdate = hasUnreadUpdate,
+        legacySourceUpdateKey = null,
+        legacyHasUnreadUpdate = false,
         addedAtEpochSecond = addedAt.epochSecond,
         addedAtNano = addedAt.nano,
         metadataUpdatedAtEpochSecond = metadataUpdatedAt.epochSecond,
@@ -171,8 +169,6 @@ internal fun BookEntity.toDomain(): LibraryBook {
         canonicalUrl = canonicalUrl,
         status = status,
         remoteTags = decodeStringSet(remoteTagsJson),
-        sourceUpdateKey = sourceUpdateKey,
-        hasUnreadUpdate = hasUnreadUpdate,
         addedAt = Instant.ofEpochSecond(addedAtEpochSecond, addedAtNano.toLong()),
         metadataUpdatedAt = Instant.ofEpochSecond(metadataUpdatedAtEpochSecond, metadataUpdatedAtNano.toLong()),
     )

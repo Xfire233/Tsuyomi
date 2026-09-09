@@ -96,8 +96,6 @@ fun RemoteLibraryScreen(
     selectedTargetId: String? = null,
     onSelectTarget: (String?) -> Unit = {},
     onOpenTarget: (String) -> Unit = {},
-    mirrorPinned: Boolean? = null,
-    onToggleMirrorPinned: () -> Unit = {},
     groupingEnabled: Boolean = false,
     onGroupingEnabledChange: (Boolean) -> Unit = {},
     unresolvedBookIds: Set<String> = emptySet(),
@@ -124,15 +122,6 @@ fun RemoteLibraryScreen(
     val allVisibleSelected = books.isNotEmpty() && books.all { remoteLibrarySelectionId(it) in selectedIds }
     val overflowActions = if (selectedCount == 0) {
         buildList {
-            mirrorPinned?.let { pinned ->
-                add(
-                    TsuyomiOverflowAction(
-                        label = if (pinned) "移出快捷书架" else "固定到快捷书架",
-                        onClick = onToggleMirrorPinned,
-                        icon = TsuyomiIcons.Pin,
-                    ),
-                )
-            }
             if (targets.size > 1 || groupingEnabled) {
                 add(
                     TsuyomiOverflowAction(
@@ -172,9 +161,9 @@ fun RemoteLibraryScreen(
             add(TsuyomiTopBarAction(TsuyomiIcons.Copy, stringResource(R.string.remote_library_copy_selected), onRequestCopy))
             if (selectedCount == 1 && selectedBook != null) {
                 if (groupingEnabled) {
-                    add(TsuyomiTopBarAction(TsuyomiIcons.MoveToFolder, "移至网站分类") { onRequestMoveBook(selectedBook) })
+                    add(TsuyomiTopBarAction(TsuyomiIcons.MoveToFolder, "移至网站分类", onClick = { onRequestMoveBook(selectedBook) }))
                 }
-                add(TsuyomiTopBarAction(TsuyomiIcons.Delete, "从网站收藏移除") { onRequestRemoveBook(selectedBook) })
+                add(TsuyomiTopBarAction(TsuyomiIcons.Delete, "从网站收藏移除", onClick = { onRequestRemoveBook(selectedBook) }))
             }
         }
     }

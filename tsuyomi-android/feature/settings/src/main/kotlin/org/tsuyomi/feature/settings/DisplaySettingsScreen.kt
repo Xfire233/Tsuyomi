@@ -13,13 +13,6 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.saveable.rememberSaveable
-import androidx.compose.runtime.setValue
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -33,8 +26,8 @@ import org.tsuyomi.core.display.DisplayProfile
 import org.tsuyomi.core.ui.components.InfoBanner
 import org.tsuyomi.core.ui.components.InlineStatus
 import org.tsuyomi.core.ui.components.SegmentedSelector
-import org.tsuyomi.core.ui.components.SettingsActionRow
 import org.tsuyomi.core.ui.components.SettingsGroup
+import org.tsuyomi.core.ui.components.SettingsActionRow
 import org.tsuyomi.core.ui.components.SettingsSectionHeader
 import org.tsuyomi.core.ui.components.SettingsSwitchRow
 import org.tsuyomi.core.ui.components.TsuyomiSegment
@@ -57,7 +50,6 @@ class DisplaySettingsActions(
     val onRefreshNow: () -> Unit,
     val onRetryWrite: () -> Unit,
     val onAcknowledgeWriteFailure: () -> Unit,
-    val onResetInterfacePreferences: () -> Unit,
 )
 
 /**
@@ -73,7 +65,6 @@ fun DisplaySettingsScreen(
     val environment = state.environment
     val preferences = environment.preferences
     val eInk = environment.effectiveProfile == DisplayProfile.EINK
-    var resetVisible by rememberSaveable { mutableStateOf(false) }
 
     Box(modifier = modifier.fillMaxSize()) {
         Column(
@@ -159,37 +150,9 @@ fun DisplaySettingsScreen(
                 }
             }
 
-            SettingsSectionHeader(title = stringResource(R.string.settings_display_section_reset))
-            SettingsGroup {
-                SettingsActionRow(
-                    title = stringResource(R.string.settings_display_reset_title),
-                    summary = stringResource(R.string.settings_display_reset_summary),
-                    onClick = { resetVisible = true },
-                )
-            }
         }
     }
 
-    if (resetVisible) {
-        AlertDialog(
-            onDismissRequest = { resetVisible = false },
-            title = { Text(stringResource(R.string.settings_display_reset_dialog_title)) },
-            text = { Text(stringResource(R.string.settings_display_reset_dialog_message)) },
-            confirmButton = {
-                TextButton(
-                    onClick = {
-                        resetVisible = false
-                        actions.onResetInterfacePreferences()
-                    },
-                ) { Text(stringResource(R.string.settings_display_reset_confirm)) }
-            },
-            dismissButton = {
-                TextButton(onClick = { resetVisible = false }) {
-                    Text(stringResource(R.string.settings_display_reset_cancel))
-                }
-            },
-        )
-    }
 }
 
 @Composable

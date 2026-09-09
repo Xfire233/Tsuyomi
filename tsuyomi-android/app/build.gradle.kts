@@ -16,6 +16,8 @@ android {
         applicationId = "org.tsuyomi.android"
         versionCode = 2
         versionName = "0.2.0"
+        testInstrumentationRunnerArguments["keep_p4c_review_state"] =
+            providers.gradleProperty("tsuyomi.keepP4cReviewState").orElse("false").get()
     }
     buildTypes {
         getByName("debug") {
@@ -49,6 +51,7 @@ android {
 dependencies {
     implementation(project(":core:display"))
     implementation(project(":core:database"))
+    implementation(project(":core:library"))
     implementation(project(":core:ui"))
     implementation(project(":core:preferences"))
     implementation(project(":core:network"))
@@ -65,6 +68,7 @@ dependencies {
     implementation(project(":shared:backup"))
     implementation(project(":shared:smart-shelf"))
     implementation(project(":feature:backup"))
+    implementation(project(":shared:library-domain"))
     implementation(project(":shared:source-contract"))
     implementation(project(":core:files"))
     implementation(project(":source:extension-manager"))
@@ -77,6 +81,8 @@ dependencies {
     implementation(libs.androidx.lifecycle.runtime.compose)
     implementation(libs.androidx.datastore.preferences)
     implementation(libs.kotlinx.coroutines.android)
+    implementation(libs.androidx.work.runtime.ktx)
+    implementation(libs.androidx.concurrent.futures.ktx)
     implementation(libs.kotlinx.serialization.json)
     implementation(libs.androidx.room.runtime)
     implementation(libs.androidx.room.ktx)

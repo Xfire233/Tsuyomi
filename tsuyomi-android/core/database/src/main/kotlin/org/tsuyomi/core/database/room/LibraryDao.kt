@@ -32,8 +32,8 @@ internal interface LibraryDao {
             canonical_url = :canonicalUrl,
             status = :status,
             remote_tags_json = :remoteTagsJson,
-            source_update_key = :sourceUpdateKey,
-            has_unread_update = :hasUnreadUpdate,
+            source_update_key = NULL,
+            has_unread_update = 0,
             metadata_updated_at_epoch_second = :metadataUpdatedAtEpochSecond,
             metadata_updated_at_nano = :metadataUpdatedAtNano
         WHERE source_id = :sourceId AND remote_book_id = :remoteBookId
@@ -49,8 +49,6 @@ internal interface LibraryDao {
         canonicalUrl: String?,
         status: String?,
         remoteTagsJson: String,
-        sourceUpdateKey: String?,
-        hasUnreadUpdate: Boolean,
         metadataUpdatedAtEpochSecond: Long,
         metadataUpdatedAtNano: Int,
     ): Int

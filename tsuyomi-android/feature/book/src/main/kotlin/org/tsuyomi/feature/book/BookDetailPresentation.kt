@@ -137,6 +137,8 @@ internal fun StandardBookDetailScreen(
     onRetryMoveOnly: () -> Unit = {},
     onRetryRemoteReconciliation: () -> Unit = {},
     onAcknowledgeRemoteReconciliation: () -> Unit = {},
+    focusChapterId: String? = null,
+    onFocusHandled: () -> Unit = {},
 ) {
     Column(modifier.fillMaxSize()) {
         mutation?.let { DetailMutationBanner(it) }
@@ -190,6 +192,8 @@ internal fun StandardBookDetailScreen(
                 onRetryDirectory = onRetry,
                 onUseOfflineCache = onUseOfflineCache,
                 onOpenVerification = onOpenVerification,
+                focusChapterId = focusChapterId,
+                onFocusHandled = onFocusHandled,
                 modifier = Modifier.weight(1f),
             )
         }
@@ -247,6 +251,8 @@ private fun DetailContent(
     onRetryDirectory: () -> Unit,
     onUseOfflineCache: () -> Unit,
     onOpenVerification: () -> Unit,
+    focusChapterId: String?,
+    onFocusHandled: () -> Unit,
     modifier: Modifier,
 ) {
     val listState = rememberLazyListState()
@@ -289,6 +295,36 @@ private fun DetailContent(
     LaunchedEffect(volumeGroups.map { it.key }) {
         if (volumeGroups.isNotEmpty() && expandedVolumeKeys.none { key -> volumeGroups.any { it.key == key } }) {
             expandedVolumeKeys = listOf(volumeGroups.first().key)
+        }
+    }
+    val focusVolumeKey = focusChapterId
+        ?.let { chapterId -> visibleChapters.firstOrNull { it.chapter.chapterId == chapterId } }
+        ?.chapter
+        ?.volumeTitle
+        .orEmpty()
+        .takeIf { key -> volumeGroups.any { it.key == key } }
+    LaunchedEffect(focusChapterId, focusVolumeKey) {
+        if (focusVolumeKey != null && focusVolumeKey !in expandedVolumeKeys) {
+            expandedVolumeKeys = expandedVolumeKeys + focusVolumeKey
+        }
+    }
+    val focusItemIndex = focusChapterId?.let { chapterId ->
+        val volumeIndex = volumeGroups.indexOfFirst { volume ->
+            volume.items.any { item -> item.chapter.chapterId == chapterId }
+        }
+        if (volumeIndex < 0 || volumeGroups[volumeIndex].key !in expandedVolumeKeys) {
+            null
+        } else {
+            val chapterIndex = volumeGroups[volumeIndex].items.indexOfFirst { item -> item.chapter.chapterId == chapterId }
+            4 + volumeGroups.take(volumeIndex).sumOf { volume ->
+                1 + if (volume.key in expandedVolumeKeys) volume.items.size else 0
+            } + 1 + chapterIndex
+        }
+    }
+    LaunchedEffect(focusChapterId, focusItemIndex) {
+        if (focusChapterId != null && focusItemIndex != null) {
+            listState.scrollToItem(focusItemIndex)
+            onFocusHandled()
         }
     }
     val continueChapter = allChapters.firstOrNull { it.chapterId == currentChapterId } ?: allChapters.firstOrNull()

@@ -25,6 +25,13 @@ object TsuyomiEInkPalette {
 val ColorScheme.link: Color
     get() = if (surface.luminance() > 0.5f) Color(0xFF4A6E8A) else Color(0xFFA8C4D8)
 
+/** Stronger ink-teal navigation accent; local to STANDARD Library text tabs. */
+val ColorScheme.libraryTabSelected: Color
+    get() = if (surface.luminance() > 0.5f) Color(0xFF007A8F) else Color(0xFF65D5EA)
+
+val ColorScheme.libraryTabUnselected: Color
+    get() = if (surface.luminance() > 0.5f) Color(0xFF707070) else Color(0xFFA0A0A0)
+
 /** Standard light scheme: warm paper background with ink-teal primary. Never pure black/white. */
 val TsuyomiLightColorScheme: ColorScheme = lightColorScheme(
     primary = Color(0xFF2E4A56),

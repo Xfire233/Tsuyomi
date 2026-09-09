@@ -26,7 +26,6 @@ import androidx.compose.ui.res.stringResource
 import org.tsuyomi.core.ui.components.SettingsActionRow
 import org.tsuyomi.core.ui.components.SettingsGroup
 import org.tsuyomi.core.ui.components.SettingsSectionHeader
-import androidx.compose.ui.unit.dp
 import org.tsuyomi.core.ui.components.SettingsSwitchRow
 import org.tsuyomi.core.ui.theme.TsuyomiSpacing
 
@@ -45,7 +44,6 @@ fun HelpScreen(
     onIntroductionsEnabledChanged: (Boolean) -> Unit,
     onIntroductionSeen: (String, Int) -> Unit,
     onResetSeenVersions: () -> Unit,
-    onOpenDisplayReset: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     var query by rememberSaveable { mutableStateOf("") }
@@ -109,14 +107,6 @@ fun HelpScreen(
             }
         }
 
-        SettingsSectionHeader(stringResource(R.string.settings_help_interface_section))
-        SettingsGroup {
-            SettingsActionRow(
-                title = stringResource(R.string.settings_display_reset_title),
-                summary = stringResource(R.string.settings_help_display_reset_summary),
-                onClick = onOpenDisplayReset,
-            )
-        }
     }
 
     selectedIntroduction?.let { introduction ->

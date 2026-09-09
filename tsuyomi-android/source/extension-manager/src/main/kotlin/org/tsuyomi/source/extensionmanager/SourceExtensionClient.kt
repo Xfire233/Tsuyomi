@@ -10,6 +10,7 @@ import java.net.URLEncoder
 import java.nio.charset.Charset
 import java.nio.charset.StandardCharsets
 import java.util.UUID
+import java.util.concurrent.CancellationException
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
@@ -34,6 +35,7 @@ import org.tsuyomi.core.network.remoteLibraryReadContext
 import org.tsuyomi.core.network.remoteLibraryTargetsContext
 import org.tsuyomi.core.network.remoteLibraryRemoveContext
 import org.tsuyomi.core.network.remoteLibraryMoveContext
+import org.tsuyomi.core.network.updateCheckContext
 import org.tsuyomi.shared.model.BookIdentity
 import org.tsuyomi.shared.sourcecontract.DecodeMode
 import org.tsuyomi.shared.sourcecontract.NetworkCacheMode
@@ -64,6 +66,9 @@ import org.tsuyomi.shared.sourcecontract.SourceException
 import org.tsuyomi.shared.sourcecontract.SourceNetworkRequest
 import org.tsuyomi.shared.sourcecontract.SourceNetworkResponse
 import org.tsuyomi.shared.sourcecontract.SourceCookieMode
+import org.tsuyomi.shared.sourcecontract.SourceUpdateChapter
+import org.tsuyomi.shared.sourcecontract.SourceUpdateOutcome
+import org.tsuyomi.shared.sourcecontract.SourceUpdateProbeResult
 import org.tsuyomi.source.quickjsruntime.QuickJsRuntimeError
 import org.tsuyomi.source.quickjsruntime.QuickJsRuntimeException
 import org.tsuyomi.source.quickjsruntime.QuickJsRuntimeLane
@@ -77,6 +82,7 @@ class SourceExtensionClient private constructor(
     private val packageInfo: VerifiedHxpPackage,
     private val gateway: HostNetworkGateway,
     private val runtime: QuickJsRuntimeLane,
+    private val verifiedGet: HostNetworkGateway? = null,
 ) : Closeable {
     private val manifest = packageInfo.manifest
     private val grant = SourceNetworkGrant(
@@ -97,7 +103,11 @@ class SourceExtensionClient private constructor(
         remoteAddPolicy = manifest.capabilities.remoteLibrary.policies[RemoteOperation.ADD]?.toNetworkPolicy(),
         remoteRemovePolicy = manifest.capabilities.remoteLibrary.policies[RemoteOperation.REMOVE]?.toNetworkPolicy(),
         remoteMovePolicy = manifest.capabilities.remoteLibrary.policies[RemoteOperation.MOVE]?.toNetworkPolicy(),
+        updateCheckPolicy = manifest.capabilities.updateCheck?.policy?.toNetworkPolicy(),
     )
+
+    val supportsUpdateChecks: Boolean
+        get() = manifest.capabilities.updateCheck?.version == 2
 
     suspend fun searchRequestUrl(query: String, page: Int = 1): String =
         requestUrl("buildSearchRequest", arrayOf<Any?>(query, page), "search-network")
@@ -119,8 +129,14 @@ class SourceExtensionClient private constructor(
 
 
     suspend fun search(query: String, page: Int = 1, offlineOnly: Boolean = false): List<SourceBookSummary> {
-        val response = invokeNetwork("buildSearchRequest", arrayOf<Any?>(query, page), "search-network", offlineOnly)
-        classify(response, "search-classify", "search")
+        val response = invokeClassified(
+            "buildSearchRequest",
+            arrayOf<Any?>(query, page),
+            "search-network",
+            "search-classify",
+            "search",
+            offlineOnly,
+        )
         val root = call(
             "parseSearch",
             arrayOf<Any?>(response.text.orEmpty(), response.finalUrl),
@@ -130,13 +146,14 @@ class SourceExtensionClient private constructor(
     }
 
     suspend fun authorSearch(author: String, page: Int = 1, offlineOnly: Boolean = false): List<SourceBookSummary> {
-        val response = invokeNetwork(
+        val response = invokeClassified(
             "buildAuthorSearchRequest",
             arrayOf<Any?>(author, page),
             "author-search-network",
+            "author-search-classify",
+            "search",
             offlineOnly,
         )
-        classify(response, "author-search-classify", "search")
         val root = call(
             "parseSearch",
             arrayOf<Any?>(response.text.orEmpty(), response.finalUrl),
@@ -169,8 +186,14 @@ class SourceExtensionClient private constructor(
             fail(SourceErrorCode.MALFORMED_SOURCE_RESPONSE, "home", "invalid-home-filters")
         }
         val arguments = arrayOf<Any?>(cursor, selectedFilters)
-        val response = invokeNetwork("buildHomeRequest", arguments, "home-network", offlineOnly)
-        classify(response, "home-classify", "home")
+        val response = invokeClassified(
+            "buildHomeRequest",
+            arguments,
+            "home-network",
+            "home-classify",
+            "home",
+            offlineOnly,
+        )
         return try {
             parseHomePage(
                 call(
@@ -188,14 +211,28 @@ class SourceExtensionClient private constructor(
 
 
     suspend fun detail(remoteBookId: String, offlineOnly: Boolean = false): SourceBookDetail {
-        val response = invokeNetwork("buildDetailRequest", arrayOf<Any?>(remoteBookId), "detail-network", offlineOnly)
-        classify(response, "detail-classify", "detail", remoteBookId)
+        val response = invokeClassified(
+            "buildDetailRequest",
+            arrayOf<Any?>(remoteBookId),
+            "detail-network",
+            "detail-classify",
+            "detail",
+            offlineOnly,
+            remoteBookId = remoteBookId,
+        )
         return parseDetail(call("parseDetail", arrayOf<Any?>(response.text.orEmpty(), remoteBookId), "detail-parse").jsonObject)
     }
 
     suspend fun directory(remoteBookId: String, offlineOnly: Boolean = false): SourceDirectory {
-        val response = invokeNetwork("buildDirectoryRequest", arrayOf<Any?>(remoteBookId), "directory-network", offlineOnly)
-        classify(response, "directory-classify", "directory", remoteBookId)
+        val response = invokeClassified(
+            "buildDirectoryRequest",
+            arrayOf<Any?>(remoteBookId),
+            "directory-network",
+            "directory-classify",
+            "directory",
+            offlineOnly,
+            remoteBookId = remoteBookId,
+        )
         val root = call("parseDirectory", arrayOf<Any?>(response.text.orEmpty(), remoteBookId), "directory-parse").jsonObject
         val identity = BookIdentity(root.requiredString("sourceId"), root.requiredString("remoteBookId"))
         val chapters = root.requiredArray("chapters").map { chapter ->
@@ -209,18 +246,89 @@ class SourceExtensionClient private constructor(
         }
         return SourceDirectory(identity, chapters)
     }
+
+    suspend fun checkUpdates(remoteBookId: String, previousAnchor: String?): SourceUpdateProbeResult {
+        val identity = BookIdentity(manifest.sourceId.value, remoteBookId)
+        val checkedAt = System.currentTimeMillis()
+        if (!supportsUpdateChecks) {
+            return updateProbeResult(
+                identity = identity,
+                checkedAt = checkedAt,
+                previousAnchor = previousAnchor,
+                outcome = SourceUpdateOutcome.UNAVAILABLE,
+                reason = "update-check-not-granted",
+            )
+        }
+        val policy = requireNotNull(manifest.capabilities.updateCheck).policy.toNetworkPolicy()
+        return try {
+            val response = invokeNetwork(
+                function = "buildUpdateCheckV2Request",
+                arguments = arrayOf(remoteBookId),
+                stage = "update-check-network",
+                offlineOnly = false,
+                operationContext = updateCheckContext(policy, remoteBookId),
+            )
+            classify(response, "update-check-classify", "update-check", remoteBookId)
+            val parsed = parseUpdateCheck(
+                call(
+                    "parseUpdateCheckV2",
+                    arrayOf(response.text.orEmpty(), remoteBookId),
+                    "update-check-parse",
+                ).jsonObject,
+            )
+            val admitted = admitSourceUpdateCheck(identity, previousAnchor, parsed)
+            updateProbeResult(
+                identity = identity,
+                checkedAt = checkedAt,
+                previousAnchor = previousAnchor,
+                outcome = admitted.outcome,
+                anchor = admitted.anchor,
+                chapters = admitted.chapters,
+                newChapterIds = admitted.newChapterIds,
+                lastUpdatedDate = admitted.lastUpdatedDate,
+                reason = admitted.reason,
+            )
+        } catch (error: CancellationException) {
+            throw error
+        } catch (error: SourceException) {
+            if (error.code == SourceErrorCode.EXTENSION_CANCELLED) {
+                throw CancellationException("Source update check cancelled").apply { initCause(error) }
+            }
+            val unavailable = error.code in setOf(SourceErrorCode.SESSION_REQUIRED, SourceErrorCode.VERIFICATION_REQUIRED)
+            updateProbeResult(
+                identity = identity,
+                checkedAt = checkedAt,
+                previousAnchor = previousAnchor,
+                outcome = if (unavailable) SourceUpdateOutcome.UNAVAILABLE else SourceUpdateOutcome.FAILED,
+                reason = "source-${error.code.name.lowercase().replace('_', '-')}" +
+                    ".${error.diagnostic.stage.takeIf(UPDATE_DIAGNOSTIC_STAGE::matches) ?: "unknown"}" +
+                    ".${error.diagnostic.safeCode.takeIf(UPDATE_DIAGNOSTIC_CODE::matches) ?: "unknown"}",
+            )
+        } catch (_: Throwable) {
+            updateProbeResult(
+                identity = identity,
+                checkedAt = checkedAt,
+                previousAnchor = previousAnchor,
+                outcome = SourceUpdateOutcome.FAILED,
+                reason = "update-check-invalid-result",
+            )
+        }
+    }
     suspend fun chapter(
         chapter: SourceChapter,
         remoteBookId: String,
         offlineOnly: Boolean = false,
     ): ReaderDocument {
-        val response = invokeNetwork(
+        val response = invokeClassified(
             "buildChapterRequest",
             arrayOf<Any?>(chapter.url, remoteBookId, chapter.chapterId),
             "chapter-network",
+            "chapter-classify",
+            "chapter",
             offlineOnly,
+            remoteBookId = remoteBookId,
+            chapterId = chapter.chapterId,
         )
-        classify(response, "chapter-classify", "chapter", remoteBookId, chapter.chapterId)
         return parseDocument(
             call(
                 "parseChapter",
@@ -233,14 +341,15 @@ class SourceExtensionClient private constructor(
     suspend fun listRemoteLibrary(cursor: String?): RemoteLibraryPage {
         val policy = manifest.capabilities.remoteLibrary.policies[RemoteOperation.READ]
             ?: fail(SourceErrorCode.MALFORMED_SOURCE_RESPONSE, "remote-library-read", "remote-read-not-granted")
-        val response = invokeNetwork(
+        val response = invokeClassified(
             "buildRemoteLibraryRequest",
             arrayOf<Any?>(cursor),
             "remote-library-read-network",
+            "remote-library-read-classify",
+            "remote-library",
             offlineOnly = false,
             operationContext = remoteLibraryReadContext(policy.toNetworkPolicy(), cursor),
         )
-        classify(response, "remote-library-read-classify", "remote-library")
         val root = call("parseRemoteLibrary", arrayOf<Any?>(response.text.orEmpty()), "remote-library-read-parse").jsonObject
         val items = root.requiredArray("items").map { parseSummary(it.jsonObject) }
         val nextCursor = root.optionalString("nextCursor")
@@ -333,14 +442,15 @@ class SourceExtensionClient private constructor(
     suspend fun listRemoteTargets(): RemoteLibraryTargetsResult {
         val policy = manifest.capabilities.remoteLibrary.policies[RemoteOperation.TARGETS]
             ?: fail(SourceErrorCode.MALFORMED_SOURCE_RESPONSE, "remote-library-targets", "remote-targets-not-granted")
-        val response = invokeNetwork(
+        val response = invokeClassified(
             "buildRemoteLibraryTargetsRequest",
             emptyArray(),
             "remote-library-targets-network",
+            "remote-library-targets-classify",
+            "generic",
             offlineOnly = false,
             operationContext = remoteLibraryTargetsContext(policy.toNetworkPolicy()),
         )
-        classify(response, "remote-library-targets-classify")
         return try {
             decodeRemoteTargets(
                 call(
@@ -357,6 +467,30 @@ class SourceExtensionClient private constructor(
         }
     }
 
+    private fun updateProbeResult(
+        identity: BookIdentity,
+        checkedAt: Long,
+        previousAnchor: String?,
+        outcome: SourceUpdateOutcome,
+        anchor: String? = null,
+        chapters: List<SourceUpdateChapter> = emptyList(),
+        newChapterIds: List<String> = emptyList(),
+        lastUpdatedDate: String? = null,
+        reason: String?,
+    ) = SourceUpdateProbeResult(
+        identity = identity,
+        sourceVersion = manifest.version.original,
+        packageSha256 = packageInfo.packageSha256,
+        checkedAt = checkedAt,
+        outcome = outcome,
+        previousAnchor = previousAnchor?.takeIf(OPAQUE_UPDATE_ANCHOR::matches),
+        anchor = anchor,
+        chapters = chapters,
+        newChapterIds = newChapterIds,
+        lastUpdatedDate = lastUpdatedDate,
+        reason = reason,
+    )
+
     private suspend fun invokeNetwork(
         function: String,
         arguments: Array<out Any?>,
@@ -369,6 +503,66 @@ class SourceExtensionClient private constructor(
             gateway.request(grant, request, operationContext)
         } catch (error: HostNetworkException) {
             fail(mapNetworkError(error.error), stage, error.error.name.lowercase(), error.diagnosticId)
+        }
+    }
+
+    private suspend fun invokeClassified(
+        function: String,
+        arguments: Array<out Any?>,
+        networkStage: String,
+        classifyStage: String,
+        operation: String,
+        offlineOnly: Boolean,
+        remoteBookId: String? = null,
+        chapterId: String? = null,
+        operationContext: SourceOperationContext? = null,
+    ): SourceNetworkResponse {
+        val request = buildNetworkRequest(function, arguments, networkStage, offlineOnly)
+        val response = try {
+            gateway.request(grant, request, operationContext)
+        } catch (error: HostNetworkException) {
+            fail(mapNetworkError(error.error), networkStage, error.error.name.lowercase(), error.diagnosticId)
+        }
+        try {
+            classify(response, classifyStage, operation, remoteBookId, chapterId)
+            if (!offlineOnly) gateway.rememberLastGood(grant, request, response)
+            return response
+        } catch (error: SourceException) {
+            if (
+                offlineOnly ||
+                error.code != SourceErrorCode.SESSION_REQUIRED &&
+                error.code != SourceErrorCode.VERIFICATION_REQUIRED
+            ) {
+                throw error
+            }
+            val retried = verifiedGet?.let { browser ->
+                try {
+                    browser.request(grant, request.copy(cache = NetworkCacheMode.NETWORK_ONLY), operationContext)
+                } catch (_: HostNetworkException) {
+                    null
+                }
+            }
+            if (retried != null) {
+                try {
+                    classify(retried, classifyStage, operation, remoteBookId, chapterId)
+                    gateway.rememberLastGood(grant, request, retried)
+                    return retried
+                } catch (_: SourceException) {
+                    Unit
+                }
+            }
+            val cached = try {
+                gateway.request(grant, request.copy(cache = NetworkCacheMode.OFFLINE_ONLY), operationContext)
+            } catch (_: HostNetworkException) {
+                throw error
+            }
+            try {
+                classify(cached, classifyStage, operation, remoteBookId, chapterId)
+                return cached
+            } catch (_: SourceException) {
+                gateway.forgetLastGood(grant, request)
+                throw error
+            }
         }
     }
 
@@ -439,8 +633,15 @@ class SourceExtensionClient private constructor(
 
     companion object {
         private val JSON = Json { ignoreUnknownKeys = false; isLenient = false }
+        // Only bounded host tokens enter the durable report; never exception messages or source payloads.
+        private val UPDATE_DIAGNOSTIC_STAGE = Regex("^[a-z][a-z0-9_-]{0,31}$")
+        private val UPDATE_DIAGNOSTIC_CODE = Regex("^[a-z][a-z0-9_-]{0,47}$")
 
-        suspend fun open(packageInfo: VerifiedHxpPackage, gateway: HostNetworkGateway): SourceExtensionClient {
+        suspend fun open(
+            packageInfo: VerifiedHxpPackage,
+            gateway: HostNetworkGateway,
+            verifiedGet: HostNetworkGateway? = null,
+        ): SourceExtensionClient {
             val manifest = packageInfo.manifest
             val runtime = QuickJsRuntimeLane(
                 label = "${manifest.sourceId.value}-${manifest.version.original}",
@@ -451,7 +652,7 @@ class SourceExtensionClient private constructor(
             )
             return try {
                 runtime.evaluateModule(packageInfo.readVerifiedEntryModule(), manifest.entry)
-                SourceExtensionClient(packageInfo, gateway, runtime)
+                SourceExtensionClient(packageInfo, gateway, runtime, verifiedGet)
             } catch (failure: Throwable) {
                 runtime.close()
                 throw failure
@@ -527,6 +728,29 @@ private fun parseDetail(value: JsonObject): SourceBookDetail = SourceBookDetail(
     status = value.optionalString("status"),
     lastUpdatedDate = value.optionalString("lastUpdatedDate"),
 )
+
+private const val MAX_UPDATE_CHECK_CHAPTERS = 20_000
+private val OPAQUE_UPDATE_ANCHOR = Regex("^[A-Za-z0-9._:-]{1,128}$")
+
+private fun parseUpdateCheck(value: JsonObject): ParsedSourceUpdateCheck {
+    value.requireExactKeys("sourceId", "remoteBookId", "complete", "order", "chapters", "lastUpdatedDate")
+    require(value["complete"]?.jsonPrimitive?.booleanOrNull == true) { "Incomplete update check evidence" }
+    require(value.requiredLiteralString("order") == "source") { "Invalid update check chapter order" }
+    val chapters = value.requiredArray("chapters")
+    require(chapters.size in 1..MAX_UPDATE_CHECK_CHAPTERS) { "Invalid update check chapter count" }
+    return ParsedSourceUpdateCheck(
+        identity = BookIdentity(value.requiredLiteralString("sourceId"), value.requiredLiteralString("remoteBookId")),
+        chapters = chapters.map { element ->
+            element.jsonObject.also { it.requireExactKeys("chapterId", "title") }.let { chapter ->
+                SourceUpdateChapter(
+                    chapterId = chapter.requiredLiteralString("chapterId"),
+                    title = chapter.requiredLiteralString("title"),
+                )
+            }
+        },
+        lastUpdatedDate = value.optionalLiteralString("lastUpdatedDate"),
+    )
+}
 private fun parseHomePage(value: JsonObject): SourceHomePage = SourceHomePage(
     schemaVersion = value["schemaVersion"]?.jsonPrimitive?.int
         ?: throw IllegalArgumentException("Missing home schema version"),
@@ -621,6 +845,15 @@ private fun HxpRemoteOperationPolicy.toNetworkPolicy(): RemoteOperationRequestPo
     },
 )
 
+private fun HxpUpdateCheckPolicy.toNetworkPolicy(): RemoteOperationRequestPolicy = RemoteOperationRequestPolicy(
+    origin = origin,
+    method = NetworkMethod.GET,
+    path = path,
+    fixedParameters = parameters.filterIsInstance<HxpRemoteParameter.Fixed>().associate { it.name to it.value },
+    remoteBookIdParameter = parameters.filterIsInstance<HxpRemoteParameter.RemoteBookId>().singleOrNull()?.name,
+    referrerPath = referrerPath,
+)
+
 private const val MAX_REMOTE_LIBRARY_TARGETS = 128
 
 internal fun decodeRemoteTargets(root: JsonObject, expectedSourceId: String): RemoteLibraryTargetsResult {
@@ -658,6 +891,10 @@ private fun JsonObject.optionalLiteralString(name: String): String? {
     if (value is JsonNull) return null
     require(value is JsonPrimitive && value.isString) { "Invalid string: $name" }
     return value.content
+}
+
+private fun JsonObject.requireExactKeys(vararg required: String) {
+    require(keys == required.toSet()) { "Unexpected update check result shape" }
 }
 
 private fun JsonObject.requiredString(name: String): String = requireNotNull(this[name]?.jsonPrimitive?.contentOrNull)

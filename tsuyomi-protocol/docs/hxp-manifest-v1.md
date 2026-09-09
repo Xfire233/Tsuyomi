@@ -31,6 +31,12 @@ Archive integrity, publisher trust, revocation, rotation, rollback, and capabili
 
 The capability permits the host to invoke the versioned normalized Home projection in [`hxp-host-api-v1.md`](hxp-host-api-v1.md). It does not grant UI injection, arbitrary navigation, background refresh, browser/WebView access, website mutation, additional origins, cookies, or storage. All requests still pass through `capabilities.network` and the host starts them only after an explicit user action.
 
+## Signed update check v2
+
+`capabilities.updateCheck` is optional. When present, it declares exactly `{ version: 2, origin, method: "GET", path, parameters, referrerPath? }`. Its parameters permit fixed literals plus exactly one `remoteBookId` binding; `cursor`, target and write bindings are forbidden. The origin must already be in the signed network allowlist. Enabling this capability is a visible `source-update:read` grant during install/update approval.
+
+The host invokes an update check only through this exact signed policy, with `NETWORK_ONLY` GET and no body. A generic source request is not an update-check fallback. Redirects are not permitted. A source may use the same site endpoint for ordinary directory reads, but that does not authorize the update-check API to substitute generic directory transport or a same-origin GET mutation.
+
 ## Signed remote-library operations
 
 `capabilities.remoteLibrary.read = true` requires separate signed `policies.read` and `policies.targets` entries: paginated book listing and target discovery are distinct exact request grammars. Every declared write operation similarly requires its matching `add`, `remove`, or `move` policy. The host rejects generic transport calls to these protected surfaces and accepts only the exact operation context derived from the active signed manifest.

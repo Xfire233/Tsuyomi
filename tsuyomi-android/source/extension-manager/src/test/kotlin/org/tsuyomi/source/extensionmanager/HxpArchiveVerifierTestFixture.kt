@@ -51,6 +51,7 @@ internal fun signedFixture(
         mapOf("read" to JsonPrimitive(false), "writeOperations" to JsonArray(emptyList())),
     ),
     home: JsonObject? = null,
+    updateCheck: JsonObject? = null,
 ): SignedFixture {
     val privateKey = Ed25519PrivateKeyParameters(ByteArray(32) { (it + 1).toByte() }, 0)
     val publisher = PublisherKey(
@@ -60,7 +61,7 @@ internal fun signedFixture(
     )
     val files = JsonObject(mapOf(ENTRY_PATH to JsonPrimitive(sha256(ENTRY_BYTES))))
     val contentDigest = sha256(JsonCanonicalizer(files.toString()).encodedUTF8)
-    val manifest = manifest(contentDigest, files, version, limits, remoteLibrary, home)
+    val manifest = manifest(contentDigest, files, version, limits, remoteLibrary, home, updateCheck)
     val canonicalManifest = JsonCanonicalizer(manifest).encodedUTF8
     val message = ByteArrayOutputStream().use { output ->
         output.write("tsuyomi-hxp-v1\u0000".toByteArray(StandardCharsets.US_ASCII))
@@ -123,6 +124,7 @@ private fun manifest(
     limits: FixtureLimits,
     remoteLibrary: JsonObject,
     home: JsonObject?,
+    updateCheck: JsonObject?,
 ): String = JsonObject(
     linkedMapOf(
         "format" to JsonPrimitive("tsuyomi-hxp"),
@@ -178,6 +180,7 @@ private fun manifest(
                     ),
                 )
                 home?.let { put("home", it) }
+                updateCheck?.let { put("updateCheck", it) }
                 put("remoteLibrary", remoteLibrary)
                 put("storage", JsonObject(mapOf("quotaBytes" to JsonPrimitive(limits.storageQuotaBytes))))
             },

@@ -89,6 +89,8 @@ fun BookDetailTopBar(
     remoteMoveAvailable: Boolean = false,
     onRemoveFromRemote: () -> Unit = {},
     onMoveRemote: () -> Unit = {},
+    updateChecksExcluded: Boolean = false,
+    onToggleUpdateChecksExcluded: () -> Unit = {},
 ) {
     val actions = buildList {
         add(
@@ -115,6 +117,15 @@ fun BookDetailTopBar(
         if (remoteRemoveAvailable) {
             add(TsuyomiOverflowAction(stringResource(R.string.book_remove_from_remote), onRemoveFromRemote, destructive = true))
         }
+        add(
+            TsuyomiOverflowAction(
+                label = stringResource(
+                    if (updateChecksExcluded) R.string.book_resume_update_checks else R.string.book_stop_update_checks,
+                ),
+                onClick = onToggleUpdateChecksExcluded,
+                icon = TsuyomiIcons.Updates,
+            ),
+        )
     }
     TsuyomiTopBar(
         title = title,
@@ -180,7 +191,7 @@ internal fun DetailIdentityModule(
         val sidePlacement = textWidth >= maxOf(ratingMinimum, splitMinimum) && sideContentHeight <= cover.height
         val fallbackHorizontal = !sidePlacement && width >= ratingMinimum + horizontalGap + splitMinimum
         val ratingWidth = if (sidePlacement || fallbackHorizontal) ratingMinimum else width
-        val splitWidth = if (sidePlacement || fallbackHorizontal) splitMinimum else width
+        val splitWidth = splitMinimum.coerceAtMost(width)
         val rating = measurables[4].measure(Constraints.fixed(ratingWidth, ratingFrameHeight))
         val split = measurables[5].measure(Constraints.fixed(splitWidth, splitHeight))
 
@@ -369,7 +380,6 @@ internal fun DetailLibraryStateButton(
     val state = stringResource(if (inLibrary) R.string.book_in_library else R.string.book_not_in_library)
     TsuyomiSplitButton(
         text = stringResource(if (inLibrary) R.string.book_in_library else R.string.book_add_to_library),
-        leadingIcon = TsuyomiIcons.Shelf,
         trailingIcon = TsuyomiIcons.Disclosure,
         trailingDescription = "更多加入选项",
         onLeadingClick = onAddToLibrary,

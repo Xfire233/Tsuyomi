@@ -243,6 +243,21 @@ class ControlledWebLoginSessionInstrumentedTest {
     }
 
     @Test
+    fun explicit_verified_page_binding_ignores_stale_previous_document() {
+        val tracker = VerifiedPageNavigationTracker()
+        val requestUrl = "https://allowed.example/index.php"
+        tracker.start(requestUrl)
+        tracker.onPageStarted("https://allowed.example/")
+        tracker.onPageStarted(requestUrl)
+        tracker.onPageFinished(requestUrl)
+
+        assertEquals(
+            VerifiedPageNavigationBinding(requestUrl, requestUrl),
+            tracker.bindingFor(requestUrl),
+        )
+    }
+
+    @Test
     fun cancel_discards_webview_cookie() = runBlocking(Dispatchers.Main) {
         val session = ControlledWebLoginSession(context, "fixture.source", setOf(origin), credentials)
         session.open("https://allowed.example/login")

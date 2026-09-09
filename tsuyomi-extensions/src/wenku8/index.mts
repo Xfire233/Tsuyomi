@@ -204,6 +204,16 @@ const findBalancedContainer = (html: string, identities: string[]): string | nul
   return null;
 };
 
+const findBalancedContainerById = (html: string, id: string): string | null => {
+  const openings = /<([a-z0-9]+)\b([^>]*)>/gi;
+  for (let match = openings.exec(html); match; match = openings.exec(html)) {
+    if (attribute(match[2] ?? '', 'id')?.trim() !== id) continue;
+    const body = balancedElementBody(html, openings.lastIndex, (match[1] ?? '').toLowerCase());
+    if (body !== null) return body;
+  }
+  return null;
+};
+
 const bookIdentityFromUrl = (href: string): { remoteBookId: string; canonicalUrl: string } | null => {
   const id = /(?:\/book\/(\d+)\.htm|readbookcase\.php\?[^#]*\baid=(\d+)|articleinfo\.php\?[^#]*(?:\baid|\bid|\bbid)=(\d+))/i
     .exec(decodeEntities(href))?.slice(1).find(Boolean);
@@ -300,6 +310,28 @@ const looksLikeDirectory = (html: string, remoteBookId: string): boolean => {
   return (/(?:class=["'](?:ccss|vcss)["'])/i.test(html) || staticChapter || dynamicChapter) && (staticChapter || dynamicChapter);
 };
 
+const completeUpdateDirectoryMarkup = (html: string, remoteBookId: string): string | null => {
+  const htmlOpening = /<html\b[^>]*>/i.exec(html);
+  if (htmlOpening === null || !/<\/html>\s*$/i.test(html) ||
+    balancedElementBody(html, htmlOpening.index + htmlOpening[0].length, 'html') === null ||
+    !looksLikeDirectory(html, remoteBookId)) return null;
+  if (/<a\b[^>]*\bhref=[^>]*(?:[?&](?:page|p|pageIndex)=|\bpage=)[^>]*>[\s\S]*?(?:下一页|下页|next)\s*<\/a>/i.test(html)) {
+    return null;
+  }
+  const list = findBalancedContainerById(html, 'list');
+  const scope = list ?? html;
+  const tables = /<table\b([^>]*)>/gi;
+  let directory: string | null = null;
+  for (let table = tables.exec(scope); table; table = tables.exec(scope)) {
+    if (list === null && !attribute(table[1] ?? '', 'class')?.split(/\s+/).includes('css')) continue;
+    // Both the static #list and dynamic table.css layouts must identify one complete directory.
+    if (directory !== null) return null;
+    directory = balancedElementBody(scope, tables.lastIndex, 'table');
+    if (directory === null || !looksLikeDirectory(directory, remoteBookId)) return null;
+  }
+  return directory;
+};
+
 const looksLikeChapter = (html: string, fallbackTitle: string | undefined = undefined): boolean => {
   const content = findBalancedContainer(html, ['content', 'contentmain', 'chapter-content']);
   if (content === null) return false;
@@ -321,7 +353,7 @@ const looksLikeChapter = (html: string, fallbackTitle: string | undefined = unde
 export const classifyPage = (
   html: string,
   finalUrl?: string,
-  operation: 'generic' | 'search' | 'home' | 'detail' | 'directory' | 'chapter' | 'remote-library' = 'generic',
+  operation: 'generic' | 'search' | 'home' | 'detail' | 'directory' | 'update-check' | 'chapter' | 'remote-library' = 'generic',
   remoteBookId?: string,
   chapterId?: string,
 ): 'ok' | 'session-required' | 'verification-required' | 'malformed' => {
@@ -350,6 +382,10 @@ export const classifyPage = (
   if (operation === 'directory') {
     const identity = readerIdentityFromUrl(finalUrl);
     return identity?.remoteBookId === remoteBookId && identity.chapterId === null && looksLikeDirectory(html, remoteBookId) ? 'ok' : 'malformed';
+  }
+  if (operation === 'update-check') {
+    const identity = readerIdentityFromUrl(finalUrl);
+    return identity?.remoteBookId === remoteBookId && identity.chapterId === null && completeUpdateDirectoryMarkup(html, remoteBookId) !== null ? 'ok' : 'malformed';
   }
   const identity = readerIdentityFromUrl(finalUrl);
   return identity?.remoteBookId === remoteBookId && identity.chapterId === chapterId && looksLikeChapter(html) ? 'ok' : 'malformed';
@@ -745,6 +781,33 @@ export const parseDirectory = (html: string, remoteBookId: string) => {
   return { sourceId: SOURCE_ID, remoteBookId, chapters };
 };
 
+export const buildUpdateCheckV2Request = (remoteBookId: string): NetworkRequest => {
+  if (!/^\d{1,12}$/.test(remoteBookId)) throw new Error('INVALID_BOOK_ID');
+  return {
+    url: `${ORIGIN}/modules/article/reader.php`,
+    query: [{ name: 'aid', value: remoteBookId }],
+    queryEncoding: 'utf-8',
+    method: 'GET',
+    headers: { Accept: 'text/html,application/xhtml+xml' },
+    decode: 'gb18030',
+    cache: 'network-only',
+  };
+};
+
+export const parseUpdateCheckV2 = (html: string, remoteBookId: string) => {
+  const completeDirectory = completeUpdateDirectoryMarkup(html, remoteBookId);
+  if (completeDirectory === null) throw new Error('INCOMPLETE_UPDATE_DIRECTORY');
+  const directory = parseDirectory(completeDirectory, remoteBookId);
+  return {
+    sourceId: directory.sourceId,
+    remoteBookId: directory.remoteBookId,
+    complete: true,
+    order: 'source',
+    chapters: directory.chapters.map(({ chapterId, title }) => ({ chapterId, title })),
+    lastUpdatedDate: sourceUpdateDate(html),
+  };
+};
+
 export const buildChapterRequest = (url: string, remoteBookId: string, chapterId: string): NetworkRequest => {
   if (!/^\d{1,12}$/.test(remoteBookId) || !/^\d{1,16}$/.test(chapterId)) throw new Error('INVALID_CHAPTER_ID');
   const normalized = absoluteUrl(url, `${ORIGIN}/modules/article/reader.php?aid=${remoteBookId}`);
@@ -1028,6 +1091,8 @@ const api = {
   buildDetailRequest,
   parseDetail,
   buildDirectoryRequest,
+  buildUpdateCheckV2Request,
+  parseUpdateCheckV2,
   parseDirectory,
   buildChapterRequest,
   parseChapter,

@@ -49,7 +49,6 @@ internal fun NavGraphBuilder.settingsRoutes(
         DisplaySettingsRoute(
             environment = dependencies.environment,
             controller = dependencies.displayController,
-            onResetInterfacePreferences = dependencies.application.interfacePreferencesResetter::resetToConstitutionDefaults,
         )
     }
     composable(Routes.ReaderSettings) {
@@ -69,6 +68,10 @@ internal fun NavGraphBuilder.settingsRoutes(
             coordinator = dependencies.transferCoordinator,
             readerPreferences = dependencies.readerPreferences,
             onImportConfirmed = onImportConfirmed,
+            onResetInterfacePreferences = {
+                dependencies.application.interfacePreferencesResetter.resetToConstitutionDefaults()
+                dependencies.displayController.requestRedraw()
+            },
         )
     }
     composable(Routes.Help) {
@@ -87,7 +90,6 @@ internal fun NavGraphBuilder.settingsRoutes(
             onResetSeenVersions = {
                 scope.launch { dependencies.application.featureIntroductionPreferencesRepository.resetSeenVersions() }
             },
-            onOpenDisplayReset = { navController.navigate(Routes.Display) },
         )
     }
     composable(Routes.About) {

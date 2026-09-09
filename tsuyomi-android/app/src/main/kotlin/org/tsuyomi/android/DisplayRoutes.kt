@@ -44,7 +44,10 @@ import org.tsuyomi.feature.settings.DisplaySettingsUiState
 import org.tsuyomi.feature.settings.DisplayWriteFailure
 
 @Composable
-internal fun TsuyomiApplicationRoot(controller: DisplayController) {
+internal fun TsuyomiApplicationRoot(
+    controller: DisplayController,
+    updateNavigationSignal: Int = 0,
+) {
     val redrawEpoch by controller.redrawEpoch.collectAsStateWithLifecycle()
     val systemDark = isSystemInDarkTheme()
     val reducedMotion = rememberSystemReducedMotion()
@@ -81,7 +84,7 @@ internal fun TsuyomiApplicationRoot(controller: DisplayController) {
     DisplayEnvironmentProvider(environment) {
         TsuyomiTheme {
             SystemBarPolicy(environment)
-            TsuyomiApp(environment, controller)
+            TsuyomiApp(environment, controller, updateNavigationSignal)
         }
     }
 }
@@ -90,7 +93,6 @@ internal fun TsuyomiApplicationRoot(controller: DisplayController) {
 internal fun DisplaySettingsRoute(
     environment: DisplayEnvironment,
     controller: DisplayController,
-    onResetInterfacePreferences: suspend () -> Unit,
 ) {
     val scope = rememberCoroutineScope()
     val arbiter = rememberDisplayWriteArbiter()
@@ -121,10 +123,6 @@ internal fun DisplaySettingsRoute(
             key.startsWith("dynamic:") -> submit(key) {
                 controller.setDynamicColorEnabled(key.substringAfter(':').toBooleanStrict())
             }
-            key == "reset" -> submit(key) {
-                onResetInterfacePreferences()
-                controller.requestRedraw()
-            }
         }
     }
 
@@ -146,12 +144,6 @@ internal fun DisplaySettingsRoute(
             onRefreshNow = controller::requestRedraw,
             onRetryWrite = ::retry,
             onAcknowledgeWriteFailure = arbiter::acknowledge,
-            onResetInterfacePreferences = {
-                submit("reset") {
-                    onResetInterfacePreferences()
-                    controller.requestRedraw()
-                }
-            },
         ),
     )
 }

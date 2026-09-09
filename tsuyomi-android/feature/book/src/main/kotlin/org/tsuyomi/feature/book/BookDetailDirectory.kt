@@ -29,6 +29,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.heading
@@ -173,6 +174,7 @@ internal fun DetailChapterRow(item: DetailChapterItem, onSelectChapter: (SourceC
         Row(
             modifier = Modifier
                 .clickable(role = Role.Button) { onSelectChapter(item.chapter) }
+                .testTag("detail-chapter-${item.chapter.chapterId}")
                 .heightIn(min = 56.dp)
                 .padding(horizontal = TsuyomiSpacing.Md, vertical = TsuyomiSpacing.Sm),
             verticalAlignment = Alignment.CenterVertically,

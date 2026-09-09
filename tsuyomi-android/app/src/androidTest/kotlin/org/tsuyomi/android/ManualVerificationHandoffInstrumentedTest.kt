@@ -26,6 +26,7 @@ import androidx.compose.ui.test.performTextReplacement
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onAllNodesWithTag
 import androidx.compose.ui.test.onNodeWithContentDescription
+import androidx.compose.ui.test.onAllNodesWithContentDescription
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
@@ -103,16 +104,48 @@ class ManualVerificationHandoffInstrumentedTest {
         assertEquals(1, Phase2SourceGateway.searchRequestCount())
 
         performPlatformClick("手动登录或验证")
-        waitForText("打开对应搜索页面")
+        composeRule.onNodeWithContentDescription("打开对应搜索页面").assertIsDisplayed()
         waitForWebViewSettled()
+        composeRule.onNodeWithTag("verification-host-identity", useUnmergedTree = true).assertIsDisplayed()
+        val identityBounds = composeRule.onNodeWithTag("verification-host-identity", useUnmergedTree = true)
+            .fetchSemanticsNode()
+            .boundsInWindow
+        composeRule.onNodeWithTag("verification-action-dock", useUnmergedTree = true).assertIsDisplayed()
+        val webViewBounds = composeRule.onNodeWithTag("verification-webview", useUnmergedTree = true)
+            .assertIsDisplayed()
+            .fetchSemanticsNode()
+            .boundsInWindow
+        val windowHeight = composeRule.runOnUiThread { composeRule.activity.window.decorView.height.toFloat() }
+        val windowWidth = composeRule.runOnUiThread { composeRule.activity.window.decorView.width.toFloat() }
+        assertTrue("Verification WebView is not full-window: $webViewBounds", webViewBounds.height >= windowHeight * 0.95f)
+        assertTrue(
+            "Verification host identity should stay away from common left-aligned site titles: $identityBounds",
+            identityBounds.center.x > windowWidth * 0.5f,
+        )
+        val actionCenters = listOf(
+            composeRule.onNodeWithContentDescription("取消验证").fetchSemanticsNode().boundsInWindow.center.y,
+            composeRule.onNodeWithContentDescription("打开对应搜索页面").fetchSemanticsNode().boundsInWindow.center.y,
+            composeRule.onNodeWithText("使用当前页面").fetchSemanticsNode().boundsInWindow.center.y,
+            composeRule.onNodeWithText("保存会话并返回").fetchSemanticsNode().boundsInWindow.center.y,
+        )
+        assertTrue(
+            "Verification actions are not one compact horizontal group: $actionCenters",
+            requireNotNull(actionCenters.maxOrNull()) - requireNotNull(actionCenters.minOrNull()) < 2f,
+        )
+        composeRule.onNodeWithText("此验证由宿主应用发起。", substring = true).assertDoesNotExist()
         val searchHtml = targetContext.assets.open("search.html").bufferedReader().use { it.readText() }
         val searchUrl =
             "https://www.wenku8.net/modules/article/search.php?searchtype=articlename&searchkey=login&page=1"
         installVerifiedPageFixture(searchUrl, searchHtml)
-        composeRule.onNodeWithText("打开对应搜索页面").performClick()
+        composeRule.onNodeWithContentDescription("打开对应搜索页面").performClick()
         waitForText("使用当前页面")
         waitForWebViewSettled()
         composeRule.onNodeWithText("使用当前页面").performClick()
+        composeRule.waitUntil(15_000) {
+            runCatching {
+                composeRule.onNodeWithTag("verification-action-dock", useUnmergedTree = true).assertDoesNotExist()
+            }.isSuccess
+        }
         waitForVerifiedOutcome(
             successText = "雾港纪事",
             unboundText = "当前页面未与暂停的搜索请求绑定。请点击“打开对应搜索页面”，等待自动跳转和页面加载完成后重试。",
@@ -120,11 +153,6 @@ class ManualVerificationHandoffInstrumentedTest {
         assertEquals(1, Phase2SourceGateway.searchRequestCount())
         performPlatformClick("雾港纪事")
         waitForText("简介")
-        composeRule.onNodeWithTag("book-detail-scroll").performScrollToIndex(3)
-        waitForText("第一章 雾中的灯塔")
-        composeRule.onNodeWithText("第一章 雾中的灯塔").performClick()
-        waitForText("设置")
-        waitForText("第一章 雾中的灯塔")
     }
 
     @Test
@@ -260,12 +288,12 @@ class ManualVerificationHandoffInstrumentedTest {
         assertEquals(1, Phase2SourceGateway.directoryRequestCount())
 
         composeRule.onNodeWithText("打开手动登录或验证").performClick()
-        waitForText("打开对应详情页面")
+        composeRule.onNodeWithContentDescription("打开对应详情页面").assertIsDisplayed()
         waitForWebViewSettled()
         val detailHtml = targetContext.assets.open("detail.html").bufferedReader().use { it.readText() }
         val detailUrl = "https://www.wenku8.net/book/1234.htm"
         installVerifiedPageFixture(detailUrl, detailHtml)
-        composeRule.onNodeWithText("打开对应详情页面").performClick()
+        composeRule.onNodeWithContentDescription("打开对应详情页面").performClick()
         waitForText("使用当前页面")
         waitForWebViewSettled()
         composeRule.onNodeWithText("使用当前页面").performClick()
@@ -305,12 +333,12 @@ class ManualVerificationHandoffInstrumentedTest {
         assertEquals(1, Phase2SourceGateway.directoryRequestCount())
 
         performPlatformClick("打开手动登录或验证")
-        waitForText("打开对应章节页面")
+        composeRule.onNodeWithContentDescription("打开对应章节页面").assertIsDisplayed()
         waitForWebViewSettled()
         val chapterHtml = targetContext.assets.open("chapter.html").bufferedReader().use { it.readText() }
         val chapterUrl = "https://www.wenku8.net/modules/article/reader.php?aid=1234&cid=10001"
         installVerifiedPageFixture(chapterUrl, chapterHtml)
-        performPlatformClick("打开对应章节页面")
+        composeRule.onNodeWithContentDescription("打开对应章节页面").performClick()
         waitForText("使用当前页面")
         waitForWebViewSettled()
         composeRule.onNodeWithText("使用当前页面").performClick()
@@ -379,7 +407,7 @@ class ManualVerificationHandoffInstrumentedTest {
     }
 
     @Test
-    fun standard_detail_uses_integrated_atlas_modules_and_local_only_metadata() {
+    fun standard_detail_uses_stable_app_bar_title_and_visible_cache_action() {
         cleanSessionState()
         runBlocking {
             val application = composeRule.activity.application as TsuyomiApplication
@@ -399,6 +427,8 @@ class ManualVerificationHandoffInstrumentedTest {
         waitForText("雾港纪事")
         performPlatformClick("雾港纪事")
 
+        waitForText("书籍详情")
+        composeRule.onNodeWithContentDescription("缓存详情与目录").assertIsDisplayed()
         waitForText("简介")
         composeRule.onNodeWithContentDescription("更多加入选项").performClick()
         waitForText("稍后再读")
@@ -409,10 +439,6 @@ class ManualVerificationHandoffInstrumentedTest {
         composeRule.onNodeWithText("稍后再读").performClick()
         composeRule.onNodeWithContentDescription("更多加入选项").performClick()
         waitForStateDescription("detail-read-later-action", "未稍后再读")
-        pressBack()
-        composeRule.onNodeWithTag("book-detail-scroll").performScrollToIndex(3)
-        waitForText("全文目录")
-        waitForText("第一章 雾中的灯塔")
     }
 
     @Test
@@ -441,7 +467,7 @@ class ManualVerificationHandoffInstrumentedTest {
         waitForText("已完成：更新稍后再读")
 
         performPlatformClick("书架")
-        waitForText("快捷书架")
+        waitForText("书架")
         waitForText("雾港纪事")
         performPlatformClick("雾港纪事")
         waitForText("简介")
@@ -604,12 +630,12 @@ class ManualVerificationHandoffInstrumentedTest {
         assertEquals(1, Phase2SourceGateway.homeRequestCount())
 
         composeRule.onNodeWithText("前往登录验证").performClick()
-        waitForText("打开对应主页")
+        composeRule.onNodeWithContentDescription("打开对应主页").assertIsDisplayed()
         waitForWebViewSettled()
         val homeHtml = targetContext.assets.open("home-index.html").bufferedReader().use { it.readText() }
         val homeUrl = "https://www.wenku8.net/index.php"
         installVerifiedPageFixture(homeUrl, homeHtml)
-        composeRule.onNodeWithText("打开对应主页").performClick()
+        composeRule.onNodeWithContentDescription("打开对应主页").performClick()
         waitForText("使用当前页面")
         waitForWebViewSettled()
         composeRule.onNodeWithText("使用当前页面").performClick()
@@ -947,13 +973,28 @@ class ManualVerificationHandoffInstrumentedTest {
 
 
 
-    private fun platformHasText(text: String): Boolean = runCatching {
-        traversePlatformNodes { node ->
-            node.text?.toString() == text || node.contentDescription?.toString() == text
-        }
-    }.getOrDefault(false)
+    private fun platformHasText(text: String): Boolean =
+        runCatching {
+            composeRule.onAllNodesWithText(text, useUnmergedTree = true)
+                .fetchSemanticsNodes().isNotEmpty() ||
+                composeRule.onAllNodesWithContentDescription(text, useUnmergedTree = true)
+                    .fetchSemanticsNodes().isNotEmpty()
+        }.getOrDefault(false) || runCatching {
+            traversePlatformNodes { node ->
+                node.text?.toString() == text || node.contentDescription?.toString() == text
+            }
+        }.getOrDefault(false)
 
     private fun performPlatformClick(text: String) {
+        val composeClicked = runCatching {
+            composeRule.onNodeWithText(text).performClick()
+            true
+        }.getOrDefault(false) || runCatching {
+            composeRule.onNodeWithContentDescription(text).performClick()
+            true
+        }.getOrDefault(false)
+        if (composeClicked) return
+
         val clicked = runCatching {
             traversePlatformNodes { node ->
                 val matches =

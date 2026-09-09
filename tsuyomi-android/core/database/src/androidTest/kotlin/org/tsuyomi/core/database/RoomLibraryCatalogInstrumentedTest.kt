@@ -226,7 +226,7 @@ class RoomLibraryCatalogInstrumentedTest {
     @Test
     fun importReviewRetainsCollidingSmartRulesAndSubscriptionDrafts() = runBlocking {
         val transfer = RoomTransferRepository(database)
-        val existingRule = SmartRule(root = SmartRuleNode.Predicate(SmartPredicate.HasUnreadUpdate))
+        val existingRule = SmartRule(root = SmartRuleNode.Predicate(SmartPredicate.HasUnresolvedUpdate))
         val importedRule = SmartRule(root = SmartRuleNode.Predicate(SmartPredicate.ProgressIn(setOf(ProgressState.READING))))
         val existingRuleJson = SmartRuleCodec.encode(existingRule)
         repository.createSmartCollection(

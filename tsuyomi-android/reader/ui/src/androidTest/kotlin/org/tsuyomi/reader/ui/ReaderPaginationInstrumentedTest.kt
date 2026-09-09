@@ -379,6 +379,43 @@ class ReaderPaginationInstrumentedTest {
     }
 
     @Test
+    fun advancingPastFinalChapterReportsItsExactIdOnce() {
+        val finalChapter = SourceChapter("chapter-final", "最终章", "https://example.test/final")
+        val completed = mutableListOf<String>()
+        val document = ReaderDocument(
+            sourceId = "org.tsuyomi.reader.test",
+            remoteBookId = "final-seam",
+            contentId = finalChapter.chapterId,
+            revision = null,
+            title = finalChapter.title,
+            blocks = listOf(ReaderBlock.Paragraph("only-block", "最终章完整显示。")),
+        )
+        val environment = standardEnvironment()
+        composeRule.setContent {
+            DisplayEnvironmentProvider(environment) {
+                TsuyomiTheme(environment) {
+                    ReaderSurface(
+                        document = document,
+                        restoredLocator = null,
+                        onLocatorChanged = { _, _ -> },
+                        chapters = listOf(finalChapter),
+                        currentChapterId = finalChapter.chapterId,
+                        onSelectChapter = {},
+                        onNavigateUp = {},
+                        onChapterCompleted = { completed += it },
+                        preferences = PortableReaderPreferences(flow = "paged"),
+                    )
+                }
+            }
+        }
+
+        composeRule.onNodeWithText("下一章").performClick()
+        composeRule.onNodeWithText("下一章").performClick()
+
+        composeRule.runOnIdle { assertEquals(listOf(finalChapter.chapterId), completed) }
+    }
+
+    @Test
     fun scroll_bottom_completes_current_chapter_even_when_first_visible_block_is_earlier() {
         val current = SourceChapter("chapter-2", "第二章", "https://example.test/chapter-2")
         val next = SourceChapter("chapter-3", "第三章", "https://example.test/chapter-3")

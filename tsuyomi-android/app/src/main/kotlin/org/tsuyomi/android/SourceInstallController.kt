@@ -23,6 +23,7 @@ import org.tsuyomi.core.security.SourceCredentialPartition
 import org.tsuyomi.core.security.VerifiedBrowserSessionStore
 import org.tsuyomi.feature.browse.BrowseInstallFailure
 import org.tsuyomi.feature.browse.BrowseResourceLimit
+import org.tsuyomi.feature.library.LibraryMirrorShortcut
 import org.tsuyomi.feature.browse.BrowseResourceLimitIncrease
 import org.tsuyomi.feature.browse.BrowseUiState
 import org.tsuyomi.source.extensionmanager.ExtensionInstallApproval
@@ -64,6 +65,48 @@ class SourceInstallController(
     var state: BrowseUiState by mutableStateOf(BrowseUiState.Empty)
         private set
 
+
+    /**
+     * Selects one exact installed archive without installing, re-verifying its metadata in Room,
+     * or borrowing a different source's foreground session.
+     */
+    suspend fun activateInstalledSource(sourceId: String): VerifiedHxpPackage? {
+        activePackage?.takeIf { it.manifest.sourceId.value == sourceId }?.let { return it }
+        val restored = try {
+            withContext(Dispatchers.IO) {
+                installer.readVerifiedActive(org.tsuyomi.shared.sourcecontract.SourceId(sourceId))
+            }
+        } catch (_: ExtensionInstallException) {
+            null
+        } catch (_: IllegalArgumentException) {
+            null
+        } ?: return null
+        activePackage = restored
+        showInstalled(restored)
+        return restored
+    }
+
+    suspend fun installedRemoteLibraryRoots(): List<LibraryMirrorShortcut> = withContext(Dispatchers.IO) {
+        store.installedSourceIds().mapNotNull { sourceId ->
+            val installed = try {
+                installer.readVerifiedActive(sourceId)
+            } catch (_: ExtensionInstallException) {
+                null
+            } catch (_: IllegalArgumentException) {
+                null
+            } ?: return@mapNotNull null
+            if (!installed.manifest.capabilities.remoteLibrary.policies.containsKey(RemoteOperation.READ)) {
+                return@mapNotNull null
+            }
+            LibraryMirrorShortcut(
+                sourceId = installed.manifest.sourceId.value,
+                targetId = null,
+                label = installed.manifest.displayName,
+                count = 0,
+                frozen = false,
+            )
+        }
+    }
 
     suspend fun restoreInstalled() {
         if (activePackage != null) return

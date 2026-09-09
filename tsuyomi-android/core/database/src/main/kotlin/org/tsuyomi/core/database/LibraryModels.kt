@@ -19,8 +19,6 @@ data class LibraryBook(
     val canonicalUrl: String? = null,
     val status: String? = null,
     val remoteTags: Set<String> = emptySet(),
-    val sourceUpdateKey: String? = null,
-    val hasUnreadUpdate: Boolean = false,
 )
 
 enum class CollectionKind {
@@ -57,6 +55,7 @@ data class LibraryEntry(
     val reconciliation: RemoteReconciliationState?,
     val reconciliationOperation: String? = null,
     val progress: ReadingProgress? = null,
+    val localMembership: Boolean = true,
 ) {
     init {
         require(rating == null || rating in 1..5) { "Rating must be 1..5" }

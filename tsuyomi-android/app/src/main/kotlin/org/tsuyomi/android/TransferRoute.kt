@@ -23,6 +23,7 @@ internal fun TransferRoute(
     coordinator: TransferCoordinator,
     readerPreferences: PortableReaderPreferences,
     onImportConfirmed: suspend () -> Unit,
+    onResetInterfacePreferences: suspend () -> Unit,
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
@@ -73,5 +74,6 @@ internal fun TransferRoute(
         onDismissResult = coordinator::dismissResult,
         onRetryRecovery = { scope.launch { coordinator.retryRecovery() } },
         onAbortRecovery = { scope.launch { coordinator.abortRecovery() } },
+        onResetInterfacePreferences = { scope.launch { onResetInterfacePreferences() } },
     )
 }

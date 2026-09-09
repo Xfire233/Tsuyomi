@@ -208,6 +208,7 @@ private fun ReaderSurfaceContent(
     } else {
         readerPosition.page + readerPosition.pageStep - 1 >= readerPosition.pageCount
     }
+    var chapterCompletionReported by remember(document.contentId) { mutableStateOf(false) }
     var chromeVisible by rememberSaveable(document.contentId) { mutableStateOf(true) }
     var overlay by rememberSaveable(document.contentId) { mutableStateOf<ReaderOverlay?>(null) }
     var auxiliaryTab by rememberSaveable { mutableStateOf(ReaderAuxiliaryTab.CONTENTS) }
@@ -232,9 +233,16 @@ private fun ReaderSurfaceContent(
         commitPosition(page.startBlockIndex, page.startCodePointOffset)
     }
 
+    fun reportChapterCompletion() {
+        if (atChapterEnd && !chapterCompletionReported) {
+            chapterCompletionReported = true
+            onChapterCompleted(currentChapterId)
+        }
+    }
+
     fun selectAdjacentChapter(direction: Int): Boolean {
+        if (direction > 0) reportChapterCompletion()
         val target = chapters.getOrNull(currentChapterIndex + direction) ?: return false
-        if (direction > 0 && atChapterEnd) onChapterCompleted(currentChapterId)
         onSelectChapter(target)
         return true
     }

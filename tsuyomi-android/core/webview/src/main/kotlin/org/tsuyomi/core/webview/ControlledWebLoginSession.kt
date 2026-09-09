@@ -8,6 +8,7 @@ import android.annotation.SuppressLint
 import android.content.Context
 import android.graphics.Bitmap
 import android.net.Uri
+import android.view.View
 import android.webkit.CookieManager
 import android.webkit.WebResourceRequest
 import android.webkit.WebView
@@ -84,18 +85,19 @@ internal class VerifiedPageNavigationTracker {
         when {
             settled && currentPageUrl == targetUrl -> Unit
             settled -> clear()
-            expectedPageUrl == targetUrl -> {
+            expectedPageUrl == targetUrl || targetUrl == requestUrl -> {
                 currentPageUrl = targetUrl
                 expectedPageUrl = null
             }
-            else -> {
+            currentPageUrl != null -> {
                 // Android WebView does not consistently call shouldOverrideUrlLoading for server
-                // redirects. Until the explicit load settles, another allowed top-frame start is
-                // therefore part of that same redirect chain.
+                // redirects. After the explicit load has started, another allowed top-frame start
+                // is therefore part of that same redirect chain.
                 currentPageUrl = targetUrl
                 expectedPageUrl = null
                 automaticRedirectAvailable = false
             }
+            else -> Unit
         }
     }
 
@@ -136,6 +138,8 @@ class ControlledWebLoginSession(
     private var webView: WebView? = null
     private var active = false
     private var ownsGlobalSession = false
+    private var pendingInitialUrl: String? = null
+    private var pendingBindVerifiedPage = false
     private val verifiedPageNavigation = VerifiedPageNavigationTracker()
 
     init {
@@ -144,7 +148,7 @@ class ControlledWebLoginSession(
     }
 
     @SuppressLint("SetJavaScriptEnabled")
-    suspend fun open(initialUrl: String): WebView {
+    suspend fun open(initialUrl: String, bindAsVerifiedPage: Boolean = false): WebView {
         check(!active) { "Session is already active" }
         GLOBAL_SESSION.lock(this)
         ownsGlobalSession = true
@@ -214,11 +218,26 @@ class ControlledWebLoginSession(
             webView = view
             restoreCookies(restoredSessions)
             active = true
-            view.loadUrl(initial.toString())
+            pendingInitialUrl = initial.toString()
+            pendingBindVerifiedPage = bindAsVerifiedPage
+            view.addOnAttachStateChangeListener(
+                object : View.OnAttachStateChangeListener {
+                    override fun onViewAttachedToWindow(v: View) {
+                        dispatchPendingLoad(view)
+                    }
+
+                    override fun onViewDetachedFromWindow(v: View) = Unit
+                },
+            )
+            if (view.isAttachedToWindow) {
+                dispatchPendingLoad(view)
+            }
             return view
         } catch (failure: Throwable) {
             webView?.destroy()
             webView = null
+            pendingInitialUrl = null
+            pendingBindVerifiedPage = false
             verifiedPageNavigation.clear()
             active = false
             releaseGlobalSession()
@@ -256,13 +275,20 @@ class ControlledWebLoginSession(
         val view = checkNotNull(webView) { "Session is not active" }
         check(active) { "Session is not active" }
         val normalizedRequest = normalizedAllowedUrl(Uri.parse(requestUrl))
-        val settledPageUrl = view.url
-            ?.takeIf { view.progress == 100 }
-            ?.let(Uri::parse)
-            ?.takeIf(::isAllowed)
-            ?.let(::normalizedAllowedUrl)
-        verifiedPageNavigation.start(normalizedRequest, settledPageUrl)
-        view.loadUrl(normalizedRequest)
+        pendingInitialUrl = null
+        pendingBindVerifiedPage = false
+        view.stopLoading()
+        verifiedPageNavigation.clear()
+        view.post {
+            if (!active || webView !== view) return@post
+            val settledPageUrl = view.url
+                ?.takeIf { view.progress == 100 }
+                ?.let(Uri::parse)
+                ?.takeIf(::isAllowed)
+                ?.let(::normalizedAllowedUrl)
+            verifiedPageNavigation.start(normalizedRequest, settledPageUrl)
+            view.loadUrl(normalizedRequest)
+        }
     }
 
     /** Captures only the current allowed top-frame document. The caller must consume it in memory. */
@@ -296,6 +322,8 @@ class ControlledWebLoginSession(
     private suspend fun close() {
         if (!ownsGlobalSession && !active && webView == null) return
         try {
+            pendingInitialUrl = null
+            pendingBindVerifiedPage = false
             webView?.apply {
                 stopLoading()
                 clearHistory()
@@ -341,21 +369,38 @@ class ControlledWebLoginSession(
     }
 
     private fun verifiedSessionsFor(initial: Uri): List<Pair<HttpsOrigin, VerifiedBrowserSession>> {
-        val initialOrigin = requireNotNull(originOf(initial))
-        val sessions = VerifiedBrowserSessionStore(credentials)
-        val initialSession = sessions.getSnapshot(SourceCredentialPartition(sourceId, initialOrigin))?.session
-            ?: return emptyList()
-        return buildList {
-            add(initialOrigin to initialSession)
-            allowedOrigins.forEach { origin ->
-                if (origin.canonical == initialOrigin.canonical) return@forEach
-                sessions.getSnapshot(SourceCredentialPartition(sourceId, origin))
-                    ?.session
-                    ?.takeIf { it.userAgent == initialSession.userAgent }
-                    ?.let { add(origin to it) }
+        return runCatching {
+            val initialOrigin = requireNotNull(originOf(initial))
+            val sessions = VerifiedBrowserSessionStore(credentials)
+            val initialSession = sessions.getSnapshot(SourceCredentialPartition(sourceId, initialOrigin))?.session
+                ?: return emptyList()
+            buildList {
+                add(initialOrigin to initialSession)
+                allowedOrigins.forEach { origin ->
+                    if (origin.canonical == initialOrigin.canonical) return@forEach
+                    sessions.getSnapshot(SourceCredentialPartition(sourceId, origin))
+                        ?.session
+                        ?.takeIf { it.userAgent == initialSession.userAgent }
+                        ?.let { add(origin to it) }
+                }
             }
+        }.getOrDefault(emptyList())
+    }
+
+    private fun dispatchPendingLoad(view: WebView) {
+        val url = pendingInitialUrl ?: return
+        val bind = pendingBindVerifiedPage
+        pendingInitialUrl = null
+        pendingBindVerifiedPage = false
+        view.post {
+            if (!active || webView !== view) return@post
+            if (bind) {
+                verifiedPageNavigation.start(url)
+            }
+            view.loadUrl(url)
         }
     }
+
 
     private suspend fun restoreCookies(sessions: List<Pair<HttpsOrigin, VerifiedBrowserSession>>) {
         val cookies = CookieManager.getInstance()
@@ -379,9 +424,18 @@ class ControlledWebLoginSession(
         CookieManager.getInstance().flush()
     }
 
-    private companion object {
-        val GLOBAL_SESSION = Mutex()
-        val CLEANUP_SCOPE = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
-        const val MAX_SNAPSHOT_BYTES = 2 * 1024 * 1024
+    companion object {
+        private val GLOBAL_SESSION = Mutex()
+        private val CLEANUP_SCOPE = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
+        internal const val MAX_SNAPSHOT_BYTES = 2 * 1024 * 1024
+
+        internal suspend fun <T> withIdleBrowser(block: suspend () -> T): T? {
+            if (!GLOBAL_SESSION.tryLock(VerifiedBrowserGetTransport::class.java)) return null
+            try {
+                return block()
+            } finally {
+                GLOBAL_SESSION.unlock(VerifiedBrowserGetTransport::class.java)
+            }
+        }
     }
 }

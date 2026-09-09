@@ -66,6 +66,7 @@ sealed interface LibraryDragPayload {
 sealed interface LibraryDropDestination {
     data class Root(val index: Int) : LibraryDropDestination
     data class Collection(val id: String) : LibraryDropDestination
+    data object CreateCollection : LibraryDropDestination
     data class Book(
         val identity: BookIdentity,
         val shortcutId: String? = null,
@@ -85,6 +86,7 @@ internal enum class LibraryShortcutDropKind {
     ITEM,
     COLLECTION,
     BOOK,
+    CREATE_COLLECTION,
     REMOTE_MIRROR,
     REMOTE_FOLDER,
     LOCAL_COPY,
@@ -338,6 +340,14 @@ internal class LibraryDragCoordinator {
                 rootInsertionIndex = -1
                 return
             }
+            if (hit?.value?.kind == LibraryShortcutDropKind.CREATE_COLLECTION) {
+                externalDestination = LibraryDropDestination.CreateCollection
+                collectionTargetId = null
+                bookTargetIdentity = null
+                bookTargetShortcutId = null
+                rootInsertionIndex = -1
+                return
+            }
             val mirror = hit?.value?.mirror
             if (mirror != null) {
                 externalDestination = if (
@@ -388,6 +398,22 @@ internal class LibraryDragCoordinator {
         }
 
         isOverShelf = false
+        val visibleMirror = pointer?.let { point ->
+            val targets = if (dragShortcutBounds.isNotEmpty()) dragShortcutBounds else shortcutBounds
+            targets.values.firstOrNull { it.mirror != null && it.bounds.contains(point) }?.mirror
+        }
+        if (visibleMirror != null && activeBookIds.size == 1 && activeBookIds.single().sourceId == visibleMirror.sourceId) {
+            externalDestination = LibraryDropDestination.RemoteMirror(
+                visibleMirror.sourceId,
+                visibleMirror.targetId,
+                visibleMirror.label,
+            )
+            collectionTargetId = null
+            bookTargetIdentity = null
+            bookTargetShortcutId = null
+            libraryInsertionIndex = -1
+            return
+        }
         rootInsertionIndex = -1
         val collection = pointer?.let { point ->
             dragCollectionBounds.values.firstOrNull { it.bounds.collectionDropBounds().contains(point) }
@@ -416,23 +442,37 @@ internal class LibraryDragCoordinator {
         bookTargetShortcutId = null
 
         val overLibrary = pointer != null && activeLibraryReorderSource && libraryReorderEnabled &&
-            libraryBounds?.contains(pointer) == true && activeBookIds.isNotEmpty()
+            libraryBounds?.contains(pointer) == true &&
+            (activeBookIds.isNotEmpty() || activePayload is LibraryDragPayload.Shortcut)
         if (!overLibrary) {
             libraryInsertionIndex = -1
             return
         }
-        val target = targets.firstOrNull { it.bounds.contains(requireNotNull(pointer)) }
-            ?: targets.minByOrNull { candidate ->
-                val delta = candidate.bounds.center - requireNotNull(pointer)
+        val reorderTargets = buildList {
+            targets.forEach { add(it.index to it.bounds) }
+            val activeRootId = (activePayload as? LibraryDragPayload.Shortcut)?.id
+            if (activeRootId != null) {
+                val structural = if (dragShortcutBounds.isNotEmpty()) dragShortcutBounds.values else shortcutBounds.values
+                structural.filter { target ->
+                    target.id != activeRootId && target.kind in setOf(
+                        LibraryShortcutDropKind.COLLECTION,
+                        LibraryShortcutDropKind.REMOTE_MIRROR,
+                    )
+                }.forEach { add(it.index to it.bounds) }
+            }
+        }
+        val target = reorderTargets.firstOrNull { (_, bounds) -> bounds.contains(requireNotNull(pointer)) }
+            ?: reorderTargets.minByOrNull { (_, bounds) ->
+                val delta = bounds.center - requireNotNull(pointer)
                 delta.x * delta.x + delta.y * delta.y
             }
-        libraryInsertionIndex = target?.let {
-            val before = if (it.bounds.width > it.bounds.height * 1.5f) {
-                requireNotNull(pointer).y < it.bounds.center.y
+        libraryInsertionIndex = target?.let { (index, bounds) ->
+            val before = if (bounds.width > bounds.height * 1.5f) {
+                requireNotNull(pointer).y < bounds.center.y
             } else {
-                requireNotNull(pointer).x < it.bounds.center.x
+                requireNotNull(pointer).x < bounds.center.x
             }
-            if (before) it.index else it.index + 1
+            if (before) index else index + 1
         } ?: 0
     }
 
@@ -456,6 +496,7 @@ internal fun Modifier.libraryBookGestures(
     selectionActive: Boolean,
     selectedBookIds: Set<BookIdentity>,
     dragEnabled: Boolean,
+    longPressEnabled: Boolean,
     canRemove: Boolean,
     reorderSource: Boolean,
     scrollOrientation: Orientation,
@@ -472,9 +513,11 @@ internal fun Modifier.libraryBookGestures(
             onTap()
             true
         }
-        onLongClick(label = "选择此书") {
-            onLongPress()
-            true
+        if (longPressEnabled) {
+            onLongClick(label = "选择此书") {
+                onLongPress()
+                true
+            }
         }
     }
         .graphicsLayer {
@@ -484,6 +527,7 @@ internal fun Modifier.libraryBookGestures(
             subjectKey = subjectKey,
             coordinator = coordinator,
             dragEnabled = dragEnabled,
+            longPressEnabled = longPressEnabled,
             canRemove = canRemove,
             reorderSource = reorderSource,
             startDragOnLongPress = { false },
@@ -507,6 +551,7 @@ internal fun Modifier.libraryShortcutGestures(
     selectionActive: Boolean,
     dragEnabled: Boolean,
     canRemove: Boolean,
+    reorderSource: Boolean = false,
     scrollOrientation: Orientation,
     onTap: () -> Unit,
     onLongPress: () -> Unit,
@@ -517,8 +562,9 @@ internal fun Modifier.libraryShortcutGestures(
         subjectKey = subjectKey,
         coordinator = coordinator,
         dragEnabled = dragEnabled,
+        longPressEnabled = true,
         canRemove = canRemove,
-        reorderSource = false,
+        reorderSource = reorderSource,
         startDragOnLongPress = { false },
         payload = payload,
         scrollOrientation = scrollOrientation,
@@ -532,6 +578,7 @@ private fun Modifier.libraryPointerDragGestures(
     subjectKey: String,
     coordinator: LibraryDragCoordinator,
     dragEnabled: Boolean,
+    longPressEnabled: Boolean,
     canRemove: Boolean,
     reorderSource: Boolean,
     startDragOnLongPress: () -> Boolean,
@@ -548,10 +595,10 @@ private fun Modifier.libraryPointerDragGestures(
     val currentStartDragOnLongPress by rememberUpdatedState(startDragOnLongPress)
     val currentPayload by rememberUpdatedState(payload)
     return onGloballyPositioned { coordinator.registerSource(subjectKey, it.boundsInWindow()) }
-        .pointerInput(subjectKey, coordinator, dragEnabled, interactionSource, scrollOrientation) {
+        .pointerInput(subjectKey, coordinator, dragEnabled, longPressEnabled, interactionSource, scrollOrientation) {
             coroutineScope {
                 awaitEachGesture {
-                    val down = awaitFirstDown(requireUnconsumed = false)
+                    val down = awaitFirstDown(requireUnconsumed = true)
                     val press = PressInteraction.Press(down.position)
                     interactionSource.tryEmit(press)
                     var current = down
@@ -576,6 +623,7 @@ private fun Modifier.libraryPointerDragGestures(
                     }
 
                     val longPressJob = launch {
+                        if (!longPressEnabled) return@launch
                         delay(viewConfiguration.longPressTimeoutMillis)
                         if (scrollGestureWon) return@launch
                         longPressActivated = true

@@ -19,13 +19,17 @@ import org.tsuyomi.feature.library.LibraryDropDestination
 import androidx.compose.ui.platform.LocalContext
 import androidx.navigation.NavBackStackEntry
 import androidx.navigation.NavHostController
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.launch
 import org.tsuyomi.core.database.LibraryEntry
+import org.tsuyomi.core.database.RoomLibraryRepository
 import org.tsuyomi.core.webview.CapturedVerifiedPage
 import org.tsuyomi.source.extensionmanager.RemoteOperation
 import org.tsuyomi.shared.sourcecontract.SourceDiagnostic
 import org.tsuyomi.shared.sourcecontract.SourceBookSummary
 import org.tsuyomi.shared.model.BookIdentity
+import org.tsuyomi.feature.book.SourceBookState
+import org.tsuyomi.shared.sourcecontract.SourceChapter
 
 
 internal const val VerifiedSearchResultSequenceKey = "source.search.verified-page-sequence"
@@ -35,6 +39,7 @@ internal const val VerifiedChapterResultSequenceKey = "source.chapter.verified-p
 internal const val ResumeSourceIdKey = "source.resume.source-id"
 internal const val ResumeRemoteBookIdKey = "source.resume.remote-book-id"
 internal const val RemoteBookMembershipKey = "source.detail.remote-book-membership"
+internal const val UpdateFocusChapterIdKey = "updates.detail.focus-chapter-id"
 
 
 
@@ -49,6 +54,7 @@ internal class SourceRouteOwner(
     val flow: SourceFlowController,
     private val navController: NavHostController,
     private val requestImportAction: () -> Unit,
+    private val library: RoomLibraryRepository,
     private val onLibraryChanged: suspend () -> Unit,
 ) {
     val remoteLibraryAvailable: Boolean
@@ -112,6 +118,70 @@ internal class SourceRouteOwner(
         }
         navController.navigate(Routes.Detail)
         return true
+    }
+
+    suspend fun openUpdateDetail(identity: BookIdentity, focusChapterId: String?): Boolean {
+        return try {
+            val book = resolveUpdateBook(identity) ?: return false
+            val chapters = prepareUpdateDirectory(book, focusChapterId) ?: return false
+            if (focusChapterId != null && chapters.none { it.chapterId == focusChapterId }) return false
+            navController.navigate(Routes.Detail)
+            focusChapterId?.let { chapterId ->
+                navController.currentBackStackEntry?.savedStateHandle?.set(UpdateFocusChapterIdKey, chapterId)
+            }
+            true
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (_: Exception) {
+            false
+        }
+    }
+
+    suspend fun openUpdateChapter(identity: BookIdentity, newChapterIds: List<String>): Boolean {
+        return try {
+            val book = resolveUpdateBook(identity) ?: return false
+            val completed = library.completedChapterIds(identity)
+            val targetChapterId = newChapterIds.firstOrNull { it !in completed } ?: return false
+            val chapters = prepareUpdateDirectory(book, targetChapterId) ?: return false
+            val target = chapters.firstOrNull { it.chapterId == targetChapterId } ?: return false
+            flow.prepareChapter(target)
+            navController.navigate(Routes.Reader)
+            true
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (_: Exception) {
+            false
+        }
+    }
+
+    private suspend fun resolveUpdateBook(identity: BookIdentity): SourceBookSummary? {
+        val book = library.book(identity)
+            ?: library.remoteMirrorSnapshot(identity.sourceId)
+                ?.books
+                ?.firstOrNull { it.book.identity == identity }
+                ?.book
+            ?: return null
+        val canonicalUrl = book.canonicalUrl?.takeIf(String::isNotBlank) ?: return null
+        return SourceBookSummary(
+            identity = identity,
+            title = book.title,
+            author = book.author,
+            coverUrl = book.coverUrl,
+            canonicalUrl = canonicalUrl,
+        )
+    }
+
+    private suspend fun prepareUpdateDirectory(book: SourceBookSummary, exactChapterId: String?): List<SourceChapter>? {
+        val packageInfo = installer.activateInstalledSource(book.identity.sourceId) ?: return null
+        flow.open(packageInfo)
+        val cacheReady = flow.prepareDetail(book.identity)
+        val cachedChapters = (flow.directoryState as? SourceBookState.Content)?.value?.chapters.orEmpty()
+        if (cacheReady && (exactChapterId == null || cachedChapters.any { it.chapterId == exactChapterId })) {
+            return cachedChapters
+        }
+        flow.prepareLocalDetail(book)
+        val refreshed = flow.requestDirectory()
+        return (refreshed as? SourceBookState.Content)?.value?.chapters
     }
 
     suspend fun resumeReading(entry: LibraryEntry): Boolean {
@@ -336,6 +406,7 @@ internal fun rememberSourceRouteOwner(
             flow = flow,
             navController = navController,
             requestImportAction = { extensionPicker.launch(arrayOf("application/zip", "application/octet-stream")) },
+            library = application.libraryRepository,
             onLibraryChanged = { currentOnLibraryChanged() },
         )
     }

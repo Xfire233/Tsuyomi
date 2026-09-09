@@ -1,0 +1,11 @@
+{
+  "sourceId": "org.tsuyomi.wenku8",
+  "remoteBookId": "1234",
+  "complete": true,
+  "order": "source",
+  "chapters": [
+    { "chapterId": "10001", "title": "第一章 雾中的灯塔" },
+    { "chapterId": "10001", "title": "重复章节标识" }
+  ],
+  "lastUpdatedDate": "2026-02-30"
+}

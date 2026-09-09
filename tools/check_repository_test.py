@@ -152,11 +152,12 @@ class ToolingGovernanceTest(unittest.TestCase):
                 (
                     sections[0], markers[0], markers[1], markers[2],
                     sections[1],
-                    sections[2], markers[3], *scope_rows,
-                    sections[3], markers[4], *native_rows,
-                    sections[4], markers[5], *skill_rows,
-                    sections[5], markers[6], *mcp_rows,
-                    sections[6], sections[7],
+                    sections[2],
+                    sections[3], markers[3], *scope_rows,
+                    sections[4], markers[4], *native_rows,
+                    sections[5], markers[5], *skill_rows,
+                    sections[6], markers[6], *mcp_rows,
+                    sections[7], sections[8],
                     ".agents/skills/example",
                 )
             ),
@@ -192,6 +193,10 @@ class ToolingGovernanceTest(unittest.TestCase):
             ),
             encoding="utf-8",
         )
+        for relative_runner_path, required_markers in check_repository.GRADLE_RESOURCE_RUNNERS:
+            resource_runner = root / relative_runner_path
+            resource_runner.parent.mkdir(parents=True, exist_ok=True)
+            resource_runner.write_text("\n".join(required_markers), encoding="utf-8")
         return skill
 
     def test_valid_project_skill_registry_passes(self) -> None:
@@ -199,6 +204,19 @@ class ToolingGovernanceTest(unittest.TestCase):
             root = Path(directory)
             self.create_valid_registry(root)
             self.assertEqual([], check_repository.tooling_governance_violations(root))
+
+    def test_gradle_resource_runner_requires_both_modes(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            self.create_valid_registry(root)
+            high_runner_path, _ = check_repository.GRADLE_RESOURCE_RUNNERS[1]
+            runner = root / high_runner_path
+            runner.write_text(
+                runner.read_text(encoding="utf-8").replace("--parallel", ""),
+                encoding="utf-8",
+            )
+            violations = check_repository.tooling_governance_violations(root)
+            self.assertTrue(any("missing required resource mode marker" in violation for violation in violations))
 
     def test_every_tool_requires_scope_and_completion(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

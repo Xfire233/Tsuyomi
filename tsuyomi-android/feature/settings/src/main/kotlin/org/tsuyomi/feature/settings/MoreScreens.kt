@@ -42,7 +42,6 @@ fun MoreScreen(
     modifier: Modifier = Modifier,
 ) {
     CenteredSettingsColumn(modifier) {
-        SettingsSectionHeader(stringResource(R.string.settings_more_section_settings))
         SettingsGroup {
             SettingsActionRow(
                 title = stringResource(R.string.settings_more_display_title),
@@ -55,17 +54,13 @@ fun MoreScreen(
                 summary = stringResource(R.string.settings_more_reader_summary),
                 onClick = onOpenReaderSettings,
             )
-        }
-        SettingsSectionHeader(stringResource(R.string.settings_more_section_data))
-        SettingsGroup {
+            HorizontalDivider()
             SettingsActionRow(
                 title = stringResource(R.string.settings_more_transfer_title),
                 summary = stringResource(R.string.settings_more_transfer_summary),
                 onClick = onOpenDataTransfer,
             )
-        }
-        SettingsSectionHeader(stringResource(R.string.settings_more_section_support))
-        SettingsGroup {
+            HorizontalDivider()
             SettingsActionRow(
                 title = stringResource(R.string.settings_more_help_title),
                 summary = stringResource(R.string.settings_more_help_summary),

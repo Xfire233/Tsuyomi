@@ -25,6 +25,8 @@ import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.material3.Icon
+import androidx.compose.material3.ListItem
+import androidx.compose.material3.ListItemDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -55,7 +57,6 @@ import org.tsuyomi.core.ui.theme.instantMotion
 internal fun LibraryDragVisualOverlay(
     coordinator: LibraryDragCoordinator,
     entries: List<LibraryEntry>,
-    shortcuts: List<ProductionShortcut>,
     layout: LibraryLayout,
     coverState: @Composable (LibraryEntry) -> CoverUiState,
     modifier: Modifier = Modifier,
@@ -89,20 +90,12 @@ internal fun LibraryDragVisualOverlay(
                     when (active) {
                         is LibraryDragPayload.Books -> {
                             val activeEntries = entries.filter { it.book.identity in active.identities }
-                            if (active.fromShortcut && activeEntries.size == 1) {
-                                ShortcutBookDragPreview(activeEntries.first(), coverState)
-                            } else {
-                                LibraryBookDragPreview(activeEntries, layout, coverState)
-                            }
+                            LibraryBookDragPreview(activeEntries, layout, coverState)
                         }
-                        is LibraryDragPayload.Shortcut -> {
-                            shortcuts.firstOrNull { it.id == active.id }?.let {
-                                ShortcutDragPreview(it, coverState)
-                            }
-                        }
+                        is LibraryDragPayload.Shortcut -> RootNodeDragPreview(active.id)
                     }
                 }
-                if (showRemoveTarget) {
+                if (showRemoveTarget && active is LibraryDragPayload.Books) {
                     Surface(
                         modifier = Modifier.align(Alignment.BottomCenter)
                             .padding(bottom = 16.dp)
@@ -126,16 +119,7 @@ internal fun LibraryDragVisualOverlay(
                             verticalAlignment = Alignment.CenterVertically,
                         ) {
                             Icon(TsuyomiIcons.Delete, contentDescription = null)
-                            val shortcutRemoval = active is LibraryDragPayload.Shortcut ||
-                                (active is LibraryDragPayload.Books && active.fromShortcut)
-                            Text(
-                                when {
-                                    coordinator.isOverDelete && shortcutRemoval -> "松开以移出快捷书架"
-                                    coordinator.isOverDelete -> "松开以移出书架"
-                                    shortcutRemoval -> "拖到这里移出快捷书架"
-                                    else -> "拖到这里移出书架"
-                                },
-                            )
+                            Text(if (coordinator.isOverDelete) "松开以移出书架" else "拖到这里移出书架")
                         }
                     }
                 }
@@ -146,12 +130,10 @@ internal fun LibraryDragVisualOverlay(
 
 internal fun dragPreviewSize(payload: LibraryDragPayload, layout: LibraryLayout): DpSize = when (payload) {
     is LibraryDragPayload.Shortcut -> DpSize(216.dp, 64.dp)
-    is LibraryDragPayload.Books -> if (payload.fromShortcut) {
-        DpSize(216.dp, 64.dp)
-    } else when (layout) {
-        LibraryLayout.GRID -> DpSize(132.dp, 180.dp)
-        LibraryLayout.LIST -> DpSize(292.dp, 104.dp)
-        LibraryLayout.COMPACT -> DpSize(272.dp, 64.dp)
+    is LibraryDragPayload.Books -> when (layout) {
+        LibraryLayout.GRID -> DpSize(132.dp, 176.dp)
+        LibraryLayout.LIST -> DpSize(328.dp, 144.dp)
+        LibraryLayout.COMPACT -> DpSize(320.dp, 64.dp)
     }
 }
 
@@ -164,7 +146,7 @@ internal fun LibraryBookDragPreview(
     val lead = entries.firstOrNull() ?: return
     when (layout) {
         LibraryLayout.GRID -> Surface(
-            modifier = Modifier.size(width = 132.dp, height = 180.dp),
+            modifier = Modifier.size(width = 132.dp, height = 176.dp).testTag("library-drag-preview-grid-content"),
             shape = MaterialTheme.shapes.medium,
             color = MaterialTheme.colorScheme.surfaceContainerHigh,
             tonalElevation = 8.dp,
@@ -175,40 +157,74 @@ internal fun LibraryBookDragPreview(
                 Column(
                     Modifier.align(Alignment.BottomCenter).fillMaxWidth()
                         .background(Brush.verticalGradient(listOf(Color.Transparent, Color.Black.copy(alpha = 0.86f))))
-                        .padding(start = 8.dp, top = 30.dp, end = 8.dp, bottom = 8.dp),
+                        .padding(start = 8.dp, top = 28.dp, end = 8.dp, bottom = 6.dp),
                 ) {
-                    Text(lead.book.title, maxLines = 2, overflow = TextOverflow.Ellipsis, color = Color.White)
+                    Text(
+                        lead.book.title,
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis,
+                        style = MaterialTheme.typography.titleSmall,
+                        color = Color.White,
+                    )
+                    Text(
+                        dragPreviewStatus(lead),
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        style = MaterialTheme.typography.labelMedium,
+                        color = Color.White.copy(alpha = 0.9f),
+                    )
                 }
                 DragBatchBadge(entries.size, Modifier.align(Alignment.TopEnd).padding(6.dp))
             }
         }
         LibraryLayout.LIST -> Surface(
-            modifier = Modifier.size(width = 292.dp, height = 104.dp),
+            modifier = Modifier.size(width = 328.dp, height = 144.dp).testTag("library-drag-preview-list-content"),
             shape = MaterialTheme.shapes.medium,
-            color = MaterialTheme.colorScheme.surfaceContainerHigh,
+            color = MaterialTheme.colorScheme.surface,
             tonalElevation = 8.dp,
             shadowElevation = 10.dp,
         ) {
-            Row(Modifier.padding(6.dp), verticalAlignment = Alignment.CenterVertically) {
-                CoverImage(coverState(lead), modifier = Modifier.size(width = 68.dp, height = 92.dp))
-                Column(Modifier.weight(1f).padding(horizontal = 10.dp)) {
-                    Text(lead.book.title, maxLines = 2, overflow = TextOverflow.Ellipsis)
-                    Text(lead.book.authors.joinToString("、"), maxLines = 1, overflow = TextOverflow.Ellipsis)
-                }
-                DragBatchBadge(entries.size, Modifier.padding(end = 6.dp))
-            }
+            ListItem(
+                headlineContent = { Text(lead.book.title, maxLines = 2, overflow = TextOverflow.Ellipsis) },
+                overlineContent = lead.book.authors.joinToString("、").takeIf(String::isNotBlank)?.let { authors ->
+                    { Text(authors, maxLines = 1, overflow = TextOverflow.Ellipsis) }
+                },
+                supportingContent = { Text(dragPreviewStatus(lead), maxLines = 1, overflow = TextOverflow.Ellipsis) },
+                leadingContent = {
+                    CoverImage(
+                        coverState(lead),
+                        modifier = Modifier.size(width = 84.dp, height = 112.dp)
+                            .testTag("library-drag-preview-list-cover"),
+                    )
+                },
+                trailingContent = if (entries.size > 1) {
+                    { DragBatchBadge(entries.size) }
+                } else null,
+                modifier = Modifier.fillMaxSize(),
+                colors = ListItemDefaults.colors(containerColor = Color.Transparent),
+            )
         }
         LibraryLayout.COMPACT -> Surface(
-            modifier = Modifier.size(width = 272.dp, height = 64.dp),
+            modifier = Modifier.size(width = 320.dp, height = 64.dp).testTag("library-drag-preview-compact-content"),
             shape = MaterialTheme.shapes.medium,
-            color = MaterialTheme.colorScheme.surfaceContainerHigh,
+            color = MaterialTheme.colorScheme.surface,
             tonalElevation = 8.dp,
             shadowElevation = 10.dp,
         ) {
-            Row(Modifier.padding(horizontal = 12.dp), verticalAlignment = Alignment.CenterVertically) {
-                Text(lead.book.title, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
-                DragBatchBadge(entries.size)
-            }
+            ListItem(
+                headlineContent = { Text(lead.book.title, maxLines = 1, overflow = TextOverflow.Ellipsis) },
+                supportingContent = {
+                    val supporting = compactDragPreviewSupporting(lead)
+                    if (supporting.isNotBlank()) Text(supporting, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                },
+                trailingContent = when {
+                    entries.size > 1 -> ({ DragBatchBadge(entries.size) })
+                    lead.rating != null -> ({ Text("★ ${lead.rating}") })
+                    else -> null
+                },
+                modifier = Modifier.fillMaxSize(),
+                colors = ListItemDefaults.colors(containerColor = Color.Transparent),
+            )
         }
     }
 }
@@ -219,30 +235,35 @@ internal fun ShortcutBookDragPreview(
     coverState: @Composable (LibraryEntry) -> CoverUiState,
 ) {
     Surface(
-        modifier = Modifier.size(width = 216.dp, height = 64.dp),
+        modifier = Modifier.size(width = 96.dp, height = 128.dp)
+            .testTag("library-shortcut-book-drag-preview-content"),
         shape = MaterialTheme.shapes.medium,
         color = MaterialTheme.colorScheme.surfaceContainerHigh,
         tonalElevation = 8.dp,
         shadowElevation = 10.dp,
     ) {
-        Row(Modifier.padding(6.dp), verticalAlignment = Alignment.CenterVertically) {
-            CoverImage(coverState(entry), modifier = Modifier.size(width = 39.dp, height = 52.dp))
-            Text(
-                entry.book.title,
-                modifier = Modifier.padding(horizontal = 10.dp),
-                maxLines = 2,
-                overflow = TextOverflow.Ellipsis,
-                style = MaterialTheme.typography.labelLarge,
-            )
+        Box {
+            CoverImage(coverState(entry), modifier = Modifier.fillMaxSize())
+            Column(
+                modifier = Modifier.align(Alignment.BottomCenter).fillMaxWidth()
+                    .background(Brush.verticalGradient(listOf(Color.Transparent, Color.Black.copy(alpha = 0.86f))))
+                    .padding(start = 7.dp, top = 24.dp, end = 7.dp, bottom = 6.dp),
+            ) {
+                Text(
+                    entry.book.title,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                    style = MaterialTheme.typography.titleSmall,
+                    color = Color.White,
+                )
+            }
         }
     }
 }
 
 @Composable
-internal fun ShortcutDragPreview(
-    shortcut: ProductionShortcut,
-    coverState: @Composable (LibraryEntry) -> CoverUiState,
-) {
+internal fun RootNodeDragPreview(id: String) {
+    val collection = id.startsWith("collection:")
     Surface(
         modifier = Modifier.size(width = 216.dp, height = 64.dp),
         shape = MaterialTheme.shapes.medium,
@@ -252,23 +273,38 @@ internal fun ShortcutDragPreview(
     ) {
         Row(Modifier.padding(6.dp), verticalAlignment = Alignment.CenterVertically) {
             Box(
-                Modifier.size(width = 39.dp, height = 52.dp)
+                Modifier.size(width = 52.dp, height = 52.dp)
                     .background(MaterialTheme.colorScheme.surfaceContainerHighest),
                 contentAlignment = Alignment.Center,
             ) {
-                shortcut.entry?.let { CoverImage(coverState(it), modifier = Modifier.fillMaxSize()) }
-                    ?: Icon(shortcut.icon, contentDescription = null, modifier = Modifier.size(24.dp))
+                Icon(
+                    if (collection) TsuyomiIcons.Folder else TsuyomiIcons.Mirror,
+                    contentDescription = null,
+                    modifier = Modifier.size(24.dp),
+                )
             }
             Text(
-                shortcut.label,
+                if (collection) "收藏夹" else "网站收藏",
                 modifier = Modifier.padding(horizontal = 10.dp),
-                maxLines = 2,
+                maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
                 style = MaterialTheme.typography.labelLarge,
             )
         }
     }
 }
+
+private fun dragPreviewStatus(entry: LibraryEntry): String =
+    entry.progress?.locator?.bookProgress?.let { "读至 ${(it * 100).toInt()}%" }
+        ?: when {
+            entry.readLater -> "稍后再读"
+            !entry.sourceAvailable -> "来源未安装"
+            else -> "未开始"
+        }
+
+private fun compactDragPreviewSupporting(entry: LibraryEntry): String =
+    entry.progress?.locator?.bookProgress?.let { "读至 ${(it * 100).toInt()}%" }
+        ?: entry.book.authors.joinToString("、")
 
 @Composable
 internal fun DragBatchBadge(count: Int, modifier: Modifier = Modifier) {

@@ -42,8 +42,7 @@ enum class SmartField {
     LAST_READ_WITHIN_DAYS,
     METADATA_UPDATED_WITHIN_DAYS,
     PROGRESS,
-    UNREAD_UPDATE,
-    SOURCE_UPDATE,
+    UNRESOLVED_UPDATE,
     DORMANT_SOURCE,
 }
 
@@ -220,13 +219,12 @@ private fun SmartField.localizedName(): String = stringResource(
         SmartField.LAST_READ_WITHIN_DAYS -> R.string.smart_field_last_read
         SmartField.METADATA_UPDATED_WITHIN_DAYS -> R.string.smart_field_metadata
         SmartField.PROGRESS -> R.string.smart_field_progress
-        SmartField.UNREAD_UPDATE -> R.string.smart_field_unread
-        SmartField.SOURCE_UPDATE -> R.string.smart_field_source_update
+        SmartField.UNRESOLVED_UPDATE -> R.string.smart_field_unresolved_update
         SmartField.DORMANT_SOURCE -> R.string.smart_field_dormant
     },
 )
 
-private fun SmartField.requiresValue(): Boolean = this !in setOf(SmartField.UNREAD_UPDATE, SmartField.SOURCE_UPDATE, SmartField.DORMANT_SOURCE)
+private fun SmartField.requiresValue(): Boolean = this !in setOf(SmartField.UNRESOLVED_UPDATE, SmartField.DORMANT_SOURCE)
 private fun SmartField.hintResource(): Int = when (this) {
     SmartField.RATING -> R.string.smart_hint_rating
     SmartField.ADDED_WITHIN_DAYS, SmartField.LAST_READ_WITHIN_DAYS, SmartField.METADATA_UPDATED_WITHIN_DAYS -> R.string.smart_hint_days

@@ -67,7 +67,7 @@ Status: **HISTORY / PROVENANCE ONLY.** Current product behavior lives in `UI_CON
 | A Library | 常规手机 Standard/E-ink 固定三列；宽屏按 150dp 最小可读卡宽自适应且不设任意列数上限；系统节点可隐藏/重建但规则不变；Standard 快捷书架横滑/拖放并露出下一项提示，E-ink 用按钮分页/移动；仅 AppBar `+` 进入创建流；手动排列与确认后两书入新收藏夹；所有快捷项/卡片严格等高 | 宽屏仍固定三列；来源 hint 改布局；出现第二创建入口；系统 membership 可任意手改；无横向可发现性；同排卡片高度不同；拖放未确认或只移动一本书 |
 | B Detail | 不重复来源名；封面右侧阅读进度下固定显示五颗可点星；标签区域始终占满可用宽度。左侧 FlowRow 占 `稍后再读` 之前全部剩余空间且至多两行；内容宽度的 `稍后再读` 固定贴 trailing edge。单个 tag、完整 tonal `添加标签` 与 `稍后再读` 必须共用一套组内几何：`labelLarge`、40dp 可见高度、8dp horizontal inset、相同 48dp layout/touch slot 和 `shapes.small`；边框 top/bottom 与圆角必须精确一致。可点击控件保留 48dp minimum target。不得用 `+n` 折叠可显示标签；整条区域 external vertical inset 为 4dp。缓存顶栏一级动作；章节工具左对齐 | read-later 未贴 trailing edge；固定宽度控件；同组字体、inner inset、高度、slot 或圆角不一致；可点击目标小于 48dp；超过两行；`+n` 隐藏可显示标签；添加标签被裁切；外层区域按内容收紧；评分离开 header |
 | C Reader | semantic locator、点按跳转和单次提交仍为架构要求；seek-preview 的具体 Standard/E-ink 呈现不在当前 fixture 中审批，等待实体设备 Reader 测试 | 将 emulator still 或未审阅的 WYSIWYG/E-ink preview 当作已批准视觉合同 |
-| D Search | draft inert；输入框只有右侧 Search icon 可操作；一次提交启动本地与全部 active sources（source-addressed route 可隐式限定）；一个总进度和结果流；exact identity 合并；高级筛选/D33 不出现 | leading Search；source-selector button；输入即刷新；两次提交；常驻来源 lane/status/教学；同名猜测合并 |
+| D Search | **[SUPERSEDED 2026-09-06 BY UI_CONSTITUTION G-27]** Historical review expected one mixed local/source submission. Active behavior now separates local Library Search from Browse-owned aggregate/source Search. | Treating this historical mixed-lane description as current authority |
 | E Updates | E-ink 每项完整呈现标题、状态和主动作；Standard working 用短时 M3 indicator，E-ink 用静态 glyph；关键结果保留短文字 | E-ink spinner/动画；只剩小封面/碎片；关键失败只靠图标或颜色 |
 | F Remote | 顶栏明确显示刷新列表与全部复制；E-ink 增加纵向间距；标题按可读下限调整并允许换行 | 标题固定窄宽截断；只显示含混 sync；动作深藏 |
 | G Tags | 本地/来源结构明确；compact chips 不显示书籍数，list rows 显示书籍数；不使用 `·` 串和常驻教学说明 | list 缺少数量；compact chip 塞入数量；页面内教学；点分隔元数据 |
@@ -82,9 +82,9 @@ Status: **HISTORY / PROVENANCE ONLY.** Current product behavior lives in `UI_CON
 
 最终执行决定：
 
-- **Search**：query draft inert；输入框只保留右侧 Search icon；一次显式提交同时启动本地与全部 active sources，source-addressed route 可隐式限定来源；成功结果进入一个增量结果流，只显示一个总进度；仅 exact `BookIdentity(sourceId, remoteBookId)` 合并；不显示 source selector、leading Search 或高级筛选。
+- **Search [SUPERSEDED 2026-09-06]**：本条原本要求一次提交同时启动本地与全部 active sources；当前权威已由 `UI_CONSTITUTION.md:G-27` 改为完全分离的两类任务：Library `书架` 范围使用 120ms 本地即时搜索和空查询本地推荐，未来 `正文` 范围仍显式提交；Browse 聚合来源搜索始终显式提交。
 - **Library 几何与布局**：Standard/E-ink 均默认网格；常规手机固定三列，宽屏按 150dp 最小可读卡宽自适应且不设任意列数上限；只有确实低于可读/可触控下限的 double-compact 窗口才降为两列；忽略来源 layout hint。卡片严格等高，截断标题必须有进入 Detail/无障碍完整名称的完整入口。
-- **Library 桌面模型**：系统节点默认创建但可隐藏，并可在创建页重建；定义和规则不可改写。除 `稍后再读` 可手动拖入/移出外，`继续阅读 / 最近阅读 / 休眠来源 / 追更` membership 始终由规则自动产生。主内容流保留规则排序，并增加独立“手动排列”模式；Standard 可拖放，E-ink 用明确移动按钮实现同结果。
+- **Library 桌面模型**：`继续阅读 / 最近阅读 / 稍后再读 / 休眠来源` 系统节点默认创建但可隐藏，并可在创建页重建；定义和规则不可改写。除 `稍后再读` 可手动拖入/移出外，其余 membership 始终由规则自动产生。更新不创建 `追更` 节点，而作为 Library 根的 `SMART` 排序、`全部 / 有更新` 筛选、`+N` 状态和扫描报告投影。主内容流保留规则排序，并增加独立“手动排列”模式；Standard 可拖放，E-ink 用明确移动按钮实现同结果。
 - **创建与拖放**：创建入口只保留 Library AppBar `+`。Standard 将书拖到另一书上先弹命名/确认，确认后两本书原子加入新普通收藏夹；E-ink 通过按钮/选择流程完成同一任务。快捷书架 Standard 支持拖放，E-ink 使用前移/后移/移除/替换按钮。
 - **层级与镜像**：普通收藏夹最多两级。镜像默认只显示网站结构；只有用户在镜像页显式创建本地整理后才出现 `本地整理` 分区。
 - **Detail**：只使用一个动态多功能 FAB；持续下翻时变为快速到底，持续上翻时变为快速到顶，停止操作一段时间恢复继续阅读。来源动态区只放低风险快捷动作；缓存固定为顶栏一级图标。
@@ -181,7 +181,7 @@ Coverage is stop-ship: adding or discovering a non-empty review entry requires a
 
 - 书籍和收藏夹在书架根内容流中同级；不再要求先进入“收藏夹管理”才能打开收藏夹。
 - 默认使用节点置顶的规则排序；用户可切完全混排或独立“手动排列”模式。手动排列时 Standard 拖放，E-ink 使用上移/下移等按钮。
-- `继续阅读 / 最近阅读 / 稍后再读 / 休眠来源 / 追更` 默认创建为系统虚拟收藏夹项，可隐藏并从创建页重建；规则定义不可编辑。仅 `稍后再读` 接受显式手动 membership，其他节点由规则自动计算。
+- `继续阅读 / 最近阅读 / 稍后再读 / 休眠来源` 默认创建为系统虚拟收藏夹项，可隐藏并从创建页重建；规则定义不可编辑。仅 `稍后再读` 接受显式手动 membership，其他节点由规则自动计算。更新结果只属于 Library 根投影，不创建 `追更` 系统节点。
 - 普通收藏夹最多两级：根收藏夹 → 子收藏夹。再建下级时提示移动到根或现有子级，不形成无限文件树。
 - 网站镜像允许“仅本地可见”的整理子收藏夹，但默认只显示 `网站结构`；用户从镜像页显式创建本地整理后才显示 `本地整理` 分区。本地节点有明确本地图标/说明，永不伪装成远端文件夹，永不触发网站写入。
 
@@ -189,7 +189,7 @@ Coverage is stop-ship: adding or discovering a non-empty review entry requires a
 
 - Compose + Material 3 是唯一组件语言；Standard 委托真实 M3 控件。
 - E-ink 是全局 profile；固定浅色、高对比、显式分页、即时状态替换。
-- Library 不常驻 tag 或来源文字；来源只在混合搜索/浏览确需消歧时紧凑出现。
+- Library 不常驻 tag 或来源文字；来源只在 Browse 聚合/来源搜索等确需消歧的表面紧凑出现。
 - 无账号、云同步、遥测、远程 feature flag 或 Google Play Services 前置。
 - 核心任务不能只靠长按、swipe、overflow 或颜色。
 
@@ -220,8 +220,8 @@ Coverage is stop-ship: adding or discovering a non-empty review entry requires a
 Tsuyomi 采用：
 
 - 详情与目录合一、章节稳定行、正倒序/筛选/跳转固定在章节 header。
-- 更新页以更新条目为主、会话状态为次；图标表达处理中/已确认/失败，文字只作无障碍和异常解释。
-- Library/Updates/Remote Library 共用三布局与选择模型。
+- 更新结果下沉到 Library 根书籍状态槽和单一扫描状态条；不采用 Mihon 的独立更新页或日期时间线。
+- Library 与 Remote Library 复用三布局；更新是 Library 投影状态，不再作为第三个并列页面模型。
 
 不采用：漫画 viewer 模型、漫画专用 unread/download badge 库存、fake pull-refresh 状态、扩展生态视觉密度。
 
@@ -353,7 +353,7 @@ Hikari Flutter 不计入上述 31 个清单项，但作为迁移需求基线单�
 
 - Standard/E-ink 常规手机默认固定三列 grid，宽屏按 150dp 最小卡宽自适应且不设任意列数上限；用户可切 dense-cover list / compact-text list。double-compact 仅在触控与可读下限无法满足时降为两列；来源 layout hint 一律忽略。
 - 内容流元素是 `BookNode | CollectionNode | SystemNode | MirrorNode`。默认 collection/system/mirror 置顶；可切完全混排或独立手动排列。Standard 手动模式支持拖放，E-ink 用移动按钮实现同结果。
-- 系统节点默认创建、可隐藏、可在创建页重建：继续阅读、最近阅读、稍后再读、休眠来源、追更。定义不可编辑；仅稍后再读允许手动 membership，其他节点由规则自动计算。
+- 系统节点默认创建、可隐藏、可在创建页重建：继续阅读、最近阅读、稍后再读、休眠来源。定义不可编辑；仅稍后再读允许手动 membership，其他节点由规则自动计算。更新使用 Library 根的排序、筛选、状态标记和扫描报告，不创建 `追更` 节点。
 - 快捷书架所有 item 使用同一固定外框高度、内容高度、标题基线和 supporting slot。Standard 使用横向滑动和拖放，并通过末端露出下一项或等价位置提示保证可发现；E-ink 不使用横滑，改为明确的上一组/下一组和移动按钮。
 - grid 每格固定：3:4 visual + 固定两行标题 + 固定一行状态；常规手机固定三列。E-ink 同页所有边框等高。
 - compact-text 使用 48–56dp M3-backed outlined/tonal container：标题一至两行、独立进度图标/值、右侧评分槽；行间 0–2dp，不使用 8–16dp 卡片间距。
@@ -367,11 +367,10 @@ Hikari Flutter 不计入上述 31 个清单项，但作为迁移需求基线单�
 - 规则 editor：本地数据库已有集合全部用 picker/dropdown：本地标签、来源标签、作者、来源、阅读状态、评分、收藏夹、存在原因；只有自由文本/数值范围使用 text/range field。
 - 镜像页默认只显示 `网站结构（只读/可远端操作）`；用户显式执行镜像页 `新建本地整理` 后才出现 `本地整理（只影响本机）`。任何操作确认文案明确作用域。
 
-### 5.3 历史与追更
+### 5.3 历史与更新（历史裁决已收口）
 
 - 历史 AppBar 提供清空；最近一周用相对时间，超过 7×24h 显示 `yyyy-MM-dd HH:mm`。
-- 追更借 Mihon 的日期分组、56dp 稳定行和图标状态；保留 Tsuyomi 的会话摘要、exact anchor、失败持久报告。
-- 追更支持三布局；grid/compact 在书多时生效。`确认已看过` 或 check icon 替代“标记已处理”；Standard 处理中使用短时 M3 progress indicator，E-ink 使用静态工作 glyph；关键成功、失败、部分完成保留短文字。
+- **2026-09-07：旧独立追更页、日期时间线、三布局、`未处理 / 全部`、`标记已处理` 和 handled history 已被 Constitution G-15/G-28/G-29 完整取代。** 当前更新入口、`SMART` 排序、`全部 / 有更新`、`+N`、扫描状态/报告、exact completion 与 `忽略当前更新` 全部属于 Library 根；本历史文档不再定义另一套更新呈现。
 
 ### 5.4 详情与目录
 
@@ -394,7 +393,7 @@ Hikari Flutter 不计入上述 31 个清单项，但作为迁移需求基线单�
 
 ### 5.6 搜索与规则筛选
 
-- 搜索采用单一显式提交模型：输入只更新 query draft，不刷新结果、不访问本地仓库或网络；按搜索键后，同一 session 同时启动本地搜索与所选在线来源搜索。不得要求用户先搜本地再第二次确认在线。
+- **[SUPERSEDED 2026-09-06 BY UI_CONSTITUTION G-27]** 本条记录旧的一次 mixed local/source 提交模型，仅保留历史来源；不得再产生实现或测试依赖。
 - 常态页面可见元素限于搜索 field/按钮、来源选择、布局动作、一个总进度指示和统一结果流。不得常驻显示操作教程、local-first 解释、exact identity 解释、来源调度说明或逐来源正常状态文字；这些内容只进入帮助页或无障碍描述。
 - 同一 exact `BookIdentity` 在内部合并；不同 identity 即使同名仍分开。单来源失败不得删除已返回项；失败以紧凑图标或按需详情呈现，不展开正常来源状态流水账。
 - 高级公共/本地/来源专属筛选以及 D33 descriptor UI 在 Atlas 与 Phase 4A 均暂缓；当前搜索结果仍支持三布局，选中摘要使用独立 label/value，不用 `·` 串。
@@ -414,7 +413,7 @@ RC2.1-3 的 17 张图与绑定审阅保留为 rejected evidence，不在其文�
 1. Library 常规手机固定三列、宽屏 150dp 最小卡宽自适应、快捷书架横向可发现性、E-ink 按钮分页、AppBar-only 创建/手动排列与严格等高。
 2. Detail 元素白名单、五星评分、tag/split 动态容器、缓存一级动作、标准筛选/排序图标和方向驱动动态 FAB。
 3. Reader 本轮仅证明 route/chrome/settings；seek-preview visual approval 不使用 emulator still，等待实体设备。
-4. Search 单次提交并发本地/在线、单一进度、exact identity 去重、零常驻教学说明和零高级筛选 UI。
+4. Search 的历史 mixed local/source 验收已由 `UI_CONSTITUTION.md:G-27` 废止；当前分别证明 Library 本地书籍/文件夹搜索零来源请求，以及 Browse 聚合来源搜索零本地 lane。
 5. Updates 的 profile-specific 处理中状态与 E-ink 内容可读下限；Remote 的间距/完整标题/刷新与全部复制；Tags 的零计数、零教学说明和零 `·` 串。
 6. Reader settings 初始部分 sheet 完整显示字号、行距、边距、段距；证明部分/全高状态机、无重复标题/关闭按钮和同行紧凑 controls。
 7. E-ink 整张 PNG（含真实系统栏）通过灰阶像素检查。

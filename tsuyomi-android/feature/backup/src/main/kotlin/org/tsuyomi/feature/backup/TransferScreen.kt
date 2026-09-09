@@ -11,12 +11,20 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
+import org.tsuyomi.core.ui.components.SettingsActionRow
+import org.tsuyomi.core.ui.components.SettingsGroup
 import org.tsuyomi.core.ui.components.StateView
 import org.tsuyomi.core.ui.components.TsuyomiButton
 import org.tsuyomi.core.ui.components.TsuyomiButtonStyle
@@ -63,8 +71,10 @@ fun TransferScreen(
     onDismissResult: () -> Unit,
     onRetryRecovery: () -> Unit,
     onAbortRecovery: () -> Unit,
+    onResetInterfacePreferences: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
+    var resetVisible by rememberSaveable { mutableStateOf(false) }
     when (state) {
         is TransferUiState.Working -> StateView(
             kind = TsuyomiStateKind.LOADING,
@@ -97,6 +107,14 @@ fun TransferScreen(
                         modifier = Modifier.fillMaxWidth(),
                         style = TsuyomiButtonStyle.SECONDARY,
                     )
+                    HorizontalDivider(Modifier.padding(vertical = 4.dp))
+                    SettingsGroup {
+                        SettingsActionRow(
+                            title = stringResource(R.string.transfer_reset_preferences_title),
+                            summary = stringResource(R.string.transfer_reset_preferences_summary),
+                            onClick = { resetVisible = true },
+                        )
+                    }
                 }
                 is TransferUiState.Review -> {
                     val review = state.value
@@ -182,6 +200,26 @@ fun TransferScreen(
                 is TransferUiState.Working, is TransferUiState.Recovery -> Unit
             }
         }
+    }
+    if (resetVisible) {
+        AlertDialog(
+            onDismissRequest = { resetVisible = false },
+            title = { Text(stringResource(R.string.transfer_reset_preferences_dialog_title)) },
+            text = { Text(stringResource(R.string.transfer_reset_preferences_dialog_message)) },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        resetVisible = false
+                        onResetInterfacePreferences()
+                    },
+                ) { Text(stringResource(R.string.transfer_reset_preferences_confirm)) }
+            },
+            dismissButton = {
+                TextButton(onClick = { resetVisible = false }) {
+                    Text(stringResource(R.string.transfer_reset_preferences_cancel))
+                }
+            },
+        )
     }
 }
 

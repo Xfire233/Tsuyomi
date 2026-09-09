@@ -69,6 +69,18 @@ data class HxpCookieCapability(val sourceScoped: Boolean, val origins: Set<Https
 data class HxpWebLoginCapability(val enabled: Boolean, val origins: Set<HttpsOrigin>)
 data class HxpHomeCapability(val enabled: Boolean)
 
+data class HxpUpdateCheckPolicy(
+    val origin: HttpsOrigin,
+    val path: String,
+    val referrerPath: String?,
+    val parameters: List<HxpRemoteParameter>,
+)
+
+data class HxpUpdateCheckCapability(
+    val version: Int,
+    val policy: HxpUpdateCheckPolicy,
+)
+
 enum class RemoteOperation { READ, TARGETS, ADD, REMOVE, MOVE }
 
 sealed interface HxpRemoteParameter {
@@ -110,6 +122,7 @@ data class HxpCapabilities(
     val home: HxpHomeCapability,
     val remoteLibrary: HxpRemoteLibraryCapability,
     val storageQuotaBytes: Int,
+    val updateCheck: HxpUpdateCheckCapability? = null,
 )
 
 data class HxpResourceLimits(val maxExecutionWallTimeMs: Int, val maxMemoryBytes: Int)

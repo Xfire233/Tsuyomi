@@ -20,7 +20,7 @@ class ExtensionInstaller(
 
     fun prepare(candidateFile: File): PreparedExtensionInstall {
         val candidate = verifier.verify(candidateFile)
-        val active = readVerifiedActive(candidate.manifest.sourceId)
+        val active = readReplaceableActive(candidate.manifest.sourceId)
         if (active != null) {
             if (candidate.manifest.version == active.manifest.version) {
                 throw ExtensionInstallException(ExtensionInstallError.REPLAY_REJECTED)
@@ -68,6 +68,12 @@ class ExtensionInstaller(
         }
     }
 
+    private fun readReplaceableActive(sourceId: SourceId): VerifiedHxpPackage? = try {
+        readVerifiedActive(sourceId)
+    } catch (error: ExtensionInstallException) {
+        if (error.error == ExtensionInstallError.INSTALLED_PACKAGE_INVALID) null else throw error
+    }
+
     fun remoteCapabilitySetFingerprint(packageInfo: VerifiedHxpPackage): String =
         remoteCapabilitySetFingerprint(packageInfo.manifest, packageInfo.publisherFingerprint)
 
@@ -87,6 +93,9 @@ class ExtensionInstaller(
             .filterNot { it in activeCapabilities?.webLogin?.origins.orEmpty() }
             .forEach { add("web-login-origin:${it.canonical}") }
         if (candidate.capabilities.home.enabled && activeCapabilities?.home?.enabled != true) add("source-home:read")
+        if (candidate.capabilities.updateCheck != null && candidate.capabilities.updateCheck != activeCapabilities?.updateCheck) {
+            add("source-update:read")
+        }
         if (candidate.capabilities.remoteLibrary.read && activeCapabilities?.remoteLibrary?.read != true) {
             add("remote-library:read")
         }

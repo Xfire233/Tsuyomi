@@ -28,7 +28,7 @@ import org.tsuyomi.shared.sourcecontract.SourceHomeSection
 @RunWith(AndroidJUnit4::class)
 internal class SourceHomeControllerInstrumentedTest {
     @Test
-    fun normalized_selection_reuses_query_and_package_revision_invalidates_cache() = runBlocking {
+    fun normalized_selection_reuses_query_and_package_revision_keeps_cache() = runBlocking {
         val requests = AtomicInteger()
         val controller = SourceHomeController()
         val load: suspend (Map<String, String>, String?) -> Result<SourceHomePage> = { filters, _ ->
@@ -51,7 +51,8 @@ internal class SourceHomeControllerInstrumentedTest {
 
             withContext(Dispatchers.Main) { controller.ensureInitial("revision-b", load) }
             awaitContent(controller)
-            assertEquals(2, requests.get())
+            assertEquals(1, requests.get())
+            assertEquals("推荐 allvote", controller.activePage?.sections?.single()?.title)
         } finally {
             controller.close()
         }

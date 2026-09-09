@@ -30,6 +30,15 @@ import org.tsuyomi.core.database.room.SmartRuleEntity
 import org.tsuyomi.core.database.room.SubscriptionDraftEntity
 import org.tsuyomi.core.database.room.SourceAvailabilityEntity
 import org.tsuyomi.core.database.room.SourceRemotePolicyEntity
+import org.tsuyomi.core.database.room.UpdateBaselineEntity
+import org.tsuyomi.core.database.room.UpdateBookExclusionEntity
+import org.tsuyomi.core.database.room.UpdateDao
+import org.tsuyomi.core.database.room.UnresolvedUpdateEntity
+import org.tsuyomi.core.database.room.UpdatePolicyEntity
+import org.tsuyomi.core.database.room.UpdateSessionEntity
+import org.tsuyomi.core.database.room.UpdateSessionItemEntity
+import org.tsuyomi.core.database.room.UpdateSourceExclusionEntity
+import org.tsuyomi.core.database.room.UpdateUndoEntity
 
 @Database(
     entities = [
@@ -52,14 +61,23 @@ import org.tsuyomi.core.database.room.SourceRemotePolicyEntity
         SearchHistoryEntity::class,
         SmartRuleEntity::class,
         SubscriptionDraftEntity::class,
+        UpdateSessionEntity::class,
+        UpdateSessionItemEntity::class,
+        UpdateBaselineEntity::class,
+        UnresolvedUpdateEntity::class,
+        UpdatePolicyEntity::class,
+        UpdateBookExclusionEntity::class,
+        UpdateSourceExclusionEntity::class,
+        UpdateUndoEntity::class,
     ],
-    version = 8,
+    version = 9,
     exportSchema = true,
 )
 @TypeConverters(RoomConverters::class)
 abstract class TsuyomiDatabase : RoomDatabase() {
     /** The DAO is internal so Room implementation identifiers cannot become application contracts. */
     internal abstract fun libraryDao(): LibraryDao
+    internal abstract fun updateDao(): UpdateDao
 }
 
 val MIGRATION_1_2 = object : Migration(1, 2) {
@@ -140,5 +158,23 @@ val MIGRATION_7_8 = object : Migration(7, 8) {
         db.execSQL(
             "CREATE TABLE IF NOT EXISTS completed_chapters (source_id TEXT NOT NULL, remote_book_id TEXT NOT NULL, chapter_id TEXT NOT NULL, completed_at_epoch_second INTEGER NOT NULL, completed_at_nano INTEGER NOT NULL, PRIMARY KEY(source_id, remote_book_id, chapter_id), FOREIGN KEY(source_id, remote_book_id) REFERENCES books(source_id, remote_book_id) ON UPDATE NO ACTION ON DELETE CASCADE)",
         )
+    }
+}
+
+val MIGRATION_8_9 = object : Migration(8, 9) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        db.execSQL("CREATE TABLE IF NOT EXISTS update_sessions (session_id TEXT NOT NULL, trigger TEXT NOT NULL, state TEXT NOT NULL, total INTEGER NOT NULL, completed INTEGER NOT NULL, updated INTEGER NOT NULL, failed INTEGER NOT NULL, reason TEXT, lease_expires_at_millis INTEGER, lease_owner_token TEXT, cancellation_requested INTEGER NOT NULL, started_at_millis INTEGER NOT NULL, finished_at_millis INTEGER, PRIMARY KEY(session_id))")
+        db.execSQL("CREATE INDEX IF NOT EXISTS index_update_sessions_state_lease_expires_at_millis ON update_sessions(state, lease_expires_at_millis)")
+        db.execSQL("CREATE TABLE IF NOT EXISTS update_session_items (session_id TEXT NOT NULL, source_id TEXT NOT NULL, remote_book_id TEXT NOT NULL, captured_title TEXT NOT NULL, state TEXT NOT NULL, reason TEXT, anchor TEXT, PRIMARY KEY(session_id, source_id, remote_book_id))")
+        db.execSQL("CREATE INDEX IF NOT EXISTS index_update_session_items_session_id_state ON update_session_items(session_id, state)")
+        db.execSQL("CREATE TABLE IF NOT EXISTS update_baselines (source_id TEXT NOT NULL, remote_book_id TEXT NOT NULL, anchor TEXT NOT NULL, chapters_json TEXT NOT NULL, last_updated_date TEXT, updated_at_millis INTEGER NOT NULL, PRIMARY KEY(source_id, remote_book_id))")
+        db.execSQL("CREATE TABLE IF NOT EXISTS unresolved_updates (source_id TEXT NOT NULL, remote_book_id TEXT NOT NULL, title TEXT NOT NULL, anchor TEXT NOT NULL, chapters_json TEXT NOT NULL, new_chapter_ids_json TEXT NOT NULL, last_updated_date TEXT, detected_at_millis INTEGER NOT NULL, revision INTEGER NOT NULL, PRIMARY KEY(source_id, remote_book_id))")
+        db.execSQL("CREATE INDEX IF NOT EXISTS index_unresolved_updates_detected_at_millis ON unresolved_updates(detected_at_millis)")
+        db.execSQL("CREATE TABLE IF NOT EXISTS update_policy (id TEXT NOT NULL, cadence TEXT NOT NULL, unmetered_only INTEGER NOT NULL, requires_charging INTEGER NOT NULL, battery_not_low INTEGER NOT NULL, PRIMARY KEY(id))")
+        db.execSQL("CREATE TABLE IF NOT EXISTS update_book_exclusions (source_id TEXT NOT NULL, remote_book_id TEXT NOT NULL, PRIMARY KEY(source_id, remote_book_id))")
+        db.execSQL("CREATE TABLE IF NOT EXISTS update_source_exclusions (source_id TEXT NOT NULL, PRIMARY KEY(source_id))")
+        db.execSQL("CREATE TABLE IF NOT EXISTS update_ignore_undos (token_id TEXT NOT NULL, source_id TEXT NOT NULL, remote_book_id TEXT NOT NULL, title TEXT NOT NULL, anchor TEXT NOT NULL, chapters_json TEXT NOT NULL, new_chapter_ids_json TEXT NOT NULL, last_updated_date TEXT, detected_at_millis INTEGER NOT NULL, revision INTEGER NOT NULL, expires_at_millis INTEGER NOT NULL, PRIMARY KEY(token_id))")
+        db.execSQL("CREATE INDEX IF NOT EXISTS index_update_ignore_undos_expires_at_millis ON update_ignore_undos(expires_at_millis)")
+        db.execSQL("UPDATE smart_rules SET ast_json = REPLACE(REPLACE(ast_json, '\"field\":\"hasUnreadUpdate\"', '\"field\":\"hasUnresolvedUpdate\"'), '\"field\":\"hasSourceUpdate\"', '\"field\":\"hasUnresolvedUpdate\"')")
     }
 }

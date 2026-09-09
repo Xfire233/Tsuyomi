@@ -30,6 +30,10 @@ Android UI, navigation, interaction, display-profile, accessibility, screenshot 
 
 [`DOCUMENTATION.md`](DOCUMENTATION.md) is the canonical responsibility registry for first-party documents. It states each document's purpose, trigger, method, scope/exclusions, completion/stop condition and lifecycle. A link is not itself a trigger: read only the owning document rows that match the task.
 
+At each new request, material scope change or context recovery, check whether ownership is unresolved: unknown owners, authority/history conflicts, missing handoff ownership, or cross-component questions needing distinct authorities trigger [tsuyomi-context-router](.agents/skills/tsuyomi-context-router/SKILL.md). Read the Skill once when triggered; it owns the routing algorithm and exclusions. Known-file/symbol tasks and an already-running specialist workflow bypass routing. Do not reload unchanged context or build a plan on every tool call. Mandatory bootstrap and specialist prerequisites still apply.
+
+This versioned entry is the direct-file fallback for clients without Skill discovery. Supported clients discover `.agents/skills`; newly installed Skills require a fresh session/reload, and already-running conversations need an explicit instruction. No repository prompt can enforce compliance by clients that never load its instructions or guarantee identical judgment across models. Private memory and ignored handoff state are not required to discover the router.
+
 ## Governance object model
 
 One current fact has one owner. Other documents link to that owner instead of copying its value.

@@ -140,7 +140,6 @@ fun BrowseScreen(
     installedSource: BrowseInstalledSource? = null,
     onOpenRemoteLibrary: () -> Unit = {},
     onOpenHome: () -> Unit = {},
-    onOpenVerification: () -> Unit = {},
 ) {
     if (LocalDisplayEnvironment.current.effectiveProfile == DisplayProfile.EINK) {
         FrozenEInkBrowseScreen(
@@ -164,7 +163,6 @@ fun BrowseScreen(
         onOpenInstalledSource = onOpenInstalledSource,
         onOpenHome = onOpenHome,
         onOpenRemoteLibrary = onOpenRemoteLibrary,
-        onOpenVerification = onOpenVerification,
         onApproveInstall = onApproveInstall,
         onDismissApproval = onDismissApproval,
         modifier = modifier,
@@ -179,7 +177,6 @@ private fun BrowseScreenContent(
     onOpenInstalledSource: () -> Unit,
     onOpenHome: () -> Unit,
     onOpenRemoteLibrary: () -> Unit,
-    onOpenVerification: () -> Unit,
     onApproveInstall: (Boolean) -> Unit,
     onDismissApproval: () -> Unit,
     modifier: Modifier,
@@ -200,7 +197,6 @@ private fun BrowseScreenContent(
                         onSearch = onOpenInstalledSource,
                         onOpenHome = onOpenHome,
                         onOpenRemoteLibrary = onOpenRemoteLibrary,
-                        onOpenVerification = onOpenVerification,
                     )
                 }
                 candidate?.let {
@@ -279,7 +275,6 @@ private fun InstalledSourceCard(
     onSearch: () -> Unit,
     onOpenHome: () -> Unit,
     onOpenRemoteLibrary: () -> Unit,
-    onOpenVerification: () -> Unit,
 ) {
     val primaryAction = if (source.homeAvailable) onOpenHome else onSearch
     Surface(
@@ -334,13 +329,6 @@ private fun InstalledSourceCard(
                         text = stringResource(R.string.browse_remote_library_action),
                         onClick = onOpenRemoteLibrary,
                         style = TsuyomiButtonStyle.TEXT,
-                    )
-                }
-                if (source.verificationAvailable) {
-                    TsuyomiButton(
-                        text = stringResource(R.string.browse_source_verification_action),
-                        onClick = onOpenVerification,
-                        style = TsuyomiButtonStyle.SECONDARY,
                     )
                 }
             }

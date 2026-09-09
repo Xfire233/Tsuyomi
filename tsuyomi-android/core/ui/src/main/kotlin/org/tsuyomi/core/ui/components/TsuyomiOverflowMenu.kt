@@ -9,6 +9,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -34,6 +35,7 @@ data class TsuyomiOverflowAction(
     val icon: ImageVector? = null,
     val enabled: Boolean = true,
     val destructive: Boolean = false,
+    val menu: List<TsuyomiOverflowAction> = emptyList(),
 )
 
 /** Material 3 action menu anchored to its own 48dp overflow trigger. */
@@ -42,18 +44,23 @@ fun TsuyomiOverflowMenu(
     actions: List<TsuyomiOverflowAction>,
     contentDescription: String,
     modifier: Modifier = Modifier,
+    triggerIcon: ImageVector = TsuyomiIcons.Overflow,
 ) {
     if (actions.isEmpty()) return
     var expanded by remember { mutableStateOf(false) }
+    var submenu by remember { mutableStateOf<TsuyomiOverflowAction?>(null) }
     Box(modifier) {
         TsuyomiIconButton(
-            imageVector = TsuyomiIcons.Overflow,
+            imageVector = triggerIcon,
             contentDescription = contentDescription,
             onClick = { expanded = true },
         )
         DropdownMenu(
             expanded = expanded,
-            onDismissRequest = { expanded = false },
+            onDismissRequest = {
+                expanded = false
+                submenu = null
+            },
             modifier = Modifier.widthIn(min = 176.dp, max = 320.dp),
             offset = DpOffset(x = 0.dp, y = TsuyomiSpacing.Xs),
             shape = MaterialTheme.shapes.medium,
@@ -62,7 +69,29 @@ fun TsuyomiOverflowMenu(
             shadowElevation = 6.dp,
             border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
         ) {
-            actions.forEach { action ->
+            submenu?.let { parent ->
+                DropdownMenuItem(
+                    text = {
+                        Text(
+                            text = parent.label,
+                            style = MaterialTheme.typography.labelLarge,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                    },
+                    onClick = { submenu = null },
+                    leadingIcon = {
+                        Icon(
+                            imageVector = TsuyomiIcons.Back,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    },
+                    contentPadding = PaddingValues(horizontal = TsuyomiSpacing.Md),
+                )
+                HorizontalDivider()
+            }
+            (submenu?.menu ?: actions).forEach { action ->
                 DropdownMenuItem(
                     text = {
                         Text(
@@ -78,8 +107,13 @@ fun TsuyomiOverflowMenu(
                         )
                     },
                     onClick = {
-                        expanded = false
-                        action.onClick()
+                        if (action.menu.isEmpty()) {
+                            expanded = false
+                            submenu = null
+                            action.onClick()
+                        } else {
+                            submenu = action
+                        }
                     },
                     leadingIcon = action.icon?.let { icon ->
                         {
@@ -93,6 +127,17 @@ fun TsuyomiOverflowMenu(
                                 },
                             )
                         }
+                    },
+                    trailingIcon = if (action.menu.isNotEmpty()) {
+                        {
+                            Icon(
+                                imageVector = TsuyomiIcons.Next,
+                                contentDescription = null,
+                                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                    } else {
+                        null
                     },
                     enabled = action.enabled,
                     contentPadding = PaddingValues(horizontal = TsuyomiSpacing.Md),

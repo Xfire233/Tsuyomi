@@ -137,6 +137,51 @@ class BookDetailInstrumentedTest {
     }
 
     @Test
+    fun exactUpdateFocusExpandsAndScrollsToItsChapterWithoutChangingResume() {
+        val book = sourceBook()
+        val chapters = listOf(
+            chapter("v1-c1", "第一卷 第一章", "第一卷"),
+            chapter("v2-c1", "第二卷 第一章", "第二卷"),
+            chapter("v3-c1", "第三卷 第一章", "第三卷"),
+        )
+        var focusHandled = 0
+        compose.setContent {
+            MaterialTheme {
+                StandardBookDetailScreen(
+                    state = SourceBookState.Content(SourceBookDetail(book, "简介", emptyList(), "连载")),
+                    directoryState = SourceBookState.Content(SourceDirectory(book.identity, chapters)),
+                    localState = DetailLocalState(
+                        inLibrary = true,
+                        progressChapterId = "v1-c1",
+                    ),
+                    mutation = null,
+                    coverState = CoverUiState.Fallback(FallbackSpec(book.title, null)),
+                    unreadOnly = false,
+                    descending = false,
+                    selectedChapterId = null,
+                    onSetRating = {},
+                    onSearchAuthor = {},
+                    onAddTag = {},
+                    onToggleUnreadOnly = {},
+                    onToggleOrder = {},
+                    onSelectChapter = {},
+                    onContinueReading = {},
+                    onAddToLibrary = {},
+                    onRetry = {},
+                    onUseOfflineCache = {},
+                    onOpenVerification = {},
+                    focusChapterId = "v3-c1",
+                    onFocusHandled = { focusHandled++ },
+                )
+            }
+        }
+
+        compose.waitUntil(5_000) { focusHandled == 1 }
+        compose.onNodeWithTag("detail-chapter-v3-c1").assertIsDisplayed()
+        compose.onNodeWithTag("detail-chapter-v1-c1").assert(hasStateDescription("未读，当前"))
+    }
+
+    @Test
     fun unresolvedAddCannotBeLocallyUnlocked() {
         val book = sourceBook()
         var operation by mutableStateOf("ADD")
@@ -363,9 +408,12 @@ class BookDetailInstrumentedTest {
         val narrowSplit = bounds("detail-library-action")
         assertTrue(narrowSplit.top >= narrowRating.bottom)
         assertTrue(abs(narrowRating.left - narrowSplit.left) <= 1f)
-        assertTrue(abs(narrowRating.right - narrowSplit.right) <= 1f)
         assertTrue(abs(bounds("detail-rating-band").height - 36f * density) <= 1f)
-        assertTrue(abs(narrowSplit.right - bounds("detail-identity-module").right) <= 1f)
+        assertTrue("The relocated button must not stretch across spare width", narrowSplit.right < bounds("detail-identity-module").right)
+        assertCompletePrimaryLabel()
+        val narrowDisclosure = bounds("tsuyomi-split-trailing")
+        assertTrue(abs(narrowDisclosure.width - 48f * density) <= 1f)
+        assertTrue(abs(narrowDisclosure.right - narrowSplit.right) <= 1f)
         val statusLayouts = mutableListOf<TextLayoutResult>()
         compose.onNodeWithTag("detail-publication-status", useUnmergedTree = true)
             .performSemanticsAction(SemanticsActions.GetTextLayoutResult) { it(statusLayouts) }
@@ -465,7 +513,6 @@ class BookDetailInstrumentedTest {
                     destinationMenuContent = { dismissMenu ->
                         BookDestinationMenu(
                             readLater = localState.readLater,
-                            shortcutPinned = false,
                             collections = emptyList(),
                             remoteTargets = emptyList(),
                             selectedRemoteTargetId = null,
@@ -477,7 +524,6 @@ class BookDetailInstrumentedTest {
                                     readLater = !localState.readLater,
                                 )
                             },
-                            onToggleShortcut = {},
                             onToggleCollection = {},
                             onApplyWebsite = {},
                             onDismiss = dismissMenu,
@@ -684,8 +730,9 @@ class BookDetailInstrumentedTest {
                 DropdownMenu(expanded = true, onDismissRequest = {}) {
                     BookDestinationMenu(
                         readLater = false,
-                        shortcutPinned = false,
-                        collections = emptyList(),
+                        collections = List(30) { index ->
+                            DetailCollectionDestination("local-$index", "本地收藏夹 $index", false)
+                        },
                         remoteTargets = listOf(
                             RemoteTarget("default", "默认书架", null, "folder"),
                             RemoteTarget("favorites", "特别收藏", null, "folder"),
@@ -694,7 +741,6 @@ class BookDetailInstrumentedTest {
                         loadingRemoteTargets = false,
                         websiteGroupingEnabled = false,
                         onToggleReadLater = {},
-                        onToggleShortcut = {},
                         onToggleCollection = {},
                         onApplyWebsite = { appliedTargetId = it },
                         onDismiss = {},

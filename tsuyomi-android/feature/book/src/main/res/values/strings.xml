@@ -67,4 +67,6 @@
     <string name="book_mutation_working">正在%1$s…</string>
     <string name="book_mutation_success">已完成：%1$s</string>
     <string name="book_mutation_error">未完成：%1$s（%2$s）</string>
+    <string name="book_stop_update_checks">停止检查此书更新（保留书籍与进度）</string>
+    <string name="book_resume_update_checks">恢复检查此书更新</string>
 </resources>

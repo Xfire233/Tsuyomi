@@ -21,6 +21,9 @@ dependencies {
     implementation(project(":shared:model"))
     implementation(project(":shared:backup"))
     implementation(project(":shared:smart-shelf"))
+    implementation(project(":shared:library-domain"))
+    implementation(project(":shared:source-contract"))
     implementation(libs.kotlinx.serialization.json)
+    implementation(libs.kotlinx.coroutines.android)
     androidTestImplementation(libs.androidx.room.testing)
 }

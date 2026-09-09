@@ -25,24 +25,31 @@ import java.util.UUID
 import org.tsuyomi.core.database.CollectionKind
 import org.tsuyomi.core.database.LibraryCollection
 import org.tsuyomi.core.database.LibraryEntry
+import org.tsuyomi.core.database.LibraryBook
 import org.tsuyomi.core.database.RoomLibraryRepository
 import org.tsuyomi.core.preferences.LibraryPreferencesRepository
+import org.tsuyomi.core.preferences.LibraryRootNodePreference
+import org.tsuyomi.core.preferences.LibraryTabPresentationPreferences
 import org.tsuyomi.core.media.api.CoverRepository
 import org.tsuyomi.core.media.api.CoverRequest
 import org.tsuyomi.core.media.api.CoverUiState
 import org.tsuyomi.core.media.api.FallbackSpec
+import org.tsuyomi.feature.library.LibraryDragPayload
+import org.tsuyomi.feature.library.LibraryRootItem
+import org.tsuyomi.feature.library.LibraryRootNodePlacement
 import org.tsuyomi.feature.library.LibraryUiState
 import org.tsuyomi.feature.library.LibrarySelectionDialog
 import org.tsuyomi.feature.library.LibrarySelectionKind
 import org.tsuyomi.feature.library.LibrarySortMode
-import org.tsuyomi.feature.library.libraryBookShortcutId
 import org.tsuyomi.feature.library.LibraryMirrorShortcut
-import org.tsuyomi.feature.library.libraryMirrorFolderShortcutId
-import org.tsuyomi.feature.library.libraryMirrorShortcutId
 import org.tsuyomi.feature.library.SmartConditionDraft
 import org.tsuyomi.feature.library.SmartField
-import org.tsuyomi.feature.library.SystemLibraryFilter
+import org.tsuyomi.feature.library.LibraryUpdateFilter
+import org.tsuyomi.feature.library.buildLibraryRootItems
+import org.tsuyomi.feature.library.libraryCollectionRootId
+import org.tsuyomi.feature.library.libraryMirrorRootId
 import org.tsuyomi.feature.library.projectedEntries
+import org.tsuyomi.feature.library.SystemLibraryFilter
 import org.tsuyomi.shared.model.BookIdentity
 import org.tsuyomi.shared.smartshelf.MatchMode
 import org.tsuyomi.shared.smartshelf.ProgressState
@@ -50,30 +57,37 @@ import org.tsuyomi.shared.smartshelf.PublicationStatus
 import org.tsuyomi.shared.smartshelf.SmartPredicate
 import org.tsuyomi.shared.smartshelf.SmartRule
 import org.tsuyomi.shared.smartshelf.SmartRuleNode
-private const val HiddenShortcutPrefix = "hidden:"
-private val SystemShortcutIds = listOf("continue", "recent", "read-later", "updates")
 
 @Stable
 internal class LibraryFlowController private constructor(
     private val repository: RoomLibraryRepository,
     private val preferencesRepository: LibraryPreferencesRepository,
+    private val profileName: String,
     initialCollectionId: String?,
     initialTagDraft: String,
+    initialFilter: SystemLibraryFilter,
     initialLayout: org.tsuyomi.feature.library.LibraryLayout,
     initialSortMode: LibrarySortMode,
     initialSortDescending: Boolean,
+    initialFirstVisibleIndex: Int,
+    initialFirstVisibleOffset: Int,
 ) {
     constructor(
         repository: RoomLibraryRepository,
         preferencesRepository: LibraryPreferencesRepository,
+        profileName: String = "STANDARD",
     ) : this(
         repository,
         preferencesRepository,
+        profileName,
         null,
         "",
+        SystemLibraryFilter.ALL,
         org.tsuyomi.feature.library.LibraryLayout.GRID,
-        LibrarySortMode.CUSTOM,
+        LibrarySortMode.SMART,
         false,
+        0,
+        0,
     )
 
     var collections by mutableStateOf<List<LibraryCollection>>(emptyList())
@@ -84,9 +98,13 @@ internal class LibraryFlowController private constructor(
         private set
     var state by mutableStateOf(
         LibraryUiState(
+            filter = initialFilter,
+            isRootProjection = initialFilter == SystemLibraryFilter.ALL,
             layout = initialLayout,
             sortMode = initialSortMode,
             sortDescending = initialSortDescending,
+            firstVisibleIndex = initialFirstVisibleIndex,
+            firstVisibleOffset = initialFirstVisibleOffset,
         ),
     )
         private set
@@ -99,8 +117,9 @@ internal class LibraryFlowController private constructor(
     var remoteRetryEnabled by mutableStateOf(false)
         private set
     private val reloadMutex = Mutex()
-    private var pendingShortcutInsertionIndex: Int? = null
-    private var pendingShortcutReplacementIds: Set<String> = emptySet()
+    private var tabPresentations: Map<String, LibraryTabPresentationPreferences> = emptyMap()
+    private var callerTab: SystemLibraryFilter = initialFilter
+    private var installedMirrorRootsProvider: suspend () -> List<LibraryMirrorShortcut> = { emptyList() }
     var coverStates by mutableStateOf<Map<BookIdentity, CoverUiState>>(emptyMap())
         private set
     private var coverRepository: CoverRepository? = null
@@ -109,12 +128,20 @@ internal class LibraryFlowController private constructor(
     private var coverCredentialRevision: String? = null
     private var coverScope: CoroutineScope? = null
     private val visibleCoverEntries = linkedMapOf<BookIdentity, LibraryEntry>()
+    private val visibleUpdateCoverBooks = linkedMapOf<BookIdentity, LibraryBook>()
     private val coverJobs = mutableMapOf<BookIdentity, Job>()
     private val retainedCoverOrder = linkedSetOf<BookIdentity>()
     private var rootEntries: List<LibraryEntry> = emptyList()
+    val searchableEntries: List<LibraryEntry>
+        get() = rootEntries
+    var updatePresentationBooks by mutableStateOf<Map<BookIdentity, LibraryBook>>(emptyMap())
+        private set
     private var rootLoaded = false
     private val collectionEntryCache = mutableMapOf<String, List<LibraryEntry>>()
 
+    fun configureInstalledMirrorRoots(provider: suspend () -> List<LibraryMirrorShortcut>) {
+        installedMirrorRootsProvider = provider
+    }
 
     fun configureCoverRepository(
         repository: CoverRepository?,
@@ -135,31 +162,52 @@ internal class LibraryFlowController private constructor(
         coverPackageRevision = packageRevision
         coverCredentialRevision = credentialRevision
         coverScope = scope
-        visibleCoverEntries.values.forEach(::startCoverRequest)
+        visibleCoverEntries.values.forEach { entry -> startCoverRequest(entry.book) }
+        visibleUpdateCoverBooks.values.forEach(::startCoverRequest)
     }
 
     fun setCoverVisible(entry: LibraryEntry, visible: Boolean) {
         val identity = entry.book.identity
         if (!visible) {
             visibleCoverEntries.remove(identity)
-            coverJobs.remove(identity)?.cancel()
+            if (!isCoverVisible(identity)) coverJobs.remove(identity)?.cancel()
             trimRetainedCoverStates()
             return
         }
         visibleCoverEntries[identity] = entry
         retainedCoverOrder.remove(identity)
         retainedCoverOrder += identity
-        startCoverRequest(entry)
+        startCoverRequest(entry.book)
     }
 
-    fun coverState(entry: LibraryEntry): CoverUiState = coverStates[entry.book.identity]
-        ?: CoverUiState.Fallback(FallbackSpec(entry.book.title, entry.book.identity.sourceId))
+    /** Exposes the same verified image pipeline for a real update/mirror book projection. */
+    fun setCoverVisible(book: LibraryBook, visible: Boolean) {
+        val identity = book.identity
+        if (!visible) {
+            visibleUpdateCoverBooks.remove(identity)
+            if (!isCoverVisible(identity)) coverJobs.remove(identity)?.cancel()
+            trimRetainedCoverStates()
+            return
+        }
+        visibleUpdateCoverBooks[identity] = book
+        retainedCoverOrder.remove(identity)
+        retainedCoverOrder += identity
+        startCoverRequest(book)
+    }
 
-    private fun startCoverRequest(entry: LibraryEntry) {
-        val identity = entry.book.identity
+    fun coverState(entry: LibraryEntry): CoverUiState = coverState(entry.book)
+
+    fun coverState(book: LibraryBook): CoverUiState = coverStates[book.identity]
+        ?: CoverUiState.Fallback(FallbackSpec(book.title, book.identity.sourceId))
+
+    private fun isCoverVisible(identity: BookIdentity): Boolean =
+        identity in visibleCoverEntries || identity in visibleUpdateCoverBooks
+
+    private fun startCoverRequest(book: LibraryBook) {
+        val identity = book.identity
         coverJobs.remove(identity)?.cancel()
-        val fallback = FallbackSpec(entry.book.title, identity.sourceId)
-        val url = entry.book.coverUrl
+        val fallback = FallbackSpec(book.title, identity.sourceId)
+        val url = book.coverUrl
         val repository = coverRepository
         val sourceId = coverSourceId
         val packageRevision = coverPackageRevision
@@ -182,7 +230,7 @@ internal class LibraryFlowController private constructor(
                     packageRevision = packageRevision,
                     credentialRevision = credentialRevision,
                     transportUrl = url,
-                    referrerUrl = entry.book.canonicalUrl,
+                    referrerUrl = book.canonicalUrl,
                     targetWidthPx = 512,
                     targetHeightPx = 768,
                     fallback = fallback,
@@ -200,7 +248,7 @@ internal class LibraryFlowController private constructor(
 
     private fun trimRetainedCoverStates() {
         while (coverStates.size > MAX_RETAINED_COVER_STATES) {
-            val victim = retainedCoverOrder.firstOrNull { it !in visibleCoverEntries } ?: return
+            val victim = retainedCoverOrder.firstOrNull { !isCoverVisible(it) } ?: return
             retainedCoverOrder.remove(victim)
             coverStates = coverStates - victim
         }
@@ -216,11 +264,24 @@ internal class LibraryFlowController private constructor(
             refreshFailure = null,
         )
         state = try {
+            preferencesRepository.migrateLegacyRootPresentation(
+                listOf(
+                    SystemLibraryFilter.ALL,
+                    SystemLibraryFilter.CONTINUE,
+                    SystemLibraryFilter.READ_LATER,
+                ).associate { filter -> tabKey(filter) to defaultTabPresentation(filter) },
+            )
             val presentationPreferences = preferencesRepository.preferences.first()
+            tabPresentations = presentationPreferences.tabPresentations
             val nextCollections = repository.collections()
             val nextRootEntries = repository.libraryEntries()
-            val mirrorShortcuts = repository.remoteMirrorBindings().flatMap { binding ->
-                val snapshot = repository.remoteMirrorSnapshot(binding.sourceId)
+            val collectionCounts = nextCollections.associate { collection ->
+                collection.collectionId to repository.collectionEntries(collection.collectionId).size
+            }
+            val mirrorSnapshots = repository.remoteMirrorBindings().map { binding ->
+                binding to repository.remoteMirrorSnapshot(binding.sourceId)
+            }
+            val snapshotMirrorShortcuts = mirrorSnapshots.flatMap { (binding, snapshot) ->
                 buildList {
                     add(
                         LibraryMirrorShortcut(
@@ -244,31 +305,99 @@ internal class LibraryFlowController private constructor(
                     }
                 }
             }
+            val installedMirrorRoots = runCatching { installedMirrorRootsProvider() }.getOrDefault(emptyList())
+            val snapshotRoots = snapshotMirrorShortcuts.filter { it.targetId == null }.associateBy { it.sourceId }
+            val rootMirrors = linkedMapOf<String, LibraryMirrorShortcut>().apply {
+                putAll(snapshotRoots)
+                installedMirrorRoots.forEach { installed ->
+                    val snapshot = snapshotRoots[installed.sourceId]
+                    put(installed.sourceId, installed.copy(count = snapshot?.count ?: 0, frozen = false))
+                }
+            }.values
+            val mirrorShortcuts = rootMirrors + snapshotMirrorShortcuts.filter { it.targetId != null }
+            val structuralIds = buildList {
+                nextCollections.filter { it.parentCollectionId == null }
+                    .sortedWith(compareBy<LibraryCollection> { it.displayOrder }.thenBy { it.collectionId })
+                    .forEach { add(libraryCollectionRootId(it.collectionId)) }
+                mirrorShortcuts.filter { it.targetId == null }
+                    .sortedWith(compareBy<LibraryMirrorShortcut> { it.label }.thenBy { it.sourceId })
+                    .forEach { add(libraryMirrorRootId(it.sourceId)) }
+            }
+            val normalizedRootNodes = buildList {
+                val seen = hashSetOf<String>()
+                presentationPreferences.rootNodes.forEach { preference ->
+                    if (preference.id in structuralIds && seen.add(preference.id)) add(preference)
+                }
+                structuralIds.forEach { id -> if (seen.add(id)) add(LibraryRootNodePreference(id, 0)) }
+            }
+            if (normalizedRootNodes != presentationPreferences.rootNodes) {
+                preferencesRepository.updateRootNodes(normalizedRootNodes)
+            }
+            val nextUpdatePresentationBooks = linkedMapOf<BookIdentity, LibraryBook>().apply {
+                nextRootEntries.forEach { entry -> put(entry.book.identity, entry.book) }
+                mirrorSnapshots.forEach { (binding, snapshot) ->
+                    if (!binding.frozen) snapshot?.books?.forEach { mirrorBook ->
+                        putIfAbsent(mirrorBook.book.identity, mirrorBook.book)
+                    }
+                }
+            }
             val websiteGroupingSourceIds = mirrorShortcuts.asSequence()
                 .map(LibraryMirrorShortcut::sourceId)
                 .distinct()
                 .filterTo(linkedSetOf()) { sourceId ->
-                    presentationPreferences.websiteGroupingBySource[sourceId] ?: mirrorShortcuts.any { mirror ->
-                        val targetId = mirror.targetId
-                        mirror.sourceId == sourceId && targetId != null &&
-                            libraryMirrorFolderShortcutId(sourceId, targetId) in presentationPreferences.shortcutOrder
-                    }
+                    presentationPreferences.websiteGroupingBySource[sourceId] == true
                 }
             val validSelectedId = selectedId?.takeIf { id -> nextCollections.any { it.collectionId == id } }
             val nextEntries = validSelectedId?.let { id ->
                 repository.collectionEntries(id).also { collectionEntryCache[id] = it }
             } ?: nextRootEntries
             collections = nextCollections
-            state = state.copy(
-                shortcutOrder = presentationPreferences.shortcutOrder,
-                shortcutLocked = presentationPreferences.shortcutLocked,
-                mirrorShortcuts = mirrorShortcuts,
-                websiteGroupingSourceIds = websiteGroupingSourceIds,
-            )
             rootEntries = nextRootEntries
+            updatePresentationBooks = nextUpdatePresentationBooks
             rootLoaded = true
             selectedCollectionId = validSelectedId
-            state.copy(entries = nextEntries, loading = false, refreshing = false)
+            val localIdentities = nextRootEntries.mapTo(hashSetOf()) { it.book.identity }
+            val updateOnlyEntries = state.updates.values.mapNotNull { update ->
+                nextUpdatePresentationBooks[update.identity]
+                    ?.takeIf { it.identity !in localIdentities }
+                    ?.let { book ->
+                        LibraryEntry(
+                            book = book,
+                            libraryAddedAt = book.addedAt,
+                            rating = null,
+                            localTags = emptySet(),
+                            sourceAvailable = true,
+                            reconciliation = null,
+                            localMembership = false,
+                        )
+                    }
+            }
+            val restoredTab = if (validSelectedId == null) tabPresentation(state.filter) else null
+            state.copy(
+                entries = nextEntries,
+                rootNodePlacements = normalizedRootNodes.map { LibraryRootNodePlacement(it.id, it.bookOffset) },
+                collectionCounts = collectionCounts,
+                updateFilter = if (presentationPreferences.showUpdatesOnly) {
+                    LibraryUpdateFilter.UPDATES_ONLY
+                } else {
+                    LibraryUpdateFilter.ALL
+                },
+                mirrorShortcuts = mirrorShortcuts,
+                websiteGroupingSourceIds = websiteGroupingSourceIds,
+                layout = restoredTab?.layout?.let { name ->
+                    runCatching { org.tsuyomi.feature.library.LibraryLayout.valueOf(name) }.getOrNull()
+                } ?: state.layout,
+                sortMode = restoredTab?.sortMode?.let { name ->
+                    runCatching { LibrarySortMode.valueOf(name) }.getOrNull()
+                } ?: state.sortMode,
+                sortDescending = restoredTab?.sortDescending ?: state.sortDescending,
+                firstVisibleIndex = restoredTab?.firstVisibleIndex ?: state.firstVisibleIndex,
+                firstVisibleOffset = restoredTab?.firstVisibleOffset ?: state.firstVisibleOffset,
+                isRootProjection = validSelectedId == null && state.filter == SystemLibraryFilter.ALL,
+                updateOnlyEntries = updateOnlyEntries,
+                loading = false,
+                refreshing = false,
+            )
         } catch (_: Throwable) {
             state.copy(
                 loading = false,
@@ -279,26 +408,53 @@ internal class LibraryFlowController private constructor(
         }
     }
 
+    suspend fun restoreLibraryHome() {
+        if (selectedCollectionId != null) selectTab(callerTab)
+    }
+
     fun selectCollection(collectionId: String) {
+        if (state.filter in setOf(
+                SystemLibraryFilter.ALL,
+                SystemLibraryFilter.CONTINUE,
+                SystemLibraryFilter.READ_LATER,
+            )
+        ) callerTab = state.filter
         clearSelection()
         selectedCollectionId = collectionId
         val cached = collectionEntryCache[collectionId]
         state = state.copy(
             entries = cached.orEmpty(),
             filter = SystemLibraryFilter.ALL,
+            isRootProjection = false,
             loading = cached == null,
             refreshing = false,
             failure = null,
             refreshFailure = null,
+            firstVisibleIndex = 0,
+            firstVisibleOffset = 0,
         )
     }
 
-    fun selectSystemFilter(filter: SystemLibraryFilter) {
+    suspend fun selectTab(requested: SystemLibraryFilter) {
+        val filter = requested.takeIf {
+            it == SystemLibraryFilter.ALL || it == SystemLibraryFilter.CONTINUE || it == SystemLibraryFilter.READ_LATER
+        } ?: SystemLibraryFilter.ALL
+        if (selectedCollectionId == null) persistCurrentTabPresentation()
         clearSelection()
         selectedCollectionId = null
+        callerTab = filter
+        val presentation = tabPresentation(filter)
         state = state.copy(
             entries = rootEntries,
             filter = filter,
+            isRootProjection = filter == SystemLibraryFilter.ALL,
+            layout = runCatching { org.tsuyomi.feature.library.LibraryLayout.valueOf(presentation.layout) }
+                .getOrDefault(defaultTabPresentation(filter).let { org.tsuyomi.feature.library.LibraryLayout.valueOf(it.layout) }),
+            sortMode = runCatching { LibrarySortMode.valueOf(presentation.sortMode) }
+                .getOrDefault(LibrarySortMode.valueOf(defaultTabPresentation(filter).sortMode)),
+            sortDescending = presentation.sortDescending,
+            firstVisibleIndex = presentation.firstVisibleIndex,
+            firstVisibleOffset = presentation.firstVisibleOffset,
             loading = !rootLoaded,
             refreshing = false,
             failure = null,
@@ -306,44 +462,100 @@ internal class LibraryFlowController private constructor(
         )
     }
 
-    fun selectRoot() {
-        clearSelection()
-        selectedCollectionId = null
+    fun updateUnresolved(
+        updates: List<org.tsuyomi.shared.librarydomain.UnresolvedUpdate>,
+        session: org.tsuyomi.shared.librarydomain.UpdateSessionSummary?,
+    ) {
+        val byIdentity = updates.associateBy { it.identity }
+        val localIdentities = rootEntries.mapTo(hashSetOf()) { it.book.identity }
+        val mirrorOnly = updates.mapNotNull { update ->
+            updatePresentationBooks[update.identity]
+                ?.takeIf { it.identity !in localIdentities }
+                ?.let { book ->
+                    LibraryEntry(
+                        book = book,
+                        libraryAddedAt = book.addedAt,
+                        rating = null,
+                        localTags = emptySet(),
+                        sourceAvailable = true,
+                        reconciliation = null,
+                        localMembership = false,
+                    )
+                }
+        }
+        state = state.copy(updates = byIdentity, updateOnlyEntries = mirrorOnly, updateSession = session)
+    }
+
+    suspend fun setUpdateFilter(filter: LibraryUpdateFilter) {
+        state = state.copy(updateFilter = filter)
+        preferencesRepository.updateShowUpdatesOnly(filter == LibraryUpdateFilter.UPDATES_ONLY)
+    }
+
+
+    private fun tabKey(filter: SystemLibraryFilter): String = "$profileName:${filter.name}"
+
+    private fun defaultTabPresentation(filter: SystemLibraryFilter): LibraryTabPresentationPreferences = when (filter) {
+        SystemLibraryFilter.ALL -> LibraryTabPresentationPreferences(sortMode = LibrarySortMode.SMART.name)
+        SystemLibraryFilter.CONTINUE -> LibraryTabPresentationPreferences(
+            sortMode = LibrarySortMode.RECENT.name,
+            sortDescending = true,
+        )
+        SystemLibraryFilter.READ_LATER -> LibraryTabPresentationPreferences(
+            sortMode = LibrarySortMode.ADDED.name,
+            sortDescending = true,
+        )
+        SystemLibraryFilter.UNREAD, SystemLibraryFilter.DORMANT -> defaultTabPresentation(SystemLibraryFilter.ALL)
+    }
+
+    private fun tabPresentation(filter: SystemLibraryFilter): LibraryTabPresentationPreferences =
+        tabPresentations[tabKey(filter)] ?: defaultTabPresentation(filter)
+
+    private fun currentTabPresentation(): LibraryTabPresentationPreferences = LibraryTabPresentationPreferences(
+        layout = state.layout.name,
+        sortMode = state.sortMode.name,
+        sortDescending = state.sortDescending,
+        firstVisibleIndex = state.firstVisibleIndex,
+        firstVisibleOffset = state.firstVisibleOffset,
+    )
+
+    private suspend fun persistCurrentTabPresentation() {
+        if (selectedCollectionId != null || state.filter !in setOf(
+                SystemLibraryFilter.ALL,
+                SystemLibraryFilter.CONTINUE,
+                SystemLibraryFilter.READ_LATER,
+            )
+        ) return
+        val key = tabKey(state.filter)
+        val presentation = currentTabPresentation()
+        tabPresentations = tabPresentations + (key to presentation)
+        preferencesRepository.updateTabPresentation(key, presentation)
+    }
+
+    fun updateViewport(firstVisibleIndex: Int, firstVisibleOffset: Int) {
         state = state.copy(
-            entries = rootEntries,
-            filter = SystemLibraryFilter.ALL,
-            loading = !rootLoaded,
-            refreshing = false,
-            failure = null,
-            refreshFailure = null,
+            firstVisibleIndex = firstVisibleIndex.coerceAtLeast(0),
+            firstVisibleOffset = firstVisibleOffset.coerceAtLeast(0),
         )
     }
 
-
-    fun cycleLayout() {
-        state = state.copy(layout = state.layout.next())
+    suspend fun persistViewport(firstVisibleIndex: Int, firstVisibleOffset: Int) {
+        updateViewport(firstVisibleIndex, firstVisibleOffset)
+        persistCurrentTabPresentation()
     }
 
-    fun openSort() {
-        state = state.copy(sortOpen = true)
+    suspend fun cycleLayout() {
+        state = state.copy(layout = state.layout.next(), firstVisibleIndex = 0, firstVisibleOffset = 0)
+        persistCurrentTabPresentation()
     }
 
-    fun dismissSort() {
-        state = state.copy(sortOpen = false)
+    suspend fun selectSort(mode: LibrarySortMode) {
+        state = state.copy(sortMode = mode, firstVisibleIndex = 0, firstVisibleOffset = 0)
+        persistCurrentTabPresentation()
     }
 
-    fun selectSort(mode: LibrarySortMode) {
-        state = state.copy(sortMode = mode)
-    }
-
-    suspend fun setShortcutOrder(order: List<String>) {
-        state = state.copy(shortcutOrder = order)
-        preferencesRepository.updateShortcutOrder(order)
-    }
-
-    suspend fun setShortcutLocked(locked: Boolean) {
-        state = state.copy(shortcutLocked = locked)
-        preferencesRepository.updateShortcutLocked(locked)
+    suspend fun selectSortDirection(descending: Boolean) {
+        state = state.copy(sortDescending = descending, firstVisibleIndex = 0, firstVisibleOffset = 0)
+        persistCurrentTabPresentation()
     }
 
     fun prepareDraggedBooks(identities: Set<BookIdentity>) {
@@ -355,71 +567,10 @@ internal class LibraryFlowController private constructor(
         )
     }
 
-    suspend fun dropBooksOnShortcutRoot(
-        identities: Set<BookIdentity>,
-        destinationIndex: Int,
-        failureMessage: String,
-    ): Boolean {
-        if (identities.size != 1) {
-            prepareDraggedBooks(identities)
-            pendingShortcutInsertionIndex = destinationIndex
-            pendingShortcutReplacementIds = emptySet()
-            state = state.copy(selectionDialog = LibrarySelectionDialog.CREATE_COLLECTION)
-            return true
-        }
-        return runCatching {
-            val identity = identities.single()
-            require(rootEntries.any { it.book.identity == identity })
-            val id = libraryBookShortcutId(identity)
-            val visible = visibleShortcutIds().toMutableList()
-            val oldIndex = visible.indexOf(id)
-            if (oldIndex >= 0) visible.removeAt(oldIndex)
-            val adjusted = (destinationIndex - if (oldIndex in 0 until destinationIndex) 1 else 0)
-                .coerceIn(0, visible.size)
-            visible.add(adjusted, id)
-            persistShortcutOrder(visible, hiddenShortcutIds() - id)
-            prepareDraggedBooks(setOf(identity))
-        }.onFailure {
-            collectionMessage = failureMessage
-        }.isSuccess
-    }
-
-    suspend fun moveShortcut(
-        id: String,
-        destinationIndex: Int,
-        failureMessage: String,
-    ): Boolean = runCatching {
-        val visible = visibleShortcutIds().toMutableList()
-        val oldIndex = visible.indexOf(id)
-        require(oldIndex >= 0)
-        visible.removeAt(oldIndex)
-        val adjusted = (destinationIndex - if (oldIndex < destinationIndex) 1 else 0).coerceIn(0, visible.size)
-        visible.add(adjusted, id)
-        persistShortcutOrder(visible, hiddenShortcutIds() - id)
-    }.onFailure {
-        collectionMessage = failureMessage
-    }.isSuccess
-
-    suspend fun removeShortcut(id: String, failureMessage: String): Boolean = runCatching {
-        val visible = visibleShortcutIds().filterNot { it == id }
-        val userOwned = id.startsWith("book:") || id.startsWith("mirror:") || id.startsWith("mirror-folder:")
-        val hidden = if (userOwned) hiddenShortcutIds() - id else hiddenShortcutIds() + id
-        persistShortcutOrder(visible, hidden)
-        clearSelection()
-    }.onFailure {
-        collectionMessage = failureMessage
-    }.isSuccess
-
-    suspend fun removeBookShortcut(identity: BookIdentity, failureMessage: String): Boolean =
-        removeShortcut(libraryBookShortcutId(identity), failureMessage)
-
-    fun isBookShortcutPinned(identity: BookIdentity): Boolean = libraryBookShortcutId(identity) in visibleShortcutIds()
-
     suspend fun manualCollectionIds(identity: BookIdentity): Set<String> = repository.manualCollectionIds(identity)
 
     suspend fun applyBookDestinations(
         identity: BookIdentity,
-        shortcutPinned: Boolean,
         collectionIds: Set<String>,
         failureMessage: String,
     ): Boolean = runCatching {
@@ -430,19 +581,10 @@ internal class LibraryFlowController private constructor(
         val currentIds = repository.manualCollectionIds(identity) intersect manualIds
         (currentIds - collectionIds).forEach { collectionId -> repository.removeManualMembership(collectionId, identity) }
         (collectionIds - currentIds).forEach { collectionId -> repository.addManualMembership(collectionId, identity) }
-        val shortcutId = libraryBookShortcutId(identity)
-        val visible = visibleShortcutIds().filterNot { it == shortcutId }.toMutableList()
-        if (shortcutPinned) visible += shortcutId
-        persistShortcutOrder(visible, hiddenShortcutIds() - shortcutId)
         reload(failureMessage)
     }.onFailure {
         collectionMessage = failureMessage
     }.isSuccess
-
-    fun isMirrorShortcutPinned(sourceId: String, targetId: String?): Boolean {
-        val id = targetId?.let { libraryMirrorFolderShortcutId(sourceId, it) } ?: libraryMirrorShortcutId(sourceId)
-        return id in visibleShortcutIds()
-    }
 
     fun isWebsiteGroupingEnabled(sourceId: String): Boolean = sourceId in state.websiteGroupingSourceIds
 
@@ -463,90 +605,80 @@ internal class LibraryFlowController private constructor(
         collectionMessage = failureMessage
     }.isSuccess
 
-    suspend fun setMirrorShortcutPinned(
-        shortcut: LibraryMirrorShortcut,
-        pinned: Boolean,
+    fun requestRootCollectionCreation(moved: Set<BookIdentity>, target: BookIdentity? = null) {
+        prepareDraggedBooks(moved + listOfNotNull(target))
+        state = state.copy(selectionDialog = LibrarySelectionDialog.CREATE_COLLECTION)
+    }
+
+    private fun currentRootItems(): List<LibraryRootItem> = buildLibraryRootItems(
+        entries = state.projectedEntries(),
+        collections = collections,
+        collectionCounts = state.collectionCounts,
+        mirrors = state.mirrorShortcuts.filter { it.targetId == null },
+        placements = state.rootNodePlacements,
+        customOrder = true,
+    )
+
+    suspend fun reorderRootBooks(
+        moved: Set<BookIdentity>,
+        destinationIndex: Int,
         failureMessage: String,
     ): Boolean = runCatching {
-        require(shortcut.targetId == null || isWebsiteGroupingEnabled(shortcut.sourceId))
-        val id = shortcut.targetId?.let { libraryMirrorFolderShortcutId(shortcut.sourceId, it) }
-            ?: libraryMirrorShortcutId(shortcut.sourceId)
-        val visible = visibleShortcutIds().filterNot { it == id }.toMutableList()
-        if (pinned) {
-            val sameSourceIndices = visible.mapIndexedNotNull { index, candidate ->
-                index.takeIf {
-                    candidate == libraryMirrorShortcutId(shortcut.sourceId) ||
-                        state.mirrorShortcuts.any { mirror ->
-                            mirror.sourceId == shortcut.sourceId && mirror.targetId?.let { targetId ->
-                                libraryMirrorFolderShortcutId(mirror.sourceId, targetId) == candidate
-                            } == true
-                        }
-                }
-            }
-            visible.add((sameSourceIndices.lastOrNull()?.plus(1) ?: visible.size), id)
+        require(state.isRootProjection && state.sortMode == LibrarySortMode.CUSTOM)
+        val current = currentRootItems()
+        val moving = current.filterIsInstance<LibraryRootItem.Book>().filter { it.entry.book.identity in moved }
+        require(moving.isNotEmpty())
+        val remaining = current.filterNot { item ->
+            item is LibraryRootItem.Book && item.entry.book.identity in moved
+        }.toMutableList()
+        val removedBefore = current.take(destinationIndex.coerceIn(0, current.size)).count { item ->
+            item is LibraryRootItem.Book && item.entry.book.identity in moved
         }
-        persistShortcutOrder(visible, hiddenShortcutIds() - id)
+        remaining.addAll((destinationIndex - removedBefore).coerceIn(0, remaining.size), moving)
+        persistRootSequence(remaining)
+        clearSelection()
         reload(failureMessage)
     }.onFailure {
         collectionMessage = failureMessage
     }.isSuccess
 
-    fun requestShortcutCollectionCreation(
-        moved: Set<BookIdentity>,
-        target: BookIdentity? = null,
-        insertionIndex: Int,
-        replacementShortcutIds: Set<String> = emptySet(),
-    ) {
-        prepareDraggedBooks(moved + listOfNotNull(target))
-        pendingShortcutInsertionIndex = insertionIndex
-        pendingShortcutReplacementIds = replacementShortcutIds
-        state = state.copy(selectionDialog = LibrarySelectionDialog.CREATE_COLLECTION)
-    }
+    suspend fun reorderRootNode(
+        id: String,
+        destinationIndex: Int,
+        failureMessage: String,
+    ): Boolean = runCatching {
+        require(state.isRootProjection && state.sortMode == LibrarySortMode.CUSTOM)
+        val current = currentRootItems()
+        val moving = current.single { it.key == id && it !is LibraryRootItem.Book }
+        val oldIndex = current.indexOf(moving)
+        val remaining = current.filterNot { it.key == id }.toMutableList()
+        val adjusted = (destinationIndex - if (oldIndex in 0 until destinationIndex) 1 else 0)
+            .coerceIn(0, remaining.size)
+        remaining.add(adjusted, moving)
+        persistRootSequence(remaining)
+        reload(failureMessage)
+    }.onFailure {
+        collectionMessage = failureMessage
+    }.isSuccess
 
-    private fun hiddenShortcutIds(): Set<String> = state.shortcutOrder
-        .asSequence()
-        .filter { it.startsWith(HiddenShortcutPrefix) }
-        .mapTo(linkedSetOf()) { it.removePrefix(HiddenShortcutPrefix) }
-
-    private fun visibleShortcutIds(): List<String> {
-        val hidden = hiddenShortcutIds()
-        val available = buildList {
-            addAll(SystemShortcutIds)
-            addAll(collections.map { "collection:${it.collectionId}" })
-            addAll(state.mirrorShortcuts.filter { mirror ->
-                mirror.targetId == null || isWebsiteGroupingEnabled(mirror.sourceId)
-            }.map { mirror ->
-                mirror.targetId?.let { libraryMirrorFolderShortcutId(mirror.sourceId, it) }
-                    ?: libraryMirrorShortcutId(mirror.sourceId)
-            })
-            state.shortcutOrder.filterTo(this) { id ->
-                id.startsWith("book:") && rootEntries.any { libraryBookShortcutId(it.book.identity) == id }
+    private suspend fun persistRootSequence(items: List<LibraryRootItem>) {
+        val bookOrder = items.filterIsInstance<LibraryRootItem.Book>().map { it.entry.book.identity }
+        repository.reorderLibrary(bookOrder)
+        var bookOffset = 0
+        val placements = buildList {
+            items.forEach { item ->
+                when (item) {
+                    is LibraryRootItem.Book -> bookOffset++
+                    is LibraryRootItem.Collection, is LibraryRootItem.Mirror -> add(
+                        LibraryRootNodePreference(item.key, bookOffset),
+                    )
+                }
             }
-        }.distinct().filterNot(hidden::contains).filter { id ->
-            !id.startsWith("mirror") || id in state.shortcutOrder
         }
-        val ordered = state.shortcutOrder.filter { it in available }
-        return ordered + available.filterNot(ordered::contains)
+        preferencesRepository.updateRootNodes(placements)
+        state = state.copy(rootNodePlacements = placements.map { LibraryRootNodePlacement(it.id, it.bookOffset) })
     }
 
-    fun shortcutIndex(id: String): Int = visibleShortcutIds().indexOf(id).coerceAtLeast(0)
-
-    private fun inactiveFolderShortcutIds(): List<String> = state.shortcutOrder.filter { candidate ->
-        state.mirrorShortcuts.any { mirror ->
-            val targetId = mirror.targetId
-            targetId != null && !isWebsiteGroupingEnabled(mirror.sourceId) &&
-                libraryMirrorFolderShortcutId(mirror.sourceId, targetId) == candidate
-        }
-    }
-
-    private suspend fun persistShortcutOrder(visible: List<String>, hidden: Set<String>) {
-        val inactiveFolders = inactiveFolderShortcutIds().filterNot { it in visible || it in hidden }
-        setShortcutOrder(visible.distinct() + inactiveFolders + hidden.sorted().map { "$HiddenShortcutPrefix$it" })
-    }
-
-    fun selectSortDirection(descending: Boolean) {
-        state = state.copy(sortDescending = descending)
-    }
     fun openOrToggleEntry(entry: LibraryEntry) {
         if (state.selectionKind == LibrarySelectionKind.BOOK) {
             toggleBookSelection(entry.book.identity)
@@ -619,8 +751,6 @@ internal class LibraryFlowController private constructor(
             selectedCollectionIds = emptySet(),
             selectionDialog = null,
         )
-        pendingShortcutInsertionIndex = null
-        pendingShortcutReplacementIds = emptySet()
     }
 
     fun toggleAllVisibleSelection() {
@@ -659,13 +789,7 @@ internal class LibraryFlowController private constructor(
     }
 
     fun requestBookDropOnBook(moved: Set<BookIdentity>, target: BookIdentity) {
-        pendingShortcutInsertionIndex = null
-        pendingShortcutReplacementIds = emptySet()
-        state = state.copy(
-            selectionKind = LibrarySelectionKind.BOOK,
-            selectedBookIds = moved + target,
-            selectionDialog = LibrarySelectionDialog.CREATE_COLLECTION,
-        )
+        requestRootCollectionCreation(moved, target)
     }
 
     suspend fun createCollectionFromSelection(title: String, failureMessage: String): Boolean = runCatching {
@@ -685,11 +809,11 @@ internal class LibraryFlowController private constructor(
             ),
             selected,
         )
-        pendingShortcutInsertionIndex?.let { insertionIndex ->
-            val visible = visibleShortcutIds().filterNot(pendingShortcutReplacementIds::contains).toMutableList()
-            visible.add(insertionIndex.coerceIn(0, visible.size), "collection:$collectionId")
-            persistShortcutOrder(visible, hiddenShortcutIds() + pendingShortcutReplacementIds)
-        }
+        val existingPlacements = state.rootNodePlacements
+        val newPlacement = LibraryRootNodePlacement(libraryCollectionRootId(collectionId), 0)
+        val placements = listOf(newPlacement) + existingPlacements.filterNot { it.id == newPlacement.id }
+        preferencesRepository.updateRootNodes(placements.map { LibraryRootNodePreference(it.id, it.bookOffset) })
+        state = state.copy(rootNodePlacements = placements)
         clearSelection()
         reload(failureMessage)
     }.onFailure {
@@ -739,7 +863,8 @@ internal class LibraryFlowController private constructor(
         destinationIndex: Int,
         failureMessage: String,
     ): Boolean = runCatching {
-        require(state.sortMode == LibrarySortMode.CUSTOM && state.filter == SystemLibraryFilter.ALL)
+        require(selectedCollectionId != null && state.sortMode == LibrarySortMode.CUSTOM &&
+            state.filter == SystemLibraryFilter.ALL)
         val current = state.entries.map { it.book.identity }
         val moving = current.filter { it in moved }
         require(moving.isNotEmpty())
@@ -747,13 +872,9 @@ internal class LibraryFlowController private constructor(
         val removedBeforeDestination = current.take(destinationIndex.coerceIn(0, current.size)).count { it in moved }
         val adjustedDestination = (destinationIndex - removedBeforeDestination).coerceIn(0, remaining.size)
         remaining.addAll(adjustedDestination, moving)
-        val collectionId = selectedCollectionId
-        if (collectionId == null) {
-            repository.reorderLibrary(remaining)
-        } else {
-            require(currentCollection()?.kind == CollectionKind.MANUAL)
-            repository.reorderManualMemberships(collectionId, remaining)
-        }
+        val collectionId = requireNotNull(selectedCollectionId)
+        require(currentCollection()?.kind == CollectionKind.MANUAL)
+        repository.reorderManualMemberships(collectionId, remaining)
         clearSelection()
         reload(failureMessage)
     }.isSuccess
@@ -884,8 +1005,7 @@ internal class LibraryFlowController private constructor(
                 SmartField.PROGRESS -> SmartPredicate.ProgressIn(
                     parsedValues.mapTo(linkedSetOf()) { ProgressState.valueOf(it.uppercase()) },
                 )
-                SmartField.UNREAD_UPDATE -> SmartPredicate.HasUnreadUpdate
-                SmartField.SOURCE_UPDATE -> SmartPredicate.HasSourceUpdate
+                SmartField.UNRESOLVED_UPDATE -> SmartPredicate.HasUnresolvedUpdate
                 SmartField.DORMANT_SOURCE -> SmartPredicate.IsDormantSource
             }
             val node = SmartRuleNode.Predicate(predicate)
@@ -894,26 +1014,37 @@ internal class LibraryFlowController private constructor(
         return SmartRule(root = if (matchAll) SmartRuleNode.All(children) else SmartRuleNode.Any(children))
     }
 
+    internal fun savedCallerTab(): SystemLibraryFilter = callerTab
+
     internal companion object {
         private const val MAX_RETAINED_COVER_STATES = 24
 
         fun restored(
             repository: RoomLibraryRepository,
             preferencesRepository: LibraryPreferencesRepository,
+            profileName: String,
             collectionId: String,
             tagDraft: String,
+            filterName: String,
             layoutName: String,
             sortModeName: String,
+
             sortDescending: String,
+            firstVisibleIndex: String,
+            firstVisibleOffset: String,
         ): LibraryFlowController = LibraryFlowController(
             repository,
             preferencesRepository,
+            profileName,
             collectionId.ifEmpty { null },
             tagDraft,
+            runCatching { SystemLibraryFilter.valueOf(filterName) }.getOrDefault(SystemLibraryFilter.ALL),
             runCatching { org.tsuyomi.feature.library.LibraryLayout.valueOf(layoutName) }
                 .getOrDefault(org.tsuyomi.feature.library.LibraryLayout.GRID),
-            runCatching { LibrarySortMode.valueOf(sortModeName) }.getOrDefault(LibrarySortMode.CUSTOM),
+            runCatching { LibrarySortMode.valueOf(sortModeName) }.getOrDefault(LibrarySortMode.SMART),
             sortDescending.toBooleanStrictOrNull() ?: false,
+            firstVisibleIndex.toIntOrNull()?.coerceAtLeast(0) ?: 0,
+            firstVisibleOffset.toIntOrNull()?.coerceAtLeast(0) ?: 0,
         )
     }
 }
@@ -922,30 +1053,40 @@ internal class LibraryFlowController private constructor(
 internal fun rememberLibraryFlowController(
     repository: RoomLibraryRepository,
     preferencesRepository: LibraryPreferencesRepository,
+    profileName: String,
 ): LibraryFlowController {
-    val saver = remember(repository, preferencesRepository) {
+    val saver = remember(repository, preferencesRepository, profileName) {
         listSaver<LibraryFlowController, String>(
             save = {
                 listOf(
                     it.savedCollectionId(),
                     it.tagDraft,
+                    it.savedCallerTab().name,
                     it.state.layout.name,
                     it.state.sortMode.name,
                     it.state.sortDescending.toString(),
+                    it.state.firstVisibleIndex.toString(),
+                    it.state.firstVisibleOffset.toString(),
                 )
             },
             restore = {
                 LibraryFlowController.restored(
                     repository,
                     preferencesRepository,
+                    profileName,
                     it[0],
                     it[1],
                     it[2],
                     it[3],
                     it[4],
+                    it[5],
+                    it[6],
+                    it[7],
                 )
             },
         )
     }
-    return rememberSaveable(saver = saver) { LibraryFlowController(repository, preferencesRepository) }
+    return rememberSaveable(saver = saver) {
+        LibraryFlowController(repository, preferencesRepository, profileName)
+    }
 }

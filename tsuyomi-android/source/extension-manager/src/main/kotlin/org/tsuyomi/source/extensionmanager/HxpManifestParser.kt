@@ -134,7 +134,7 @@ internal object HxpManifestParser {
     }
 
     private fun parseCapabilities(value: JsonObject): HxpCapabilities {
-        value.requireKeys(setOf("network", "cookies", "webLogin", "remoteLibrary", "storage"), setOf("home"))
+        value.requireKeys(setOf("network", "cookies", "webLogin", "remoteLibrary", "storage"), setOf("home", "updateCheck"))
         val network = value.obj("network").also {
             it.requireKeys(setOf("origins", "maxConcurrentRequests", "requestTimeoutMs", "maxResponseBytes"))
         }
@@ -161,6 +161,7 @@ internal object HxpManifestParser {
         val homeEnabled = value["home"]?.asObject()?.also {
             it.requireKeys(setOf("enabled"))
         }?.bool("enabled") ?: false
+        val updateCheck = value["updateCheck"]?.asObject()?.let { parseUpdateCheck(it, networkOrigins) }
 
         val remoteLibrary = value.obj("remoteLibrary").also {
             it.requireKeys(setOf("read", "writeOperations"), setOf("policies"))
@@ -179,6 +180,55 @@ internal object HxpManifestParser {
             home = HxpHomeCapability(enabled = homeEnabled),
             remoteLibrary = HxpRemoteLibraryCapability(read = read, writeOperations = writes, policies = policies),
             storageQuotaBytes = storage.int("quotaBytes").inRange(0, 10_485_760),
+            updateCheck = updateCheck,
+        )
+    }
+
+    private fun parseUpdateCheck(
+        value: JsonObject,
+        networkOrigins: Set<HttpsOrigin>,
+    ): HxpUpdateCheckCapability {
+        value.requireKeys(
+            required = setOf("version", "origin", "method", "path", "parameters"),
+            optional = setOf("referrerPath"),
+        )
+        if (value.int("version") != 2 || value.string("method") != NetworkMethod.GET.name) {
+            fail(HxpVerificationError.CAPABILITY_POLICY_VIOLATION)
+        }
+        val origin = runCatching { HttpsOrigin(value.string("origin")) }
+            .getOrElse { fail(HxpVerificationError.INVALID_MANIFEST) }
+        if (origin !in networkOrigins) fail(HxpVerificationError.CAPABILITY_POLICY_VIOLATION)
+        val path = value.string("path")
+        if (!path.startsWith('/') || '?' in path || '#' in path || path.length > 1024) {
+            fail(HxpVerificationError.INVALID_MANIFEST)
+        }
+        val referrerPath = value.optionalString("referrerPath")
+        if (referrerPath != null && (!referrerPath.startsWith('/') || '?' in referrerPath || '#' in referrerPath || referrerPath.length > 1024)) {
+            fail(HxpVerificationError.INVALID_MANIFEST)
+        }
+        val parametersObject = value.obj("parameters")
+        if (parametersObject.size !in 1..16) fail(HxpVerificationError.INVALID_MANIFEST)
+        val parameters = parametersObject.entries.sortedBy { it.key }.map { (name, rule) ->
+            if (name.isBlank() || name.codePointCount(0, name.length) > 256) fail(HxpVerificationError.INVALID_MANIFEST)
+            val ruleObject = rule.asObject()
+            when (ruleObject.string("kind")) {
+                "fixed" -> {
+                    ruleObject.requireKeys(setOf("kind", "value"))
+                    HxpRemoteParameter.Fixed(name, ruleObject.string("value").bounded(0, 8192))
+                }
+                "remoteBookId" -> {
+                    ruleObject.requireKeys(setOf("kind"))
+                    HxpRemoteParameter.RemoteBookId(name)
+                }
+                else -> fail(HxpVerificationError.CAPABILITY_POLICY_VIOLATION)
+            }
+        }
+        if (parameters.count { it is HxpRemoteParameter.RemoteBookId } != 1) {
+            fail(HxpVerificationError.CAPABILITY_POLICY_VIOLATION)
+        }
+        return HxpUpdateCheckCapability(
+            version = 2,
+            policy = HxpUpdateCheckPolicy(origin, path, referrerPath, parameters),
         )
     }
 

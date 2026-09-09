@@ -9,13 +9,14 @@ import org.tsuyomi.shared.sourcecontract.HttpsOrigin
 import org.tsuyomi.shared.sourcecontract.NetworkMethod
 import org.tsuyomi.shared.sourcecontract.SourceNetworkRequest
 
-/** Host-minted policy for one remote-library transport operation. */
+/** Host-minted policy for one signed source transport operation. */
 enum class SourceOperationKind {
     REMOTE_LIBRARY_READ,
     REMOTE_LIBRARY_TARGETS,
     REMOTE_LIBRARY_ADD,
     REMOTE_LIBRARY_REMOVE,
     REMOTE_LIBRARY_MOVE,
+    UPDATE_CHECK,
 }
 
 /** A signed, exact redirect destination for one remote-library operation. */
@@ -57,8 +58,8 @@ data class RemoteOperationRequestPolicy(
 }
 
 /**
- * Only host code may create this after resolving immutable manifest policy and direct user intent.
- * [cursor] is null on the first page and becomes the opaque host-observed cursor thereafter.
+ * Only host code may create this after resolving immutable manifest policy and current operation
+ * authorization. [cursor] is only used by paginated remote-library reads.
  */
 class SourceOperationContext internal constructor(
     val kind: SourceOperationKind,
@@ -78,6 +79,8 @@ class SourceOperationContext internal constructor(
         require(kind == SourceOperationKind.REMOTE_LIBRARY_MOVE || targetId == null)
         require(kind !in setOf(SourceOperationKind.REMOTE_LIBRARY_READ, SourceOperationKind.REMOTE_LIBRARY_TARGETS) || remoteBookId == null)
         require(kind != SourceOperationKind.REMOTE_LIBRARY_TARGETS || cursor == null)
+        require(kind != SourceOperationKind.UPDATE_CHECK || !remoteBookId.isNullOrBlank())
+        require(kind != SourceOperationKind.UPDATE_CHECK || cursor == null && targetId == null && directActionToken == null)
         require(cursor == null || cursor.isNotBlank())
     }
 
@@ -130,6 +133,9 @@ fun remoteLibraryReadContext(policy: RemoteOperationRequestPolicy, cursor: Strin
 
 fun remoteLibraryTargetsContext(policy: RemoteOperationRequestPolicy): SourceOperationContext =
     SourceOperationContext(SourceOperationKind.REMOTE_LIBRARY_TARGETS, policy)
+
+fun updateCheckContext(policy: RemoteOperationRequestPolicy, remoteBookId: String): SourceOperationContext =
+    SourceOperationContext(SourceOperationKind.UPDATE_CHECK, policy, remoteBookId = remoteBookId)
 
 fun remoteLibraryAddContext(
     policy: RemoteOperationRequestPolicy,

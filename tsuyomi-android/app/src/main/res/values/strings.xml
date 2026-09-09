@@ -3,6 +3,7 @@
 <resources>
     <string name="app_name">月读</string>
     <string name="nav_library">书架</string>
+    <string name="title_library_search">搜索书架</string>
     <string name="nav_browse">浏览</string>
     <string name="nav_more">更多</string>
     <string name="title_display_settings">显示</string>
@@ -17,6 +18,10 @@
     <string name="title_source_home_verification">登录验证</string>
     <string name="title_source_home_refresh">刷新当前目录</string>
     <string name="title_collections">本地集合</string>
+    <string name="title_updates_settings">更新设置</string>
+    <string name="updates_notification_channel">更新检查</string>
+    <string name="updates_notification_running">正在检查更新</string>
+    <string name="updates_notification_cancel">取消</string>
     <string name="title_library_tags">标签</string>
     <string name="collection_saved">集合已保存。</string>
     <string name="collection_invalid">规则或集合名称无效，未保存。</string>
@@ -25,11 +30,7 @@
     <string name="title_book_directory">章节目录</string>
     <string name="title_reader">阅读</string>
     <string name="title_verification">手动登录或验证</string>
-    <string name="verification_atlas_title">登录验证</string>
-    <string name="verification_atlas_subtitle">%1$s · %2$s</string>
-    <string name="verification_host_notice">此验证由宿主应用发起。页面内容由 %1$s 提供；Tsuyomi 不记录你在页面中的任何输入。</string>
-    <string name="verification_status_waiting">状态：等待你在页面中完成验证</string>
-    <string name="verification_webview_caption">受控网页视图仅允许此内容源声明的 HTTPS 站点。“保存会话并返回”只保存匹配站点的加密登录状态，不会重试来源操作；操作失败页可打开对应页面并使用当前页面。</string>
+    <string name="verification_host_identity">受控网页 · %1$s</string>
     <string name="verification_complete_action">保存会话并返回</string>
     <string name="verification_cancel_action">取消验证</string>
     <string name="verification_open_home_page">打开对应主页</string>
@@ -56,6 +57,7 @@
     <string name="title_remote_library">网站收藏</string>
     <string name="remote_library_copy_result">已复制 %1$d 本，新增 %2$d 本到本地书架；未向网站写入。</string>
     <string name="transfer_recovery_working">正在核对内部导入记录并继续未完成的步骤。</string>
+    <string name="updates_loading_settings">正在读取更新设置</string>
     <string name="transfer_recovery_blocked">内部恢复文件缺失或校验失败。可重试恢复，或在尚未合并书库时放弃此次导入。</string>
     <string name="transfer_reading_file">正在按 32 MiB 上限读取并检查文件。</string>
     <string name="transfer_import_failed_code">文件未通过检查：%1$s</string>

@@ -52,7 +52,7 @@ internal object SmartShelfQueryCompiler {
             is SmartPredicate.StatusIn -> predicate.statuses.size
             is SmartPredicate.RatingBetween -> (if (predicate.minimum != null) 1 else 0) + (if (predicate.maximum != null) 1 else 0)
             is SmartPredicate.AddedWithinDays, is SmartPredicate.LastReadWithinDays, is SmartPredicate.MetadataUpdatedWithinDays -> 1
-            is SmartPredicate.ProgressIn, SmartPredicate.HasUnreadUpdate, SmartPredicate.HasSourceUpdate, SmartPredicate.IsDormantSource -> 0
+            is SmartPredicate.ProgressIn, SmartPredicate.HasUnresolvedUpdate, SmartPredicate.IsDormantSource -> 0
         }
     }
 
@@ -91,8 +91,7 @@ internal object SmartShelfQueryCompiler {
         }
         is SmartPredicate.MetadataUpdatedWithinDays -> withinDays("b.metadata_updated_at_epoch_second", predicate.days, arguments, now)
         is SmartPredicate.ProgressIn -> progressClause(predicate.states)
-        SmartPredicate.HasUnreadUpdate -> "b.has_unread_update = 1"
-        SmartPredicate.HasSourceUpdate -> "b.source_update_key IS NOT NULL"
+        SmartPredicate.HasUnresolvedUpdate -> "EXISTS (SELECT 1 FROM unresolved_updates u WHERE u.source_id = le.source_id AND u.remote_book_id = le.remote_book_id)"
         SmartPredicate.IsDormantSource -> "sa.available IS NOT 1"
     }
 

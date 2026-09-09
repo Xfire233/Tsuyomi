@@ -22,6 +22,7 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalWindowInfo
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.paneTitle
 import androidx.compose.ui.semantics.semantics
@@ -35,6 +36,8 @@ data class TsuyomiTopBarAction(
     val icon: ImageVector,
     val label: String,
     val onClick: () -> Unit,
+    val menu: List<TsuyomiOverflowAction> = emptyList(),
+    val testTag: String? = null,
 )
 
 /**
@@ -52,14 +55,17 @@ fun TsuyomiTopBar(
     navigationContentDescription: String? = null,
     actions: List<TsuyomiTopBarAction> = emptyList(),
     overflow: List<TsuyomiOverflowAction> = emptyList(),
+    maxVisibleActions: Int? = null,
 ) {
     val narrowWindow = with(LocalDensity.current) {
         LocalWindowInfo.current.containerSize.width.toDp() < 360.dp
     }
-    val actionBudget = if (narrowWindow) 2 else 3
+    val actionBudget = maxVisibleActions ?: if (narrowWindow) 2 else 3
     val visibleActions = actions.take(actionBudget)
-    val foldedActions = actions.drop(actionBudget).map { action ->
-        TsuyomiOverflowAction(action.label, action.onClick, action.icon)
+    val foldedActions = actions.drop(actionBudget).flatMap { action ->
+        action.menu.ifEmpty {
+            listOf(TsuyomiOverflowAction(action.label, action.onClick, action.icon))
+        }
     }
     TopAppBar(
         title = {
@@ -88,7 +94,16 @@ fun TsuyomiTopBar(
         },
         actions = {
             visibleActions.forEach { action ->
-                TsuyomiIconButton(action.icon, action.label, action.onClick)
+                if (action.menu.isEmpty()) {
+                    TsuyomiIconButton(action.icon, action.label, action.onClick)
+                } else {
+                    TsuyomiOverflowMenu(
+                        actions = action.menu,
+                        contentDescription = action.label,
+                        modifier = action.testTag?.let { tag -> Modifier.testTag(tag) } ?: Modifier,
+                        triggerIcon = action.icon,
+                    )
+                }
             }
             TsuyomiOverflowMenu(
                 actions = foldedActions + overflow,

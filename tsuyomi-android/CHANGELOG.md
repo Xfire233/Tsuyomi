@@ -29,6 +29,13 @@ All notable changes use semantic versioning. Future Phase baselines use annotate
   - Operation-specific `ADD`/`MOVE`/`REMOVE` authorization, separately signed target discovery, cancellation-safe retry and process-resumable targeted ADD→MOVE.
   - Local-only COPY and ordinary `加入书架`, with website actions and persistent outcomes kept visually and semantically distinct.
 - `tsuyomi-transfer` v2 export with strict v1/v2 import, completed chapter IDs and expanded reader preferences.
+- Phase 4C local update inbox and optional scheduling:
+  - Signed, read-only `update-check-v2` and Wenku8 ordered-directory evidence; the first trusted baseline is silent, and ambiguous directory changes preserve pending updates.
+  - Room v9 sessions, fenced recovery, incremental inbox, bounded reports, per-book/source exclusions and exact-anchor handling/Undo.
+  - Default-off WorkManager schedules with persistent constraints and in-app progress/results/cancellation even when notifications are denied.
+  - Library-native cover grid, cover list and compact layouts; canonical Detail focus and direct reading also work for mirror-only books without creating local pins.
+  - Automatic handling requires durable completion of every admitted new chapter, never a locator or only the last chapter.
+- Dedicated local Library search with latest-wins metadata/folder matching, bounded recommendations and immediate explicit submission; source search remains separate.
 
 ### Changed
 
@@ -46,7 +53,11 @@ All notable changes use semantic versioning. Future Phase baselines use annotate
 - Remote mutation recovery now keeps operation and state from one reconciliation record, makes pre-acceptance cancelled ADD retryable, cancels complete acknowledged MOVE/REMOVE retry chains, and preserves operation-specific receipts across package restoration.
 - Remote target decoding now rejects malformed, duplicate, oversized, cross-source, unsupported, and invalid-parent collections as typed source failures instead of leaking model-constructor exceptions.
 - Transfer v2 now requires `completedChapterIds` to be an explicit bounded array of unique nonblank strings without tightening legacy v1 author/tag/shelf values.
+- Shared segmented selectors now constrain their dividers to intrinsic content height instead of consuming a weighted list's viewport.
 - Android CI planning now computes reverse transitive Gradle consumers and selects their existing unit, screenshot, and API 29 instrumentation families for shared production changes.
+- Update-check reports preserve source error category, host stage and bounded safe diagnostic code instead of collapsing failures to an uninformative message; raw exception messages, URLs, credentials and response bodies remain excluded.
+- Detail's destination dropdown puts website actions before all local manual collections so long local lists cannot bury a frequent remote action; preserves immediate independent actions and the complete local list without extra menu levels.
+- Detail's SplitButton primary is text-only, with no redundant bookshelf icon or icon spacer; compact 12dp horizontal padding and content-sized fallback preserve full labels and the 48dp disclosure target.
 
 ## [0.1.0] - 2026-08-09
 

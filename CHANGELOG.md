@@ -5,6 +5,7 @@
 
 ## Unreleased
 
+- Added a repository-owned context-router Skill with bounded trigger/bypass rules, existing-authority routing, versioned cross-session discovery fallback, and adoption gated on preserved answer quality plus measured time and token savings.
 - Consolidated Android, protocol, and extension components into one public monorepo.
 - Preserved independent component versions and path-scoped quality workflows.
 - Added public provenance, licensing boundaries, and local-only development-state rules.

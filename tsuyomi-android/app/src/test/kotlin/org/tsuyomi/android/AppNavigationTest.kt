@@ -16,6 +16,7 @@ class AppNavigationTest {
     fun nestedRoutesMapToTheirStableRoot() {
         mapOf(
             Routes.Collections to Routes.Library,
+            Routes.LibrarySearch to Routes.Library,
             Routes.Reader to Routes.Browse,
             Routes.Transfer to Routes.More,
             Routes.Library to Routes.Library,
@@ -35,7 +36,7 @@ class AppNavigationTest {
             Routes.Verification,
             Routes.RemoteLibrary,
         ).forEach { route -> assertTrue(route, routeOwnsSourceFlow(route)) }
-        listOf(Routes.Library, Routes.Transfer).forEach { route ->
+        listOf(Routes.Library, Routes.LibrarySearch, Routes.Transfer).forEach { route ->
             assertFalse(route, routeOwnsSourceFlow(route))
         }
     }
@@ -51,7 +52,7 @@ class AppNavigationTest {
         ).forEach { (route, expectedTarget) ->
             assertEquals(route, expectedTarget, restorationTargetForRoute(route))
         }
-        listOf(Routes.Browse, Routes.Library).forEach { route ->
+        listOf(Routes.Browse, Routes.Library, Routes.LibrarySearch).forEach { route ->
             assertNull(route, restorationTargetForRoute(route))
         }
     }

@@ -9,7 +9,7 @@ A book is the host record keyed by `(sourceId, remoteBookId)`. A collection is a
 
 | Collection kind | Membership source | Phase 0–3 behavior |
 |---|---|---|
-| System | fixed host query | All, Continue reading, Recent reading, Unread updates, Dormant sources |
+| System | fixed host query | Continue reading and Read Later are fixed Library tabs; only Read Later accepts direct membership writes |
 | Manual | `collection_book` many-to-many relation | create, reorder, nest for presentation, multi-select add/remove |
 | Smart | validated local rule compiled to Room query | create, edit, observe live result; no stored result list |
 | Subscription | source discovery intent + observed candidate ledger | data model only; direct user refresh after compatible source contract |
@@ -30,10 +30,12 @@ collection_refresh_run(id, collectionId, startedAt, completedAt?, completeness, 
 - `collection_book` is unique on `(collectionId, sourceId, remoteBookId)`.
 - Manual collection ordering is stable and repaired transactionally after moves/deletes.
 - Parent graph is acyclic and presentation depth is capped at two levels.
-- System collection identities/query definitions cannot be renamed or deleted. Their Library presentation nodes are default-created but may be hidden, rebuilt and reordered; only Read Later accepts direct membership writes.
+- System projections have fixed host identities and query definitions and cannot be renamed, deleted, hidden or reordered. Continue reading and Read Later are fixed tabs rather than root content nodes; only Read Later accepts direct membership writes. Recent-reading and dormant-source semantics remain available to local sort, recommendation, filter and smart-rule owners instead of separate system nodes.
 - Smart collections cannot receive direct membership writes.
 - Candidate deletion in replace mode requires a completed run marked complete.
 - Source uninstall makes related book rows dormant; it does not delete collection relations.
+- The Library root projection is a typed ordered sequence of books, local collections and source website-mirror roots. A book identity appears at most once. Rule sorts keep structural nodes first and sort only the book range; custom/manual order alone may intermix all root types.
+- Every installed website-library-capable source and every retained source with local mirror state contributes exactly one default-visible mirror-root identity. Remote folders remain source state inside that mirror route and never become Library-root identities.
 
 ## Smart rule language
 

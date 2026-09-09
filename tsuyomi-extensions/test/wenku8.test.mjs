@@ -15,6 +15,7 @@ import {
   buildRemoteLibraryRequest,
   buildHomeRequest,
   parseChapter,
+  buildUpdateCheckV2Request,
   parseDetail,
   parseDirectory,
   parseSearch,
@@ -27,6 +28,7 @@ import {
   buildRemoteLibraryTargetsRequest,
   parseRemoteLibraryTargets,
   parseHome,
+  parseUpdateCheckV2,
 } from '../dist/modules/wenku8/index.mjs';
 
 const fixture = (name) => readFile(new URL(`../fixtures/wenku8/${name}.html`, import.meta.url), 'utf8');
@@ -150,6 +152,72 @@ test('directory preserves order and deduplicates by stable chapter identity', as
     { chapterId: '10001', title: '第一章 雾中的灯塔', url: 'https://www.wenku8.net/modules/article/reader.php?aid=1234&cid=10001', volumeTitle: '第一卷' },
     { chapterId: '10002', title: '第二章 旧船票', url: 'https://www.wenku8.net/modules/article/reader.php?aid=1234&cid=10002', volumeTitle: '第一卷' },
   ]);
+});
+
+test('update-check-v2 uses its signed read-only directory request and emits no raw chapter payload', async () => {
+  assert.deepEqual(buildUpdateCheckV2Request('1234'), {
+    url: 'https://www.wenku8.net/modules/article/reader.php',
+    query: [{ name: 'aid', value: '1234' }],
+    queryEncoding: 'utf-8',
+    method: 'GET',
+    headers: { Accept: 'text/html,application/xhtml+xml' },
+    decode: 'gb18030',
+    cache: 'network-only',
+  });
+  const baseline = parseUpdateCheckV2(await fixture('directory'), '1234');
+  assert.equal(baseline.complete, true);
+  assert.equal(baseline.order, 'source');
+  assert.deepEqual(baseline.chapters.map((chapter) => chapter.chapterId), ['10001', '10002']);
+  assert.equal('url' in baseline.chapters[0], false);
+  assert.equal(baseline.lastUpdatedDate, null);
+
+  const appended = parseUpdateCheckV2(await fixture('update-directory-appended'), '1234');
+  assert.deepEqual(appended.chapters.map((chapter) => chapter.chapterId), ['10001', '10002', '10003']);
+  assert.equal(appended.lastUpdatedDate, '2026-09-07');
+  const reordered = parseUpdateCheckV2(await fixture('update-directory-reordered'), '1234');
+  assert.deepEqual(reordered.chapters.map((chapter) => chapter.chapterId), ['10002', '10001', '10003']);
+  assert.equal(
+    classifyPage(await fixture('update-directory-appended'), 'https://www.wenku8.net/modules/article/reader.php?aid=1234', 'update-check', '1234'),
+    'ok',
+  );
+  const challenge = await fixture('challenge');
+  const wrongIdentity = await fixture('update-directory-wrong-identity');
+  const partial = await fixture('update-directory-partial');
+  const truncated = await fixture('update-directory-truncated-with-chapter');
+  const paginated = await fixture('update-directory-paginated');
+  const noncanonical = await fixture('update-directory-noncanonical');
+  assert.equal(classifyPage(challenge, 'https://www.wenku8.net/modules/article/reader.php?aid=1234', 'update-check', '1234'), 'verification-required');
+  assert.equal(classifyPage(truncated, 'https://www.wenku8.net/modules/article/reader.php?aid=1234', 'update-check', '1234'), 'malformed');
+  assert.equal(classifyPage(paginated, 'https://www.wenku8.net/modules/article/reader.php?aid=1234', 'update-check', '1234'), 'malformed');
+  assert.equal(classifyPage(noncanonical, 'https://www.wenku8.net/modules/article/reader.php?aid=1234', 'update-check', '1234'), 'malformed');
+  assert.throws(() => parseUpdateCheckV2('<html><body><div id="list"></div></body></html>', '1234'), /INCOMPLETE_UPDATE_DIRECTORY/);
+  assert.throws(() => parseUpdateCheckV2(wrongIdentity, '1234'), /INCOMPLETE_UPDATE_DIRECTORY/);
+  assert.throws(() => parseUpdateCheckV2(partial, '1234'), /INCOMPLETE_UPDATE_DIRECTORY/);
+  assert.throws(() => parseUpdateCheckV2(truncated, '1234'), /INCOMPLETE_UPDATE_DIRECTORY/);
+  assert.throws(() => parseUpdateCheckV2(paginated, '1234'), /INCOMPLETE_UPDATE_DIRECTORY/);
+  assert.throws(() => parseUpdateCheckV2(noncanonical, '1234'), /INCOMPLETE_UPDATE_DIRECTORY/);
+  assert.deepEqual(parseDirectory(truncated, '1234').chapters.map((chapter) => chapter.chapterId), ['10001', '10002', '10003']);
+  assert.throws(() => buildUpdateCheckV2Request('9999999999999'), /INVALID_BOOK_ID/);
+});
+
+test('update checks admit the standalone css directory without unrelated links and reject incomplete or ambiguous tables', async () => {
+  const html = await fixture('update-directory-dynamic');
+  const url = 'https://www.wenku8.net/modules/article/reader.php?aid=1234';
+  assert.equal(classifyPage(html, url, 'update-check', '1234'), 'ok');
+  assert.deepEqual(parseUpdateCheckV2(html, '1234').chapters.map(({ chapterId }) => chapterId), ['10001', '10002']);
+  const invalidDocuments = [
+    html.replace('</table>\n<div id="adbottom">', '<div id="adbottom">'),
+    html.replace('</html>', ''),
+    html.replace('class="recommendations"', 'class="css"'),
+    html.replace('class="css"', 'class="css-other"'),
+    html.replace('</body>', '<a href="?page=2">下一页</a></body>'),
+    html.replaceAll('aid=1234', 'aid=9999'),
+  ];
+  for (const invalid of invalidDocuments) {
+    assert.equal(classifyPage(invalid, url, 'update-check', '1234'), 'malformed');
+    assert.throws(() => parseUpdateCheckV2(invalid, '1234'), /INCOMPLETE_UPDATE_DIRECTORY/);
+  }
+  assert.equal(classifyPage(html, url.replace('1234', '9999'), 'update-check', '1234'), 'malformed');
 });
 
 test('chapter emits ordered structured paragraphs and excludes navigation chrome', async () => {

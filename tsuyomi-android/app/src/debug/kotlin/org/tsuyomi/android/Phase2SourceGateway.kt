@@ -36,6 +36,8 @@ internal object Phase2SourceGateway {
     private val requireNextDetailVerification = AtomicBoolean()
     private val requireNextChapterVerification = AtomicBoolean()
     private val websiteMutations = AtomicInteger()
+    private val appendedUpdateDirectory = AtomicBoolean()
+    private val shortUpdateBaselineDirectory = AtomicBoolean()
 
     fun resetOperationCounts() {
         sourceRequests.set(0)
@@ -50,6 +52,8 @@ internal object Phase2SourceGateway {
         requireNextDetailVerification.set(false)
         requireNextChapterVerification.set(false)
         websiteMutations.set(0)
+        appendedUpdateDirectory.set(false)
+        shortUpdateBaselineDirectory.set(false)
     }
 
     fun remoteLibraryReadCount(): Int = remoteLibraryReads.get()
@@ -63,6 +67,17 @@ internal object Phase2SourceGateway {
     fun chapterRequestCount(): Int = chapterRequests.get()
     fun liveTransportRequestCount(): Int = liveTransportRequests.get()
     fun websiteMutationCount(): Int = websiteMutations.get()
+    /** Test-only mode remains active through Detail and Reader until reset in the fixture teardown. */
+    fun useAppendedUpdateDirectory() {
+        shortUpdateBaselineDirectory.set(false)
+        appendedUpdateDirectory.set(true)
+    }
+
+    /** Supplies one trusted chapter before [useAppendedUpdateDirectory] exercises an exact two-chapter delta. */
+    fun useShortUpdateBaselineDirectory() {
+        appendedUpdateDirectory.set(false)
+        shortUpdateBaselineDirectory.set(true)
+    }
 
     fun requireVerificationForNextHomeRequest() {
         requireNextHomeVerification.set(true)
@@ -150,6 +165,12 @@ internal object Phase2SourceGateway {
             if (chapterRequest && requireNextChapterVerification.compareAndSet(true, false)) {
                 return@HostHttpTransport fixtureResponse(context, request.url, "challenge.html")
             }
+            val appendedDirectoryRequest = request.method == NetworkMethod.GET &&
+                request.url.toString() == APPENDED_DIRECTORY_URL
+            val appendedChapterRequest = request.method == NetworkMethod.GET &&
+                request.url.toString() == APPENDED_CHAPTER_URL
+            val shortBaselineDirectoryRequest = request.method == NetworkMethod.GET &&
+                request.url.toString() == APPENDED_DIRECTORY_URL
             val fixture = when {
                 request.url.path == "/modules/article/addbookcase.php" -> "remote-add-applied.html"
                 request.url.path == "/modules/article/bookcase.php" && request.method == NetworkMethod.POST ->
@@ -169,11 +190,13 @@ internal object Phase2SourceGateway {
                     request.url.rawQuery.orEmpty().split('&').contains("searchtype=author") -> "search-author.html"
                 request.url.path.contains("search.php") -> "search.html"
                 request.url.path == "/modules/article/articleinfo.php" -> "detail.html"
+                appendedChapterRequest && appendedUpdateDirectory.get() -> "update-chapter-appended.html"
                 request.url.path == "/modules/article/reader.php" &&
                     request.url.rawQuery.orEmpty().split('&').any { it == "cid=10002" } -> "chapter-2.html"
                 request.url.path == "/modules/article/reader.php" &&
                     request.url.rawQuery.orEmpty().contains("cid=") -> "chapter.html"
-                request.url.path == "/modules/article/reader.php" -> "directory.html"
+                appendedDirectoryRequest && appendedUpdateDirectory.get() -> "update-directory-appended.html"
+                shortBaselineDirectoryRequest && shortUpdateBaselineDirectory.get() -> "update-directory-first-chapter.html"
                 request.url.path.startsWith("/book/") -> "detail.html"
                 request.url.path.endsWith("/index.htm") -> "directory.html"
                 else -> "chapter.html"
@@ -182,6 +205,12 @@ internal object Phase2SourceGateway {
         }
         return SourceGatewayFactory.create(context, packageInfo, transport, directActionTokens)
     }
+
+    fun createSession(
+        context: Context,
+        packageInfo: VerifiedHxpPackage,
+        directActionTokens: DirectActionTokenRegistry,
+    ): Pair<HostNetworkGateway, HostNetworkGateway?> = create(context, packageInfo, directActionTokens) to null
 
     fun createVerifiedPage(
         context: Context,
@@ -213,4 +242,6 @@ internal object Phase2SourceGateway {
 
     private const val LIVE_TRANSPORT_MARKER = "live-wenku8-transport.enabled"
     private const val PRIOR_FAILED_SEARCH_MARKER = "live-wenku8-prior-search.url"
+    private const val APPENDED_DIRECTORY_URL = "https://www.wenku8.net/modules/article/reader.php?aid=1234"
+    private const val APPENDED_CHAPTER_URL = "https://www.wenku8.net/modules/article/reader.php?aid=1234&cid=10003"
 }

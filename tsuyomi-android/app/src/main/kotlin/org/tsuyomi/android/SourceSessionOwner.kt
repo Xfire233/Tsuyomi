@@ -273,11 +273,9 @@ internal class SourceSessionOwner(
             context: android.content.Context,
             directActionTokens: DirectActionTokenRegistry,
         ): suspend (VerifiedHxpPackage) -> SourceFlowSession = { packageInfo ->
+            val (native, verifiedGet) = Phase2SourceGateway.createSession(context, packageInfo, directActionTokens)
             ExtensionSourceFlowSession(
-                delegate = SourceExtensionClient.open(
-                    packageInfo,
-                    Phase2SourceGateway.create(context, packageInfo, directActionTokens),
-                ),
+                delegate = SourceExtensionClient.open(packageInfo, native, verifiedGet),
                 verifiedPageClient = { snapshot ->
                     SourceExtensionClient.open(
                         packageInfo,

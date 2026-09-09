@@ -30,6 +30,11 @@ for (const { label, schemaPath, fixturePath } of [
     schemaPath: '../schemas/hxp-manifest-v1.schema.json',
     fixturePath: '../fixtures/hxp/valid-minimal-manifest.json',
   },
+  {
+    label: 'hxp update check v2',
+    schemaPath: '../schemas/hxp-update-check-v2.schema.json',
+    fixturePath: '../fixtures/hxp/valid-update-check-v2.json',
+  },
 ]) {
   test(`${label} accepts its valid fixture`, async () => {
     const ajv = createAjv();
@@ -81,6 +86,38 @@ test('hxp manifest v1 keeps source Home optional and rejects source-controlled l
   const injectedLayout = await loadJson('../fixtures/hxp/valid-minimal-manifest.json');
   injectedLayout.capabilities.home.layout = 'source-controlled';
   assert.equal(validate(injectedLayout), false);
+});
+
+test('hxp update check v2 requires explicit complete source-order evidence', async () => {
+  const ajv = createAjv();
+  const validate = ajv.compile(await loadJson('../schemas/hxp-update-check-v2.schema.json'));
+  assert.equal(validate(await loadJson('../fixtures/hxp/valid-update-check-v2.json')), true, ajv.errorsText(validate.errors));
+  for (const fixture of [
+    'invalid-update-check-v2-raw-url.json',
+    'invalid-update-check-v2-incomplete.json',
+    'invalid-update-check-v2-missing-order.json',
+  ]) {
+    assert.equal(validate(await loadJson(`../fixtures/hxp/${fixture}`)), false, fixture);
+  }
+});
+
+test('hxp manifest v1 permits only the signed read-only update check grammar', async () => {
+  const ajv = createAjv();
+  const validate = ajv.compile(await loadJson('../schemas/hxp-manifest-v1.schema.json'));
+  const manifest = await loadJson('../fixtures/hxp/valid-minimal-manifest.json');
+  manifest.capabilities.updateCheck = {
+    version: 2,
+    origin: 'https://www.wenku8.net',
+    method: 'GET',
+    path: '/modules/article/reader.php',
+    parameters: { aid: { kind: 'remoteBookId' } },
+  };
+  assert.equal(validate(manifest), true, ajv.errorsText(validate.errors));
+  manifest.capabilities.updateCheck.method = 'POST';
+  assert.equal(validate(manifest), false);
+  manifest.capabilities.updateCheck.method = 'GET';
+  manifest.capabilities.updateCheck.parameters.aid = { kind: 'cursor' };
+  assert.equal(validate(manifest), false);
 });
 
 test('hxp manifest v1 requires signed policies for remote read, targets, and writes', async () => {

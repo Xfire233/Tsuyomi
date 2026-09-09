@@ -16,6 +16,24 @@ const createAjv = () => {
 const compare = (left, right) => (left < right ? -1 : left > right ? 1 : 0);
 const transferMaxBytes = 32 * 1024 * 1024;
 
+const updateCheckIssues = (document) => {
+  const issues = [];
+  if (document.complete !== true) issues.push('incomplete-evidence');
+  if (document.order !== 'source') issues.push('non-source-order');
+  const chapterIds = new Set();
+  for (const chapter of document.chapters) {
+    if (chapterIds.has(chapter.chapterId)) issues.push(`duplicate-chapter:${chapter.chapterId}`);
+    chapterIds.add(chapter.chapterId);
+  }
+  if (document.lastUpdatedDate !== null) {
+    const parsed = new Date(`${document.lastUpdatedDate}T00:00:00.000Z`);
+    if (Number.isNaN(parsed.valueOf()) || parsed.toISOString().slice(0, 10) !== document.lastUpdatedDate) {
+      issues.push('invalid-calendar-date');
+    }
+  }
+  return issues;
+};
+
 const transferIssues = (document) => {
   const issues = [];
   if (Buffer.byteLength(JSON.stringify(document), 'utf8') > transferMaxBytes) issues.push('document-size');
@@ -165,6 +183,14 @@ test('HXP host API requires query and queryEncoding together', async () => {
   request.queryEncoding = 'gb18030';
   delete request.query;
   assert.equal(validate(request), false);
+});
+
+test('update-check-v2 semantic conformance admits normalized evidence only', async () => {
+  const valid = await loadJson('../fixtures/hxp/valid-update-check-v2.json');
+  const invalid = await loadJson('../fixtures/hxp/invalid-update-check-v2-duplicate.json');
+  assert.deepEqual(updateCheckIssues(valid), []);
+  assert.ok(updateCheckIssues(invalid).includes('duplicate-chapter:10001'));
+  assert.ok(updateCheckIssues(invalid).includes('invalid-calendar-date'));
 });
 
 test('HXP manifest semantic origins keep cookie and WebView scope within network scope', async () => {

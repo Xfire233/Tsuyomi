@@ -71,6 +71,8 @@ fun BookDetailScreen(
     onRetryMoveOnly: () -> Unit = {},
     onRetryRemoteReconciliation: () -> Unit = {},
     onAcknowledgeRemoteReconciliation: () -> Unit = {},
+    focusChapterId: String? = null,
+    onFocusHandled: () -> Unit = {},
 ) {
     if (LocalDisplayEnvironment.current.effectiveProfile == DisplayProfile.EINK) {
         FrozenEInkBookDetailScreen(
@@ -115,6 +117,8 @@ fun BookDetailScreen(
         onOpenVerification = onOpenVerification,
         onRetryRemoteReconciliation = onRetryRemoteReconciliation,
         onAcknowledgeRemoteReconciliation = onAcknowledgeRemoteReconciliation,
+        focusChapterId = focusChapterId,
+        onFocusHandled = onFocusHandled,
         modifier = modifier,
     )
 }

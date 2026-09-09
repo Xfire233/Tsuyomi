@@ -4,6 +4,12 @@
     <string name="transfer_local_notice">导入和导出只通过系统文件选择器进行。Tsuyomi 不会上传文件，也不会导入帐号、Cookie、凭证、网页状态或缓存。</string>
     <string name="transfer_import_action">选择备份文件</string>
     <string name="transfer_export_action">导出 Tsuyomi 数据</string>
+    <string name="transfer_reset_preferences_title">重置界面与阅读偏好</string>
+    <string name="transfer_reset_preferences_summary">恢复显示、阅读、书架布局和功能说明默认值；不会删除任何书籍或数据</string>
+    <string name="transfer_reset_preferences_dialog_title">重置界面与阅读偏好？</string>
+    <string name="transfer_reset_preferences_dialog_message">仅清除界面与阅读偏好并恢复当前宪章默认值。书籍、收藏夹、进度、历史、来源包、登录凭据、网站镜像和缓存均不会改动。</string>
+    <string name="transfer_reset_preferences_confirm">确认重置</string>
+    <string name="transfer_reset_preferences_cancel">取消</string>
     <string name="transfer_working_title">正在处理本地文件</string>
     <string name="transfer_recovery_title">正在恢复未完成的导入</string>
     <string name="transfer_review_title">确认导入内容</string>

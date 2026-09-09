@@ -8,9 +8,7 @@ package org.tsuyomi.android
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
-import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
-import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -23,11 +21,13 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.produceState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
@@ -42,6 +42,7 @@ import androidx.navigation.compose.rememberNavController
 import java.time.Instant
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.collect
 import org.tsuyomi.core.database.LibraryEntry
 import org.tsuyomi.core.display.DisplayController
 import org.tsuyomi.core.display.DisplayProfile
@@ -63,6 +64,7 @@ import org.tsuyomi.core.ui.theme.TsuyomiTheme
 import org.tsuyomi.feature.library.LibrarySelectionDialog
 import org.tsuyomi.feature.library.LibrarySelectionKind
 import org.tsuyomi.feature.library.LibraryTopBar
+import org.tsuyomi.feature.library.SystemLibraryFilter
 import org.tsuyomi.feature.library.projectedEntries
 import org.tsuyomi.feature.library.libraryNodeRouteTitle
 import org.tsuyomi.core.ui.theme.rememberSystemReducedMotion
@@ -81,16 +83,31 @@ import org.tsuyomi.feature.search.SearchScreen
 import org.tsuyomi.feature.search.SearchTopBar
 import org.tsuyomi.shared.backup.PortableReaderPreferences
 import org.tsuyomi.source.extensionmanager.RemoteOperation
+import org.tsuyomi.shared.librarydomain.UpdateSnapshot
 
 class MainActivity : ComponentActivity() {
+    private var updateNavigationSignal by mutableIntStateOf(0)
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        handleIntent(intent)
         WindowCompat.setDecorFitsSystemWindows(window, false)
         setContent {
             TsuyomiApplicationRoot(
                 controller = (application as TsuyomiApplication).displayController,
+                updateNavigationSignal = updateNavigationSignal,
             )
         }
+    }
+
+    override fun onNewIntent(intent: android.content.Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        handleIntent(intent)
+    }
+
+    private fun handleIntent(intent: android.content.Intent?) {
+        if (intent?.action == UpdateNotificationOpenAction) updateNavigationSignal++
     }
 }
 
@@ -101,11 +118,15 @@ class MainActivity : ComponentActivity() {
 internal fun TsuyomiApp(
     environment: DisplayEnvironment,
     controller: DisplayController,
+    updateNavigationSignal: Int = 0,
 ) {
     val context = LocalContext.current
     val resources = LocalResources.current
     val scope = rememberCoroutineScope()
     val application = context.applicationContext as TsuyomiApplication
+    val updateSnapshot by produceState<UpdateSnapshot?>(initialValue = null, application.updateCoordinator) {
+        application.updateCoordinator.snapshots.collect { value = it }
+    }
     val readerPreferences by application.readerPreferencesRepository.preferences.collectAsStateWithLifecycle(
         PortableReaderPreferences(flow = "scroll", fontScale = 1.0, lineHeight = 1.5, theme = "paper"),
     )
@@ -125,6 +146,7 @@ internal fun TsuyomiApp(
             onDismissResult = {},
             onRetryRecovery = { scope.launch { transferCoordinator.retryRecovery() } },
             onAbortRecovery = { scope.launch { transferCoordinator.abortRecovery() } },
+            onResetInterfacePreferences = {},
             modifier = Modifier.fillMaxSize(),
         )
         return
@@ -133,12 +155,26 @@ internal fun TsuyomiApp(
     val libraryFlow = rememberLibraryFlowController(
         application.libraryRepository,
         application.libraryPreferencesRepository,
+        environment.effectiveProfile.name,
     )
     suspend fun reloadLibrary() {
         libraryFlow.reload(resources.getString(R.string.library_read_failure_safe))
     }
 
     val navController = rememberNavController()
+    fun requestManualUpdate() {
+        application.updateScheduler.enqueueManual()
+    }
+    LaunchedEffect(updateSnapshot) {
+        libraryFlow.updateUnresolved(updateSnapshot?.updates.orEmpty(), updateSnapshot?.session)
+    }
+    LaunchedEffect(updateNavigationSignal) {
+        if (updateNavigationSignal > 0) {
+            libraryFlow.selectTab(SystemLibraryFilter.ALL)
+            libraryFlow.setUpdateFilter(org.tsuyomi.feature.library.LibraryUpdateFilter.UPDATES_ONLY)
+            navController.navigate(Routes.Library) { launchSingleTop = true }
+        }
+    }
     val currentEntry by navController.currentBackStackEntryAsState()
     val currentRoute = currentEntry?.destination?.route ?: Routes.Library
     val searchLayoutFlow = remember(currentEntry) {
@@ -164,6 +200,7 @@ internal fun TsuyomiApp(
         currentRoute = currentRoute,
         onLibraryChanged = ::reloadLibrary,
     )
+    libraryFlow.configureInstalledMirrorRoots(sourceOwner.installer::installedRemoteLibraryRoots)
     var pendingIntroductionId by rememberSaveable { mutableStateOf<String?>(null) }
     val introductionRouteId = when (currentRoute) {
         Routes.LibraryMirror, Routes.LibraryMirrorFolder -> "website-mirror"
@@ -233,9 +270,6 @@ internal fun TsuyomiApp(
             scope = scope,
         )
     }
-    LaunchedEffect(currentRoute) {
-        if (currentRoute == Routes.Library) libraryFlow.selectRoot()
-    }
     LaunchedEffect(activeSourcePackage?.packageSha256) {
         reloadLibrary()
     }
@@ -248,6 +282,15 @@ internal fun TsuyomiApp(
         ) && libraryFlow.state.selectionKind != null,
     ) {
         libraryFlow.clearSelection()
+    }
+    BackHandler(
+        enabled = currentRoute == Routes.Library &&
+            libraryFlow.state.selectionKind == null &&
+            libraryFlow.state.filter != SystemLibraryFilter.ALL,
+    ) {
+        scope.launch {
+            libraryFlow.selectTab(SystemLibraryFilter.ALL)
+        }
     }
 
     val selectedRoot = rootRouteFor(currentRoute)
@@ -316,8 +359,18 @@ internal fun TsuyomiApp(
             widthDp = maxWidth.value.toInt(),
             heightDp = maxHeight.value.toInt(),
         )
-        val routeOwnsChrome = environment.effectiveProfile == DisplayProfile.STANDARD &&
-            currentRoute in setOf(Routes.Reader, Routes.RemoteLibrary, Routes.LibraryMirror, Routes.LibraryMirrorFolder)
+        val routeOwnsChrome = environment.effectiveProfile == DisplayProfile.STANDARD && currentRoute in setOf(
+            Routes.Reader,
+            Routes.RemoteLibrary,
+            Routes.LibraryMirror,
+            Routes.LibraryMirrorFolder,
+            Routes.Verification,
+            Routes.VerifiedHomePage,
+            Routes.VerifiedPage,
+            Routes.VerifiedDetailPage,
+            Routes.VerifiedDirectoryPage,
+            Routes.VerifiedChapterPage,
+        )
         Surface(
             modifier = Modifier
                 .fillMaxSize()
@@ -341,14 +394,31 @@ internal fun TsuyomiApp(
                             layout = libraryFlow.state.layout,
                             sortMode = libraryFlow.state.sortMode,
                             sortDescending = libraryFlow.state.sortDescending,
-                            refreshing = libraryFlow.state.refreshing,
-                            root = currentRoute == Routes.Library,
+                            root = currentRoute == Routes.Library && libraryFlow.state.filter == SystemLibraryFilter.ALL,
+                            refreshing = if (
+                                currentRoute == Routes.Library && libraryFlow.state.filter == SystemLibraryFilter.ALL
+                            ) {
+                                libraryFlow.state.updateSession?.state in setOf(
+                                    org.tsuyomi.shared.librarydomain.UpdateSessionStates.QUEUED,
+                                    org.tsuyomi.shared.librarydomain.UpdateSessionStates.RUNNING,
+                                )
+                            } else {
+                                libraryFlow.state.refreshing
+                            },
+                            updateFilter = libraryFlow.state.updateFilter,
+                            onSetUpdateFilter = { filter -> scope.launch { libraryFlow.setUpdateFilter(filter) } },
                             onNavigateUp = if (currentRoute == Routes.Library) null else ({ navController.navigateUp() }),
-                            onSearch = { navController.navigate(Routes.Search) },
-                            onCycleLayout = libraryFlow::cycleLayout,
+                            onSearch = { navController.navigate(Routes.LibrarySearch) },
+                            onCycleLayout = { scope.launch { libraryFlow.cycleLayout() } },
+                            onCheckUpdates = ::requestManualUpdate,
                             onRefresh = { scope.launch { reloadLibrary() } },
-                            onSort = libraryFlow::openSort,
+                            onOpenUpdateSettings = { navController.navigate(Routes.UpdateSettings) },
+                            onSelectSort = { mode -> scope.launch { libraryFlow.selectSort(mode) } },
+                            onSelectSortDirection = { descending -> scope.launch {
+                                libraryFlow.selectSortDirection(descending)
+                            } },
                             onTags = { navController.navigate(Routes.LibraryTags) },
+                            onCreateCollection = { navController.navigate(Routes.Collections) },
                             selectionKind = libraryFlow.state.selectionKind,
                             selectedCount = libraryFlow.state.selectedBookIds.size + libraryFlow.state.selectedCollectionIds.size,
                             allVisibleSelected = when (libraryFlow.state.selectionKind) {
@@ -457,7 +527,7 @@ internal fun TsuyomiApp(
                             selectedPackage?.manifest?.sourceId?.value == selectedBook.identity.sourceId
                         val remotePolicies = selectedPackage?.manifest?.capabilities?.remoteLibrary?.policies
                         BookDetailTopBar(
-                            title = selectedBook?.title ?: stringResource(R.string.title_book_detail),
+                            title = stringResource(R.string.title_book_detail),
                             inLibrary = sourceOwner.flow.remoteLibrary.selectedBookInLibrary,
                             onNavigateUp = { navController.navigateUp() },
                             onCacheDetail = { issueDetailCommand(SourceDetailRouteOwner.Command.CACHE_DETAIL) },
@@ -470,22 +540,17 @@ internal fun TsuyomiApp(
                                 remotePolicies?.containsKey(RemoteOperation.MOVE) == true,
                             onRemoveFromRemote = { issueDetailRequest(RemoteRemoveRequestKey) },
                             onMoveRemote = { issueDetailRequest(RemoteMoveRequestKey) },
-                        )
-                    } else if (
-                        currentRoute in setOf(
-                            Routes.Verification,
-                            Routes.VerifiedHomePage,
-                            Routes.VerifiedPage,
-                            Routes.VerifiedDetailPage,
-                            Routes.VerifiedDirectoryPage,
-                            Routes.VerifiedChapterPage,
-                        ) &&
-                        environment.effectiveProfile == DisplayProfile.STANDARD &&
-                        sourceOwner.installer.activePackage != null
-                    ) {
-                        ManualVerificationTopBar(
-                            packageInfo = requireNotNull(sourceOwner.installer.activePackage),
-                            onNavigateUp = { navController.navigateUp() },
+                            updateChecksExcluded = selectedBook?.identity in updateSnapshot?.excludedBooks.orEmpty(),
+                            onToggleUpdateChecksExcluded = {
+                                selectedBook?.identity?.let { identity ->
+                                    scope.launch {
+                                        application.updateCoordinator.excludeBook(
+                                            identity,
+                                            identity !in updateSnapshot?.excludedBooks.orEmpty(),
+                                        )
+                                    }
+                                }
+                            },
                         )
                     } else {
                         TsuyomiTopBar(
@@ -500,7 +565,14 @@ internal fun TsuyomiApp(
                             layout = layout,
                             items = appNavigationItems,
                             selectedRoute = selectedRoot,
-                            onSelect = { navController.selectRoot(it.route) },
+                            onSelect = { item ->
+                                if (item.route == Routes.Library) {
+                                    scope.launch {
+                                        libraryFlow.selectTab(SystemLibraryFilter.ALL)
+                                    }
+                                }
+                                navController.selectRoot(item.route)
+                            }
                         )
                     }
                 },
@@ -518,7 +590,15 @@ internal fun TsuyomiApp(
                         resumeReading = sourceOwner::resumeReading,
                         onCoverVisibility = libraryFlow::setCoverVisible,
                         openRemoteDestination = sourceOwner::openRemoteDestination,
+                        onManualUpdate = ::requestManualUpdate,
+                        onCancelUpdate = { scope.launch { application.updateScheduler.cancel() } },
+                        onOpenUpdateSettings = { navController.navigate(Routes.UpdateSettings) },
+                        onIgnoreUpdate = { update ->
+                            application.updateCoordinator.ignore(update.identity, update.anchor)
+                        },
+                        onUndoUpdate = application.updateCoordinator::undo,
                     )
+                    updateSettingsRoute(application, libraryFlow)
                     sourceRoutes(
                         navController = navController,
                         owner = sourceOwner,
@@ -530,6 +610,12 @@ internal fun TsuyomiApp(
                         coverRepository = coverRepository,
                         packageRevision = activeSourcePackage?.packageSha256,
                         credentialRevision = activeSourcePackage?.let { coverCredentialRevision },
+                        onExactChapterCompleted = { identity ->
+                            application.updateCoordinator.reconcileCompleted(
+                                identity,
+                                application.libraryRepository.completedChapterIds(identity),
+                            )
+                        },
                     )
                     settingsRoutes(
                         navController = navController,

@@ -61,9 +61,6 @@ fun LibraryEmptyStateScreenshots() {
                     onOpenBook = {},
                     onCreateCollection = {},
                     onRetry = {},
-                    onDismissSort = {},
-                    onSelectSort = {},
-                    onSelectSortDirection = {},
                 )
             }
         }

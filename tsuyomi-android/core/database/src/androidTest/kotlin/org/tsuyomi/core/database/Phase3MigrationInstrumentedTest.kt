@@ -234,6 +234,44 @@ class Phase3MigrationInstrumentedTest {
         }
     }
 
+    @Test
+    fun migration_8_to_9_adds_unresolved_update_state_without_mutating_existing_library_data() {
+        helper.createDatabase(UPDATE_STATE_DATABASE, 8).use { db ->
+            db.execSQL(
+                "INSERT INTO books(source_id,remote_book_id,title,authors_json,remote_tags_json,has_unread_update,added_at_epoch_second,added_at_nano,metadata_updated_at_epoch_second,metadata_updated_at_nano) " +
+                    "VALUES ('fixture.source','book-42','章节状态','[]','[]',0,10,0,10,0)",
+            )
+            db.execSQL(
+                "INSERT INTO completed_chapters(source_id,remote_book_id,chapter_id,completed_at_epoch_second,completed_at_nano) " +
+                    "VALUES ('fixture.source','book-42','chapter-2',20,0)",
+            )
+        }
+
+        helper.runMigrationsAndValidate(UPDATE_STATE_DATABASE, 9, true, MIGRATION_8_9).use { db ->
+            db.query(
+                "SELECT name FROM sqlite_master WHERE type='table' AND name IN " +
+                    "('update_sessions','update_session_items','update_baselines','unresolved_updates','update_policy','update_book_exclusions','update_source_exclusions','update_ignore_undos')",
+            ).use { cursor -> assertEquals(8, cursor.count) }
+            db.query(
+                "SELECT name FROM sqlite_master WHERE type='table' AND name IN ('update_inbox_rows','update_ack_undos')",
+            ).use { cursor -> assertEquals(0, cursor.count) }
+            db.query("SELECT chapter_id FROM completed_chapters WHERE source_id='fixture.source' AND remote_book_id='book-42'").use { cursor ->
+                assertEquals(1, cursor.count)
+                cursor.moveToFirst()
+                assertEquals("chapter-2", cursor.getString(0))
+            }
+            db.execSQL(
+                "INSERT INTO update_sessions(session_id,trigger,state,total,completed,updated,failed,reason,lease_expires_at_millis,lease_owner_token,cancellation_requested,started_at_millis,finished_at_millis) " +
+                    "VALUES ('session-1','manual','RUNNING',1,0,0,0,NULL,1000,'owner-1',0,1,NULL)",
+            )
+            db.query("SELECT lease_owner_token, cancellation_requested FROM update_sessions WHERE session_id='session-1'").use { cursor ->
+                cursor.moveToFirst()
+                assertEquals("owner-1", cursor.getString(0))
+                assertEquals(0, cursor.getInt(1))
+            }
+        }
+    }
+
     private companion object {
         const val DATABASE = "phase3-migration"
         const val READ_LATER_DATABASE = "phase4a-read-later-migration"
@@ -242,5 +280,6 @@ class Phase3MigrationInstrumentedTest {
         const val REMOTE_MIRROR_DATABASE = "phase4b-remote-mirror-migration"
         const val LOCAL_COPY_RECEIPT_DATABASE = "phase4b-local-copy-receipt-migration"
         const val EXACT_CHAPTER_STATE_DATABASE = "phase4b-exact-chapter-state-migration"
+        const val UPDATE_STATE_DATABASE = "phase4c-update-state"
     }
 }

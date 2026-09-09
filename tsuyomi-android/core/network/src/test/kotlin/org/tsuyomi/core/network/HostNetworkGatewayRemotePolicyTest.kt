@@ -270,4 +270,78 @@ class HostNetworkGatewayRemotePolicyTest {
         assertEquals(1, signedTransport.requests.size)
     }
 
+
+    @Test
+    fun update_check_allows_only_its_exact_signed_read_only_request() = runBlocking {
+        val policy = RemoteOperationRequestPolicy(
+            origin = HttpsOrigin("https://www.wenku8.net"),
+            method = NetworkMethod.GET,
+            path = "/modules/article/reader.php",
+            fixedParameters = emptyMap(),
+            remoteBookIdParameter = "aid",
+        )
+        val context = updateCheckContext(policy, remoteBookId = "1234")
+        val transport = RecordingTransport()
+        val gateway = HostNetworkGateway(transport)
+        val signedGrant = grant.copy(updateCheckPolicy = policy)
+
+        val mutation = assertHostFailure {
+            gateway.request(
+                signedGrant,
+                request(url = "https://www.wenku8.net/modules/article/addbookcase.php?bid=1234"),
+                context,
+            )
+        }
+        val alteredQuery = assertHostFailure {
+            gateway.request(
+                signedGrant,
+                request(url = "https://www.wenku8.net/modules/article/reader.php?aid=9999"),
+                context,
+            )
+        }
+        val cached = assertHostFailure {
+            gateway.request(
+                signedGrant,
+                request(
+                    url = "https://www.wenku8.net/modules/article/reader.php?aid=1234",
+                    cache = NetworkCacheMode.DEFAULT,
+                ),
+                context,
+            )
+        }
+
+        assertEquals(HostNetworkError.INVALID_REQUEST, mutation.error)
+        assertEquals(HostNetworkError.INVALID_REQUEST, alteredQuery.error)
+        assertEquals(HostNetworkError.INVALID_REQUEST, cached.error)
+        assertEquals(0, transport.requests.size)
+
+        gateway.request(
+            signedGrant,
+            request(url = "https://www.wenku8.net/modules/article/reader.php?aid=1234"),
+            context,
+        )
+        assertEquals(1, transport.requests.size)
+    }
+
+    @Test
+    fun update_check_cannot_reuse_a_signed_remote_add_get_surface() = runBlocking {
+        val collidingPolicy = RemoteOperationRequestPolicy(
+            origin = HttpsOrigin("https://www.wenku8.net"),
+            method = NetworkMethod.GET,
+            path = "/modules/article/addbookcase.php",
+            fixedParameters = emptyMap(),
+            remoteBookIdParameter = "bid",
+        )
+        val transport = RecordingTransport()
+        val failure = assertHostFailure {
+            HostNetworkGateway(transport).request(
+                grant.copy(updateCheckPolicy = collidingPolicy, remoteAddPolicy = collidingPolicy),
+                request(url = "https://www.wenku8.net/modules/article/addbookcase.php?bid=1234"),
+                updateCheckContext(collidingPolicy, remoteBookId = "1234"),
+            )
+        }
+
+        assertEquals(HostNetworkError.INVALID_REQUEST, failure.error)
+        assertEquals(0, transport.requests.size)
+    }
 }

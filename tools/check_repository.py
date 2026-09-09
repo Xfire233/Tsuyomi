@@ -14,10 +14,21 @@ from typing import Iterable
 REPO_ROOT = Path(__file__).resolve().parents[1]
 TOOLING_PATH = Path("TOOLING.md")
 DOCUMENTATION_PATH = Path("DOCUMENTATION.md")
+GRADLE_RESOURCE_RUNNERS = (
+    (
+        Path("tsuyomi-android/tools/Run-Gradle-Low.bat"),
+        ("--max-workers=2", "--no-parallel", "--no-daemon", "resource mode: LOW"),
+    ),
+    (
+        Path("tsuyomi-android/tools/Run-Gradle-High.bat"),
+        ("NUMBER_OF_PROCESSORS", "--parallel", "resource mode: HIGH"),
+    ),
+)
 PROJECT_SKILLS_ROOT = Path(".agents/skills")
 TOOLING_REQUIRED_SECTIONS = (
     "## Resource record standard",
     "## Deterministic dispatch",
+    "## Execution resource modes",
     "## Scope and completion",
     "## Native and repository tools",
     "## Skills",
@@ -76,6 +87,7 @@ TOOLING_SCOPE_RESOURCES = (
     "`smell-check`",
     "`find-skills`",
     "`to-spec`",
+    "`tsuyomi-context-router`",
     "Context7",
     "UIAutomator2",
     "`node_repl`",
@@ -83,7 +95,7 @@ TOOLING_SCOPE_RESOURCES = (
     "`grep_app`",
 )
 TOOLING_NATIVE_RESOURCES = TOOLING_SCOPE_RESOURCES[:22]
-TOOLING_SKILL_RESOURCES = TOOLING_SCOPE_RESOURCES[22:29]
+TOOLING_SKILL_RESOURCES = TOOLING_SCOPE_RESOURCES[22:30]
 TOOLING_MCP_RESOURCES = ("`context7`", "`uiautomator2`", "`node_repl`", "`websearch`", "`grep_app`")
 PROJECT_SKILL_REQUIRED_SECTIONS = ("## When to use", "## Do not use", "## Required inputs")
 DOCUMENTATION_REQUIRED_SECTIONS = (
@@ -411,6 +423,21 @@ def tooling_governance_violations(repo_root: Path = REPO_ROOT) -> list[str]:
     for marker in TOOLING_REQUIRED_MARKERS:
         if marker not in tooling_text:
             violations.append(f"{TOOLING_PATH.as_posix()}: missing required registry marker {marker}")
+
+    for relative_runner_path, required_markers in GRADLE_RESOURCE_RUNNERS:
+        resource_runner_path = repo_root / relative_runner_path
+        try:
+            resource_runner_text = resource_runner_path.read_text(encoding="utf-8")
+        except OSError as error:
+            violations.append(
+                f"{relative_runner_path.as_posix()}: cannot read Gradle resource mode runner: {error}"
+            )
+            continue
+        for marker in required_markers:
+            if marker not in resource_runner_text:
+                violations.append(
+                    f"{relative_runner_path.as_posix()}: missing required resource mode marker {marker}"
+                )
 
     dynamic_policy_values: list[tuple[str, str]] = []
     skills_root = repo_root / PROJECT_SKILLS_ROOT

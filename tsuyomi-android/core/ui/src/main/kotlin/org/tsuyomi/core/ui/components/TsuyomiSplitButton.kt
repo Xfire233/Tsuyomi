@@ -4,11 +4,9 @@
  */
 package org.tsuyomi.core.ui.components
 
-import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.shape.CornerSize
-import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.widthIn
@@ -24,7 +22,6 @@ import androidx.compose.material3.SplitButtonShapes
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
-import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.layout
@@ -43,7 +40,6 @@ private val SplitInnerCorner = CornerSize(4.dp)
 @Composable
 fun TsuyomiSplitButton(
     text: String,
-    leadingIcon: ImageVector,
     trailingIcon: ImageVector,
     trailingDescription: String,
     onLeadingClick: () -> Unit,
@@ -82,15 +78,9 @@ fun TsuyomiSplitButton(
                         .testTag("tsuyomi-split-leading"),
                     enabled = leadingEnabled,
                     shapes = leadingShapes,
-                    contentPadding = PaddingValues(start = 16.dp, end = 20.dp),
+                    contentPadding = PaddingValues(horizontal = 12.dp),
                 ) {
-                    Row(
-                        horizontalArrangement = Arrangement.spacedBy(12.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        Icon(leadingIcon, contentDescription = null, modifier = Modifier.size(24.dp))
-                        Text(text, maxLines = 1, style = MaterialTheme.typography.labelLarge)
-                    }
+                    Text(text, maxLines = 1, style = MaterialTheme.typography.labelLarge)
                 }
             },
             trailingButton = {

@@ -380,8 +380,6 @@ internal class RoomRemoteLibraryStore(
                 canonicalUrl = incoming.canonicalUrl ?: current.canonicalUrl,
                 status = current.status,
                 remoteTags = current.remoteTags,
-                sourceUpdateKey = current.sourceUpdateKey,
-                hasUnreadUpdate = current.hasUnreadUpdate,
             )
         } ?: incoming
         catalog.saveBook(merged)

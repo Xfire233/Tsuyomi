@@ -11,7 +11,7 @@
 - device template：`pixel_2`（只提供基础硬件字段，显示参数由脚本覆盖）
 - locale：`zh-CN`
 - navigation：three-button 与 keyboard/DPAD 场景均验证
-- 启动：验收前 wipe data/cold boot；不得依赖 snapshot 中的应用状态
+- 启动：验收前 wipe data/cold boot；不得依赖 snapshot 中的应用状态。canonical 实机/覆盖安装 look **不得** `-wipe-data`。真实 declared-origin WebView 用 `tools/avd/Start-CanonicalAvd.ps1`：`-dns-server 8.8.8.8,1.1.1.1 -netdelay none -netspeed full`。模拟器 DNS 代理跟随主机解析器，本机代理/TUN 拆除后必须带公共 DNS 重启，否则 WebView 报 `ERR_NAME_NOT_RESOLVED`。DNS 修复只需重启模拟器进程，不必 cold boot。
 
 SDK package 和 emulator 的实际 revision 必须记录在 `docs/phases/PHASE_N.md`；升级 revision 会使运行期证据失效并要求重跑。
 

@@ -273,7 +273,6 @@ internal class SourceHomeController : Closeable {
 
     private fun ensurePackageRevision(revision: String?) {
         if (packageRevision == revision) return
-        reset()
         packageRevision = revision
     }
 
@@ -408,8 +407,6 @@ internal class SourceHomeController : Closeable {
         primaryFilter?.let { filters[it.id] } ?: DEFAULT_PRIMARY
 
     private fun queryKey(filters: Map<String, String>): String = buildString {
-        append(packageRevision.orEmpty())
-        append('|')
         filters.toSortedMap().forEach { (id, value) ->
             append(id)
             append('=')
