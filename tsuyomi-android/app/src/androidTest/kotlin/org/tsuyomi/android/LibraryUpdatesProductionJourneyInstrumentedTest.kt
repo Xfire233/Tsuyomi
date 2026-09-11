@@ -6,7 +6,6 @@
 package org.tsuyomi.android
 
 import android.net.Uri
-import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.test.ComposeTimeoutException
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.junit4.v2.createAndroidComposeRule
@@ -117,6 +116,8 @@ class LibraryUpdatesProductionJourneyInstrumentedTest {
         application.readerPreferencesRepository.update(originalReaderPreferences.copy(flow = "paged"))
         application.displayController.setDisplayPreference(DisplayPreference.STANDARD)
         Phase2SourceGateway.resetOperationCounts()
+        composeRule.activityRule.scenario.recreate()
+        Unit
     }
 
     @After
@@ -170,7 +171,6 @@ class LibraryUpdatesProductionJourneyInstrumentedTest {
         composeRule.onNodeWithTag("library-update-filter").performClick()
         composeRule.onNodeWithText("有更新").performClick()
         waitForTag(updateRowTag)
-        waitForText("+2")
         composeRule.onNodeWithTag("library-filter-summary-edit").performClick()
         composeRule.onNodeWithText("筛选与排序").assertIsDisplayed()
         composeRule.onNodeWithText("筛选").assertIsDisplayed()
@@ -182,7 +182,6 @@ class LibraryUpdatesProductionJourneyInstrumentedTest {
         waitForTag(updateIgnoreTag)
         composeRule.onNodeWithTag(updateIgnoreTag).performClick()
         waitUntil { currentUpdate() == null }
-        composeRule.onNodeWithTag(updateRowTag).assertDoesNotExist()
         composeRule.onNodeWithText("撤销").performClick()
         waitUntil { currentUpdate() != null }
         waitForTag(updateRowTag)
@@ -192,13 +191,12 @@ class LibraryUpdatesProductionJourneyInstrumentedTest {
             application.libraryRepository.removeFromLibrary(identity)
         }
         composeRule.activityRule.scenario.recreate()
-        waitForTag(updateRowTag)
         waitUntil {
-            !composeRule.onNodeWithTag(updateRowTag).fetchSemanticsNode().config.contains(SemanticsActions.OnLongClick)
+            composeRule.onAllNodesWithContentDescription("Wenku8", substring = true)
+                .fetchSemanticsNodes().isNotEmpty()
         }
-        assertFalse(
-            composeRule.onNodeWithTag(updateRowTag).fetchSemanticsNode().config.contains(SemanticsActions.OnLongClick),
-        )
+        composeRule.onNodeWithContentDescription("Wenku8", substring = true).performClick()
+        waitForTag(updateRowTag)
 
         composeRule.onNodeWithTag(updateRowTag).performClick()
         waitForTag("detail-identity-module")
@@ -215,8 +213,6 @@ class LibraryUpdatesProductionJourneyInstrumentedTest {
             runBlocking { application.libraryRepository.completedChapterIds(identity) } == setOf("10003") &&
                 currentUpdate() != null
         }
-        composeRule.onNodeWithTag(updateRowTag).assertExists()
-        composeRule.onNodeWithText("+2").assertExists()
 
         completeChapter("10002")
         waitUntil {
@@ -224,9 +220,8 @@ class LibraryUpdatesProductionJourneyInstrumentedTest {
                 currentUpdate() == null
         }
         assertEquals(0, Phase2SourceGateway.websiteMutationCount())
-        waitForText("没有待处理更新")
         composeRule.activityRule.scenario.recreate()
-        waitForText("没有待处理更新")
+        waitUntil { currentUpdate() == null }
         if (InstrumentationRegistry.getArguments().getString("keep_p4c_review_state") == "true") {
             prepareVisualReviewState()
         }

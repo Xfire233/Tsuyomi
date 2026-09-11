@@ -486,7 +486,9 @@ internal fun rememberSourceRouteOwner(
     val browseAnchored = runCatching { navController.getBackStackEntry(Routes.Browse) }.isSuccess
     val observedSourceFlowRoot = when {
         currentRoute == null -> null
-        routeOwnsSourceFlow(currentRoute) -> if (browseAnchored) Routes.Browse else Routes.Library
+        routeOwnsSourceFlow(currentRoute) -> if (
+            browseAnchored || retainedSourceFlowRoot == Routes.Browse
+        ) Routes.Browse else Routes.Library
         rootRouteFor(currentRoute) == Routes.Library -> if (
             browseAnchored && retainedSourceFlowRoot == Routes.Browse
         ) null else Routes.Library

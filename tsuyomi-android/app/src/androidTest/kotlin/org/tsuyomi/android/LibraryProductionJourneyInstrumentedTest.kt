@@ -92,8 +92,10 @@ class LibraryProductionJourneyInstrumentedTest {
             repository.deleteCollection(behaviorCollectionId)
             repository.deleteCollection(searchCollectionId)
             listOf(identity, behaviorNewer, behaviorOlder, behaviorUnstarted).forEach {
-                repository.setReadLater(it, false)
-                repository.removeFromLibrary(it)
+                if (repository.libraryEntry(it) != null) {
+                    repository.setReadLater(it, false)
+                    repository.removeFromLibrary(it)
+                }
             }
         }
     }
