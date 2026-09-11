@@ -126,6 +126,31 @@ const packagePolicy = ({ active, candidate, revokedKeyIds, rotationVerified }) =
   if (candidate.keyId !== active.keyId && !rotationVerified) return 'rejected-key-rotation';
   return hasCapabilityExpansion(active.capabilities, candidate.capabilities) ? 'requires-grant' : 'accepted';
 };
+const repositoryIssues = (catalog) => {
+  const issues = [];
+  const publisherIds = new Set();
+  const publisherFingerprints = new Set();
+  for (const publisher of catalog.signed.publishers) {
+    if (publisherIds.has(publisher.keyId)) issues.push(`duplicate-publisher-id:${publisher.keyId}`);
+    if (publisherFingerprints.has(publisher.fingerprint)) issues.push(`duplicate-publisher-fingerprint:${publisher.fingerprint}`);
+    publisherIds.add(publisher.keyId);
+    publisherFingerprints.add(publisher.fingerprint);
+  }
+  const packageIds = new Set();
+  for (const entry of catalog.signed.packages) {
+    if (packageIds.has(entry.id)) issues.push(`duplicate-package-id:${entry.id}`);
+    packageIds.add(entry.id);
+    if (!publisherIds.has(entry.publisherKeyId)) issues.push(`unknown-package-publisher:${entry.id}`);
+    if (compareSemver(entry.hostApi.minInclusive, entry.hostApi.maxExclusive) >= 0) issues.push(`invalid-host-api:${entry.id}`);
+  }
+  for (const [name, values] of Object.entries(catalog.signed.revocations)) {
+    if (new Set(values).size !== values.length) issues.push(`duplicate-revocation:${name}`);
+  }
+  const issuedAt = Date.parse(catalog.signed.issuedAt);
+  const expiresAt = Date.parse(catalog.signed.expiresAt);
+  if (!(expiresAt > issuedAt) || expiresAt - issuedAt > 30 * 24 * 60 * 60 * 1000) issues.push('invalid-lifetime');
+  return issues;
+};
 
 test('transfer semantic conformance accepts the canonical minimal fixture', async () => {
   const document = await loadJson('../fixtures/transfer/valid-minimal.json');
@@ -164,6 +189,18 @@ test('transfer progress conflict cases use newer valid updatedAt only', async ()
 test('transfer size limit is 32 MiB of UTF-8 JSON', () => {
   const oversized = { library: [], shelves: [], padding: 'x'.repeat(transferMaxBytes) };
   assert.ok(transferIssues(oversized).includes('document-size'));
+});
+test('repository catalog semantic conformance binds unique publishers and packages', async () => {
+  const catalog = await loadJson('../fixtures/repository/valid-catalog.json');
+  assert.deepEqual(repositoryIssues(catalog), []);
+
+  const duplicate = structuredClone(catalog);
+  duplicate.signed.packages.push(structuredClone(duplicate.signed.packages[0]));
+  duplicate.signed.publishers.push(structuredClone(duplicate.signed.publishers[0]));
+  duplicate.signed.revocations.packageDigests = ['a'.repeat(64), 'a'.repeat(64)];
+  assert.ok(repositoryIssues(duplicate).includes('duplicate-package-id:org.tsuyomi.fixture'));
+  assert.ok(repositoryIssues(duplicate).some((issue) => issue.startsWith('duplicate-publisher-id:')));
+  assert.ok(repositoryIssues(duplicate).includes('duplicate-revocation:packageDigests'));
 });
 
 test('HXP host API v1 accepts each valid network value fixture', async () => {

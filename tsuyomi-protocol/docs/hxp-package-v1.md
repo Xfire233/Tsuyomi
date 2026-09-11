@@ -21,11 +21,11 @@ The manifest's signature metadata is therefore signed but the detached signature
 
 ## Trust and revocation
 
-A publisher key is trusted only through the built-in official root, a user-added publisher key, or one explicit local-import confirmation. Trust is recorded by public-key fingerprint and key ID, not a mutable display name. The host verifies signed repository metadata, expiry, and revocation data before offering repository packages.
+A publisher key is trusted only through current or previously authenticated root-signed repository metadata, a user-added publisher key, or one explicit local-import confirmation. Trust is recorded by public-key fingerprint and key ID, not a mutable display name. A production repository root is explicit application configuration; no fixture or local key is a production fallback.
 
-A valid revocation for a publisher key or package digest disables affected installed packages and rejects new installs/updates. It must state issuer, issued/expiry time, key/package target, reason code, and Ed25519 signature under an already trusted authorized revocation key. A newer valid revocation wins; expired or invalid revocation data never grants trust.
+A root-signed catalog revocation for a publisher fingerprint or complete HXP archive SHA-256 disables affected installed packages and rejects new installs/updates. Current metadata is required to authorize an installation. Expired cached metadata may retain already authenticated identity and revocation state for installed packages, but cannot authorize a new download.
 
-Key rotation requires an authorized current key and a cross-signature from the previously trusted non-revoked key over the new key fingerprint and effective timestamp. A root-authorized emergency rotation is allowed only when explicitly marked in signed metadata. A bare key-ID change is not rotation.
+Repository updates must retain their publisher key ID and strictly increase the installed semantic version. The sole key-change exception is an exact root-authorized `legacyMigration` entry whose prior publisher fingerprint and archive digest match the active package, followed by a separate explicit migration confirmation. A bare key-ID change and a fixture-key cross-signature are not migration authority. Local import behavior remains distinct.
 
 ## Updates, rollback, and grants
 
@@ -35,4 +35,4 @@ The host compares normalized capability sets before activating an update. Adding
 
 ## Conformance cases
 
-Phase 0 includes deterministic policy cases for successful same-key update, capability expansion, revoked publisher, valid/invalid key rotation, repository rollback, and invalid capability origin subsets. The package toolchain later adds real archive, hash, canonicalization, Ed25519, and signed-metadata test vectors before any production package is installed.
+Conformance covers same-key updates, capability expansion, publisher and complete-archive-digest revocation, repository rollback/equivocation, exact catalog-to-manifest binding, valid and invalid root-authorized legacy migration, expiry at approval, and invalid capability origin subsets. Repository envelope vectors and rules are normative in [`tsuyomi-repository-v1.md`](tsuyomi-repository-v1.md).

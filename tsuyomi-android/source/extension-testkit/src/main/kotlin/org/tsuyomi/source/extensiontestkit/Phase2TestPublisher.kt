@@ -9,7 +9,7 @@ import org.tsuyomi.source.extensionmanager.PublisherTrust
 
 /**
  * Deterministic public key for Phase 2 fixtures only. Production trust stores must not register it.
- * The matching seed is intentionally public in tsuyomi-extensions/tools/build-fixture.mjs.
+ * The public seed's immutable upstream identity is recorded in fixtures/provenance.json.
  */
 object Phase2TestPublisher {
     const val KEY_ID = "tsuyomi-phase2-fixture"

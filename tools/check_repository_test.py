@@ -14,21 +14,19 @@ class RepositoryPolicyTest(unittest.TestCase):
         paths = [
             Path("tsuyomi-android/app/src/main/kotlin/App.kt"),
             Path("tsuyomi-protocol/schemas/host-api.json"),
-            Path("tsuyomi-extensions/src/wenku8.ts"),
             Path("README.md"),
         ]
 
         self.assertEqual([paths[0]], check_repository.paths_in_scope(paths, "android"))
         self.assertEqual([paths[1]], check_repository.paths_in_scope(paths, "protocol"))
-        self.assertEqual([paths[2]], check_repository.paths_in_scope(paths, "extensions"))
         self.assertEqual(paths, check_repository.paths_in_scope(paths, "all"))
 
     def test_only_the_public_wenku8_hxp_fixture_is_allowed(self) -> None:
         self.assertFalse(
-            check_repository.violates_policy(Path("tsuyomi-extensions/fixtures/wenku8/signed-fixture.hxp"))
+            check_repository.violates_policy(Path("tsuyomi-android/source/extension-testkit/fixtures/wenku8/wenku8-fixture.hxp"))
         )
-        self.assertTrue(check_repository.violates_policy(Path("tsuyomi-extensions/dist/private.hxp")))
-        self.assertTrue(check_repository.violates_policy(Path("tsuyomi-extensions/fixtures/other/private.hxp")))
+        self.assertTrue(check_repository.violates_policy(Path("tsuyomi-android/source/extension-testkit/fixtures/wenku8/private.hxp")))
+        self.assertTrue(check_repository.violates_policy(Path("tsuyomi-android/source/extension-testkit/fixtures/other/wenku8-fixture.hxp")))
 
     def test_versioned_project_skills_are_the_only_agents_exception(self) -> None:
         self.assertFalse(
@@ -43,13 +41,13 @@ class RepositoryPolicyTest(unittest.TestCase):
         rejected = [
             Path("tsuyomi-android/.local/report.json"),
             Path("tsuyomi-protocol/AGENTS.md"),
-            Path("tsuyomi-extensions/.env.production"),
+            Path("tsuyomi-protocol/.env.production"),
             Path("tsuyomi-android/release.jks"),
             Path("session.transcript.json"),
         ]
 
         self.assertTrue(all(check_repository.violates_policy(path) for path in rejected))
-        self.assertFalse(check_repository.violates_policy(Path("tsuyomi-extensions/.env.example")))
+        self.assertFalse(check_repository.violates_policy(Path("tsuyomi-protocol/.env.example")))
 
     def test_retired_android_prototype_is_rejected(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

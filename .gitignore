@@ -53,6 +53,7 @@ tsuyomi-android/buildinteractive-*smoke-traces/
 *.apk
 *.aab
 *.hxp
+!/tsuyomi-android/source/extension-testkit/fixtures/wenku8/wenku8-fixture.hxp
 *.mp4
 *.dump
 *.hierarchy

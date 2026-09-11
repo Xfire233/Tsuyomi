@@ -9,6 +9,7 @@ import androidx.compose.animation.core.tween
 import androidx.compose.animation.expandVertically
 import androidx.compose.animation.fadeIn
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.ScrollState
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -22,15 +23,23 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyListState
+import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -38,23 +47,28 @@ import androidx.compose.runtime.setValue
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.Role
-import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import org.tsuyomi.core.display.DisplayProfile
 import org.tsuyomi.core.display.LocalDisplayEnvironment
+import org.tsuyomi.core.ui.components.InfoBanner
+import org.tsuyomi.core.ui.components.InlineStatus
 import org.tsuyomi.core.ui.components.StateView
 import org.tsuyomi.core.ui.components.TsuyomiButton
 import org.tsuyomi.core.ui.components.TsuyomiButtonStyle
+import org.tsuyomi.core.ui.components.TsuyomiIconButton
 import org.tsuyomi.core.ui.components.TsuyomiOverflowAction
 import org.tsuyomi.core.ui.components.TsuyomiStateKind
 import org.tsuyomi.core.ui.components.TsuyomiTopBar
+import org.tsuyomi.core.ui.components.TsuyomiTabOption
+import org.tsuyomi.core.ui.components.TsuyomiTabRow
 import org.tsuyomi.core.ui.components.TsuyomiTopBarAction
 import org.tsuyomi.core.ui.icons.TsuyomiIcons
-import org.tsuyomi.core.ui.theme.TsuyomiEInkPalette
 import org.tsuyomi.core.ui.theme.TsuyomiSpacing
 
 sealed interface BrowseUiState {
@@ -68,6 +82,7 @@ sealed interface BrowseUiState {
         val capabilities: List<String>,
         val resourceLimitIncreases: List<BrowseResourceLimitIncrease>,
         val isDowngrade: Boolean,
+        val isLegacyMigration: Boolean = false,
     ) : BrowseUiState
     data class Installed(val sourceName: String, val version: String) : BrowseUiState
     data class Failure(val reason: BrowseInstallFailure) : BrowseUiState
@@ -88,6 +103,54 @@ enum class BrowseInstallFailure {
     VERIFICATION,
     INSTALL,
     EXPIRED_APPROVAL,
+}
+
+enum class BrowseCatalogStatus {
+    IDLE,
+    LOADING,
+    READY,
+    UNAVAILABLE,
+    ERROR,
+}
+
+data class BrowseCatalogState(
+    val status: BrowseCatalogStatus = BrowseCatalogStatus.IDLE,
+    val items: List<BrowseCatalogItem> = emptyList(),
+    val problem: String? = null,
+    val stale: Boolean = false,
+    val busySourceId: String? = null,
+)
+
+data class BrowseCatalogItem(
+    val sourceId: String,
+    val name: String,
+    val version: String,
+    val summary: String,
+    val language: String,
+    val license: String,
+    val sourceUrl: String,
+    val sourceRevision: String,
+    val publisherFingerprint: String,
+    val compatible: Boolean,
+    val installedVersion: String?,
+    val updateAvailable: Boolean,
+)
+
+sealed interface BrowseCatalogAction {
+    data object Refresh : BrowseCatalogAction
+    data class Install(val sourceId: String) : BrowseCatalogAction
+    data class OpenSourceCode(val url: String) : BrowseCatalogAction
+}
+
+sealed interface BrowseSourceAction {
+    data class OpenHome(val sourceId: String) : BrowseSourceAction
+    data class Search(val sourceId: String) : BrowseSourceAction
+    data class OpenRemoteLibrary(val sourceId: String) : BrowseSourceAction
+}
+
+private enum class BrowseSection {
+    INSTALLED,
+    AVAILABLE,
 }
 
 /** Atlas-root action grammar backed by real source install and navigation callbacks. */
@@ -124,45 +187,50 @@ fun BrowseTopBar(
 }
 
 /**
- * Production-owned Atlas Browse composition. Standard replaces fixture source rows with the
- * verified active package and the staged install candidate. The previous renderer remains only
- * for the explicitly frozen E-ink profile.
+ * Standard Browse is the repository-backed installed/available split. The explicitly frozen
+ * E-ink renderer receives the active installed source, or the first installed source as fallback.
  */
 @Composable
 fun BrowseScreen(
     state: BrowseUiState,
     onRequestImport: () -> Unit,
-    onOpenInstalledSource: () -> Unit,
-    onApproveInstall: (allowDowngrade: Boolean) -> Unit,
+    onApproveInstall: (allowDowngrade: Boolean, allowLegacyMigration: Boolean) -> Unit,
     onDismissApproval: () -> Unit,
     onDismissFailure: () -> Unit,
+    installedSources: List<BrowseInstalledSource>,
+    activeSourceId: String? = null,
+    catalog: BrowseCatalogState,
+    onCatalogAction: (BrowseCatalogAction) -> Unit,
+    onSourceAction: (BrowseSourceAction) -> Unit,
     modifier: Modifier = Modifier,
-    installedSource: BrowseInstalledSource? = null,
-    onOpenRemoteLibrary: () -> Unit = {},
-    onOpenHome: () -> Unit = {},
 ) {
+    val activeSource = installedSources.firstOrNull { it.sourceId == activeSourceId } ?: installedSources.firstOrNull()
     if (LocalDisplayEnvironment.current.effectiveProfile == DisplayProfile.EINK) {
         FrozenEInkBrowseScreen(
             state = state,
             onRequestImport = onRequestImport,
-            onOpenInstalledSource = onOpenInstalledSource,
-            onApproveInstall = onApproveInstall,
+            onOpenInstalledSource = {
+                activeSource?.let { onSourceAction(BrowseSourceAction.Search(it.sourceId)) }
+            },
+            onApproveInstall = { allowDowngrade -> onApproveInstall(allowDowngrade, false) },
             onDismissApproval = onDismissApproval,
             onDismissFailure = onDismissFailure,
             modifier = modifier,
-            remoteLibraryAvailable = installedSource?.remoteLibraryAvailable == true,
-            onOpenRemoteLibrary = onOpenRemoteLibrary,
+            remoteLibraryAvailable = activeSource?.remoteLibraryAvailable == true,
+            onOpenRemoteLibrary = {
+                activeSource?.let { onSourceAction(BrowseSourceAction.OpenRemoteLibrary(it.sourceId)) }
+            },
         )
         return
     }
 
     BrowseScreenContent(
         state = state,
-        installedSource = installedSource,
+        installedSources = installedSources,
+        catalog = catalog,
         onRequestImport = onRequestImport,
-        onOpenInstalledSource = onOpenInstalledSource,
-        onOpenHome = onOpenHome,
-        onOpenRemoteLibrary = onOpenRemoteLibrary,
+        onCatalogAction = onCatalogAction,
+        onSourceAction = onSourceAction,
         onApproveInstall = onApproveInstall,
         onDismissApproval = onDismissApproval,
         modifier = modifier,
@@ -172,54 +240,122 @@ fun BrowseScreen(
 @Composable
 private fun BrowseScreenContent(
     state: BrowseUiState,
-    installedSource: BrowseInstalledSource?,
+    installedSources: List<BrowseInstalledSource>,
+    catalog: BrowseCatalogState,
     onRequestImport: () -> Unit,
-    onOpenInstalledSource: () -> Unit,
-    onOpenHome: () -> Unit,
-    onOpenRemoteLibrary: () -> Unit,
-    onApproveInstall: (Boolean) -> Unit,
+    onCatalogAction: (BrowseCatalogAction) -> Unit,
+    onSourceAction: (BrowseSourceAction) -> Unit,
+    onApproveInstall: (Boolean, Boolean) -> Unit,
     onDismissApproval: () -> Unit,
     modifier: Modifier,
 ) {
+    var selectedKey by rememberSaveable { mutableStateOf(BrowseSection.INSTALLED.name) }
+    val selectedSection = BrowseSection.entries.firstOrNull { it.name == selectedKey } ?: BrowseSection.INSTALLED
+    val installedScrollState = rememberSaveable(saver = ScrollState.Saver) { ScrollState(0) }
+    val catalogScrollState = rememberLazyListState()
+    var catalogQuery by rememberSaveable { mutableStateOf("") }
+    var detailsSourceId by rememberSaveable { mutableStateOf<String?>(null) }
+    LaunchedEffect(selectedSection) {
+        if (
+            selectedSection == BrowseSection.AVAILABLE &&
+            state !is BrowseUiState.Approval &&
+            catalog.status == BrowseCatalogStatus.IDLE
+        ) {
+            onCatalogAction(BrowseCatalogAction.Refresh)
+        }
+    }
+
     Column(modifier.fillMaxSize()) {
         InstallMutationBanner(state, onRequestImport)
-        val candidate = state as? BrowseUiState.Approval
-        when {
-            installedSource != null || candidate != null -> Column(
-                Modifier
-                    .weight(1f)
-                    .verticalScroll(rememberScrollState()),
-            ) {
-                installedSource?.let { source ->
-                    BrowseSection(stringResource(R.string.browse_section_installed))
-                    InstalledSourceCard(
-                        source = source,
-                        onSearch = onOpenInstalledSource,
-                        onOpenHome = onOpenHome,
-                        onOpenRemoteLibrary = onOpenRemoteLibrary,
-                    )
-                }
-                candidate?.let {
-                    BrowseSection(stringResource(R.string.browse_section_installable))
-                    ApprovalSourceCard(it, onApproveInstall, onDismissApproval)
-                }
+        TsuyomiTabRow(
+            options = listOf(
+                TsuyomiTabOption(BrowseSection.INSTALLED.name, stringResource(R.string.browse_section_installed)),
+                TsuyomiTabOption(BrowseSection.AVAILABLE.name, stringResource(R.string.browse_section_installable)),
+            ),
+            selectedKey = selectedSection.name,
+            onSelect = { selectedKey = it },
+            modifier = Modifier.fillMaxWidth(),
+        )
+        if (state is BrowseUiState.Approval) {
+            Column(Modifier.weight(1f).verticalScroll(rememberScrollState())) {
+                ApprovalSourceCard(state, onApproveInstall, onDismissApproval)
                 Spacer(Modifier.height(TsuyomiSpacing.Lg))
             }
-            state is BrowseUiState.Preparing -> StateView(
+        } else {
+            when (selectedSection) {
+                BrowseSection.INSTALLED -> InstalledSourcesContent(
+                    state = state,
+                    installedSources = installedSources,
+                    onRequestImport = onRequestImport,
+                    onSourceAction = onSourceAction,
+                    scrollState = installedScrollState,
+                    modifier = Modifier.weight(1f),
+                )
+                BrowseSection.AVAILABLE -> BrowseCatalogContent(
+                    catalog = catalog,
+                    installationAllowed =
+                        catalog.status == BrowseCatalogStatus.READY &&
+                            !catalog.stale &&
+                            catalog.busySourceId == null &&
+                            state !is BrowseUiState.Preparing &&
+                            state !is BrowseUiState.Approval,
+                    refreshAllowed =
+                        catalog.busySourceId == null &&
+                            state !is BrowseUiState.Preparing &&
+                            state !is BrowseUiState.Approval,
+                    onCatalogAction = onCatalogAction,
+                    modifier = Modifier.weight(1f),
+                    scrollState = catalogScrollState,
+                    catalogQuery = catalogQuery,
+                    onCatalogQueryChange = { catalogQuery = it },
+                    detailsSourceId = detailsSourceId,
+                    onDetailsSourceIdChange = { detailsSourceId = it },
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun InstalledSourcesContent(
+    state: BrowseUiState,
+    installedSources: List<BrowseInstalledSource>,
+    onRequestImport: () -> Unit,
+    onSourceAction: (BrowseSourceAction) -> Unit,
+    scrollState: ScrollState,
+    modifier: Modifier,
+) {
+    if (installedSources.isEmpty()) {
+        if (state is BrowseUiState.Preparing) {
+            StateView(
                 kind = TsuyomiStateKind.LOADING,
                 title = stringResource(R.string.browse_preparing_title),
                 message = stringResource(R.string.browse_preparing_message, state.fileName),
-                modifier = Modifier.weight(1f),
+                modifier = modifier,
             )
-            else -> StateView(
+        } else {
+            StateView(
                 kind = TsuyomiStateKind.EMPTY,
                 title = stringResource(R.string.browse_empty_title),
                 message = stringResource(R.string.browse_empty_message),
                 actionLabel = stringResource(R.string.browse_import_action),
                 onAction = onRequestImport,
-                modifier = Modifier.weight(1f),
+                modifier = modifier,
             )
         }
+        return
+    }
+
+    Column(modifier.verticalScroll(scrollState)) {
+        installedSources.forEach { source ->
+            InstalledSourceCard(
+                source = source,
+                onSearch = { onSourceAction(BrowseSourceAction.Search(source.sourceId)) },
+                onOpenHome = { onSourceAction(BrowseSourceAction.OpenHome(source.sourceId)) },
+                onOpenRemoteLibrary = { onSourceAction(BrowseSourceAction.OpenRemoteLibrary(source.sourceId)) },
+            )
+        }
+        Spacer(Modifier.height(TsuyomiSpacing.Lg))
     }
 }
 
@@ -253,20 +389,6 @@ private fun InstallMutationBanner(state: BrowseUiState, onRetry: () -> Unit) {
             }
         }
     }
-}
-
-@Composable
-private fun BrowseSection(title: String) {
-    Text(
-        text = title,
-        modifier = Modifier.padding(
-            start = TsuyomiSpacing.Md,
-            end = TsuyomiSpacing.Md,
-            top = TsuyomiSpacing.Lg,
-            bottom = TsuyomiSpacing.Sm,
-        ).semantics { heading() },
-        style = MaterialTheme.typography.titleSmall,
-    )
 }
 
 @Composable
@@ -319,9 +441,17 @@ private fun InstalledSourceCard(
                 horizontalArrangement = Arrangement.spacedBy(TsuyomiSpacing.Sm),
                 verticalArrangement = Arrangement.spacedBy(TsuyomiSpacing.Sm),
             ) {
+                if (source.homeAvailable) {
+                    TsuyomiButton(
+                        text = stringResource(R.string.browse_source_home_action),
+                        onClick = onOpenHome,
+                        style = TsuyomiButtonStyle.TEXT,
+                    )
+                }
                 TsuyomiButton(
                     text = stringResource(R.string.browse_source_search_action),
                     onClick = onSearch,
+                    modifier = Modifier.testTag("browse-source-search-${source.sourceId}"),
                     style = if (source.homeAvailable) TsuyomiButtonStyle.TEXT else TsuyomiButtonStyle.PRIMARY,
                 )
                 if (source.remoteLibraryAvailable) {
@@ -342,16 +472,308 @@ private fun sourceCapabilityLabel(source: BrowseInstalledSource): String = build
     if (source.homeAvailable) add(stringResource(R.string.browse_source_capabilities_home))
     if (source.remoteLibraryAvailable) add(stringResource(R.string.browse_source_capabilities_remote_library))
     if (source.verificationAvailable) add(stringResource(R.string.browse_source_capabilities_verification))
-}.joinToString(stringResource(R.string.browse_source_capabilities_separator))
+}.joinToString("、")
+
+@Composable
+private fun BrowseCatalogContent(
+    catalog: BrowseCatalogState,
+    installationAllowed: Boolean,
+    refreshAllowed: Boolean,
+    onCatalogAction: (BrowseCatalogAction) -> Unit,
+    scrollState: LazyListState,
+    catalogQuery: String,
+    onCatalogQueryChange: (String) -> Unit,
+    detailsSourceId: String?,
+    onDetailsSourceIdChange: (String?) -> Unit,
+    modifier: Modifier,
+) {
+    if (catalog.items.isEmpty()) {
+        CatalogEmptyState(catalog, refreshAllowed, onCatalogAction, modifier)
+        return
+    }
+
+    val visibleItems = if (catalogQuery.isBlank()) {
+        catalog.items
+    } else {
+        catalog.items.filter { item ->
+            item.name.contains(catalogQuery, ignoreCase = true) ||
+                item.summary.contains(catalogQuery, ignoreCase = true) ||
+                item.language.contains(catalogQuery, ignoreCase = true) ||
+                item.sourceId.contains(catalogQuery, ignoreCase = true)
+        }
+    }
+    LazyColumn(
+        modifier = modifier,
+        state = scrollState,
+        contentPadding = PaddingValues(bottom = TsuyomiSpacing.Lg),
+    ) {
+        item(key = "catalog-search", contentType = "search") {
+            Row(
+                modifier = Modifier.fillMaxWidth().padding(TsuyomiSpacing.Md),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                OutlinedTextField(
+                    value = catalogQuery,
+                    onValueChange = onCatalogQueryChange,
+                    modifier = Modifier.weight(1f).testTag("browse-catalog-search"),
+                    label = { Text(stringResource(R.string.browse_catalog_search_label)) },
+                    singleLine = true,
+                )
+                if (catalog.status == BrowseCatalogStatus.READY || catalog.status == BrowseCatalogStatus.IDLE) {
+                    TsuyomiIconButton(
+                        imageVector = TsuyomiIcons.Refresh,
+                        contentDescription = stringResource(R.string.browse_catalog_refresh_action),
+                        onClick = { onCatalogAction(BrowseCatalogAction.Refresh) },
+                        enabled = refreshAllowed,
+                        modifier = Modifier.padding(start = TsuyomiSpacing.Sm),
+                    )
+                }
+            }
+        }
+        item(key = "catalog-status", contentType = "status") {
+            CatalogStatusNotice(catalog, refreshAllowed, onCatalogAction)
+        }
+        if (visibleItems.isEmpty()) {
+            item(key = "catalog-empty", contentType = "status") {
+                Text(
+                    stringResource(R.string.browse_catalog_search_empty),
+                    modifier = Modifier.padding(TsuyomiSpacing.Md),
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        } else {
+            items(visibleItems, key = { it.sourceId }, contentType = { "source" }) { item ->
+                BrowseCatalogItemRow(
+                    item = item,
+                    busy = catalog.busySourceId == item.sourceId,
+                    installationAllowed = installationAllowed,
+                    onOpenDetails = { onDetailsSourceIdChange(item.sourceId) },
+                    onInstall = { onCatalogAction(BrowseCatalogAction.Install(item.sourceId)) },
+                )
+            }
+        }
+    }
+    catalog.items.firstOrNull { it.sourceId == detailsSourceId }?.let { item ->
+        BrowseCatalogDetailsDialog(
+            item = item,
+            onOpenSourceCode = { onCatalogAction(BrowseCatalogAction.OpenSourceCode(item.sourceUrl)) },
+            onDismiss = { onDetailsSourceIdChange(null) },
+        )
+    }
+}
+
+@Composable
+private fun CatalogEmptyState(
+    catalog: BrowseCatalogState,
+    refreshAllowed: Boolean,
+    onCatalogAction: (BrowseCatalogAction) -> Unit,
+    modifier: Modifier,
+) {
+    when (catalog.status) {
+        BrowseCatalogStatus.LOADING -> StateView(
+            kind = TsuyomiStateKind.LOADING,
+            title = stringResource(R.string.browse_catalog_loading),
+            modifier = modifier,
+        )
+        BrowseCatalogStatus.UNAVAILABLE -> StateView(
+            kind = TsuyomiStateKind.ERROR,
+            title = stringResource(R.string.browse_catalog_unavailable_title),
+            message = catalog.problem ?: stringResource(R.string.browse_catalog_unavailable_message),
+            modifier = modifier,
+        )
+        BrowseCatalogStatus.ERROR -> StateView(
+            kind = TsuyomiStateKind.ERROR,
+            title = stringResource(R.string.browse_catalog_error_title),
+            message = catalog.problem ?: stringResource(R.string.browse_catalog_error_message),
+            actionLabel = if (refreshAllowed) stringResource(R.string.browse_catalog_refresh_action) else null,
+            onAction = if (refreshAllowed) {
+                { onCatalogAction(BrowseCatalogAction.Refresh) }
+            } else {
+                null
+            },
+            modifier = modifier,
+        )
+        BrowseCatalogStatus.IDLE,
+        BrowseCatalogStatus.READY -> StateView(
+            kind = TsuyomiStateKind.EMPTY,
+            title = stringResource(R.string.browse_catalog_empty_title),
+            message = stringResource(R.string.browse_catalog_empty_message),
+            actionLabel = if (refreshAllowed) stringResource(R.string.browse_catalog_refresh_action) else null,
+            onAction = if (refreshAllowed) {
+                { onCatalogAction(BrowseCatalogAction.Refresh) }
+            } else {
+                null
+            },
+            modifier = modifier,
+        )
+    }
+}
+
+@Composable
+private fun CatalogStatusNotice(
+    catalog: BrowseCatalogState,
+    refreshAllowed: Boolean,
+    onCatalogAction: (BrowseCatalogAction) -> Unit,
+) {
+    when (catalog.status) {
+        BrowseCatalogStatus.LOADING -> InlineStatus(stringResource(R.string.browse_catalog_loading))
+        BrowseCatalogStatus.ERROR -> InfoBanner(
+            title = stringResource(R.string.browse_catalog_error_title),
+            message = catalog.problem ?: stringResource(R.string.browse_catalog_error_message),
+            primaryActionLabel = if (refreshAllowed) stringResource(R.string.browse_catalog_refresh_action) else null,
+            onPrimaryAction = if (refreshAllowed) {
+                { onCatalogAction(BrowseCatalogAction.Refresh) }
+            } else {
+                null
+            },
+        )
+        BrowseCatalogStatus.UNAVAILABLE -> InfoBanner(
+            title = stringResource(R.string.browse_catalog_unavailable_title),
+            message = catalog.problem ?: stringResource(R.string.browse_catalog_unavailable_message),
+        )
+        BrowseCatalogStatus.IDLE,
+        BrowseCatalogStatus.READY -> Unit
+    }
+    if (catalog.stale) {
+        InlineStatus(stringResource(R.string.browse_catalog_stale))
+    }
+}
+
+@Composable
+private fun BrowseCatalogItemRow(
+    item: BrowseCatalogItem,
+    busy: Boolean,
+    installationAllowed: Boolean,
+    onOpenDetails: () -> Unit,
+    onInstall: () -> Unit,
+) {
+    val action = catalogItemAction(item, busy, installationAllowed)
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(role = Role.Button, onClick = onOpenDetails)
+            .padding(horizontal = TsuyomiSpacing.Md, vertical = TsuyomiSpacing.Sm),
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Column(Modifier.weight(1f)) {
+                Text(
+                    item.name,
+                    style = MaterialTheme.typography.titleSmall,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                Text(
+                    "${item.version}  ${item.language}",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                Text(
+                    item.summary,
+                    modifier = Modifier.padding(top = TsuyomiSpacing.Xs),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+            TsuyomiButton(
+                text = stringResource(action.label),
+                onClick = onInstall,
+                enabled = action.enabled,
+                modifier = Modifier.padding(start = TsuyomiSpacing.Md),
+                style = action.style,
+            )
+        }
+        HorizontalDivider(Modifier.padding(top = TsuyomiSpacing.Sm))
+    }
+}
+
+private data class CatalogItemAction(
+    val label: Int,
+    val enabled: Boolean,
+    val style: TsuyomiButtonStyle,
+)
+
+private fun catalogItemAction(
+    item: BrowseCatalogItem,
+    busy: Boolean,
+    installationAllowed: Boolean,
+): CatalogItemAction = when {
+    busy -> CatalogItemAction(R.string.browse_catalog_preparing, false, TsuyomiButtonStyle.TEXT)
+    !item.compatible -> CatalogItemAction(R.string.browse_catalog_incompatible, false, TsuyomiButtonStyle.TEXT)
+    item.installedVersion == null -> CatalogItemAction(
+        R.string.browse_catalog_install_action,
+        installationAllowed,
+        TsuyomiButtonStyle.PRIMARY,
+    )
+    item.updateAvailable -> CatalogItemAction(
+        R.string.browse_catalog_update_action,
+        installationAllowed,
+        TsuyomiButtonStyle.PRIMARY,
+    )
+    else -> CatalogItemAction(R.string.browse_catalog_installed, false, TsuyomiButtonStyle.TEXT)
+}
+
+@Composable
+private fun BrowseCatalogDetailsDialog(
+    item: BrowseCatalogItem,
+    onOpenSourceCode: () -> Unit,
+    onDismiss: () -> Unit,
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(stringResource(R.string.browse_catalog_details_title)) },
+        text = {
+            Column(Modifier.heightIn(max = 360.dp).verticalScroll(rememberScrollState())) {
+                Text(item.name, style = MaterialTheme.typography.titleMedium)
+                Text("${item.version}  ${item.language}", style = MaterialTheme.typography.labelMedium)
+                Text(
+                    item.summary,
+                    modifier = Modifier.padding(vertical = TsuyomiSpacing.Md),
+                    style = MaterialTheme.typography.bodyMedium,
+                )
+                CatalogDetailField(stringResource(R.string.browse_catalog_publisher), item.publisherFingerprint)
+                CatalogDetailField(stringResource(R.string.browse_catalog_license), item.license)
+                CatalogDetailField(stringResource(R.string.browse_catalog_source_revision), item.sourceRevision)
+                CatalogDetailField(stringResource(R.string.browse_catalog_source_url), item.sourceUrl)
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = onOpenSourceCode) {
+                Text(stringResource(R.string.browse_catalog_open_source_code))
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text(stringResource(R.string.browse_close_action))
+            }
+        },
+    )
+}
+
+@Composable
+private fun CatalogDetailField(label: String, value: String) {
+    Text(label, style = MaterialTheme.typography.labelLarge)
+    Text(
+        value,
+        modifier = Modifier.padding(bottom = TsuyomiSpacing.Md),
+        style = MaterialTheme.typography.bodyMedium,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+    )
+}
 
 @Composable
 private fun ApprovalSourceCard(
     state: BrowseUiState.Approval,
-    onApprove: (Boolean) -> Unit,
+    onApprove: (Boolean, Boolean) -> Unit,
     onDismiss: () -> Unit,
 ) {
     var expanded by rememberSaveable(state.sourceId, state.version) { mutableStateOf(false) }
     var downgradeConfirmed by remember(state.sourceId, state.version) { mutableStateOf(false) }
+    var legacyMigrationConfirmed by remember(state.sourceId, state.version) { mutableStateOf(false) }
     Surface(
         modifier = Modifier.fillMaxWidth().padding(horizontal = TsuyomiSpacing.Md),
         shape = MaterialTheme.shapes.medium,
@@ -423,10 +845,18 @@ private fun ApprovalSourceCard(
                     label = stringResource(R.string.browse_approval_downgrade),
                 )
             }
+            if (state.isLegacyMigration) {
+                CheckboxRow(
+                    checked = legacyMigrationConfirmed,
+                    onCheckedChange = { legacyMigrationConfirmed = it },
+                    label = stringResource(R.string.browse_approval_legacy_migration),
+                )
+            }
             TsuyomiButton(
                 text = stringResource(R.string.browse_approval_install_action),
-                onClick = { onApprove(downgradeConfirmed) },
-                enabled = !state.isDowngrade || downgradeConfirmed,
+                onClick = { onApprove(downgradeConfirmed, legacyMigrationConfirmed) },
+                enabled = (!state.isDowngrade || downgradeConfirmed) &&
+                    (!state.isLegacyMigration || legacyMigrationConfirmed),
                 style = TsuyomiButtonStyle.SECONDARY,
             )
             TsuyomiButton(

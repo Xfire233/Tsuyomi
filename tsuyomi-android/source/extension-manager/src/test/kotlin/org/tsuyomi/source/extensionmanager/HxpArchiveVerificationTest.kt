@@ -192,6 +192,14 @@ class HxpArchiveVerificationTest {
             HxpArchiveVerifier(revokedStore).verify(fixture.writeToTemporaryFile())
         }
         assertEquals(HxpVerificationError.REVOKED_PUBLISHER, revoked.error)
+
+        val packageStore = InMemoryPublisherKeyStore(listOf(fixture.publisher)).also {
+            it.revokePackage(sha256(fixture.bytes))
+        }
+        val packageRevoked = assertThrows(HxpVerificationException::class.java) {
+            HxpArchiveVerifier(packageStore).verify(fixture.writeToTemporaryFile())
+        }
+        assertEquals(HxpVerificationError.REVOKED_PACKAGE, packageRevoked.error)
     }
 
 

@@ -456,7 +456,7 @@ internal fun TsuyomiApp(
                         environment.effectiveProfile == DisplayProfile.STANDARD
                     ) {
                         BrowseTopBar(
-                            installedSourceCount = if (sourceOwner.installer.activePackage == null) 0 else 1,
+                            installedSourceCount = sourceOwner.installer.installedPackages.size,
                             onSearch = { navController.navigate(Routes.Search) },
                             onImport = sourceOwner::requestImport,
                             onRefreshSources = { scope.launch { sourceOwner.refreshInstalledSources() } },

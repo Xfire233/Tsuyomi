@@ -15,7 +15,7 @@ An `.hxp` archive contains `manifest.json`, `index.mjs`, optional `assets/` and 
 
 ## Trust and updates
 
-Installation requires a signature chaining to a user-trusted key or an explicit local-import confirmation. A same-key update with no capability expansion may be offered as a normal update. Any added domain, cookie scope, controlled-WebView permission, file ability, or storage quota requires a new explicit grant. Revocation and key-rotation data is signed and evaluated before updates.
+Installation requires a publisher signature trusted through current or retained root-signed repository metadata, a user-trusted key, or an explicit local-import confirmation. A same-key update with no capability expansion may be offered as a normal update. Any added domain, cookie scope, controlled-WebView permission, file ability, or storage quota requires a new explicit grant. Catalog expiry, root-signed revocation, and the exact legacy-migration exception are rechecked before repository activation.
 
 ## Host security boundary
 

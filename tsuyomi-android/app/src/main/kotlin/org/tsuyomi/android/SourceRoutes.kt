@@ -6,6 +6,9 @@
 package org.tsuyomi.android
 
 import androidx.activity.compose.BackHandler
+import android.widget.Toast
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.foundation.layout.Column
 import androidx.compose.runtime.Composable
 import androidx.compose.material3.AlertDialog
@@ -36,7 +39,10 @@ import org.tsuyomi.feature.book.DetailCollectionDestination
 import org.tsuyomi.feature.book.SourceBookState
 import org.tsuyomi.feature.book.BookDirectoryScreen
 import org.tsuyomi.feature.browse.BrowseInstalledSource
+import org.tsuyomi.feature.browse.BrowseCatalogAction
+import org.tsuyomi.feature.browse.BrowseSourceAction
 import org.tsuyomi.feature.browse.BrowseScreen
+import org.tsuyomi.feature.browse.BrowseUiState
 import org.tsuyomi.feature.browse.SourceHomeScreen
 import org.tsuyomi.feature.library.RemoteLibraryScreen
 import org.tsuyomi.feature.reader.ReaderScreen
@@ -93,6 +99,13 @@ internal fun NavGraphBuilder.sourceRoutes(
 private fun NavGraphBuilder.browseRoute(navController: NavHostController, owner: SourceRouteOwner) {
     composable(Routes.Browse) { entry ->
         val scope = rememberCoroutineScope()
+        val context = LocalContext.current
+        val uriHandler = LocalUriHandler.current
+        var sourceOpening by remember { mutableStateOf(false) }
+        val profile = org.tsuyomi.core.display.LocalDisplayEnvironment.current.effectiveProfile
+        LaunchedEffect(profile, owner.installer.state) {
+            if (profile == org.tsuyomi.core.display.DisplayProfile.EINK) owner.installer.dismissRepositoryApproval()
+        }
         val packageInfo = owner.installer.activePackage
         val resumeSourceId by entry.savedStateHandle
             .getStateFlow(ResumeSourceIdKey, "")
@@ -113,23 +126,66 @@ private fun NavGraphBuilder.browseRoute(navController: NavHostController, owner:
             }
         }
         BrowseScreen(
-            state = owner.installer.state,
-            installedSource = packageInfo?.let { verified ->
+            state = owner.installer.state.takeUnless {
+                profile == org.tsuyomi.core.display.DisplayProfile.EINK && it is BrowseUiState.Approval && it.isLegacyMigration
+            } ?: packageInfo?.let { BrowseUiState.Installed(it.manifest.displayName, it.manifest.version.original) }
+                ?: BrowseUiState.Empty,
+            activeSourceId = packageInfo?.manifest?.sourceId?.value,
+            installedSources = owner.installer.installedPackages.map { verified ->
                 BrowseInstalledSource(
                     sourceId = verified.manifest.sourceId.value,
                     name = verified.manifest.displayName,
                     version = verified.manifest.version.original,
                     summary = verified.manifest.summary,
-                    homeAvailable = owner.sourceHomeAvailable,
-                    remoteLibraryAvailable = owner.remoteLibraryAvailable,
+                    homeAvailable = verified.manifest.capabilities.home.enabled,
+                    remoteLibraryAvailable = verified.manifest.capabilities.remoteLibrary.policies.containsKey(
+                        org.tsuyomi.source.extensionmanager.RemoteOperation.READ,
+                    ),
                     verificationAvailable = verified.manifest.capabilities.webLogin.enabled,
                 )
             },
             onRequestImport = owner::requestImport,
-            onOpenHome = owner::navigateToSourceHome,
-            onOpenInstalledSource = { scope.launch { owner.openInstalledSource() } },
-            onOpenRemoteLibrary = { scope.launch { owner.openRemoteLibrary() } },
-            onApproveInstall = { allowDowngrade -> scope.launch { owner.installer.approve(allowDowngrade) } },
+            catalog = owner.installer.catalog.state,
+            onCatalogAction = { action ->
+                when (action) {
+                    BrowseCatalogAction.Refresh -> scope.launch { owner.installer.catalog.refresh() }
+                    is BrowseCatalogAction.Install -> scope.launch { owner.installer.catalog.install(action.sourceId) }
+                    is BrowseCatalogAction.OpenSourceCode -> try {
+                        uriHandler.openUri(action.url)
+                    } catch (_: IllegalArgumentException) {
+                        Toast.makeText(context, R.string.source_repository_no_browser, Toast.LENGTH_LONG).show()
+                    }
+                }
+            },
+            onSourceAction = { action ->
+                if (!sourceOpening) {
+                    sourceOpening = true
+                scope.launch {
+                    try {
+                    val sourceId = when (action) {
+                        is BrowseSourceAction.OpenHome -> action.sourceId
+                        is BrowseSourceAction.Search -> action.sourceId
+                        is BrowseSourceAction.OpenRemoteLibrary -> action.sourceId
+                    }
+                    val selected = owner.installer.activateInstalledSource(sourceId)
+                    if (selected != null) when (action) {
+                        is BrowseSourceAction.OpenHome -> if (selected.manifest.capabilities.home.enabled) {
+                            owner.navigateToSourceHome()
+                        } else {
+                            owner.openInstalledSource()
+                        }
+                        is BrowseSourceAction.Search -> owner.openInstalledSource()
+                        is BrowseSourceAction.OpenRemoteLibrary -> owner.openRemoteLibrary()
+                    }
+                    } finally {
+                        sourceOpening = false
+                    }
+                }
+                }
+            },
+            onApproveInstall = { allowDowngrade, allowLegacyMigration ->
+                scope.launch { owner.installer.approve(allowDowngrade, allowLegacyMigration) }
+            },
             onDismissApproval = owner.installer::dismissApproval,
             onDismissFailure = owner.installer::dismissFailure,
         )

@@ -18,7 +18,7 @@ Tsuyomi needs a durable identity, release lineage, and licensing policy independ
 
 ## Decision
 
-Tsuyomi is an independent project. New project-owned code and documentation use Apache-2.0. Every source file carries SPDX metadata. Copied or adapted third-party material is accepted only after license compatibility review and is recorded in `THIRD_PARTY_NOTICES.md` with its pinned source revision and adoption scope.
+Android host code, platform-neutral protocol code and their documentation use Apache-2.0. As explicitly authorized on 2026-09-11, independently maintained source-extension implementations move to the public `Chachaanteng/tsuyomi-extensions` repository under AGPL-3.0-only. Existing Apache grants are not revoked; historical copyright, license and NOTICE obligations remain attached to adopted material. Every source file carries accurate SPDX metadata. Third-party material requires pinned provenance and compatibility review. The intended licensing boundary keeps the host and protocol Apache-2.0; any additional Host API permission needed for combined distribution must be separately reviewed by the user before formal distribution, never silently invented or inferred from repository separation.
 
 Behavior, data formats, and user workflows may be migrated from the Flutter reference application. Its package identity, release signing identity, private runtime data, and branding are not inherited.
 

@@ -163,12 +163,14 @@ internal enum class SourceSessionOpenResult {
     ALREADY_OPEN,
     OPENED,
     PACKAGE_CHANGED,
+    UNAVAILABLE,
 }
 
 
 internal class SourceSessionOwner(
     val directActionTokens: DirectActionTokenRegistry,
     private val openSession: suspend (VerifiedHxpPackage) -> SourceFlowSession,
+    private val isPackageTrusted: (VerifiedHxpPackage) -> Boolean,
 ) : Closeable {
     private val lock = Any()
     private var client: SourceFlowSession? = null
@@ -181,6 +183,10 @@ internal class SourceSessionOwner(
         packageInfo: VerifiedHxpPackage,
         onPackageChanged: () -> Unit = {},
     ): SourceSessionOpenResult {
+        if (!isPackageTrusted(packageInfo)) {
+            closeActiveClient()
+            return SourceSessionOpenResult.UNAVAILABLE
+        }
         val (previousClient, operationGeneration, packageChanged) = synchronized(lock) {
             checkOpen()
             if (activePackage?.packageSha256 == packageInfo.packageSha256 && client != null) {
@@ -199,7 +205,7 @@ internal class SourceSessionOwner(
 
         val openedClient = openSession(packageInfo)
         val retained = synchronized(lock) {
-            if (closed || openGeneration != operationGeneration) {
+            if (closed || openGeneration != operationGeneration || !isPackageTrusted(packageInfo)) {
                 false
             } else {
                 client = openedClient
@@ -210,6 +216,7 @@ internal class SourceSessionOwner(
         if (!retained) {
             openedClient.close()
             synchronized(lock) { checkOpen() }
+            if (!isPackageTrusted(packageInfo)) return SourceSessionOpenResult.UNAVAILABLE
             return SourceSessionOpenResult.ALREADY_OPEN
         }
         return if (packageChanged) SourceSessionOpenResult.PACKAGE_CHANGED else SourceSessionOpenResult.OPENED
@@ -217,17 +224,17 @@ internal class SourceSessionOwner(
 
     fun active(): ActiveSourceSession? = synchronized(lock) {
         checkOpen()
-        activePackage?.let { ActiveSourceSession(it, openGeneration) }
+        activePackage?.takeIf(isPackageTrusted)?.let { ActiveSourceSession(it, openGeneration) }
     }
 
-    fun requireClient(): SourceFlowSession = synchronized(lock) {
-        checkOpen()
-        checkNotNull(client) { "Source is not open" }
-    }
+    fun requireClient(): SourceFlowSession = requireClientOrNull() ?: throw SourceException(
+        code = SourceErrorCode.EXTENSION_RUNTIME_FAILURE,
+        diagnostic = SourceDiagnostic("source-unavailable", "source-session", "source-untrusted-or-closed"),
+    )
 
     fun requireClientOrNull(): SourceFlowSession? = synchronized(lock) {
         checkOpen()
-        client
+        client.takeIf { activePackage?.let(isPackageTrusted) == true }
     }
 
     suspend fun reopen(): SourceSessionOpenResult? {

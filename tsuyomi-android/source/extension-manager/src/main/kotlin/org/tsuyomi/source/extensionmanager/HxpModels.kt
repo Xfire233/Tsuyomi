@@ -26,12 +26,12 @@ data class SemanticVersion(
             val left = prerelease.getOrNull(index) ?: return -1
             val right = other.prerelease.getOrNull(index) ?: return 1
             if (left == right) continue
-            val leftNumber = left.toIntOrNull()
-            val rightNumber = right.toIntOrNull()
+            val leftNumeric = left.all { it in '0'..'9' }
+            val rightNumeric = right.all { it in '0'..'9' }
             return when {
-                leftNumber != null && rightNumber != null -> leftNumber.compareTo(rightNumber)
-                leftNumber != null -> -1
-                rightNumber != null -> 1
+                leftNumeric && rightNumeric -> compareNumericPrereleaseIdentifier(left, right)
+                leftNumeric -> -1
+                rightNumeric -> 1
                 else -> left.compareTo(right)
             }
         }
@@ -56,6 +56,14 @@ data class SemanticVersion(
             )
         }
     }
+}
+
+private fun compareNumericPrereleaseIdentifier(left: String, right: String): Int {
+    val normalizedLeft = left.trimStart('0').ifEmpty { "0" }
+    val normalizedRight = right.trimStart('0').ifEmpty { "0" }
+    return compareValues(normalizedLeft.length, normalizedRight.length)
+        .takeIf { it != 0 }
+        ?: normalizedLeft.compareTo(normalizedRight)
 }
 
 data class HxpNetworkCapability(
@@ -144,7 +152,7 @@ data class HxpManifest(
     val updateChannel: String,
 )
 
-enum class PublisherTrust { BUILT_IN_TEST, USER_ADDED }
+enum class PublisherTrust { BUILT_IN_OFFICIAL, BUILT_IN_TEST, USER_ADDED }
 
 data class PublisherKey(
     val keyId: String,
@@ -166,7 +174,7 @@ data class PublisherKey(
 interface PublisherKeyResolver {
     fun resolve(keyId: String): PublisherKey?
     fun isRevokedFingerprint(fingerprint: String): Boolean
-    fun isRevokedPackage(contentDigest: String): Boolean
+    fun isRevokedPackage(packageSha256: String): Boolean
 }
 
 class InMemoryPublisherKeyStore(keys: Iterable<PublisherKey>) : PublisherKeyResolver {
@@ -176,7 +184,7 @@ class InMemoryPublisherKeyStore(keys: Iterable<PublisherKey>) : PublisherKeyReso
 
     override fun resolve(keyId: String): PublisherKey? = byId[keyId]
     override fun isRevokedFingerprint(fingerprint: String): Boolean = fingerprint in revokedFingerprints
-    override fun isRevokedPackage(contentDigest: String): Boolean = contentDigest in revokedPackages
+    override fun isRevokedPackage(packageSha256: String): Boolean = packageSha256 in revokedPackages
 
     fun add(key: PublisherKey) {
         val existing = byId[key.keyId]
@@ -188,8 +196,8 @@ class InMemoryPublisherKeyStore(keys: Iterable<PublisherKey>) : PublisherKeyReso
         revokedFingerprints += fingerprint
     }
 
-    fun revokePackage(contentDigest: String) {
-        revokedPackages += contentDigest
+    fun revokePackage(packageSha256: String) {
+        revokedPackages += packageSha256
     }
 }
 

@@ -110,11 +110,14 @@ private fun BrowsePreview(profile: DisplayProfile, state: BrowseUiState = Browse
             Surface(Modifier.fillMaxSize()) {
                 BrowseScreen(
                     state = state,
+                    installedSources = emptyList(),
+                    catalog = BrowseCatalogState(),
                     onRequestImport = {},
-                    onOpenInstalledSource = {},
-                    onApproveInstall = {},
+                    onApproveInstall = { _, _ -> },
                     onDismissApproval = {},
                     onDismissFailure = {},
+                    onCatalogAction = {},
+                    onSourceAction = {},
                 )
             }
         }

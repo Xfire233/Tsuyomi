@@ -40,6 +40,11 @@ for (const { label, schemaPath, fixturePath } of [
     schemaPath: '../schemas/hxp-update-check-v2.schema.json',
     fixturePath: '../fixtures/hxp/valid-update-check-v2.json',
   },
+  {
+    label: 'tsuyomi signed extension repository v1',
+    schemaPath: '../schemas/tsuyomi-repository-v1.schema.json',
+    fixturePath: '../fixtures/repository/valid-catalog.json',
+  },
 ]) {
   test(`${label} accepts its valid fixture`, async () => {
     const ajv = createAjv();
@@ -74,6 +79,16 @@ test('tsuyomi-transfer v3 requires local pin state and rejects unpinned manual m
   delete valid.library[0].localPin;
   assert.equal(validate(valid), false);
   assert.equal(validate(invalid), false);
+});
+test('tsuyomi repository v1 rejects unsigned shape changes and unsafe package URLs', async () => {
+  const ajv = createAjv();
+  const validate = ajv.compile(await loadJson('../schemas/tsuyomi-repository-v1.schema.json'));
+  const unknown = await loadJson('../fixtures/repository/invalid-catalog-unknown-field.json');
+  assert.equal(validate(unknown), false);
+
+  const credentialed = await loadJson('../fixtures/repository/valid-catalog.json');
+  credentialed.signed.packages[0].downloadUrl = 'https://user@example.test/fixture.hxp';
+  assert.equal(validate(credentialed), false);
 });
 
 test('hxp manifest v1 rejects non-HTTPS network origins', async () => {

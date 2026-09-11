@@ -1,0 +1,16 @@
+{
+  "format": "tsuyomi-repository",
+  "version": 1,
+  "keyId": "fixture-root-key",
+  "signed": {
+    "repositoryId": "org.tsuyomi.extensions",
+    "repositoryId": "org.tsuyomi.attacker",
+    "sequence": 1,
+    "issuedAt": "2030-01-01T00:00:00Z",
+    "expiresAt": "2030-01-15T00:00:00Z",
+    "publishers": [],
+    "packages": [],
+    "revocations": { "publisherFingerprints": [], "packageDigests": [] }
+  },
+  "signature": "tp7OS9eMAw25f3zHAQMjxQXBK02pfdLqOZ5S+QPYEjR9VfmCVGWCi92ZbmbsvtwnA+gkPIhWuIT7m5bukKg4CQ=="
+}

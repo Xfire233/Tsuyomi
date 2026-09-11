@@ -27,6 +27,11 @@ class HxpArchiveVerifier(
         }
         val archiveBytes = runCatching { file.readBytes() }
             .getOrElse { fail(HxpVerificationError.INVALID_ARCHIVE_ENTRY) }
+        return verify(archiveBytes)
+    }
+
+    /** Re-verifies an already prepared archive against the resolver's current revocation snapshot. */
+    fun verify(archiveBytes: ByteArray): VerifiedHxpPackage {
         if (archiveBytes.size.toLong() !in 1..limits.maxArchiveBytes) fail(HxpVerificationError.ARCHIVE_TOO_LARGE)
         return runCatching { verifyArchive(archiveBytes) }
             .getOrElse { error ->
@@ -36,6 +41,7 @@ class HxpArchiveVerifier(
     }
 
     private fun verifyArchive(archiveBytes: ByteArray): VerifiedHxpPackage {
+        val packageSha256 = sha256(archiveBytes)
         ZipFile.builder().setSeekableByteChannel(SeekableInMemoryByteChannel(archiveBytes)).get().use { zip ->
             val entries = mutableMapOf<String, ByteArray>()
             var totalUncompressed = 0L
@@ -102,7 +108,7 @@ class HxpArchiveVerifier(
             if (publisherKeys.isRevokedFingerprint(publisher.fingerprint)) {
                 fail(HxpVerificationError.REVOKED_PUBLISHER)
             }
-            if (publisherKeys.isRevokedPackage(manifest.contentDigest)) {
+            if (publisherKeys.isRevokedPackage(packageSha256)) {
                 fail(HxpVerificationError.REVOKED_PACKAGE)
             }
             val signedMessage = signatureMessage(parsed.canonicalBytes, manifest.contentDigest)
@@ -111,7 +117,7 @@ class HxpArchiveVerifier(
             }
             return VerifiedHxpPackage(
                 manifest = manifest,
-                packageSha256 = sha256(archiveBytes),
+                packageSha256 = packageSha256,
                 publisherFingerprint = publisher.fingerprint,
                 archiveBytes = archiveBytes,
                 entryModuleBytes = entries.getValue(manifest.entry),

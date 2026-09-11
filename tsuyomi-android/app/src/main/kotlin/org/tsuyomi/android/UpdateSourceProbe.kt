@@ -44,8 +44,9 @@ internal class UpdateSourceRuntime(
     private val libraryRepository: RoomLibraryRepository,
 ) {
     private val applicationContext = context.applicationContext
+    private val repositoryClient = (applicationContext as TsuyomiApplication).officialRepository
     private val installer = ExtensionInstaller(
-        verifier = HxpArchiveVerifier(Phase2LocalTrust.resolver()),
+        verifier = HxpArchiveVerifier(OfficialRepositoryConfiguration.publisherKeys(repositoryClient)),
         store = InstalledExtensionStore(
             QuotaFileStore(
                 roots = StorageRoots.from(applicationContext),
@@ -126,6 +127,11 @@ internal class UpdateSourceRuntime(
     }
 
     private suspend fun readVerifiedPackage(sourceId: String): VerifiedHxpPackage? = withContext(Dispatchers.IO) {
+        try {
+            repositoryClient?.cached()
+        } catch (_: org.tsuyomi.source.extensionmanager.RepositoryCatalogException) {
+            // Unknown repository publishers remain unavailable without disabling independent local keys.
+        }
         try {
             installer.readVerifiedActive(SourceId(sourceId))
         } catch (_: ExtensionInstallException) {

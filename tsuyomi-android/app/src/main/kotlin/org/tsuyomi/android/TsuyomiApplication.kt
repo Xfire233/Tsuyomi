@@ -39,6 +39,11 @@ import org.tsuyomi.core.preferences.PortableReaderPreferencesRepository
 import org.tsuyomi.core.preferences.createAppPreferencesDataStore
 
 class TsuyomiApplication : Application() {
+    internal val extensionMutationMutex = kotlinx.coroutines.sync.Mutex()
+    internal val officialRepository by lazy(LazyThreadSafetyMode.SYNCHRONIZED) {
+        OfficialRepositoryConfiguration.createClient(this)
+    }
+
     val preferencesDataStore by lazy(LazyThreadSafetyMode.SYNCHRONIZED) {
         createAppPreferencesDataStore(applicationContext)
     }

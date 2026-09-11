@@ -3,7 +3,7 @@
 
 # Tsuyomi
 
-本地优先、面向墨水屏的原生 Android 轻小说阅读器。Android 宿主使用 Kotlin 与 Jetpack Compose；平台无关协议和签名来源扩展与宿主在同一个 Monorepo 中独立版本化。
+本地优先、面向墨水屏的原生 Android 轻小说阅读器。Android 宿主使用 Kotlin 与 Jetpack Compose；宿主和平台无关协议在本仓库维护，签名来源扩展在独立仓库维护。
 
 > [!NOTE]
 > 项目已完成 **Phase 0–Phase 4B** 的协议、安全、本地书架、Standard 交互和显式网站收藏回写实现。当前包含 Wenku8 搜索/详情/目录/阅读、语义进度与精确章节完成、书架拖拽与快捷栏、数据迁移、网站书架镜像以及可恢复的单书 `ADD`/`MOVE`/`REMOVE`。原型 UI Atlas 已退役，生产代码与 Review Graph 是唯一实现/审阅路径；E-ink 仍冻结，待 Standard 发布闭环后专项恢复。
@@ -13,9 +13,9 @@
 |---|---|
 | [`tsuyomi-android`](tsuyomi-android) | 原生 Android 宿主、Reader、持久化、安全、UI 和系统集成 |
 | [`tsuyomi-protocol`](tsuyomi-protocol) | JSON Schema、fixtures、Host API、transfer/backup 和一致性测试 |
-| [`tsuyomi-extensions`](tsuyomi-extensions) | 签名 `.hxp` 来源扩展、构建工具和来源验收 fixtures |
+| [Chachaanteng/tsuyomi-extensions](https://github.com/Chachaanteng/tsuyomi-extensions)（独立仓库） | AGPL-3.0-only 插件实现、测试和构建发布；正式签名目录发布独立审批 |
 
-三个组件共享一个 Git 提交，使协议、扩展和 Android consumer 可以在一个 PR 中原子变更；发布仍使用独立 SemVer 和标签：
+本仓库中的宿主与协议可以原子变更；插件通过固定提交、版本化协议和制品摘要衔接，不依赖相邻 checkout 或远端最新分支。组件使用独立 SemVer 和标签，extensions 标签位于独立插件仓库：
 
 ```text
 protocol-vX.Y.Z

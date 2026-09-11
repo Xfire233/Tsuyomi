@@ -13,8 +13,8 @@ import org.tsuyomi.source.extensionmanager.InMemoryPublisherKeyStore
 class Phase2TestPublisherTest {
     @Test
     fun verifiesTheDeterministicWenku8Fixture() {
-        val fixture = File("../../../tsuyomi-extensions/fixtures/wenku8/wenku8-fixture.hxp")
-        check(fixture.isFile) { "Build tsuyomi-extensions fixture before Android verification" }
+        val fixture = File("fixtures/wenku8/wenku8-fixture.hxp")
+        check(fixture.isFile) { "Pinned host replay fixture is missing" }
 
         val verified = HxpArchiveVerifier(InMemoryPublisherKeyStore(listOf(Phase2TestPublisher.key))).verify(fixture)
 

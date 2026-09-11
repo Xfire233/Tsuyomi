@@ -3,14 +3,14 @@
 
 # Contributing
 
-Tsuyomi is a monorepo with independently versioned Android, protocol, and extension components.
+Tsuyomi's monorepo contains independently versioned Android and protocol components; extensions are maintained in the independent `Chachaanteng/tsuyomi-extensions` repository.
 
 ## Change boundaries
 
 - Protocol behavior changes update `tsuyomi-protocol` schemas, valid/invalid fixtures, conformance tests, version, and changelog first within the same PR.
-- Extension changes declare every origin, capability, cookie scope, controlled WebView request, and storage requirement. CAPTCHA or anti-bot bypass is prohibited.
+- Extension implementation and its contribution policy live in `Chachaanteng/tsuyomi-extensions`; every origin, capability, cookie scope, controlled WebView request and storage requirement remains explicitly declared. CAPTCHA or anti-bot bypass is prohibited.
 - Android changes preserve module dependency direction, API 29 behavior, shared Standard/E-ink business state, and the option-applicability rules.
-- Cross-component changes must update every affected consumer atomically. Do not leave temporary shims, dual parsers, aliases, or dead settings.
+- Cross-component changes update affected Android/protocol consumers atomically; cross-repository extension integration pins an immutable commit and artifact digest. Host builds must not require an extension sibling checkout. Do not leave temporary shims, dual parsers, aliases or dead settings.
 
 ## Public quality evidence
 
@@ -52,4 +52,4 @@ cd ../tsuyomi-android
 - New source files require SPDX copyright and license identifiers.
 - Copied or adapted upstream work requires compatibility review, pinned provenance, retained notices, and an updated `THIRD_PARTY_NOTICES.md` in the same PR.
 - Never commit cookies, tokens, accounts, private keys, signing material, unredacted site content, databases, local SDK paths, or private test data.
-- Tsuyomi currently does not adopt GPL/AGPL source code; public behavior research is not permission to copy or translate protected code.
+- The host/protocol remain Apache-2.0; independent derivative extensions are AGPL-3.0-only with historical Apache obligations retained, as owned by ADR 0001. Adopting third-party copyleft implementation into the host/protocol requires separate compatibility review. Repository separation grants no license exception; public behavior research is not permission to copy or translate protected code.

@@ -1,11 +1,26 @@
 // SPDX-FileCopyrightText: 2026 Tsuyomi Contributors
 // SPDX-License-Identifier: Apache-2.0
 
+import java.util.Base64
+
 plugins {
     alias(libs.plugins.android.application)
     id("tsuyomi.android.application")
     id("tsuyomi.android.compose")
 }
+
+val repositoryKeyId = providers.gradleProperty("tsuyomi.repository.keyId").orElse("").get()
+val repositoryPublicKey = providers.gradleProperty("tsuyomi.repository.publicKey").orElse("").get()
+require(repositoryKeyId.isEmpty() == repositoryPublicKey.isEmpty()) {
+    "Official repository keyId and publicKey must be configured together"
+}
+require(repositoryKeyId.isEmpty() || Regex("[A-Za-z0-9._-]{8,128}").matches(repositoryKeyId))
+require(repositoryPublicKey.isEmpty() || Regex("[A-Za-z0-9+/]{43}=").matches(repositoryPublicKey))
+require(
+    repositoryPublicKey.isEmpty() || !Base64.getDecoder().decode(repositoryPublicKey).contentEquals(
+        Base64.getDecoder().decode("ebVWLo/mVPlAeLES6KmLp5AfhTrmlb7X4OORC60ElmQ="),
+    ),
+) { "The public deterministic fixture key cannot be an official repository root" }
 
 android {
     namespace = "org.tsuyomi.android"
@@ -15,6 +30,8 @@ android {
         versionName = "0.2.0"
         testInstrumentationRunnerArguments["keep_p4c_review_state"] =
             providers.gradleProperty("tsuyomi.keepP4cReviewState").orElse("false").get()
+        buildConfigField("String", "OFFICIAL_REPOSITORY_KEY_ID", "\"$repositoryKeyId\"")
+        buildConfigField("String", "OFFICIAL_REPOSITORY_PUBLIC_KEY", "\"$repositoryPublicKey\"")
     }
     buildTypes {
         getByName("debug") {
@@ -31,7 +48,7 @@ android {
     buildFeatures {
         buildConfig = true
     }
-    sourceSets.getByName("debug").assets.directories += "../../tsuyomi-extensions/fixtures/wenku8"
+    sourceSets.getByName("debug").assets.directories += "../source/extension-testkit/fixtures/wenku8"
     testOptions {
         managedDevices {
             localDevices {

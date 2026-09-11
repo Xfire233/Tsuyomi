@@ -14,6 +14,7 @@
 - Strict `tsuyomi-transfer` v2 schema and fixture for completed chapter IDs, read-later state and expanded reader preferences. Importers retain strict v1 compatibility while v1 documents reject v2-only fields.
 - Strict `tsuyomi-transfer` v3 schema and conformance fixtures preserve explicit local-pin state. A retained unpinned record may carry local metadata, ratings, read-later state, progress, and completion state, but cannot carry a manual collection membership; strict v1/v2 import remains pinned by definition.
 - Signed read-only `updateCheck` capability and `hxp-update-check-v2` normalized parser schema. Exact `complete: true` and `order: "source"` assertions, the exact GET request policy, bounded no-URL/no-body evidence, and semantic fixtures reject generic transport fallback, incomplete evidence, raw chapter payloads, duplicate IDs, and invalid source dates.
+- Strict `tsuyomi-repository` v1 schema, deterministic signed fixture, and normative catalog contract for root signatures, bounded HTTPS download binding, durable sequence anti-rollback, expiry, revocation, and explicit root-authorized legacy publisher migration.
 
 ## [0.1.0] - 2026-08-09
 

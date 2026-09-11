@@ -79,7 +79,12 @@ internal class SourceRouteOwner(
     }
 
     suspend fun refreshInstalledSources() {
-        installer.refreshInstalled()
+        if (installer.mutationPending) return
+        if (installer.catalog.state.status == org.tsuyomi.feature.browse.BrowseCatalogStatus.UNAVAILABLE) {
+            installer.refreshInstalled()
+        } else {
+            installer.catalog.refresh()
+        }
     }
 
 

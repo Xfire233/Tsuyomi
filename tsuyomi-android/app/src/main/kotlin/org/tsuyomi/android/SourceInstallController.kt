@@ -11,6 +11,9 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import java.io.File
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import org.tsuyomi.core.database.RoomLibraryRepository
@@ -36,14 +39,19 @@ import org.tsuyomi.source.extensionmanager.PreparedExtensionInstall
 import org.tsuyomi.source.extensionmanager.VerifiedHxpPackage
 import org.tsuyomi.source.extensionmanager.RemoteOperation
 import org.tsuyomi.source.extensionmanager.ResourceLimit
+import org.tsuyomi.source.extensionmanager.OfficialRepositoryClient
+import org.tsuyomi.source.extensionmanager.RepositoryCatalog
 
 /** App-owned coordinator: the picker grants transient read access; only verified archives become durable. */
 class SourceInstallController(
     private val context: Context,
     private val libraryRepository: RoomLibraryRepository,
+    private val repositoryClient: OfficialRepositoryClient? = (context.applicationContext as TsuyomiApplication).officialRepository,
 ) {
     private val credentialStore = VerifiedBrowserSessionStore(context)
     private val stagingDirectory = File(context.cacheDir, "hxp-staging")
+    private val mutationMutex = (context.applicationContext as TsuyomiApplication).extensionMutationMutex
+    private val publisherKeys = OfficialRepositoryConfiguration.publisherKeys(repositoryClient)
     private val store = InstalledExtensionStore(
         QuotaFileStore(
             roots = StorageRoots.from(context),
@@ -53,14 +61,23 @@ class SourceInstallController(
         ),
     )
     private val installer = ExtensionInstaller(
-        verifier = HxpArchiveVerifier(Phase2LocalTrust.resolver()),
+        verifier = HxpArchiveVerifier(publisherKeys),
         store = store,
         stagingDirectory = stagingDirectory,
     )
 
-    var activePackage: VerifiedHxpPackage? by mutableStateOf(null)
-        private set
+    private var selectedPackage: VerifiedHxpPackage? by mutableStateOf(null)
+    var activePackage: VerifiedHxpPackage?
+        get() = selectedPackage?.takeIf { OfficialRepositoryConfiguration.isTrusted(it, publisherKeys) }
+        private set(value) { selectedPackage = value }
     private var prepared: PreparedExtensionInstall? = null
+    private var preparedFromRepository = false
+    private var installedLoaded = false
+    var installedPackages: List<VerifiedHxpPackage> by mutableStateOf(emptyList())
+        private set
+    internal val catalog = SourceCatalogController(context, repositoryClient, this)
+    internal val mutationPending: Boolean
+        get() = mutationMutex.isLocked || prepared != null
 
     var state: BrowseUiState by mutableStateOf(BrowseUiState.Empty)
         private set
@@ -71,22 +88,36 @@ class SourceInstallController(
      * or borrowing a different source's foreground session.
      */
     suspend fun activateInstalledSource(sourceId: String): VerifiedHxpPackage? {
-        activePackage?.takeIf { it.manifest.sourceId.value == sourceId }?.let { return it }
-        val restored = try {
-            withContext(Dispatchers.IO) {
-                installer.readVerifiedActive(org.tsuyomi.shared.sourcecontract.SourceId(sourceId))
-            }
-        } catch (_: ExtensionInstallException) {
-            null
-        } catch (_: IllegalArgumentException) {
-            null
-        } ?: return null
-        activePackage = restored
-        showInstalled(restored)
-        return restored
+        if (prepared != null || !mutationMutex.tryLock()) return null
+        try {
+            catalog.restoreCache()
+            val restored = try {
+                withContext(Dispatchers.IO) {
+                    installer.readVerifiedActive(org.tsuyomi.shared.sourcecontract.SourceId(sourceId))
+                }
+            } catch (_: ExtensionInstallException) {
+                null
+            } catch (_: IllegalArgumentException) {
+                null
+            } ?: return null
+            activePackage = restored
+            showInstalled(restored)
+            return restored
+        } finally {
+            mutationMutex.unlock()
+        }
+    }
+
+    internal fun dismissRepositoryApproval() {
+        if (preparedFromRepository) dismissApproval()
     }
 
     suspend fun installedRemoteLibraryRoots(): List<LibraryMirrorShortcut> = withContext(Dispatchers.IO) {
+        try {
+            repositoryClient?.cached()
+        } catch (_: org.tsuyomi.source.extensionmanager.RepositoryCatalogException) {
+            // Unauthenticated repository identities fail closed; local publishers remain independent.
+        }
         store.installedSourceIds().mapNotNull { sourceId ->
             val installed = try {
                 installer.readVerifiedActive(sourceId)
@@ -109,36 +140,63 @@ class SourceInstallController(
     }
 
     suspend fun restoreInstalled() {
-        if (activePackage != null) return
-        val sourceIds = withContext(Dispatchers.IO) { store.installedSourceIds() }
-        sourceIds.forEach { sourceId ->
-            val restored = try {
-                withContext(Dispatchers.IO) { installer.readVerifiedActive(sourceId) }
-            } catch (_: ExtensionInstallException) {
-                markSourceUnavailable(sourceId.value)
-                resetToFailure(BrowseInstallFailure.VERIFICATION)
-                return
-            } ?: return@forEach
-            activePackage = restored
-            synchronizeVerifiedPackage(restored, preserveWriteback = true)
-            showInstalled(restored)
-            return
+        if (installedLoaded) return
+        mutationMutex.lock()
+        try {
+            if (!installedLoaded) loadInstalledPackages()
+        } finally {
+            mutationMutex.unlock()
         }
     }
 
     suspend fun refreshInstalled() {
-        activePackage = null
-        prepared = null
-        state = BrowseUiState.Empty
-        restoreInstalled()
-    }
-    suspend fun prepare(uri: Uri, resolver: ContentResolver) {
-        val displayName = uri.lastPathSegment?.takeLast(96)?.ifBlank { "extension.hxp" } ?: "extension.hxp"
-        state = BrowseUiState.Preparing(displayName)
+        if (prepared != null || !mutationMutex.tryLock()) return
         try {
-            val staged = withContext(Dispatchers.IO) { copyToBoundedStaging(uri, resolver) }
-            val result = withContext(Dispatchers.IO) { installer.prepare(staged) }
+            loadInstalledPackages()
+        } finally {
+            mutationMutex.unlock()
+        }
+    }
+
+    internal suspend fun refreshRepositoryCatalog(): RepositoryCatalog? {
+        val client = repositoryClient ?: return null
+        if (prepared != null || !mutationMutex.tryLock()) return null
+        try {
+            return withContext(NonCancellable) {
+                val accepted = withContext(Dispatchers.IO) { client.refresh() }
+                loadInstalledPackages()
+                accepted
+            }
+        } finally {
+            mutationMutex.unlock()
+        }
+    }
+
+    suspend fun prepare(uri: Uri, resolver: ContentResolver) {
+        prepareCandidate(uri.lastPathSegment?.takeLast(96)?.ifBlank { "extension.hxp" } ?: "extension.hxp", false) {
+            val staged = copyToBoundedStaging(uri, resolver)
+            try {
+                installer.prepare(staged)
+            } finally {
+                staged.delete()
+            }
+        }
+    }
+
+    internal suspend fun prepareRepository(sourceId: String) {
+        val client = repositoryClient ?: return
+        prepareCandidate(sourceId, true) { client.prepare(sourceId, installer) }
+    }
+
+    private suspend fun prepareCandidate(name: String, repository: Boolean, load: () -> PreparedExtensionInstall) {
+        if (!mutationMutex.tryLock()) return
+        try {
+            prepared = null
+            preparedFromRepository = false
+            state = BrowseUiState.Preparing(name)
+            val result = withContext(Dispatchers.IO) { load() }
             prepared = result
+            preparedFromRepository = repository
             state = BrowseUiState.Approval(
                 sourceName = result.candidate.manifest.displayName,
                 sourceId = result.candidate.manifest.sourceId.value,
@@ -153,38 +211,94 @@ class SourceInstallController(
                     )
                 },
                 isDowngrade = result.isDowngrade,
+                isLegacyMigration = result.isLegacyMigration,
             )
+        } catch (cancelled: CancellationException) {
+            prepared = null
+            resetToInstalledOrEmpty()
+            throw cancelled
         } catch (_: HxpVerificationException) {
             resetToFailure(BrowseInstallFailure.VERIFICATION)
         } catch (_: ExtensionInstallException) {
             resetToFailure(BrowseInstallFailure.INSTALL)
         } catch (_: Exception) {
-            resetToFailure(BrowseInstallFailure.FILE_ACCESS)
+            resetToFailure(if (repository) BrowseInstallFailure.VERIFICATION else BrowseInstallFailure.FILE_ACCESS)
+        } finally {
+            mutationMutex.unlock()
         }
     }
 
-    suspend fun approve(allowDowngrade: Boolean) {
-        val candidate = prepared ?: return resetToFailure(BrowseInstallFailure.EXPIRED_APPROVAL)
-        state = BrowseUiState.Preparing(candidate.candidate.manifest.displayName)
+    suspend fun approve(allowDowngrade: Boolean, allowLegacyMigration: Boolean = false) {
+        if (!mutationMutex.tryLock()) return
         try {
-            withContext(Dispatchers.IO) {
-                installer.activate(candidate, ExtensionInstallApproval.approve(candidate, allowDowngrade))
+            val candidate = prepared ?: return resetToFailure(BrowseInstallFailure.EXPIRED_APPROVAL)
+            withContext(NonCancellable) {
+                state = BrowseUiState.Preparing(candidate.candidate.manifest.displayName)
+                withContext(Dispatchers.IO) {
+                    if (preparedFromRepository) requireNotNull(repositoryClient).validatePreparedRepositoryInstall(candidate)
+                    installer.activate(candidate, ExtensionInstallApproval.approve(candidate, allowDowngrade, allowLegacyMigration))
+                }
+                activePackage = candidate.candidate
+                synchronizeVerifiedPackage(candidate.candidate, preserveWriteback = !candidate.isDowngrade)
+                installedPackages = (installedPackages.filterNot {
+                    it.manifest.sourceId == candidate.candidate.manifest.sourceId
+                } + candidate.candidate).sortedBy { it.manifest.displayName }
+                installedLoaded = true
+                prepared = null
+                preparedFromRepository = false
+                catalog.onInstalledPackagesChanged()
+                showInstalled(candidate.candidate)
             }
-            activePackage = candidate.candidate
-            synchronizeVerifiedPackage(candidate.candidate, preserveWriteback = !candidate.isDowngrade)
+        } catch (cancelled: CancellationException) {
             prepared = null
-            showInstalled(candidate.candidate)
-        } catch (_: ExtensionInstallException) {
+            resetToInstalledOrEmpty()
+            installedLoaded = false
+            throw cancelled
+        } catch (_: Exception) {
             resetToFailure(BrowseInstallFailure.INSTALL)
+        } finally {
+            mutationMutex.unlock()
         }
+    }
+
+    private suspend fun loadInstalledPackages() {
+        catalog.restoreCache()
+        val previousId = activePackage?.manifest?.sourceId
+        val sourceIds = withContext(Dispatchers.IO) { store.installedSourceIds() }
+        val packages = mutableListOf<VerifiedHxpPackage>()
+        var invalid = false
+        for (sourceId in sourceIds) {
+            val restored = try {
+                withContext(Dispatchers.IO) { installer.readVerifiedActive(sourceId) }
+            } catch (_: ExtensionInstallException) {
+                null
+            } catch (_: IllegalArgumentException) {
+                null
+            }
+            if (restored == null) {
+                invalid = true
+                markSourceUnavailable(sourceId.value)
+            } else {
+                synchronizeVerifiedPackage(restored, preserveWriteback = true)
+                packages += restored
+            }
+        }
+        installedPackages = packages.sortedBy { it.manifest.displayName }
+        activePackage = packages.firstOrNull { it.manifest.sourceId == previousId } ?: packages.firstOrNull()
+        installedLoaded = true
+        catalog.onInstalledPackagesChanged()
+        if (invalid) resetToFailure(BrowseInstallFailure.VERIFICATION) else resetToInstalledOrEmpty()
     }
 
     fun dismissApproval() {
+        if (mutationMutex.isLocked) return
         prepared = null
+        preparedFromRepository = false
         resetToInstalledOrEmpty()
     }
 
     fun dismissFailure() {
+        if (mutationMutex.isLocked) return
         resetToInstalledOrEmpty()
     }
     suspend fun remotePolicy(): SourceRemotePolicy? {
@@ -220,6 +334,7 @@ class SourceInstallController(
 
     private fun resetToFailure(reason: BrowseInstallFailure) {
         prepared = null
+        preparedFromRepository = false
         state = BrowseUiState.Failure(reason)
     }
 

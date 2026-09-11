@@ -125,7 +125,6 @@ SCOPE_ROOTS = {
     "all": None,
     "android": Path("tsuyomi-android"),
     "protocol": Path("tsuyomi-protocol"),
-    "extensions": Path("tsuyomi-extensions"),
 }
 FORBIDDEN_PARTS = {
     "build",
@@ -300,7 +299,7 @@ def paths_in_scope(paths: Iterable[Path], scope: str) -> list[Path]:
 
 
 def is_public_hxp_fixture(path: Path) -> bool:
-    return path.suffix.lower() == ".hxp" and path.parts[:3] == ("tsuyomi-extensions", "fixtures", "wenku8")
+    return path == Path("tsuyomi-android/source/extension-testkit/fixtures/wenku8/wenku8-fixture.hxp")
 
 
 def is_public_project_skill(path: Path) -> bool:
@@ -342,7 +341,7 @@ def documentation_inventory_paths(repo_root: Path) -> list[Path]:
     for path in repo_root.glob("*.md"):
         if path.is_file() and path.name not in FORBIDDEN_NAMES:
             paths.add(path.relative_to(repo_root))
-    for component in ("tsuyomi-android", "tsuyomi-protocol", "tsuyomi-extensions"):
+    for component in ("tsuyomi-android", "tsuyomi-protocol"):
         root = repo_root / component
         if root.is_dir():
             paths.update(
@@ -354,7 +353,6 @@ def documentation_inventory_paths(repo_root: Path) -> list[Path]:
         Path(".github"),
         Path("tsuyomi-android/docs"),
         Path("tsuyomi-protocol/docs"),
-        Path("tsuyomi-extensions/docs"),
     ):
         root = repo_root / relative_root
         if root.is_dir():

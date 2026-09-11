@@ -43,8 +43,9 @@ internal class SourceFlowController(
     directActionTokens: DirectActionTokenRegistry = DirectActionTokenRegistry(),
     openSession: suspend (VerifiedHxpPackage) -> SourceFlowSession =
         SourceSessionOwner.extensionClientFactory(context, directActionTokens),
+    isPackageTrusted: (VerifiedHxpPackage) -> Boolean = OfficialRepositoryConfiguration.admission(context),
 ) : Closeable {
-    private val sessionOwner = SourceSessionOwner(directActionTokens, openSession)
+    private val sessionOwner = SourceSessionOwner(directActionTokens, openSession, isPackageTrusted)
 
     val remoteLibrary = SourceRemoteLibraryCoordinator(context, library, sessionOwner)
     val home = SourceHomeController()
@@ -113,6 +114,7 @@ internal class SourceFlowController(
         }
         when (result) {
             SourceSessionOpenResult.ALREADY_OPEN -> return
+            SourceSessionOpenResult.UNAVAILABLE -> sourceBecameUnavailable()
             SourceSessionOpenResult.OPENED -> searchState = SearchResultState.Idle
             SourceSessionOpenResult.PACKAGE_CHANGED -> {
                 searchState = SearchResultState.Idle
@@ -211,6 +213,7 @@ internal class SourceFlowController(
                 searchState = SearchResultState.Idle
             }
             SourceSessionOpenResult.ALREADY_OPEN, null -> Unit
+            SourceSessionOpenResult.UNAVAILABLE -> sourceBecameUnavailable()
         }
     }
 
@@ -223,6 +226,7 @@ internal class SourceFlowController(
                 remoteLibrary.reset()
             }
             SourceSessionOpenResult.ALREADY_OPEN, null -> Unit
+            SourceSessionOpenResult.UNAVAILABLE -> sourceBecameUnavailable()
         }
     }
 
@@ -682,6 +686,13 @@ internal class SourceFlowController(
             safeCode = "$stage-miss",
         ),
     )
+
+    private fun sourceBecameUnavailable() {
+        resetReadingState()
+        remoteLibrary.reset()
+        home.reset()
+        searchState = searchFailure(SourceErrorCode.EXTENSION_RUNTIME_FAILURE, "source-session", "source-untrusted")
+    }
 
     private fun resetReadingState() {
         query = ""

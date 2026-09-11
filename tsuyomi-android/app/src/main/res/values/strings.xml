@@ -74,4 +74,7 @@
     <string name="detail_remove_confirm_message">将本书移出本地书架和本地收藏夹。稍后再读、评分、标签、阅读进度及已缓存内容保留，不影响网站收藏。</string>
     <string name="detail_remove_confirm_action">移出书架</string>
     <string name="detail_remove_cancel">取消</string>
+    <string name="source_repository_unconfigured">官方插件仓库尚未开放。已安装来源和本地导入仍可使用。</string>
+    <string name="source_repository_failure">无法取得有效的官方插件目录。请稍后重试；已安装来源不受目录加载失败影响。</string>
+    <string name="source_repository_no_browser">没有可打开源码链接的浏览器。</string>
 </resources>

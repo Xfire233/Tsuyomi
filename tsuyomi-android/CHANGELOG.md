@@ -9,6 +9,9 @@ All notable changes use semantic versioning. Future Phase baselines use annotate
 
 ### Added
 
+- Official source discovery in Standard Browse: installed/available sections, independent plugin search, bounded rows and scrollable source/license/publisher details, explicit installation approval and manual updates; local HXP import remains available.
+- Root-signed static catalog admission, exact HXP binding, durable replay and revocation state, total download deadlines, and shared foreground/background trust reconciliation without removing installed archives or user data. Production keys and formal catalog/package publication are separately authorized; unconfigured builds report the repository as unavailable.
+
 - Phase 4A Standard Library production cutover; accepted Atlas-era behavior was migrated into production and the prototype was retired:
   - Stationary platform-threshold long-press multi-selection across Grid, List, and Compact layouts.
   - `SelectionAppBar` with item count, select all, clear all, batch add/move to collections, and local deletion.

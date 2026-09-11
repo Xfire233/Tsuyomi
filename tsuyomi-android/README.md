@@ -6,13 +6,13 @@
 本地优先、面向墨水屏的原生 Android 轻小说阅读器。使用 Kotlin 与 Jetpack Compose 构建，目标平台为 Android 10 及以上版本（`minSdk 29`）。
 
 > [!NOTE]
-> 项目目前已完成 **Phase 0 到 Phase 3** 的基础设施、数据与契约，以及 **Phase 4A (Standard UI/UX 生产级交互切片)**。已实现 Wenku8 在线搜索、详情、目录、章节正文阅读、双排/单排排版、语义进度持久化、书架拖拽与快捷栏交互、数据导入导出迁移。墨水屏全局适配（E-ink）处于临时冻结状态，待 Standard 阶段闭环后开展专项恢复。
+> 项目已完成 **Phase 0 到 Phase 3** 的基础设施、数据与契约；**Phase 4 Standard 功能实现与验收仍在推进**。已实现在线搜索、详情、目录、正文阅读、语义进度、Library 内容系统及签名来源安装。人工视觉、辅助技术和完整真实在线验收仍待完成；墨水屏全局适配（E-ink）保持冻结。
 ## 项目目标
 
 - **本地优先**：不要求 Tsuyomi 账号，不依赖 Google Play Services，不接入遥测、远程 feature flag 或自动崩溃上报。
 - **原生 Android**：Kotlin、Jetpack Compose、Room、DataStore；不继承 Flutter 页面树或组件实现。
 - **全局墨水屏模式**：Standard 与 E-ink 复用同一路由、业务状态和持久数据；E-ink 是应用根级显示配置，不是阅读器内的局部开关。
-- **来源与宿主分离**：规划中的内容来源以签名、平台无关的 `.hxp` 包交付，通过版本化 Host API 运行；不是 Android APK 插件。
+- **来源与宿主分离**：内容来源以签名、平台无关的 `.hxp` 包交付，通过版本化 Host API 运行；不是 Android APK 插件。维护源码位于独立的 [tsuyomi-extensions](https://github.com/Chachaanteng/tsuyomi-extensions) 仓库。
 - **语义阅读进度**：持久化章节与文本语义位置，而不是依赖易失效的页码、像素偏移或滚动百分比。
 - **可审计发布**：面向 GitHub Releases 与 F-Droid；依赖锁、校验元数据、第三方声明、REUSE、Phase 证据和 gate 判定随代码版本化。
 
@@ -24,14 +24,12 @@
 - **Phase 1：Android 宿主骨架与全局显示模式（已完成）**：Jetpack Compose + Material 3 原生界面架构、Room 数据模型与事务不变量、Standard / E-ink 双模式配置架构与 API 29 验证基线。
 - **Phase 2：Wenku8 只读垂直阅读切片（已完成）**：QuickJS 隔离执行沙箱、受控 WebView 登录验证、搜索 → 详情 → 目录 → 章节阅读 → 语义进度保存与恢复端到端闭环。
 - **Phase 3：本地书架与迁移体系（已完成）**：多层级系统/手动/智能收藏夹、`tsuyomi-transfer` 数据导入导出、从旧版 Hikari 无凭据安全平滑迁移、远端书架只读拉取与同步。
-- **Phase 4A：Standard 交互与 UI Atlas 生产级落地（已完成）**：
+- **Phase 4A：Standard 交互生产实现（当前变更验收待完成）**：
   - **书架交互全套迁移**：网格、列表、紧凑三布局长按多选，`SelectionAppBar` 批量移动/添加至收藏夹及本地删除。
   - **书籍拖拽与归类**：书籍拖至书籍创建收藏夹、拖入现有收藏夹、根目录横向展开插入位并挤开相邻元素。
-  - **快捷栏双模式重构**：
-    - **常驻锁定模式**：快捷栏固定于 AppBar 下方，便于大量书籍拖拽归类，保持完整拖拽、插入、重排与交互能力。
-    - **内联收折模式**：跟随页面滚动，滑出视口后收折为 ≥48dp 悬浮手柄，支持点击、上滑或拖拽书籍悬停动态展开。
+  - **Library 内容系统**：固定 `书架 / 继续阅读 / 稍后再读` 点按分栏；收藏夹、网站镜像与书籍统一根内容流，子节点进入独立页面，不再保留快捷栏。
   - **单次长按连续拖拽**：非多选模式下长按书籍达到平台阈值即刻拾取拖动，无需二次手势；拖拽时具备动态让位与收藏夹缩放高亮反馈。
-  - **自定义排序持久化**：Room v4 引入 `display_order`，支持书架根目录及手动收藏夹自由重排与持久化。
+  - **排序与本地保留**：自定义排序持久化；Room v10 将本地书架归属与书籍元数据分离，移出书架不删除阅读进度、标注、缓存或网站镜像状态。
   - **发现页与推荐源站化**：原生解析 Wenku8 首页推荐栏目（7 月新番、新书风云榜、本周会员推荐榜）及《这本轻小说真厉害！》专属榜单页。
   - **界面细节与规范**：对称标签栏、200ms M3 展开收起动效、滚动方向自适应 FAB。
 
@@ -41,11 +39,11 @@
 
 详细版本变更历史见 [`CHANGELOG.md`](CHANGELOG.md)。近期主要更新：
 
-### [Unreleased] (Phase 4A Standard UX Cutover)
-- **书架交互与 Atlas 对齐**：长按多选、SelectionAppBar、书籍拖拽归类与合集创建、Room v4 自定义排序持久化。
-- **快捷书架双模式**：常驻锁定（保持固定且全交互可用）与内联收折（悬浮把手动态展开），单次长按连续拾取。
-- **Wenku8 发现与推荐栏目**：首页三大推荐栏目、轻小说排行榜专页、对称标签栏与 200ms M3 动效。
-- **稳定性与测试**：消除 Compose 触摸输入与手势事件循环死锁，CI 全自动化测试（API 29 Instrumentation、Lint、Goldens）全绿通过。
+### [Unreleased] (Phase 4 Standard)
+- **Library 控件与数据保留**：立即生效的统一筛选与排序、固定点按分栏、独立布局选择，以及保留本地数据的移出书架操作。
+- **签名来源目录**：Browse 已安装/可安装分区、插件搜索与详情、明确确认安装和手动更新；本地 `.hxp` 导入继续保留。
+- **生产信任边界**：正式目录和包尚未发布。构建只有在另行授权后才配置成对的 `tsuyomi.repository.keyId` 与 `tsuyomi.repository.publicKey` Gradle 属性；公钥为原始 32 字节 Ed25519 公钥的 Base64，不是私钥。未配置时明确显示目录不可用，公开测试密钥不能充当生产根。
+- **验证边界**：严格依赖校验、针对性测试与隔离设备证据不等于人工批准；不自动接受 goldens 或替换 canonical。
 
 ### [0.1.0] - 2026-08-09
 - Phase 1 Android 宿主骨架、全局 Standard/E-ink 配置、Room 架构与 API 29 基线。
@@ -55,7 +53,7 @@
 项目后续迭代遵循公开阶段规划与本地架构契约：
 
 - [ ] **Phase 4B: 授权远端回写与云端书架镜像**
-  - 基于 Host API 1.2 / HXP v2 写入能力子集；
+  - 基于 Host API 1.2 与签名 HXP v1 声明的写入能力子集；
   - 提供用户显式授权的远端书架目标选择、远端移出与移入对账机制，确保网络操作完全透明可控。
 - [ ] **Phase 4C: 更新协调中心与可控计划检查（本地实现已落地，生产验收待完成）**
   - 静默可信基线、增量追更收件箱、精确处理与撤销、逐章完成联动和来源/书籍排除；
@@ -73,22 +71,21 @@
 
 ## 组件边界
 
-Tsuyomi Monorepo 包含三个独立版本、独立发布和独立回退的组件：
+Tsuyomi Monorepo 包含两个独立版本、独立发布和独立回退的组件：
 
 | 目录 | 职责 |
 |---|---|
 | `tsuyomi-android` | 原生 Android 宿主、Reader、持久化、安全、UI 与系统集成 |
 | `tsuyomi-protocol` | JSON Schema、fixtures、Host API、transfer/backup 与一致性测试 |
-| `tsuyomi-extensions` | 签名来源扩展、构建工具和来源验收 fixtures |
 
-一个 PR 可以原子更新多个组件，但源码边界仍只允许通过版本化协议、签名制品、脱敏 fixtures 和 release metadata 互操作。组件发布顺序为 protocol → extensions → Android。
+维护中的来源扩展、打包工具和来源验收 fixtures 位于独立的 [Chachaanteng/tsuyomi-extensions](https://github.com/Chachaanteng/tsuyomi-extensions) 仓库。Android 与 protocol 可以原子更新；跨仓库仅通过版本化协议、签名制品、固定脱敏 fixtures 和发布元数据互操作，兼容性顺序为 protocol → extensions → Android。宿主构建不要求检出相邻插件仓库。
 
 ## 构建
 
 要求：
 
 - JDK 17
-- Android SDK Platform 36
+- Android SDK Platform 37
 - Android API 29 default x86_64 system image（instrumentation/AVD 验收）
 - Python 与 [REUSE Tool](https://reuse.software/)
 
