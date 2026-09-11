@@ -30,9 +30,11 @@ FULL_BUILD_TASKS = (
     ":core:media:testDebugUnitTest",
     ":core:security:testDebugUnitTest",
     ":core:network:testDebugUnitTest",
+    ":core:preferences:testDebugUnitTest",
     ":feature:library:testDebugUnitTest",
     ":source:extension-manager:testDebugUnitTest",
     ":source:extension-testkit:testDebugUnitTest",
+    ":app:validateDebugScreenshotTest",
     ":core:ui:validateDebugScreenshotTest",
     ":feature:library:validateDebugScreenshotTest",
     ":feature:browse:validateDebugScreenshotTest",
@@ -40,6 +42,7 @@ FULL_BUILD_TASKS = (
 )
 FULL_INSTRUMENTATION_TASKS = (
     ":app:connectedDebugAndroidTest",
+    ":feature:backup:connectedDebugAndroidTest",
     ":feature:book:connectedDebugAndroidTest",
     ":feature:browse:connectedDebugAndroidTest",
     ":feature:library:connectedDebugAndroidTest",
@@ -64,12 +67,14 @@ JVM_TASKS = {
     ":core:files": ":core:files:testDebugUnitTest",
     ":core:media": ":core:media:testDebugUnitTest",
     ":core:security": ":core:security:testDebugUnitTest",
+    ":core:preferences": ":core:preferences:testDebugUnitTest",
     ":core:network": ":core:network:testDebugUnitTest",
     ":feature:library": ":feature:library:testDebugUnitTest",
     ":source:extension-manager": ":source:extension-manager:testDebugUnitTest",
     ":source:extension-testkit": ":source:extension-testkit:testDebugUnitTest",
 }
 SCREENSHOT_TASKS = {
+    ":app": ":app:validateDebugScreenshotTest",
     ":core:ui": ":core:ui:validateDebugScreenshotTest",
     ":feature:library": ":feature:library:validateDebugScreenshotTest",
     ":feature:browse": ":feature:browse:validateDebugScreenshotTest",
@@ -77,6 +82,7 @@ SCREENSHOT_TASKS = {
 }
 INSTRUMENTED_MODULES = {
     ":app",
+    ":feature:backup",
     ":feature:book",
     ":feature:browse",
     ":feature:library",
