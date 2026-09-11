@@ -968,15 +968,15 @@ class ManualVerificationHandoffInstrumentedTest {
         var failure: String? = null
         composeRule.waitUntil(timeoutMillis = 60_000) {
             when {
-                platformHasText(rejectedText) -> {
+                composeHasText(rejectedText) -> {
                     failure = rejectedText
                     true
                 }
-                platformHasText(unboundText) -> {
+                composeHasText(unboundText) -> {
                     failure = unboundText
                     true
                 }
-                !platformHasText("使用当前页面") && platformHasText(successText) -> true
+                !composeHasText("使用当前页面") && composeHasText(successText) -> true
                 else -> false
             }
         }
@@ -1003,19 +1003,17 @@ class ManualVerificationHandoffInstrumentedTest {
         }
     }
 
+    private fun composeHasText(text: String): Boolean = runCatching {
+        composeRule.onAllNodesWithText(text, useUnmergedTree = true).fetchSemanticsNodes().isNotEmpty() ||
+            composeRule.onAllNodesWithContentDescription(text, useUnmergedTree = true)
+                .fetchSemanticsNodes().isNotEmpty()
+    }.getOrDefault(false)
 
-
-    private fun platformHasText(text: String): Boolean =
-        runCatching {
-            composeRule.onAllNodesWithText(text, useUnmergedTree = true)
-                .fetchSemanticsNodes().isNotEmpty() ||
-                composeRule.onAllNodesWithContentDescription(text, useUnmergedTree = true)
-                    .fetchSemanticsNodes().isNotEmpty()
-        }.getOrDefault(false) || runCatching {
-            traversePlatformNodes { node ->
-                node.text?.toString() == text || node.contentDescription?.toString() == text
-            }
-        }.getOrDefault(false)
+    private fun platformHasText(text: String): Boolean = composeHasText(text) || runCatching {
+        traversePlatformNodes { node ->
+            node.text?.toString() == text || node.contentDescription?.toString() == text
+        }
+    }.getOrDefault(false)
 
     private fun performPlatformClick(text: String) {
         val composeClicked = runCatching {
