@@ -139,7 +139,7 @@ class ManualVerificationHandoffInstrumentedTest {
         composeRule.onNodeWithContentDescription("打开对应搜索页面").performClick()
         assertTrue("Verified search fixture was not requested", searchFixtureRequested.await(15, TimeUnit.SECONDS))
         waitForText("使用当前页面")
-        waitForWebViewSettled(searchUrl)
+        waitForWebViewSettled(searchUrl, searchHtml)
         composeRule.onNodeWithText("使用当前页面").performClick()
         composeRule.waitUntil(15_000) {
             runCatching {
@@ -296,14 +296,22 @@ class ManualVerificationHandoffInstrumentedTest {
         composeRule.onNodeWithContentDescription("打开对应详情页面").performClick()
         assertTrue("Verified detail fixture was not requested", detailFixtureRequested.await(15, TimeUnit.SECONDS))
         waitForText("使用当前页面")
-        waitForWebViewSettled(detailUrl)
+        waitForWebViewSettled(detailUrl, detailHtml)
         composeRule.onNodeWithText("使用当前页面").performClick()
         waitForVerifiedOutcome(
             successText = "简介",
             unboundText = "当前页面未与暂停的详情请求绑定。请点击“打开对应详情页面”，等待自动跳转和页面加载完成后重试。",
         )
-        composeRule.waitUntil(timeoutMillis = 15_000) {
-            Phase2SourceGateway.directoryRequestCount() == 2
+        try {
+            composeRule.waitUntil(timeoutMillis = 15_000) {
+                Phase2SourceGateway.directoryRequestCount() == 2
+            }
+        } catch (error: androidx.compose.ui.test.ComposeTimeoutException) {
+            throw AssertionError(
+                "Verified detail directory did not resume: detailRequests=${Phase2SourceGateway.detailRequestCount()}; " +
+                    "directoryRequests=${Phase2SourceGateway.directoryRequestCount()}; fixtureUi=${platformTextSnapshot()}",
+                error,
+            )
         }
         assertEquals(1, Phase2SourceGateway.detailRequestCount())
         assertEquals(2, Phase2SourceGateway.directoryRequestCount())
@@ -345,7 +353,7 @@ class ManualVerificationHandoffInstrumentedTest {
         composeRule.onNodeWithContentDescription("打开对应章节页面").performClick()
         assertTrue("Verified chapter fixture was not requested", chapterFixtureRequested.await(15, TimeUnit.SECONDS))
         waitForText("使用当前页面")
-        waitForWebViewSettled(chapterUrl)
+        waitForWebViewSettled(chapterUrl, chapterHtml)
         composeRule.onNodeWithText("使用当前页面").performClick()
         waitForVerifiedOutcome(
             successText = "第一章 雾中的灯塔",
@@ -649,7 +657,7 @@ class ManualVerificationHandoffInstrumentedTest {
         composeRule.onNodeWithContentDescription("打开对应主页").performClick()
         assertTrue("Verified home fixture was not requested", homeFixtureRequested.await(15, TimeUnit.SECONDS))
         waitForText("使用当前页面")
-        waitForWebViewSettled(homeUrl)
+        waitForWebViewSettled(homeUrl, homeHtml)
         composeRule.onNodeWithText("使用当前页面").performClick()
 
         waitForVerifiedOutcome(
@@ -909,14 +917,28 @@ class ManualVerificationHandoffInstrumentedTest {
     }
 
 
-    private fun waitForWebViewSettled(expectedUrl: String? = null) {
+    private fun waitForWebViewSettled(expectedUrl: String? = null, expectedHtml: String? = null) {
+        var documentMatches = expectedHtml == null
+        var evaluationPending = false
+        val documentCheck = expectedHtml?.let { html ->
+            """(function(){var expected=new DOMParser().parseFromString(${org.json.JSONObject.quote(html)},'text/html');return document.readyState==='complete'&&document.documentElement.outerHTML===expected.documentElement.outerHTML;})()"""
+        }
         composeRule.waitUntil(timeoutMillis = 30_000) {
             composeRule.runOnUiThread {
                 val webView = findWebView(composeRule.activity.window.decorView)
-                webView != null &&
+                val settled = webView != null &&
                     !webView.url.isNullOrBlank() &&
                     (expectedUrl == null || webView.url == expectedUrl) &&
                     webView.progress == 100
+                // Same-URL reloads can still expose the old document at progress 100.
+                if (settled && !documentMatches && !evaluationPending && documentCheck != null) {
+                    evaluationPending = true
+                    requireNotNull(webView).evaluateJavascript(documentCheck) { value ->
+                        documentMatches = value == "true"
+                        evaluationPending = false
+                    }
+                }
+                settled && documentMatches
             }
         }
     }
@@ -965,10 +987,15 @@ class ManualVerificationHandoffInstrumentedTest {
 
     private fun waitForVerifiedOutcome(successText: String, unboundText: String) {
         val rejectedText = "当前页面与刚才请求不一致，请重新打开对应页面"
+        val parseRejectedText = targetContext.getString(R.string.verification_snapshot_rejected)
         var failure: String? = null
         try {
         composeRule.waitUntil(timeoutMillis = 60_000) {
             when {
+                composeHasText(parseRejectedText) -> {
+                    failure = "Verified page parsing rejected: ${platformTextSnapshot()}"
+                    true
+                }
                 composeHasText(rejectedText) -> {
                     failure = rejectedText
                     true
