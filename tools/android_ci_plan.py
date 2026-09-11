@@ -96,6 +96,8 @@ INSTRUMENTED_MODULES = {
 GLOBAL_ANDROID_INPUTS = {
     ".github/workflows/android-quality.yml",
     "tools/android_ci_plan.py",
+    "tools/android_api29.py",
+    "tools/android_api29_profile.json",
     "tsuyomi-android/build.gradle.kts",
     "tsuyomi-android/settings.gradle.kts",
     "tsuyomi-android/gradle.properties",

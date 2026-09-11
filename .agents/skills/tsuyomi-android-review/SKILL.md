@@ -104,6 +104,14 @@ The policy selects review work; it does not grant Phase implementation authoriza
 - AI may visit nodes, attach evidence, and write only a `PENDING` draft. AI never sets `humanReviewedAt`, `approvedAt`, `ACCEPT`, or goldens.
 - One obligation has one evidence owner: static screenshot assertion, structure/layout, behavioral test, Journey, or human-only review. Never prove the same fact five ways.
 
+### Local API 29 CI preflight
+
+Local API 29 CI is permitted only in explicit `HIGH`. In that mode, after the bounded diagnostic ladder, run the planner-selected local gate through `tools/android_api29.py --mode high --build`. Every non-prepare run precompiles its selected instrumentation before AVD work; `HIGH` omits `--no-daemon` for precompile and serialized instrumentation so Gradle may reuse a daemon between phases, while hosted `ci` retains `--no-daemon`. Non-focused `--build` adds the planner-selected build work and is the only local full gate. The runner has one shared `android_api29_profile.json` for local and hosted automation, creates only a disposable automation AVD, collects evidence under `tsuyomi-android/build/api29-ci/`, and cleans its own AVD/emulator in `finally`. `HIGH` increases compilation throughput only: device execution remains serialized.
+
+In `LOW`, do not invoke the local API 29 runner, matrix, preflight, or `--prepare-only`; bounded direct development is not CI and hosted protected checks are the only CI path. `--mode ci` is reserved for hosted execution with `GITHUB_ACTIONS=true`. In `HIGH`, use `--task` with an exact `--test-class` only for the focused diagnostic step. It is explicitly not a full gate. The required order is focused test, directly adjacent sequence, then the complete planner-selected local gate; hosted protected checks independently remain final acceptance and cannot be bypassed by local evidence. On a repeated signature, collect logs/device state and classify the shared lifecycle, helper or synchronization boundary before any change—never invent a speculative production patch.
+
+The automation AVD is a CI-only exception, not `Tsuyomi_Review_Work_API29`: it does not replace a visual/human Review_Work device, canonical APK, canonical AVD, or human authorization. Its environment evidence records image/emulator revision, system fingerprint, WebView version, resolved local head/worktree overlay and phase timings for comparison; it must not claim host, kernel or emulator-build identity with hosted CI. Compare timing only for equal resolved head/overlay policy, scope, selected tasks, profile/image revision and host evidence. The contributor-facing invocation, native Windows preference and conditional WSL2 requirements are owned by [`tsuyomi-android/README.md`](../../../tsuyomi-android/README.md).
+
 ## Fast review path
 
 ### Native edit loop — no formal evidence
@@ -273,8 +281,8 @@ Run `android studio check` once per IDE-assisted session. Successful compiler/li
 - Deferred-profile restoration → the policy's complete retained graph, inventory, Journeys, adaptive matrix, and physical human review.
 - Actual-online review → policy-required package, real host controllers/storage/navigation, live and controlled-fixture lanes, redacted evidence, and no fixture-only verdict substitution.
 - Resolve the policy partition before every Gradle/device command. Tests for a profile currently marked deferred/frozen remain retained but ignored from routine instrumentation and screenshot registration; a test's presence in a class never makes that profile active.
-- Journey debugging follows `QUALITY_GATES.md`: exact reproduction, stable affected test, adjacent sequence, affected active-profile group, then at most one required full class/suite. Repeated full-suite reruns, local duplication of the CI matrix, and production changes made only to satisfy Compose idling are review failures.
-- When the same failure signature crosses Journeys or appears only in class order, stop broad execution and classify the shared helper, lifecycle owner, device state, or synchronization boundary before editing. Report the boundary change immediately.
+- Journey debugging in explicit `HIGH` follows `QUALITY_GATES.md`: exact reproduction, stable affected test, adjacent sequence, then the local planner-selected API 29 gate before hosted protected final acceptance. The entire planner-selected local matrix is required preflight in `HIGH`, but never an inner retry loop. In `LOW`, no local API 29 runner executes; hosted protected checks are the CI path.
+- When the same failure signature crosses Journeys or appears only in class order, stop broad execution, capture diagnostic state, and classify the shared helper, lifecycle owner, device state, or synchronization boundary before changing anything. Never make speculative production changes to satisfy Compose idling; report the boundary change immediately.
 
 ## Evidence and handoff
 

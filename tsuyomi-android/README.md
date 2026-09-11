@@ -82,27 +82,57 @@ Tsuyomi Monorepo 包含两个独立版本、独立发布和独立回退的组件
 
 维护中的来源扩展、打包工具和来源验收 fixtures 位于独立的 [Chachaanteng/tsuyomi-extensions](https://github.com/Chachaanteng/tsuyomi-extensions) 仓库。Android 与 protocol 可以原子更新；跨仓库仅通过版本化协议、签名制品、固定脱敏 fixtures 和发布元数据互操作，兼容性顺序为 protocol → extensions → Android。宿主构建不要求检出相邻插件仓库。
 
-## 构建
+## 构建与本地 API 29 预检
 
 要求：
 
 - JDK 17
-- Android SDK Platform 37
-- Android API 29 default x86_64 system image（instrumentation/AVD 验收）
+- Android SDK Platform 37、platform-tools、emulator 与 `system-images;android-29;default;x86_64`
 - Python 与 [REUSE Tool](https://reuse.software/)
 
-Windows：
+仅在显式 **HIGH** 模式下，提交前先完成最小复现和相邻顺序诊断，再运行由 `tools/android_ci_plan.py` 选择的本地 API 29 gate；不要把完整选中矩阵当作重试循环。顺序为有界诊断 → 本地 planned gate → 受保护的 hosted checks。**LOW 模式绝不运行本地 API 29 runner，包括 `--prepare-only`、预检和矩阵；LOW 的 CI 仅由 hosted protected checks 执行。** 有界直接开发编译仍是独立操作，不构成 CI。任何本地结果都不能跳过 hosted 最终验收或授予批准。
+
+**Windows 原生优先**（当前没有通用 WSL 发行版时不要为此安装一个）：
 
 ```powershell
 $env:ANDROID_SDK_ROOT = '<your-android-sdk>'
 ./tools/Doctor.ps1
-./gradlew.bat --no-daemon --console=plain --dependency-verification strict :app:assembleDebug
-python -m reuse lint
-python ../tools/check_repository.py --scope android
+$base = git -C .. merge-base origin/main HEAD
+python ../tools/android_api29.py --repo-root .. --base $base --head HEAD --mode high --build
 ```
 
-完整质量命令和固定 AVD 参数分别见：
+除 `--prepare-only` 外，每次运行都会先编译 planner 选择的 instrumentation `:module:assembleDebug` 与 `:module:assembleDebugAndroidTest`，再创建或启动 AVD。`HIGH` 在预编译与串行 instrumentation 中省略 `--no-daemon`，允许 Gradle 在 phase 间复用 daemon；hosted `ci` 保持 `--no-daemon`。`--build` 还会在此阶段加入 planner 选择的 build/lint/JVM/screenshot tasks；仅非 focused 的 `--build` 运行是完整 gate（`scope=planner_selected_preflight`、`full_gate=true`）。默认运行的 scope 为 `planner_selected_instrumentation`、`full_gate=false`。一次有界的 focused 诊断可显式覆盖 instrumentation 任务；它只产生诊断证据，不是完整 gate：
 
+```powershell
+python ../tools/android_api29.py --repo-root .. --base $base --head HEAD --mode high `
+  --task :app:connectedDebugAndroidTest `
+  --test-class org.tsuyomi.android.UpdatesProductionJourneyInstrumentedTest
+```
+
+可重复传入 `--task`。仅检查环境、隔离 AVD 配置和清理路径时使用：
+
+```powershell
+python ../tools/android_api29.py --repo-root .. --base $base --head HEAD --mode high --prepare-only
+```
+
+工具默认从 `ANDROID_SDK_ROOT` 或 `ANDROID_HOME` 取得 SDK；可用 `--sdk PATH` 覆盖，`--repo-root` 省略时由工具推导。`--head` 默认为 `HEAD`；本地仅接受 `HEAD`，并把 tracked dirty 与未忽略 untracked paths 作为相对该 head 的 planner overlay，记录 resolved head 和 overlay。 有可用 merge-base 时传入 `--base`；没有有效 base 时省略它，planner 会保守回退到完整选择。工具共享 `tools/android_api29_profile.json`；不要手工复刻 AVD 参数。它使用独立临时 AVD home、唯一 `tsuyomi-ci-*` AVD 与可用端口，证据保存在 `build/api29-ci/<run>/`，随后清理自己的 emulator/AVD。缺少固定 system image 时按报出的 `sdkmanager` 安装提示处理；工具不会自动安装或接受许可证。
+
+共享 profile 固定 `system-images;android-29;default;x86_64`、`pixel_2`、`swiftshader`、1080×2400/420dpi、font scale 1.0、portrait（rotation 0）和 animation 0；CLI 的默认 `--mode` 是 `low`，但本地 runner 在接触 SDK/AVD/Gradle 前就拒绝默认或显式 `low`，只接受显式 `--mode high`；`--mode ci` 仅保留给 `GITHUB_ACTIONS=true` 的 hosted execution。`--prepare-only` 仅允许 AVD 生命周期证据，拒绝 `--build` 与 focused flags。`environment.json` 标明 run、mode、scope、`full_gate`、planner base/head/fallback/reasons、resolved head/worktree overlay、已解析 profile/AVD、host、SDK packages/revisions、tool versions、task selection、logs、exit/failure，以及 `webview_dumpsys`、system fingerprint、resolved device settings 和 `timings_seconds.precompile`、`timings_seconds.emulator_prepare`、`timings_seconds.instrumentation`（prepare-only 不含）与 `timings_seconds.total`；同一 run 另保存 emulator/adb/build/instrumentation logs 与对应的 WebView、system-fingerprint、device-settings 文件。
+
+仅在出现明确的 Windows 主机差异且 WSL2 可用 KVM 时，才使用 Linux；把 checkout 与 SDK 放在 Linux 文件系统而非 `/mnt/c`，仍运行同一个 runner/profile：
+
+```bash
+export ANDROID_SDK_ROOT="$HOME/Android/Sdk"
+base="$(git -C .. merge-base origin/main HEAD)"
+python3 ../tools/android_api29.py --repo-root .. --base "$base" --head HEAD --mode high --build
+```
+
+本地、WSL2 与 hosted 环境并不保证相同的 host、kernel 或 emulator build。每次运行记录已安装 image/emulator revision、system fingerprint 与 WebView 版本，供差异比较。这个 automation AVD 只服务 CI-style instrumentation；它不替代 `Tsuyomi_Review_Work_API29` 的视觉/人工 Review_Work 所有权，绝不替换 canonical，也不产生批准。
+性能比较必须使用相同 resolved `HEAD`/worktree-overlay policy、scope、selected tasks、profile/image revision 和 host evidence，并比较上述各 phase timing；它们用于定位性能差异，不证明 Windows、WSL2 Linux 与 hosted 的 host、kernel 或 emulator build 相同。
+
+完整质量门、固定人工/视觉 AVD 配方分别见：
+
+- [`CONTRIBUTING.md`](CONTRIBUTING.md)
 - [`docs/process/QUALITY_GATES.md`](docs/process/QUALITY_GATES.md)
 - [`docs/verification/AVD_MATRIX.md`](docs/verification/AVD_MATRIX.md)
 - [`tools/avd/Create-ReviewAvds.ps1`](tools/avd/Create-ReviewAvds.ps1)
