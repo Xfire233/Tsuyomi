@@ -135,8 +135,9 @@ class ManualVerificationHandoffInstrumentedTest {
         val searchHtml = targetContext.assets.open("search.html").bufferedReader().use { it.readText() }
         val searchUrl =
             "https://www.wenku8.net/modules/article/search.php?searchtype=articlename&searchkey=login&page=1"
-        installVerifiedPageFixture(searchUrl, searchHtml)
+        val searchFixtureRequested = installVerifiedPageFixture(searchUrl, searchHtml)
         composeRule.onNodeWithContentDescription("打开对应搜索页面").performClick()
+        assertTrue("Verified search fixture was not requested", searchFixtureRequested.await(15, TimeUnit.SECONDS))
         waitForText("使用当前页面")
         waitForWebViewSettled(searchUrl)
         composeRule.onNodeWithText("使用当前页面").performClick()
@@ -291,8 +292,9 @@ class ManualVerificationHandoffInstrumentedTest {
         waitForWebViewSettled()
         val detailHtml = targetContext.assets.open("detail.html").bufferedReader().use { it.readText() }
         val detailUrl = "https://www.wenku8.net/book/1234.htm"
-        installVerifiedPageFixture(detailUrl, detailHtml)
+        val detailFixtureRequested = installVerifiedPageFixture(detailUrl, detailHtml)
         composeRule.onNodeWithContentDescription("打开对应详情页面").performClick()
+        assertTrue("Verified detail fixture was not requested", detailFixtureRequested.await(15, TimeUnit.SECONDS))
         waitForText("使用当前页面")
         waitForWebViewSettled(detailUrl)
         composeRule.onNodeWithText("使用当前页面").performClick()
@@ -300,6 +302,9 @@ class ManualVerificationHandoffInstrumentedTest {
             successText = "简介",
             unboundText = "当前页面未与暂停的详情请求绑定。请点击“打开对应详情页面”，等待自动跳转和页面加载完成后重试。",
         )
+        composeRule.waitUntil(timeoutMillis = 15_000) {
+            Phase2SourceGateway.directoryRequestCount() == 2
+        }
         assertEquals(1, Phase2SourceGateway.detailRequestCount())
         assertEquals(2, Phase2SourceGateway.directoryRequestCount())
     }
@@ -336,8 +341,9 @@ class ManualVerificationHandoffInstrumentedTest {
         waitForWebViewSettled()
         val chapterHtml = targetContext.assets.open("chapter.html").bufferedReader().use { it.readText() }
         val chapterUrl = "https://www.wenku8.net/modules/article/reader.php?aid=1234&cid=10001"
-        installVerifiedPageFixture(chapterUrl, chapterHtml)
+        val chapterFixtureRequested = installVerifiedPageFixture(chapterUrl, chapterHtml)
         composeRule.onNodeWithContentDescription("打开对应章节页面").performClick()
+        assertTrue("Verified chapter fixture was not requested", chapterFixtureRequested.await(15, TimeUnit.SECONDS))
         waitForText("使用当前页面")
         waitForWebViewSettled(chapterUrl)
         composeRule.onNodeWithText("使用当前页面").performClick()
@@ -639,8 +645,9 @@ class ManualVerificationHandoffInstrumentedTest {
         waitForWebViewSettled()
         val homeHtml = targetContext.assets.open("home-index.html").bufferedReader().use { it.readText() }
         val homeUrl = "https://www.wenku8.net/index.php"
-        installVerifiedPageFixture(homeUrl, homeHtml)
+        val homeFixtureRequested = installVerifiedPageFixture(homeUrl, homeHtml)
         composeRule.onNodeWithContentDescription("打开对应主页").performClick()
+        assertTrue("Verified home fixture was not requested", homeFixtureRequested.await(15, TimeUnit.SECONDS))
         waitForText("使用当前页面")
         waitForWebViewSettled(homeUrl)
         composeRule.onNodeWithText("使用当前页面").performClick()
@@ -915,26 +922,27 @@ class ManualVerificationHandoffInstrumentedTest {
     }
 
 
-    private fun installVerifiedPageFixture(url: String, html: String) {
+    private fun installVerifiedPageFixture(url: String, html: String): CountDownLatch {
+        val fixtureRequested = CountDownLatch(1)
         composeRule.runOnUiThread {
             val webView = requireNotNull(findWebView(composeRule.activity.window.decorView))
             val delegate = webView.webViewClient
             webView.webViewClient = object : WebViewClient() {
-                override fun shouldOverrideUrlLoading(view: WebView, request: WebResourceRequest): Boolean =
-                    delegate.shouldOverrideUrlLoading(view, request)
-
                 override fun shouldInterceptRequest(
                     view: WebView,
                     request: WebResourceRequest,
                 ): WebResourceResponse? = when {
-                    request.isForMainFrame && request.url.toString() == url -> WebResourceResponse(
-                        "text/html",
-                        "utf-8",
-                        200,
-                        "OK",
-                        emptyMap(),
-                        ByteArrayInputStream(html.encodeToByteArray()),
-                    )
+                    request.isForMainFrame && request.url.toString() == url -> {
+                        fixtureRequested.countDown()
+                        WebResourceResponse(
+                            "text/html",
+                            "utf-8",
+                            200,
+                            "OK",
+                            emptyMap(),
+                            ByteArrayInputStream(html.encodeToByteArray()),
+                        )
+                    }
                     request.url.host == "www.wenku8.net" -> WebResourceResponse(
                         "text/plain",
                         "utf-8",
@@ -952,6 +960,7 @@ class ManualVerificationHandoffInstrumentedTest {
                 }
             }
         }
+        return fixtureRequested
     }
 
     private fun waitForVerifiedOutcome(successText: String, unboundText: String) {

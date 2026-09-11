@@ -5,6 +5,8 @@
 
 package org.tsuyomi.android
 
+import android.os.Handler
+import android.os.Looper
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.runtime.Composable
@@ -486,10 +488,13 @@ internal fun rememberSourceRouteOwner(
     val browseAnchored = runCatching { navController.getBackStackEntry(Routes.Browse) }.isSuccess
     val observedSourceFlowRoot = when {
         currentRoute == null -> null
+        currentRoute == Routes.Browse -> Routes.Browse
         routeOwnsSourceFlow(currentRoute) -> if (
             browseAnchored || retainedSourceFlowRoot == Routes.Browse
         ) Routes.Browse else Routes.Library
-        rootRouteFor(currentRoute) == Routes.Library -> Routes.Library
+        rootRouteFor(currentRoute) == Routes.Library -> if (
+            browseAnchored && retainedSourceFlowRoot == Routes.Browse
+        ) Routes.Browse else Routes.Library
         else -> null
     }
     val sourceFlowRoot = observedSourceFlowRoot ?: retainedSourceFlowRoot
@@ -505,8 +510,9 @@ internal fun rememberSourceRouteOwner(
             SourceFlowSnapshotStore(application.preferencesDataStore),
         )
     }
+    val mainHandler = remember { Handler(Looper.getMainLooper()) }
     DisposableEffect(flow) {
-        onDispose(flow::close)
+        onDispose { mainHandler.post(flow::close) }
     }
 
     val currentOnLibraryChanged by rememberUpdatedState(onLibraryChanged)
