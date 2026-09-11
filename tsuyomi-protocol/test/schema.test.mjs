@@ -26,6 +26,11 @@ for (const { label, schemaPath, fixturePath } of [
     fixturePath: '../fixtures/transfer/valid-v2.json',
   },
   {
+    label: 'tsuyomi-transfer v3',
+    schemaPath: '../schemas/tsuyomi-transfer-v3.schema.json',
+    fixturePath: '../fixtures/transfer/valid-v3-retained-unpinned.json',
+  },
+  {
     label: 'hxp manifest v1',
     schemaPath: '../schemas/hxp-manifest-v1.schema.json',
     fixturePath: '../fixtures/hxp/valid-minimal-manifest.json',
@@ -58,6 +63,17 @@ test('tsuyomi-transfer v1 rejects v2-only completion and reader fields', async (
   document.library[0].completedChapterIds = ['67889'];
   document.preferences = { reader: { horizontalMargin: 32 } };
   assert.equal(validate(document), false);
+});
+
+test('tsuyomi-transfer v3 requires local pin state and rejects unpinned manual membership', async () => {
+  const ajv = createAjv();
+  const validate = ajv.compile(await loadJson('../schemas/tsuyomi-transfer-v3.schema.json'));
+  const valid = await loadJson('../fixtures/transfer/valid-v3-retained-unpinned.json');
+  const invalid = await loadJson('../fixtures/transfer/invalid-v3-unpinned-shelf-membership.json');
+
+  delete valid.library[0].localPin;
+  assert.equal(validate(valid), false);
+  assert.equal(validate(invalid), false);
 });
 
 test('hxp manifest v1 rejects non-HTTPS network origins', async () => {

@@ -1,0 +1,25 @@
+{
+  "format": "tsuyomi-transfer",
+  "version": 3,
+  "createdAt": "2026-09-10T00:00:00Z",
+  "library": [
+    {
+      "identity": {
+        "sourceId": "org.tsuyomi.wenku8",
+        "remoteBookId": "invalid-unpinned-member"
+      },
+      "title": "Invalid unpinned manual member",
+      "shelfIds": ["favorites"],
+      "localPin": false,
+      "updatedAt": "2026-09-10T00:00:00Z",
+      "completedChapterIds": []
+    }
+  ],
+  "shelves": [
+    {
+      "id": "favorites",
+      "name": "Favorites",
+      "position": 0
+    }
+  ]
+}

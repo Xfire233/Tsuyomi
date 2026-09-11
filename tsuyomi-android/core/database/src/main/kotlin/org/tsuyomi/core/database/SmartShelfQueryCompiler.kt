@@ -27,7 +27,7 @@ internal object SmartShelfQueryCompiler {
             FROM library_entries le
             JOIN books b ON b.source_id = le.source_id AND b.remote_book_id = le.remote_book_id
             LEFT JOIN source_availability sa ON sa.source_id = le.source_id
-            WHERE $predicate
+            WHERE le.local_pin = 1 AND ($predicate)
             ORDER BY b.title COLLATE NOCASE, le.source_id, le.remote_book_id
             """.trimIndent(),
             arguments.toTypedArray(),

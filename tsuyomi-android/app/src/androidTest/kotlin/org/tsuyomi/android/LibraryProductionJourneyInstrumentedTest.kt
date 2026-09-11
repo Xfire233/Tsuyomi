@@ -78,6 +78,7 @@ class LibraryProductionJourneyInstrumentedTest {
         }
     }
 
+    @Before
     @After
     fun removeFixtureBook() {
         runBlocking {
@@ -91,6 +92,7 @@ class LibraryProductionJourneyInstrumentedTest {
             repository.deleteCollection(behaviorCollectionId)
             repository.deleteCollection(searchCollectionId)
             listOf(identity, behaviorNewer, behaviorOlder, behaviorUnstarted).forEach {
+                repository.setReadLater(it, false)
                 repository.removeFromLibrary(it)
             }
         }
@@ -113,8 +115,7 @@ class LibraryProductionJourneyInstrumentedTest {
         composeRule.onNodeWithTag("tsuyomi-tab-READ_LATER").assertIsDisplayed()
         composeRule.onNodeWithContentDescription("刷新").fetchSemanticsNode()
         composeRule.onNodeWithContentDescription("搜索").fetchSemanticsNode()
-        composeRule.onNodeWithContentDescription("切换布局；当前为网格").performClick()
-        composeRule.onNodeWithContentDescription("切换布局；当前为列表").fetchSemanticsNode()
+        composeRule.onNodeWithContentDescription("切换布局；当前为", substring = true).performClick()
         composeRule.onNodeWithContentDescription("更多操作").performClick()
         composeRule.onNodeWithText("新建收藏夹").assertIsDisplayed()
         composeRule.onNodeWithText("标签").performClick()
@@ -226,13 +227,11 @@ class LibraryProductionJourneyInstrumentedTest {
         val expectedRootCount = runBlocking { repository.libraryEntries().size }
 
         assertTrue(composeRule.onAllNodesWithContentDescription("最近阅读").fetchSemanticsNodes().isEmpty())
-        composeRule.onNodeWithContentDescription("更多操作").performClick()
-        composeRule.onNodeWithText("书籍排序：智能 · 正序").performClick()
-        composeRule.onNodeWithText("书籍排序依据 · 最近阅读").performClick()
-        composeRule.onAllNodesWithText("完成").assertCountEquals(0)
-        composeRule.onNodeWithContentDescription("更多操作").performClick()
-        composeRule.onNodeWithText("书籍排序：最近阅读 · 正序").performClick()
-        composeRule.onNodeWithText("顺序 · 倒序").performClick()
+        composeRule.onAllNodesWithText("书籍排序：智能 · 正序").assertCountEquals(0)
+        composeRule.onNodeWithContentDescription("筛选与排序；筛选：全部；排序：", substring = true).performClick()
+        composeRule.onNodeWithText("排序方式：最近阅读").performClick()
+        composeRule.onNodeWithContentDescription("筛选与排序；筛选：全部；排序：最近阅读", substring = true).performClick()
+        composeRule.onNodeWithText("排序方向：倒序").performClick()
 
         val newerBounds = composeRule.onNodeWithText("最近阅读·新").fetchSemanticsNode().boundsInRoot
         val olderBounds = composeRule.onNodeWithText("最近阅读·旧").fetchSemanticsNode().boundsInRoot
@@ -372,8 +371,8 @@ class LibraryProductionJourneyInstrumentedTest {
         controller.restoreLibraryHome()
         controller.longPressBook(behaviorNewer)
         assertTrue(controller.removeSelection("failed"))
-        assertTrue(repository.libraryEntry(behaviorNewer) == null)
-        assertTrue(repository.libraryEntry(behaviorOlder) != null)
+        assertEquals(false, repository.libraryEntry(behaviorNewer)?.localMembership)
+        assertEquals(true, repository.libraryEntry(behaviorOlder)?.localMembership)
     }
     @Test
     fun library_controller_restores_root_projection_without_collection_flash() = runBlocking {
@@ -523,6 +522,11 @@ class LibraryProductionJourneyInstrumentedTest {
         assertEquals(org.tsuyomi.feature.library.LibraryLayout.LIST, controller.state.layout)
         assertEquals(2, controller.state.firstVisibleIndex)
         controller.persistViewport(6, 20)
+        controller.selectTab(org.tsuyomi.feature.library.SystemLibraryFilter.READ_LATER)
+        assertEquals(org.tsuyomi.feature.library.LibraryLayout.COMPACT, controller.state.layout)
+        controller.selectTab(org.tsuyomi.feature.library.SystemLibraryFilter.CONTINUE)
+        assertEquals(6, controller.state.firstVisibleIndex)
+        assertEquals(20, controller.state.firstVisibleOffset)
         controller.selectTab(org.tsuyomi.feature.library.SystemLibraryFilter.ALL)
         assertEquals(4, controller.state.firstVisibleIndex)
 
@@ -534,6 +538,31 @@ class LibraryProductionJourneyInstrumentedTest {
         restored.selectTab(org.tsuyomi.feature.library.SystemLibraryFilter.READ_LATER)
         assertEquals(org.tsuyomi.feature.library.LibraryLayout.COMPACT, restored.state.layout)
         assertEquals(1, restored.state.firstVisibleIndex)
+    }
+
+    @Test
+    fun library_controller_keeps_root_filter_out_of_system_tabs_and_clearing_it_keeps_sort() = runBlocking {
+        val repository = (composeRule.activity.application as TsuyomiApplication).libraryRepository
+        repository.removeFromLibrary(behaviorNewer)
+        repository.addToLibrary(book(behaviorNewer, "筛选隔离"))
+        repository.setReadLater(behaviorNewer, true)
+        val controller = LibraryFlowController(repository, libraryPreferences, "FIXTURE_FILTER_ISOLATION")
+        controller.reload("failed")
+        controller.selectSort(org.tsuyomi.feature.library.LibrarySortMode.TITLE)
+        controller.selectSortDirection(true)
+        controller.setUpdateFilter(org.tsuyomi.feature.library.LibraryUpdateFilter.UPDATES_ONLY)
+        assertTrue(controller.state.projectedEntries().isEmpty())
+
+        controller.selectTab(org.tsuyomi.feature.library.SystemLibraryFilter.READ_LATER)
+        assertEquals(listOf(behaviorNewer), controller.state.projectedEntries().map { it.book.identity })
+        assertEquals(org.tsuyomi.feature.library.LibraryUpdateFilter.UPDATES_ONLY, controller.state.updateFilter)
+
+        controller.selectTab(org.tsuyomi.feature.library.SystemLibraryFilter.ALL)
+        assertEquals(org.tsuyomi.feature.library.LibrarySortMode.TITLE, controller.state.sortMode)
+        assertTrue(controller.state.sortDescending)
+        controller.setUpdateFilter(org.tsuyomi.feature.library.LibraryUpdateFilter.ALL)
+        assertEquals(org.tsuyomi.feature.library.LibrarySortMode.TITLE, controller.state.sortMode)
+        assertTrue(controller.state.sortDescending)
     }
 
     @Test

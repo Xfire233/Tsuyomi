@@ -5,7 +5,7 @@
 
 Platform-neutral contracts shared by Tsuyomi hosts and source tooling:
 
-- portable transfer data (`tsuyomi-transfer` v2 output with strict v1/v2 input);
+- portable transfer data (`tsuyomi-transfer` v3 output with strict v1/v2/v3 input);
 - reading locators and progress merge rules;
 - `.hxp` extension manifests and package integrity;
 - signed read-only `hxp-update-check-v2` requests, normalized complete chapter evidence, and append-only admission fixtures;

@@ -25,8 +25,6 @@ import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.grid.LazyGridItemScope
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
-import androidx.compose.material3.DropdownMenu
-import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.ListItem
@@ -342,32 +340,20 @@ internal fun LibraryFilterSummary(
     onClear: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    var expanded by remember { mutableStateOf(false) }
     Surface(modifier.fillMaxWidth().testTag("library-filter-summary"), color = MaterialTheme.colorScheme.secondaryContainer) {
         Row(
             modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp).padding(start = TsuyomiSpacing.Md),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            Box(Modifier.weight(1f)) {
-                Column(
-                    Modifier.fillMaxWidth()
-                        .clickable { expanded = true; onEdit() }
-                        .padding(vertical = TsuyomiSpacing.Sm),
-                ) {
-                    Text("有更新", style = MaterialTheme.typography.labelLarge)
-                    Text("$count 本", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                }
-                DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
-                    DropdownMenuItem(
-                        text = { Text("全部") },
-                        onClick = { expanded = false; onClear() },
-                    )
-                    DropdownMenuItem(
-                        text = { Text("有更新") },
-                        trailingIcon = { Icon(TsuyomiIcons.Selected, contentDescription = null) },
-                        onClick = { expanded = false },
-                    )
-                }
+            Column(
+                Modifier
+                    .weight(1f)
+                    .clickable(onClick = onEdit)
+                    .testTag("library-filter-summary-edit")
+                    .padding(vertical = TsuyomiSpacing.Sm),
+            ) {
+                Text("有更新", style = MaterialTheme.typography.labelLarge)
+                Text("$count 本", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
             IconButton(onClick = onClear, modifier = Modifier.size(48.dp)) {
                 Icon(TsuyomiIcons.Close, contentDescription = "清除筛选")

@@ -230,6 +230,7 @@ internal fun TsuyomiApp(
     }
     LaunchedEffect(currentRoute) {
         if (currentRoute != Routes.Detail) detailRemoveConfirmationVisible = false
+        libraryFlow.setFilterAndSortPanelExpanded(false)
     }
     val activeSourcePackage = sourceOwner.installer.activePackage
     val coverGateway = remember(activeSourcePackage?.packageSha256) {
@@ -406,6 +407,8 @@ internal fun TsuyomiApp(
                                 libraryFlow.state.refreshing
                             },
                             updateFilter = libraryFlow.state.updateFilter,
+                            filterSortPanelExpanded = libraryFlow.filterSortPanelExpanded,
+                            onFilterSortPanelExpandedChange = libraryFlow::setFilterAndSortPanelExpanded,
                             onSetUpdateFilter = { filter -> scope.launch { libraryFlow.setUpdateFilter(filter) } },
                             onNavigateUp = if (currentRoute == Routes.Library) null else ({ navController.navigateUp() }),
                             onSearch = { navController.navigate(Routes.LibrarySearch) },
@@ -610,6 +613,7 @@ internal fun TsuyomiApp(
                         coverRepository = coverRepository,
                         packageRevision = activeSourcePackage?.packageSha256,
                         credentialRevision = activeSourcePackage?.let { coverCredentialRevision },
+                        onRequestRemoveFromLibrary = { detailRemoveConfirmationVisible = true },
                         onExactChapterCompleted = { identity ->
                             application.updateCoordinator.reconcileCompleted(
                                 identity,

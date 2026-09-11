@@ -47,6 +47,7 @@ data class TransferBook(
     val shelfIds: Set<String> = emptySet(),
     val rating: Double? = null,
     val readLater: Boolean = false,
+    val localPin: Boolean = true,
     val addedAt: Instant? = null,
     val updatedAt: Instant,
     val progress: TransferProgress? = null,

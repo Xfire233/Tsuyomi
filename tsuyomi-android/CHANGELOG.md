@@ -28,7 +28,7 @@ All notable changes use semantic versioning. Future Phase baselines use annotate
   - Root/group mirror shortcuts, frozen missing-target restoration and Library-native grid/list/compact rendering.
   - Operation-specific `ADD`/`MOVE`/`REMOVE` authorization, separately signed target discovery, cancellation-safe retry and process-resumable targeted ADD→MOVE.
   - Local-only COPY and ordinary `加入书架`, with website actions and persistent outcomes kept visually and semantically distinct.
-- `tsuyomi-transfer` v2 export with strict v1/v2 import, completed chapter IDs and expanded reader preferences.
+- `tsuyomi-transfer` v3 export with explicit local pin state and strict v1/v2/v3 import, preserving retained unpinned annotations without repinning during restoration.
 - Phase 4C local update inbox and optional scheduling:
   - Signed, read-only `update-check-v2` and Wenku8 ordered-directory evidence; the first trusted baseline is silent, and ambiguous directory changes preserve pending updates.
   - Room v9 sessions, fenced recovery, incremental inbox, bounded reports, per-book/source exclusions and exact-anchor handling/Undo.
@@ -58,6 +58,13 @@ All notable changes use semantic versioning. Future Phase baselines use annotate
 - Update-check reports preserve source error category, host stage and bounded safe diagnostic code instead of collapsing failures to an uninformative message; raw exception messages, URLs, credentials and response bodies remain excluded.
 - Detail's destination dropdown puts website actions before all local manual collections so long local lists cannot bury a frequent remote action; preserves immediate independent actions and the complete local list without extra menu levels.
 - Detail's SplitButton primary is text-only, with no redundant bookshelf icon or icon spacer; compact 12dp horizontal padding and content-sized fallback preserve full labels and the 48dp disclosure target.
+- Selectively migrated ordinary Standard text buttons to graduated Material3 ButtonShapes with restrained press corners, unchanged labels/touch geometry, and immediate visible feedback under static motion. Toggle/IconButton families and the global theme identity are unchanged; E-ink remains frozen.
+- Migrated existing Detail SplitButtonLayout and full-screen verification-toolbar ownership to the pinned graduated APIs without adding Expressive caller opt-ins or changing their business actions.
+- Upgraded the compatible Compose/Material3, AGP/Gradle, built-in Kotlin/KSP, Screenshot and compile-SDK toolchain while retaining minSdk29, targetSdk36 and JVM17. Strict variant builds and bounded device checks pass; existing screenshot differences and service/human review still block full admission, and no goldens were accepted.
+- Library now combines immediately applied filtering and sorting in one bounded panel, with separate sections, filter-only clearing and independent layout switching. System tabs preserve but do not expose the root filter.
+- Fixed Library tabs use a short destination-only fade on tap; initial rendering, data updates and reduced-motion navigation remain immediate, without a horizontal pager.
+- Detail's selected `已在书架` primary now requests the existing local-removal confirmation; its independent destination disclosure and working-state guard remain intact.
+- Room v10 separates the local pin from retained annotations. Confirmed removal clears the pin and direct manual memberships while preserving rating, tags, Read Later and reading state; Read Later remains independently accessible and re-add preserves metadata.
 
 ## [0.1.0] - 2026-08-09
 

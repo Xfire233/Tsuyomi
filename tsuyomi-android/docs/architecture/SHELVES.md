@@ -36,6 +36,10 @@ collection_refresh_run(id, collectionId, startedAt, completedAt?, completeness, 
 - Source uninstall makes related book rows dormant; it does not delete collection relations.
 - The Library root projection is a typed ordered sequence of books, local collections and source website-mirror roots. A book identity appears at most once. Rule sorts keep structural nodes first and sort only the book range; custom/manual order alone may intermix all root types.
 - Every installed website-library-capable source and every retained source with local mirror state contributes exactly one default-visible mirror-root identity. Remote folders remain source state inside that mirror route and never become Library-root identities.
+- Local annotations and Read Later outlive the root pin. Room `library_entries.local_pin` selects root membership while the retained row owns rating and Read Later and retains local tags. The additive v9→v10 migration marks every existing entry pinned without replacing its data or foreign keys.
+- Confirmed local removal atomically clears that pin and direct manual-collection memberships only. Rating, local tags, Read Later, metadata, semantic progress/completed chapters, history, cached content and website state remain. Re-adding restores the pin without resetting annotations or the retained local context. Repeated removal is a no-op.
+- Root, manual/smart organization and local update eligibility require the pin; Read Later has its independent query and remains usable after unpin. Retained metadata existence is never a substitute for checking local membership. Turning off retained Read Later does not repin a book; explicitly enabling it for an unpinned book establishes local presence as before.
+- Portable transfer v3 preserves explicit `localPin` independently of annotations and Read Later. Strict v1/v2 inputs retain their original pinned interpretation. Restoring an unpinned record does not silently put it back in root; merging one cannot unpin an existing local book. Unpinned manual-collection relationships are invalid.
 
 ## Smart rule language
 

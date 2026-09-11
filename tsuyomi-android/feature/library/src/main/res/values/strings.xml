@@ -16,10 +16,13 @@
     <string name="library_search_books_heading">书籍</string>
     <string name="library_search_recommended_books_heading">最近阅读与加入</string>
     <string name="library_action_refresh">刷新</string>
-    <string name="library_action_filter">筛选：%1$s</string>
-    <string name="library_action_sort">书籍排序：%1$s · %2$s</string>
-    <string name="library_sort_basis_option">书籍排序依据 · %1$s</string>
-    <string name="library_sort_direction_option">顺序 · %1$s</string>
+    <string name="library_action_filter_sort_root">筛选与排序；筛选：%1$s；排序：%2$s，%3$s</string>
+    <string name="library_action_filter_sort">筛选与排序；排序：%1$s，%2$s</string>
+    <string name="library_filter_sort_panel_title">筛选与排序</string>
+    <string name="library_filter_sort_filter_section">筛选</string>
+    <string name="library_filter_sort_sort_section">排序</string>
+    <string name="library_sort_mode_option">排序方式：%1$s</string>
+    <string name="library_sort_direction_option">排序方向：%1$s</string>
     <string name="library_action_tags">标签</string>
     <string name="library_action_create_collection">新建收藏夹</string>
     <string name="library_sort_ascending">正序</string>

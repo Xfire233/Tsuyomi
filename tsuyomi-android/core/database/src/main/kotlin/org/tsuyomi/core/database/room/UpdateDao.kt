@@ -128,7 +128,7 @@ internal interface UpdateDao {
         reason: String?,
     ): Int
 
-    @Query("SELECT EXISTS(SELECT 1 FROM library_entries WHERE source_id = :sourceId AND remote_book_id = :remoteBookId) OR EXISTS(SELECT 1 FROM remote_mirror_items i INNER JOIN remote_mirror_bindings b ON b.source_id = i.source_id WHERE i.source_id = :sourceId AND i.remote_book_id = :remoteBookId AND b.frozen = 0)")
+    @Query("SELECT EXISTS(SELECT 1 FROM library_entries WHERE source_id = :sourceId AND remote_book_id = :remoteBookId AND local_pin = 1) OR EXISTS(SELECT 1 FROM remote_mirror_items i INNER JOIN remote_mirror_bindings b ON b.source_id = i.source_id WHERE i.source_id = :sourceId AND i.remote_book_id = :remoteBookId AND b.frozen = 0)")
     suspend fun isBookInUpdateScope(sourceId: String, remoteBookId: String): Boolean
 
     @Query("SELECT * FROM update_baselines WHERE source_id = :sourceId AND remote_book_id = :remoteBookId")

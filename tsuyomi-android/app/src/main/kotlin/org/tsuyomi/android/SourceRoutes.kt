@@ -55,6 +55,7 @@ internal fun NavGraphBuilder.sourceRoutes(
     packageRevision: String?,
     credentialRevision: String?,
     onExactChapterCompleted: suspend (BookIdentity) -> Unit,
+    onRequestRemoveFromLibrary: () -> Unit,
 ) {
     browseRoute(navController, owner)
     sourceHomeRoute(navController, owner, coverRepository, packageRevision, credentialRevision)
@@ -66,7 +67,15 @@ internal fun NavGraphBuilder.sourceRoutes(
         packageRevision = packageRevision,
         credentialRevision = credentialRevision,
     )
-    detailRoute(navController, owner, libraryFlow, coverRepository, packageRevision, credentialRevision)
+    detailRoute(
+        navController = navController,
+        owner = owner,
+        libraryFlow = libraryFlow,
+        coverRepository = coverRepository,
+        packageRevision = packageRevision,
+        credentialRevision = credentialRevision,
+        onRequestRemoveFromLibrary = onRequestRemoveFromLibrary,
+    )
     directoryRoute(navController, owner)
     readerRoute(
         navController,
@@ -438,6 +447,7 @@ private fun NavGraphBuilder.detailRoute(
     coverRepository: CoverRepository?,
     packageRevision: String?,
     credentialRevision: String?,
+    onRequestRemoveFromLibrary: () -> Unit,
 ) {
     composable(Routes.Detail) { entry ->
         val scope = rememberCoroutineScope()
@@ -754,6 +764,7 @@ private fun NavGraphBuilder.detailRoute(
             onRemoveFromLibrary = {
                 scope.launch { detail.execute(SourceDetailRouteOwner.Command.REMOVE_FROM_LIBRARY.name) }
             },
+            onRequestRemoveFromLibrary = onRequestRemoveFromLibrary,
             onOpenDirectory = { navController.navigate(Routes.Directory) },
             onRetry = { scope.launch { detail.loadAll() } },
             onUseOfflineCache = { scope.launch { detail.loadAll(offlineOnly = true) } },

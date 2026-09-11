@@ -119,6 +119,8 @@ internal class LibraryFlowController private constructor(
     private val reloadMutex = Mutex()
     private var tabPresentations: Map<String, LibraryTabPresentationPreferences> = emptyMap()
     private var callerTab: SystemLibraryFilter = initialFilter
+    var filterSortPanelExpanded by mutableStateOf(false)
+        private set
     private var installedMirrorRootsProvider: suspend () -> List<LibraryMirrorShortcut> = { emptyList() }
     var coverStates by mutableStateOf<Map<BookIdentity, CoverUiState>>(emptyMap())
         private set
@@ -132,8 +134,9 @@ internal class LibraryFlowController private constructor(
     private val coverJobs = mutableMapOf<BookIdentity, Job>()
     private val retainedCoverOrder = linkedSetOf<BookIdentity>()
     private var rootEntries: List<LibraryEntry> = emptyList()
-    val searchableEntries: List<LibraryEntry>
-        get() = rootEntries
+    private var readLaterEntries: List<LibraryEntry> = emptyList()
+    var searchableEntries: List<LibraryEntry> = emptyList()
+        private set
     var updatePresentationBooks by mutableStateOf<Map<BookIdentity, LibraryBook>>(emptyMap())
         private set
     private var rootLoaded = false
@@ -275,6 +278,7 @@ internal class LibraryFlowController private constructor(
             tabPresentations = presentationPreferences.tabPresentations
             val nextCollections = repository.collections()
             val nextRootEntries = repository.libraryEntries()
+            val nextReadLaterEntries = repository.readLaterEntries()
             val collectionCounts = nextCollections.associate { collection ->
                 collection.collectionId to repository.collectionEntries(collection.collectionId).size
             }
@@ -350,9 +354,11 @@ internal class LibraryFlowController private constructor(
             val validSelectedId = selectedId?.takeIf { id -> nextCollections.any { it.collectionId == id } }
             val nextEntries = validSelectedId?.let { id ->
                 repository.collectionEntries(id).also { collectionEntryCache[id] = it }
-            } ?: nextRootEntries
+            } ?: if (state.filter == SystemLibraryFilter.READ_LATER) nextReadLaterEntries else nextRootEntries
             collections = nextCollections
             rootEntries = nextRootEntries
+            readLaterEntries = nextReadLaterEntries
+            searchableEntries = nextRootEntries + nextReadLaterEntries.filterNot { it.localMembership }
             updatePresentationBooks = nextUpdatePresentationBooks
             rootLoaded = true
             selectedCollectionId = validSelectedId
@@ -443,9 +449,10 @@ internal class LibraryFlowController private constructor(
         clearSelection()
         selectedCollectionId = null
         callerTab = filter
+        filterSortPanelExpanded = false
         val presentation = tabPresentation(filter)
         state = state.copy(
-            entries = rootEntries,
+            entries = if (filter == SystemLibraryFilter.READ_LATER) readLaterEntries else rootEntries,
             filter = filter,
             isRootProjection = filter == SystemLibraryFilter.ALL,
             layout = runCatching { org.tsuyomi.feature.library.LibraryLayout.valueOf(presentation.layout) }
@@ -489,6 +496,10 @@ internal class LibraryFlowController private constructor(
     suspend fun setUpdateFilter(filter: LibraryUpdateFilter) {
         state = state.copy(updateFilter = filter)
         preferencesRepository.updateShowUpdatesOnly(filter == LibraryUpdateFilter.UPDATES_ONLY)
+    }
+
+    fun setFilterAndSortPanelExpanded(expanded: Boolean) {
+        filterSortPanelExpanded = expanded
     }
 
 
@@ -574,7 +585,7 @@ internal class LibraryFlowController private constructor(
         collectionIds: Set<String>,
         failureMessage: String,
     ): Boolean = runCatching {
-        require(repository.libraryEntry(identity) != null) { "Book must exist in the local library" }
+        require(repository.libraryEntry(identity)?.localMembership == true) { "Book must exist in the local library" }
         val manualIds = collections.asSequence()
             .filter { it.kind == CollectionKind.MANUAL }
             .mapTo(hashSetOf()) { it.collectionId }

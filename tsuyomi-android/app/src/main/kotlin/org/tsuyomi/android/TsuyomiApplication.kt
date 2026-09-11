@@ -23,6 +23,7 @@ import org.tsuyomi.core.database.MIGRATION_5_6
 import org.tsuyomi.core.database.MIGRATION_6_7
 import org.tsuyomi.core.database.MIGRATION_7_8
 import org.tsuyomi.core.database.MIGRATION_8_9
+import org.tsuyomi.core.database.MIGRATION_9_10
 import org.tsuyomi.core.database.RoomLibraryRepository
 import org.tsuyomi.core.database.RoomTransferRepository
 import org.tsuyomi.core.database.TsuyomiDatabase
@@ -59,6 +60,7 @@ class TsuyomiApplication : Application() {
                 MIGRATION_6_7,
                 MIGRATION_7_8,
                 MIGRATION_8_9,
+                MIGRATION_9_10,
             )
             .build()
     }

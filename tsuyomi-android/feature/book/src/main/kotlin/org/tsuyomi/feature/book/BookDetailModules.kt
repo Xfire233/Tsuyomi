@@ -143,6 +143,8 @@ internal fun DetailIdentityModule(
     onSetRating: (Int?) -> Unit,
     onSearchAuthor: (String) -> Unit,
     onAddToLibrary: () -> Unit,
+    onRequestRemoveFromLibrary: () -> Unit,
+    primaryActionEnabled: Boolean,
     onOpenDestinations: () -> Unit,
     destinationMenuExpanded: Boolean,
     onDestinationMenuExpandedChange: (Boolean) -> Unit,
@@ -167,6 +169,8 @@ internal fun DetailIdentityModule(
             DetailLibraryStateButton(
                 inLibrary = localState.inLibrary,
                 onAddToLibrary = onAddToLibrary,
+                onRequestRemoveFromLibrary = onRequestRemoveFromLibrary,
+                primaryActionEnabled = primaryActionEnabled,
                 onOpenDestinations = onOpenDestinations,
                 destinationMenuExpanded = destinationMenuExpanded,
                 onDestinationMenuExpandedChange = onDestinationMenuExpandedChange,
@@ -371,7 +375,9 @@ private fun DetailRatingControl(localState: DetailLocalState, onSetRating: (Int?
 internal fun DetailLibraryStateButton(
     inLibrary: Boolean,
     onAddToLibrary: () -> Unit,
+    onRequestRemoveFromLibrary: () -> Unit,
     onOpenDestinations: () -> Unit,
+    primaryActionEnabled: Boolean,
     destinationMenuExpanded: Boolean,
     onDestinationMenuExpandedChange: (Boolean) -> Unit,
     destinationMenuContent: @Composable ColumnScope.(dismissMenu: () -> Unit) -> Unit,
@@ -382,11 +388,11 @@ internal fun DetailLibraryStateButton(
         text = stringResource(if (inLibrary) R.string.book_in_library else R.string.book_add_to_library),
         trailingIcon = TsuyomiIcons.Disclosure,
         trailingDescription = "更多加入选项",
-        onLeadingClick = onAddToLibrary,
+        onLeadingClick = if (inLibrary) onRequestRemoveFromLibrary else onAddToLibrary,
         onMenuOpen = onOpenDestinations,
         menuExpanded = destinationMenuExpanded,
         onMenuExpandedChange = onDestinationMenuExpandedChange,
-        leadingEnabled = !inLibrary,
+        leadingEnabled = primaryActionEnabled,
         modifier = modifier
             .semantics {
                 selected = inLibrary

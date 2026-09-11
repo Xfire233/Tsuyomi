@@ -6,6 +6,7 @@ package org.tsuyomi.feature.library
 
 import java.time.Instant
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.tsuyomi.core.database.CollectionKind
@@ -69,6 +70,14 @@ class LibraryRootContentTest {
             ),
             items.map { it.key },
         )
+    }
+
+    @Test
+    fun tabDestinationFadeRunsOnlyForNonStaticFixedTabChanges() {
+        assertFalse(shouldFadeLibraryTabDestination(null, SystemLibraryFilter.ALL, staticMotion = false))
+        assertTrue(shouldFadeLibraryTabDestination(SystemLibraryFilter.ALL, SystemLibraryFilter.CONTINUE, staticMotion = false))
+        assertFalse(shouldFadeLibraryTabDestination(SystemLibraryFilter.ALL, SystemLibraryFilter.ALL, staticMotion = false))
+        assertFalse(shouldFadeLibraryTabDestination(SystemLibraryFilter.ALL, SystemLibraryFilter.CONTINUE, staticMotion = true))
     }
 
     private fun entry(id: String): LibraryEntry {

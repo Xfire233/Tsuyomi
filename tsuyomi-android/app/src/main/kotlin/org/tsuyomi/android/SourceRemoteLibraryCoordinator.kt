@@ -111,7 +111,7 @@ internal class SourceRemoteLibraryCoordinator(
             selectedBookAddWritesRemote = addWritesRemote
             selectedBookRemoveWritesRemote = removeWritesRemote
             selectedBookMoveWritesRemote = moveWritesRemote
-            selectedBookInLibrary = entry != null
+            selectedBookInLibrary = entry?.localMembership == true
             selectedBookReconciliation = reconciliation?.state
             selectedBookReconciliationOperation = reconciliation?.operation
         }
@@ -214,14 +214,14 @@ internal class SourceRemoteLibraryCoordinator(
                 ?: error("Book is not selected")
             val current = library.libraryEntry(selected.identity)
             val next = !(current?.readLater ?: false)
-            if (current == null) {
+            if (next && current?.localMembership != true) {
                 library.addToLibrary(selected.toLibraryBook(importedAt))
             }
             library.setReadLater(selected.identity, next)
             val updated = requireNotNull(library.libraryEntry(selected.identity)) { "Book is not in library" }
             if (selectedIdentity == selected.identity) {
                 selectedLibraryEntry = updated
-                selectedBookInLibrary = true
+                selectedBookInLibrary = updated.localMembership
                 selectedBookReconciliation = updated.reconciliation
                 selectedBookReconciliationOperation = updated.reconciliationOperation
             }
@@ -263,15 +263,9 @@ internal class SourceRemoteLibraryCoordinator(
         }
 
     suspend fun removeBook(summary: SourceBookSummary?): Boolean {
-        val identity = summary?.identity ?: return false
-        val removed = library.removeFromLibrary(identity)
-        if (removed && selectedIdentity == identity) {
-            selectedLibraryEntry = null
-            selectedBookInLibrary = false
-            selectedBookReconciliation = null
-            selectedBookReconciliationOperation = null
-            selectedBookAddWritesRemote = false
-        }
+        val selected = summary ?: return false
+        val removed = library.removeFromLibrary(selected.identity)
+        if (removed && selectedIdentity == selected.identity) refreshSelection(selected)
         return removed
     }
 

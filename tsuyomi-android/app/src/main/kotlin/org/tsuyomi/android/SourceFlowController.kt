@@ -548,7 +548,7 @@ internal class SourceFlowController(
 
     suspend fun setSelectedRating(rating: Int?) {
         val book = requireNotNull(selectedBook) { "Book is not selected" }
-        check(remoteLibrary.selectedLibraryEntry != null) { "Book is not in library" }
+        check(remoteLibrary.selectedLibraryEntry?.localMembership == true) { "Book is not in library" }
         library.setRating(book.identity, rating)
         remoteLibrary.refreshSelection(book)
     }
@@ -556,6 +556,7 @@ internal class SourceFlowController(
     suspend fun addSelectedLocalTag(tag: String) {
         val book = requireNotNull(selectedBook) { "Book is not selected" }
         val entry = requireNotNull(remoteLibrary.selectedLibraryEntry) { "Book is not in library" }
+        check(entry.localMembership) { "Book is not in library" }
         library.setLocalTags(book.identity, entry.localTags + tag)
         remoteLibrary.refreshSelection(book)
     }

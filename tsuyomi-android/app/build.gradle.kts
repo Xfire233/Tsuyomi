@@ -1,11 +1,8 @@
 // SPDX-FileCopyrightText: 2026 Tsuyomi Contributors
 // SPDX-License-Identifier: Apache-2.0
 
-import com.android.build.api.dsl.ManagedVirtualDevice
-
 plugins {
     alias(libs.plugins.android.application)
-    alias(libs.plugins.kotlin.android)
     id("tsuyomi.android.application")
     id("tsuyomi.android.compose")
 }
@@ -34,11 +31,11 @@ android {
     buildFeatures {
         buildConfig = true
     }
-    sourceSets.getByName("debug").assets.srcDir("../../tsuyomi-extensions/fixtures/wenku8")
+    sourceSets.getByName("debug").assets.directories += "../../tsuyomi-extensions/fixtures/wenku8"
     testOptions {
         managedDevices {
-            devices {
-                create<ManagedVirtualDevice>("tsuyomiPixel6Api29") {
+            localDevices {
+                create("tsuyomiPixel6Api29") {
                     device = "Pixel 6"
                     apiLevel = 29
                     systemImageSource = "aosp"

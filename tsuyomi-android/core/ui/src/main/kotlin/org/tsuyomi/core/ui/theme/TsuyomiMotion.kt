@@ -7,6 +7,8 @@ package org.tsuyomi.core.ui.theme
 
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.EaseOut
+import androidx.compose.animation.core.FiniteAnimationSpec
+import androidx.compose.animation.core.snap
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.IndicationNodeFactory
 import androidx.compose.foundation.interaction.FocusInteraction
@@ -27,6 +29,7 @@ import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.node.DelegatableNode
 import androidx.compose.ui.node.DrawModifierNode
 import androidx.compose.ui.node.invalidateDraw
+import androidx.compose.material3.MotionScheme
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.launch
 import org.tsuyomi.core.display.DisplayEnvironment
@@ -38,6 +41,62 @@ object TsuyomiMotion {
     const val SWITCH_DURATION_MS = 150
     const val EXPAND_DURATION_MS = 220
     val Easing = EaseOut
+}
+
+/**
+ * Finite, non-bouncy motion consumed by all Material components in the standard profile.
+ *
+ * The alpha27 `MotionScheme.standard()` uses springs, so it cannot satisfy Tsuyomi's bounded
+ * motion policy.
+ */
+internal object TsuyomiStandardMotionScheme : MotionScheme {
+    private val defaultSpatialSpec = tween<Any>(TsuyomiMotion.EXPAND_DURATION_MS, easing = TsuyomiMotion.Easing)
+    private val fastSpatialSpec = tween<Any>(TsuyomiMotion.SWITCH_DURATION_MS, easing = TsuyomiMotion.Easing)
+    private val slowSpatialSpec = tween<Any>(TsuyomiMotion.EXPAND_DURATION_MS, easing = TsuyomiMotion.Easing)
+    private val defaultEffectsSpec = tween<Any>(TsuyomiMotion.SELECTION_DURATION_MS, easing = TsuyomiMotion.Easing)
+    private val fastEffectsSpec = tween<Any>(TsuyomiMotion.SWITCH_DURATION_MS, easing = TsuyomiMotion.Easing)
+    private val slowEffectsSpec = tween<Any>(TsuyomiMotion.EXPAND_DURATION_MS, easing = TsuyomiMotion.Easing)
+
+    @Suppress("UNCHECKED_CAST")
+    override fun <T> defaultSpatialSpec(): FiniteAnimationSpec<T> = defaultSpatialSpec as FiniteAnimationSpec<T>
+
+    @Suppress("UNCHECKED_CAST")
+    override fun <T> fastSpatialSpec(): FiniteAnimationSpec<T> = fastSpatialSpec as FiniteAnimationSpec<T>
+
+    @Suppress("UNCHECKED_CAST")
+    override fun <T> slowSpatialSpec(): FiniteAnimationSpec<T> = slowSpatialSpec as FiniteAnimationSpec<T>
+
+    @Suppress("UNCHECKED_CAST")
+    override fun <T> defaultEffectsSpec(): FiniteAnimationSpec<T> = defaultEffectsSpec as FiniteAnimationSpec<T>
+
+    @Suppress("UNCHECKED_CAST")
+    override fun <T> fastEffectsSpec(): FiniteAnimationSpec<T> = fastEffectsSpec as FiniteAnimationSpec<T>
+
+    @Suppress("UNCHECKED_CAST")
+    override fun <T> slowEffectsSpec(): FiniteAnimationSpec<T> = slowEffectsSpec as FiniteAnimationSpec<T>
+}
+
+/** Immediate final-state motion for system reduced motion. */
+internal object TsuyomiInstantMotionScheme : MotionScheme {
+    private val spec = snap<Any>()
+
+    @Suppress("UNCHECKED_CAST")
+    override fun <T> defaultSpatialSpec(): FiniteAnimationSpec<T> = spec as FiniteAnimationSpec<T>
+
+    @Suppress("UNCHECKED_CAST")
+    override fun <T> fastSpatialSpec(): FiniteAnimationSpec<T> = spec as FiniteAnimationSpec<T>
+
+    @Suppress("UNCHECKED_CAST")
+    override fun <T> slowSpatialSpec(): FiniteAnimationSpec<T> = spec as FiniteAnimationSpec<T>
+
+    @Suppress("UNCHECKED_CAST")
+    override fun <T> defaultEffectsSpec(): FiniteAnimationSpec<T> = spec as FiniteAnimationSpec<T>
+
+    @Suppress("UNCHECKED_CAST")
+    override fun <T> fastEffectsSpec(): FiniteAnimationSpec<T> = spec as FiniteAnimationSpec<T>
+
+    @Suppress("UNCHECKED_CAST")
+    override fun <T> slowEffectsSpec(): FiniteAnimationSpec<T> = spec as FiniteAnimationSpec<T>
 }
 
 /** True when the current environment replaces all state transitions with immediate commits. */
@@ -55,8 +114,9 @@ fun rememberSystemReducedMotion(): Boolean {
 }
 
 /**
- * Animates a semantic color only under the standard motion policy; instant policy commits the
- * target value in the same frame so E-ink and reduced-motion never render intermediate frames.
+ * Animates a semantic color under the standard policy; instant policy commits the target in the
+ * same frame, while Compose's system duration scale commits reduced motion without an
+ * intermediate frame.
  */
 @Composable
 fun tsuyomiAnimateColorAsState(target: Color, instant: Boolean, label: String): Color {

@@ -171,6 +171,12 @@ class LibraryUpdatesProductionJourneyInstrumentedTest {
         composeRule.onNodeWithText("有更新").performClick()
         waitForTag(updateRowTag)
         waitForText("+2")
+        composeRule.onNodeWithTag("library-filter-summary-edit").performClick()
+        composeRule.onNodeWithText("筛选与排序").assertIsDisplayed()
+        composeRule.onNodeWithText("筛选").assertIsDisplayed()
+        composeRule.onNodeWithText("排序").assertIsDisplayed()
+        composeRule.onNodeWithText("全部").performClick()
+        waitForTag(updateRowTag)
 
         composeRule.onNodeWithTag(updateActionsTag, useUnmergedTree = true).performClick()
         waitForTag(updateIgnoreTag)

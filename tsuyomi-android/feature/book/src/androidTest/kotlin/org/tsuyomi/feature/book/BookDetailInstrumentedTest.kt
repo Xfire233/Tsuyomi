@@ -113,6 +113,7 @@ class BookDetailInstrumentedTest {
                     onSelectChapter = {},
                     onContinueReading = {},
                     onAddToLibrary = {},
+                    onRequestRemoveFromLibrary = {},
                     onRetry = {},
                     onUseOfflineCache = {},
                     onOpenVerification = {},
@@ -167,6 +168,7 @@ class BookDetailInstrumentedTest {
                     onSelectChapter = {},
                     onContinueReading = {},
                     onAddToLibrary = {},
+                    onRequestRemoveFromLibrary = {},
                     onRetry = {},
                     onUseOfflineCache = {},
                     onOpenVerification = {},
@@ -208,6 +210,7 @@ class BookDetailInstrumentedTest {
                         onSelectChapter = {},
                         onContinueReading = {},
                         onAddToLibrary = {},
+                        onRequestRemoveFromLibrary = {},
                         onRetry = {},
                         onUseOfflineCache = {},
                         onOpenVerification = {},
@@ -250,6 +253,8 @@ class BookDetailInstrumentedTest {
                                 onSetRating = { localState = localState.copy(rating = it) },
                                 onSearchAuthor = {},
                                 onAddToLibrary = {},
+                                onRequestRemoveFromLibrary = {},
+                                primaryActionEnabled = true,
                                 onOpenDestinations = {},
                                 destinationMenuExpanded = false,
                                 onDestinationMenuExpandedChange = {},
@@ -461,6 +466,7 @@ class BookDetailInstrumentedTest {
                     onSelectChapter = {},
                     onContinueReading = {},
                     onAddToLibrary = {},
+                    onRequestRemoveFromLibrary = {},
                     onRetry = {},
                     onUseOfflineCache = {},
                     onOpenVerification = {},
@@ -484,6 +490,9 @@ class BookDetailInstrumentedTest {
         var destinationsOpened = false
         var searchedAuthor: String? = null
         var authorSearchCount = 0
+        var removeRequests = 0
+        var confirmRemoval: (() -> Unit)? = null
+        var mutation by mutableStateOf<DetailMutationStatus?>(null)
         compose.setContent {
             var menuExpanded by remember { mutableStateOf(false) }
             var localState by remember { mutableStateOf(DetailLocalState()) }
@@ -493,9 +502,9 @@ class BookDetailInstrumentedTest {
                     directoryState = SourceBookState.Content(
                         SourceDirectory(book.identity, listOf(chapter("c1", "第一章", "第一卷"))),
                     ),
+                    coverState = CoverUiState.Fallback(FallbackSpec(book.title, book.identity.sourceId)),
                     localState = localState,
-                    mutation = null,
-                    coverState = CoverUiState.Fallback(FallbackSpec(book.title, null)),
+                    mutation = mutation,
                     unreadOnly = false,
                     descending = false,
                     selectedChapterId = null,
@@ -507,6 +516,10 @@ class BookDetailInstrumentedTest {
                     onSelectChapter = {},
                     onContinueReading = {},
                     onAddToLibrary = { localState = localState.copy(inLibrary = true) },
+                    onRequestRemoveFromLibrary = {
+                        removeRequests++
+                        confirmRemoval = { localState = localState.copy(inLibrary = false) }
+                    },
                     onOpenDestinations = { destinationsOpened = true },
                     destinationMenuExpanded = menuExpanded,
                     onDestinationMenuExpandedChange = { menuExpanded = it },
@@ -631,6 +644,18 @@ class BookDetailInstrumentedTest {
         assertTrue(tagBounds.top >= tagSurfaceBounds.top)
         compose.onNodeWithTag("detail-read-later-action").assertDoesNotExist()
         compose.onNodeWithText("加入书架").performClick()
+        compose.onNodeWithText("已在书架").assertIsEnabled().performClick()
+        compose.runOnIdle { assertTrue(removeRequests == 1) }
+        // A dismissed host confirmation does not change local membership.
+        compose.onNodeWithText("已在书架").assertIsDisplayed()
+        mutation = DetailMutationStatus(DetailMutationOperation.REMOVE_FROM_LIBRARY, DetailMutationPhase.WORKING)
+        compose.onNodeWithText("已在书架").assertIsNotEnabled()
+        mutation = null
+        compose.runOnIdle {
+            assertTrue(confirmRemoval != null)
+            confirmRemoval?.invoke()
+        }
+        compose.onNodeWithText("加入书架").assertIsDisplayed().performClick()
         compose.onNodeWithText("已在书架").assertIsDisplayed()
         compose.onNodeWithContentDescription("更多加入选项").assertIsEnabled().performClick()
         assertTrue(destinationsOpened)
@@ -680,6 +705,7 @@ class BookDetailInstrumentedTest {
                     onSelectChapter = {},
                     onContinueReading = {},
                     onAddToLibrary = {},
+                    onRequestRemoveFromLibrary = {},
                     onRetry = {},
                     onUseOfflineCache = {},
                     onOpenVerification = {},
@@ -780,6 +806,7 @@ class BookDetailInstrumentedTest {
                     onSelectChapter = {},
                     onContinueReading = {},
                     onAddToLibrary = {},
+                    onRequestRemoveFromLibrary = {},
                     onRetry = {},
                     onUseOfflineCache = {},
                     onOpenVerification = {},

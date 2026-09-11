@@ -282,8 +282,9 @@ class RoomUpdateStoreInstrumentedTest {
             val repository = RoomLibraryRepository(database)
             repository.setSourceAvailability(candidate.identity.sourceId, "1.0.0", true, 1L)
             repository.ensureRemoteMirrorBinding(candidate.identity.sourceId, "测试来源")
-            repository.upsertRemoteMirrorBook(requireNotNull(repository.book(candidate.identity)), targetId = null)
             repository.removeFromLibrary(candidate.identity)
+            assertFalse(store.canProbe(lease, candidate, now))
+            repository.upsertRemoteMirrorBook(requireNotNull(repository.book(candidate.identity)), targetId = null)
             assertTrue(store.canProbe(lease, candidate, now))
             repository.removeRemoteMirrorBook(candidate.identity)
 

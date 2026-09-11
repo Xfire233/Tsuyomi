@@ -272,6 +272,86 @@ class Phase3MigrationInstrumentedTest {
         }
     }
 
+    @Test
+    fun migration_9_to_10_preserves_v9_library_data_and_validates_room_schema() {
+        helper.createDatabase(LOCAL_PIN_DATABASE, 9).use { db ->
+            db.execSQL(
+                "INSERT INTO books(source_id,remote_book_id,title,authors_json,author_sort_key,cover_url,canonical_url,status,remote_tags_json,source_update_key,has_unread_update,added_at_epoch_second,added_at_nano,metadata_updated_at_epoch_second,metadata_updated_at_nano) " +
+                    "VALUES ('fixture.source','retained-42','保留状态','[\"作者\"]',X'0102','https://example.com/cover','https://example.com/book','ongoing','[\"远程\"]','legacy-key',0,10,2,20,3)",
+            )
+            db.execSQL(
+                "INSERT INTO library_entries(source_id,remote_book_id,added_at_epoch_second,added_at_nano,rating,read_later,display_order) " +
+                    "VALUES ('fixture.source','retained-42',10,2,4,1,7)",
+            )
+            db.execSQL(
+                "INSERT INTO collections(collection_id,kind,title,parent_collection_id,display_order,created_at_epoch_second,created_at_nano,updated_at_epoch_second,updated_at_nano) " +
+                    "VALUES ('favorites','MANUAL','收藏',NULL,0,1,2,3,4)",
+            )
+            db.execSQL(
+                "INSERT INTO manual_collection_memberships(collection_id,source_id,remote_book_id,added_at_epoch_second,added_at_nano,display_order) " +
+                    "VALUES ('favorites','fixture.source','retained-42',10,2,0)",
+            )
+            db.execSQL(
+                "INSERT INTO local_book_tags(source_id,remote_book_id,normalized_tag,display_tag) " +
+                    "VALUES ('fixture.source','retained-42','保留','保留')",
+            )
+            db.execSQL(
+                "INSERT INTO reading_progress(source_id,remote_book_id,content_id,revision,block_id,text_anchor_digest,character_offset,chapter_progress,book_progress,updated_at_epoch_second,updated_at_nano) " +
+                    "VALUES ('fixture.source','retained-42','chapter-7','rev-1','block-7',NULL,23,0.4,0.4,30,4)",
+            )
+            db.execSQL(
+                "INSERT INTO completed_chapters(source_id,remote_book_id,chapter_id,completed_at_epoch_second,completed_at_nano) " +
+                    "VALUES ('fixture.source','retained-42','chapter-7',31,5)",
+            )
+        }
+
+        helper.runMigrationsAndValidate(LOCAL_PIN_DATABASE, 10, true, MIGRATION_9_10).use { db ->
+            db.query(
+                "SELECT rating,read_later,display_order,local_pin FROM library_entries WHERE source_id='fixture.source' AND remote_book_id='retained-42'",
+            ).use { cursor ->
+                cursor.moveToFirst()
+                assertEquals(4, cursor.getInt(0))
+                assertEquals(1, cursor.getInt(1))
+                assertEquals(7, cursor.getInt(2))
+                assertEquals(1, cursor.getInt(3))
+            }
+            db.query(
+                "SELECT title,authors_json,author_sort_key,cover_url,canonical_url,status,remote_tags_json,source_update_key,added_at_epoch_second,added_at_nano,metadata_updated_at_epoch_second,metadata_updated_at_nano FROM books WHERE source_id='fixture.source' AND remote_book_id='retained-42'",
+            ).use { cursor ->
+                cursor.moveToFirst()
+                assertEquals("保留状态", cursor.getString(0))
+                assertEquals("[\"作者\"]", cursor.getString(1))
+                assertEquals(byteArrayOf(1, 2).toList(), cursor.getBlob(2).toList())
+                assertEquals("https://example.com/cover", cursor.getString(3))
+                assertEquals("https://example.com/book", cursor.getString(4))
+                assertEquals("ongoing", cursor.getString(5))
+                assertEquals("[\"远程\"]", cursor.getString(6))
+                assertEquals("legacy-key", cursor.getString(7))
+                assertEquals(10L, cursor.getLong(8))
+                assertEquals(2, cursor.getInt(9))
+                assertEquals(20L, cursor.getLong(10))
+                assertEquals(3, cursor.getInt(11))
+            }
+            db.query("PRAGMA foreign_key_check").use { cursor -> assertEquals(0, cursor.count) }
+            db.query("SELECT COUNT(*) FROM manual_collection_memberships WHERE collection_id='favorites'").use { cursor ->
+                cursor.moveToFirst()
+                assertEquals(1, cursor.getInt(0))
+            }
+            db.query("SELECT COUNT(*) FROM local_book_tags WHERE normalized_tag='保留'").use { cursor ->
+                cursor.moveToFirst()
+                assertEquals(1, cursor.getInt(0))
+            }
+            db.query("SELECT COUNT(*) FROM reading_progress WHERE content_id='chapter-7'").use { cursor ->
+                cursor.moveToFirst()
+                assertEquals(1, cursor.getInt(0))
+            }
+            db.query("SELECT COUNT(*) FROM completed_chapters WHERE chapter_id='chapter-7'").use { cursor ->
+                cursor.moveToFirst()
+                assertEquals(1, cursor.getInt(0))
+            }
+        }
+    }
+
     private companion object {
         const val DATABASE = "phase3-migration"
         const val READ_LATER_DATABASE = "phase4a-read-later-migration"
@@ -281,5 +361,6 @@ class Phase3MigrationInstrumentedTest {
         const val LOCAL_COPY_RECEIPT_DATABASE = "phase4b-local-copy-receipt-migration"
         const val EXACT_CHAPTER_STATE_DATABASE = "phase4b-exact-chapter-state-migration"
         const val UPDATE_STATE_DATABASE = "phase4c-update-state"
+        const val LOCAL_PIN_DATABASE = "local-pin-migration"
     }
 }

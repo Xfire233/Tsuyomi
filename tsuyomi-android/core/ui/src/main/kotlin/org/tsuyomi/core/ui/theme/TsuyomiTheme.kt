@@ -32,9 +32,10 @@ import org.tsuyomi.core.display.LocalDisplayEnvironment
  * with an effective dynamic-color preference uses an injected deterministic scheme when supplied,
  * otherwise the Android system dynamic scheme; other standard states use static light/dark palettes.
  *
- * Under [org.tsuyomi.core.display.MotionPolicy.INSTANT] the theme removes every animated default
- * that Material could leak: ripples are replaced by an immediate opaque indication, the Material
- * ripple configuration is disabled, and overscroll effects are removed entirely.
+ * Under [org.tsuyomi.core.display.MotionPolicy.INSTANT] or system reduced motion, the theme removes
+ * every animated default that Material could leak: ripples are replaced by an immediate opaque
+ * indication, the Material ripple configuration is disabled, and overscroll effects are removed
+ * entirely.
  *
  * The provider structure is identical for every profile so switching profiles never remounts the
  * content subtree (routes, scroll positions, and focus are preserved).
@@ -60,17 +61,24 @@ fun TsuyomiTheme(
         else -> TsuyomiLightColorScheme
     }
     val instant = environment.instantMotion
-    val indication: Indication = if (instant) {
-        remember { TsuyomiInstantIndication(TsuyomiEInkPalette.N30) }
-    } else {
-        ripple()
+    val reducedMotion = rememberSystemReducedMotion()
+    val staticMotion = instant || reducedMotion
+    val motionScheme = when {
+        environment.effectiveProfile == DisplayProfile.EINK -> MaterialTheme.motionScheme
+        instant || reducedMotion -> TsuyomiInstantMotionScheme
+        else -> TsuyomiStandardMotionScheme
     }
-    val rippleConfiguration: RippleConfiguration? = if (instant) {
+    val indication: Indication = when {
+        instant -> remember { TsuyomiInstantIndication(TsuyomiEInkPalette.N30) }
+        reducedMotion -> remember(colorScheme.onSurface) { TsuyomiInstantIndication(colorScheme.onSurface) }
+        else -> ripple()
+    }
+    val rippleConfiguration: RippleConfiguration? = if (staticMotion) {
         null
     } else {
         LocalRippleConfiguration.current
     }
-    val overscrollFactory = if (instant) null else LocalOverscrollFactory.current
+    val overscrollFactory = if (staticMotion) null else LocalOverscrollFactory.current
 
     CompositionLocalProvider(
         LocalIndication provides indication,
@@ -79,6 +87,7 @@ fun TsuyomiTheme(
     ) {
         MaterialTheme(
             colorScheme = colorScheme,
+            motionScheme = motionScheme,
             typography = TsuyomiTypography,
             shapes = TsuyomiShapes,
             content = content,

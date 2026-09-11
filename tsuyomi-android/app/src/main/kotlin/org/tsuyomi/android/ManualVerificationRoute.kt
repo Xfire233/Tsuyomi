@@ -24,9 +24,7 @@ import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
 import androidx.compose.material3.FilledTonalButton
-import androidx.compose.material3.HorizontalFloatingToolbar
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -45,6 +43,9 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.LiveRegionMode
+import androidx.compose.ui.semantics.liveRegion
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.compose.ui.zIndex
@@ -57,8 +58,11 @@ import org.tsuyomi.core.ui.components.StateView
 import org.tsuyomi.core.ui.components.TsuyomiButton
 import org.tsuyomi.core.ui.components.TsuyomiButtonStyle
 import org.tsuyomi.core.ui.components.TsuyomiStateKind
+import org.tsuyomi.core.ui.components.TsuyomiVerificationToolbar
 import org.tsuyomi.core.ui.icons.TsuyomiIcons
 import org.tsuyomi.core.ui.theme.TsuyomiSpacing
+import org.tsuyomi.core.ui.theme.instantMotion
+import org.tsuyomi.core.ui.theme.rememberSystemReducedMotion
 import org.tsuyomi.core.webview.CapturedVerifiedPage
 import org.tsuyomi.core.webview.ControlledWebLoginSession
 import org.tsuyomi.shared.sourcecontract.SourceDiagnostic
@@ -221,7 +225,6 @@ fun ManualVerificationRoute(
     }
 }
 
-@OptIn(ExperimentalMaterial3ExpressiveApi::class)
 @Composable
 private fun VerificationContent(
     sourceName: String,
@@ -239,13 +242,13 @@ private fun VerificationContent(
     onComplete: () -> Unit,
     modifier: Modifier,
 ) {
+    val staticMotion = LocalDisplayEnvironment.current.instantMotion || rememberSystemReducedMotion()
     BackHandler {
         if (webView.canGoBack()) webView.goBack() else onCancel()
     }
 
     Box(modifier.fillMaxSize()) {
-        HorizontalFloatingToolbar(
-            expanded = true,
+        TsuyomiVerificationToolbar(
             modifier = Modifier
                 .align(Alignment.BottomCenter)
                 .windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Bottom))
@@ -253,7 +256,6 @@ private fun VerificationContent(
                 .widthIn(max = VerificationToolbarMaxWidth)
                 .testTag("verification-action-dock")
                 .zIndex(2f),
-            contentPadding = PaddingValues(horizontal = 4.dp),
         ) {
             IconButton(onClick = onCancel) {
                 Icon(
@@ -276,7 +278,12 @@ private fun VerificationContent(
                     modifier = Modifier.testTag("verification-use-current-page"),
                     contentPadding = VerificationButtonPadding,
                 ) {
-                    if (snapshotWorking) {
+                    if (snapshotWorking && staticMotion) {
+                        Text(
+                            text = stringResource(R.string.verification_snapshot_working),
+                            modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite },
+                        )
+                    } else if (snapshotWorking) {
                         CircularProgressIndicator(
                             modifier = Modifier.size(18.dp),
                             strokeWidth = 2.dp,

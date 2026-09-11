@@ -17,6 +17,10 @@ import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.Immutable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalDensity
@@ -37,6 +41,10 @@ data class TsuyomiTopBarAction(
     val label: String,
     val onClick: () -> Unit,
     val menu: List<TsuyomiOverflowAction> = emptyList(),
+    /** Optional visible title for this action's anchored menu panel. */
+    val menuTitle: String? = null,
+    val menuExpanded: Boolean? = null,
+    val onMenuExpandedChange: ((Boolean) -> Unit)? = null,
     val testTag: String? = null,
 )
 
@@ -62,11 +70,12 @@ fun TsuyomiTopBar(
     }
     val actionBudget = maxVisibleActions ?: if (narrowWindow) 2 else 3
     val visibleActions = actions.take(actionBudget)
-    val foldedActions = actions.drop(actionBudget).flatMap { action ->
-        action.menu.ifEmpty {
-            listOf(TsuyomiOverflowAction(action.label, action.onClick, action.icon))
-        }
+    val folded = actions.drop(actionBudget)
+    val foldedActions = folded.map { action ->
+        TsuyomiOverflowAction(action.menuTitle ?: action.label, action.onClick, action.icon, menu = action.menu)
     }
+    var overflowExpanded by remember { mutableStateOf(false) }
+    val requestedActionIndex = folded.indexOfFirst { it.menuExpanded == true }
     TopAppBar(
         title = {
             Column(Modifier.semantics { heading(); paneTitle = title }) {
@@ -102,12 +111,21 @@ fun TsuyomiTopBar(
                         contentDescription = action.label,
                         modifier = action.testTag?.let { tag -> Modifier.testTag(tag) } ?: Modifier,
                         triggerIcon = action.icon,
+                        expanded = action.menuExpanded,
+                        onExpandedChange = action.onMenuExpandedChange,
+                        panelTitle = action.menuTitle,
                     )
                 }
             }
             TsuyomiOverflowMenu(
                 actions = foldedActions + overflow,
                 contentDescription = stringResource(R.string.coreui_more_actions),
+                expanded = overflowExpanded || requestedActionIndex >= 0,
+                requestedSubmenu = foldedActions.getOrNull(requestedActionIndex),
+                onExpandedChange = { expanded ->
+                    overflowExpanded = expanded
+                    if (!expanded) folded.forEach { it.onMenuExpandedChange?.invoke(false) }
+                },
             )
         },
         colors = TopAppBarDefaults.topAppBarColors(

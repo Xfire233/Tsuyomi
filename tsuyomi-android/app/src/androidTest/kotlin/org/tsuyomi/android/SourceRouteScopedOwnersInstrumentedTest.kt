@@ -310,6 +310,20 @@ internal class SourceRouteScopedOwnersInstrumentedTest : SourceFlowInstrumentedT
             assertEquals(detailCover, library.libraryEntry(book.identity)?.book?.coverUrl)
             owner.execute(SourceDetailRouteOwner.Command.REMOVE_FROM_LIBRARY.name)
             assertEquals(false, owner.localState.inLibrary)
+            assertEquals(4, owner.localState.rating)
+            assertEquals(listOf("本地标签"), owner.localState.localTags)
+            assertTrue(owner.localState.readLater)
+            assertEquals("1", owner.localState.progressChapterId)
+            assertTrue(library.libraryEntries().none { it.book.identity == book.identity })
+            assertTrue(library.readLaterEntries().any { it.book.identity == book.identity })
+            owner.toggleReadLater()
+            assertEquals(false, owner.localState.readLater)
+            assertEquals(false, owner.localState.inLibrary)
+            owner.execute(SourceDetailRouteOwner.Command.ADD_TO_LIBRARY.name)
+            assertTrue(owner.localState.inLibrary)
+            assertEquals(4, owner.localState.rating)
+            assertEquals(listOf("本地标签"), owner.localState.localTags)
+            assertEquals("1", owner.localState.progressChapterId)
         }
     }
     @Test

@@ -135,7 +135,7 @@ object TransferCodec {
 
     private fun parseTransfer(root: JsonObject): ImportParseResult {
         val version = root.int("version") ?: return ImportParseResult.Fatal("unsupported-version")
-        if (version !in setOf(1, CURRENT_VERSION)) return ImportParseResult.Fatal("unsupported-version")
+        if (version !in 1..CURRENT_VERSION) return ImportParseResult.Fatal("unsupported-version")
         if (!root.keys.all { it in setOf("format", "version", "createdAt", "library", "shelves", "preferences") }) {
             return ImportParseResult.Fatal("unknown-root-field")
         }
@@ -184,7 +184,11 @@ object TransferCodec {
     }
 
     private fun parseBook(value: JsonObject, version: Int): TransferBook? = runCatching {
-        require(value.keys.all { it in if (version == 1) BOOK_FIELDS_V1 else BOOK_FIELDS_V2 })
+        require(value.keys.all { it in when (version) {
+            1 -> BOOK_FIELDS_V1
+            2 -> BOOK_FIELDS_V2
+            else -> BOOK_FIELDS_V3
+        } })
         val identityObject = requireNotNull(value.obj("identity"))
         require(identityObject.keys == setOf("sourceId", "remoteBookId"))
         val identity = BookIdentity(requireNotNull(identityObject.string("sourceId")), requireNotNull(identityObject.string("remoteBookId")))
@@ -212,6 +216,11 @@ object TransferCodec {
             shelfIds = shelfIds,
             rating = rating,
             readLater = version != 1 && (value.primitive("readLater")?.booleanOrNull ?: false),
+            localPin = if (version == 3) {
+                requireNotNull(value.primitive("localPin")?.takeUnless { it.isString }?.booleanOrNull)
+            } else {
+                true
+            }.also { localPin -> require(localPin || shelfIds.isEmpty()) },
             addedAt = value.instant("addedAt"),
             updatedAt = updatedAt,
             progress = value.obj("progress")?.let(::parseProgress),
@@ -277,22 +286,28 @@ object TransferCodec {
         )
     }
 
-    private fun bookJson(book: TransferBook): JsonObject = buildJsonObject {
-        put("identity", buildJsonObject { put("sourceId", book.identity.sourceId); put("remoteBookId", book.identity.remoteBookId) })
-        put("title", book.title)
-        putStringSet("authors", book.authors)
-        book.canonicalUrl?.let { put("canonicalUrl", it) }
-        book.coverUrl?.let { put("coverUrl", it) }
-        if (book.status != "unknown") put("status", book.status)
-        putStringSet("remoteTags", book.remoteTags)
-        putStringSet("localTags", book.localTags)
-        putStringSet("shelfIds", book.shelfIds)
-        book.rating?.let { put("rating", it) }
-        if (book.readLater) put("readLater", true)
-        book.addedAt?.let { put("addedAt", it.toString()) }
-        put("updatedAt", book.updatedAt.toString())
-        book.progress?.let { put("progress", progressJson(it)) }
-        putStringSet("completedChapterIds", book.completedChapterIds)
+    private fun bookJson(book: TransferBook): JsonObject {
+        require(book.localPin || book.shelfIds.isEmpty()) {
+            "Unpinned transfer books cannot have manual collection memberships"
+        }
+        return buildJsonObject {
+            put("identity", buildJsonObject { put("sourceId", book.identity.sourceId); put("remoteBookId", book.identity.remoteBookId) })
+            put("title", book.title)
+            putStringSet("authors", book.authors)
+            book.canonicalUrl?.let { put("canonicalUrl", it) }
+            book.coverUrl?.let { put("coverUrl", it) }
+            if (book.status != "unknown") put("status", book.status)
+            putStringSet("remoteTags", book.remoteTags)
+            putStringSet("localTags", book.localTags)
+            putStringSet("shelfIds", book.shelfIds)
+            book.rating?.let { put("rating", it) }
+            if (book.readLater) put("readLater", true)
+            put("localPin", book.localPin)
+            book.addedAt?.let { put("addedAt", it.toString()) }
+            put("updatedAt", book.updatedAt.toString())
+            book.progress?.let { put("progress", progressJson(it)) }
+            putStringSet("completedChapterIds", book.completedChapterIds)
+        }
     }
 
     private fun progressJson(progress: TransferProgress): JsonObject = buildJsonObject {
@@ -323,9 +338,10 @@ object TransferCodec {
     private val STATUSES = setOf("unknown", "ongoing", "completed", "hiatus", "cancelled")
     private val BOOK_FIELDS_V1 = setOf("identity", "title", "authors", "canonicalUrl", "coverUrl", "status", "remoteTags", "localTags", "shelfIds", "rating", "addedAt", "updatedAt", "progress")
     private val BOOK_FIELDS_V2 = BOOK_FIELDS_V1 + setOf("readLater", "completedChapterIds")
+    private val BOOK_FIELDS_V3 = BOOK_FIELDS_V2 + "localPin"
     private val READER_FIELDS_V1 = setOf("flow", "fontScale", "lineHeight", "theme")
     private val READER_FIELDS_V2 = READER_FIELDS_V1 + setOf("horizontalMargin", "paragraphSpacing", "lockPortrait", "progressVisible", "immersive", "keepAwake", "volumePaging")
-    private const val CURRENT_VERSION = 2
+    private const val CURRENT_VERSION = 3
     internal const val MAX_COMPLETED_CHAPTERS_PER_BOOK = 20_000
     private val PROGRESS_FIELDS = setOf("chapterId", "textAnchor", "characterOffset", "chapterProgress", "bookProgress", "updatedAt")
 }

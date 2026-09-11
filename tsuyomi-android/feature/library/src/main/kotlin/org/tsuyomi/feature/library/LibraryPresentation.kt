@@ -4,6 +4,8 @@
  */
 package org.tsuyomi.feature.library
 
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
@@ -11,6 +13,7 @@ import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.SnackbarResult
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -18,15 +21,20 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.res.stringResource
 import kotlinx.coroutines.launch
 import org.tsuyomi.core.database.LibraryCollection
 import org.tsuyomi.core.database.LibraryEntry
+import org.tsuyomi.core.display.LocalDisplayEnvironment
 import org.tsuyomi.core.media.api.CoverUiState
 import org.tsuyomi.core.ui.components.StateView
 import org.tsuyomi.core.ui.components.TsuyomiStateKind
 import org.tsuyomi.core.ui.components.TsuyomiTabOption
 import org.tsuyomi.core.ui.components.TsuyomiLibraryTabRow
+import org.tsuyomi.core.ui.theme.TsuyomiMotion
+import org.tsuyomi.core.ui.theme.instantMotion
+import org.tsuyomi.core.ui.theme.rememberSystemReducedMotion
 import org.tsuyomi.shared.model.BookIdentity
 
 @Composable
@@ -132,46 +140,50 @@ internal fun LibraryPresentation(
                 )
             }
             val content: @Composable () -> Unit = {
-                LibraryBookSurface(
-                    entries = filtered,
-                    state = state,
-                    onOpenBook = onOpenBook,
-                    onLongPressBook = onLongPressBook,
-                    onToggleBookSelection = onToggleBookSelection,
-                    dragCoordinator = dragCoordinator,
-                    dragEnabled = true,
-                    reorderEnabled = reorderEnabled,
-                    coverState = coverState,
-                    onCoverVisibility = onCoverVisibility,
-                    onIgnoreUpdate = ignoreUpdate,
-                    onViewportChanged = onViewportChanged,
-                    onViewportSettled = onViewportSettled,
-                    rootItems = rootItems,
-                    onOpenCollection = onOpenCollection,
-                    onOpenMirror = onOpenMirror,
-                    onLongPressCollection = onLongPressCollection,
-                    onToggleCollectionSelection = onToggleCollectionSelection,
-                    empty = {
-                        StateView(
-                            kind = TsuyomiStateKind.EMPTY,
-                            title = when {
-                                state.updateFilter == LibraryUpdateFilter.UPDATES_ONLY -> "没有待处理更新"
-                                state.filter == SystemLibraryFilter.CONTINUE -> "没有继续阅读的书籍"
-                                state.filter == SystemLibraryFilter.READ_LATER -> "稍后再读为空"
-                                else -> "书架为空"
-                            },
-                            message = when {
-                                state.updateFilter == LibraryUpdateFilter.UPDATES_ONLY -> "检查发现的新章节会显示在这里。"
-                                state.filter == SystemLibraryFilter.CONTINUE -> "开始阅读后，未完成的书籍会显示在这里。"
-                                state.filter == SystemLibraryFilter.READ_LATER -> "在书籍详情中加入稍后再读。"
-                                else -> "从浏览或搜索中加入书籍。"
-                            },
-                            actionLabel = if (state.isRootProjection) null else "刷新",
-                            onAction = if (state.isRootProjection) null else onRetry,
-                        )
-                    },
-                    modifier = Modifier.fillMaxSize(),
-                )
+                LibraryTabDestinationFade(
+                    tab = state.filter.takeIf { showNavigationNodes },
+                ) {
+                    LibraryBookSurface(
+                        entries = filtered,
+                        state = state,
+                        onOpenBook = onOpenBook,
+                        onLongPressBook = onLongPressBook,
+                        onToggleBookSelection = onToggleBookSelection,
+                        dragCoordinator = dragCoordinator,
+                        dragEnabled = true,
+                        reorderEnabled = reorderEnabled,
+                        coverState = coverState,
+                        onCoverVisibility = onCoverVisibility,
+                        onIgnoreUpdate = ignoreUpdate,
+                        onViewportChanged = onViewportChanged,
+                        onViewportSettled = onViewportSettled,
+                        rootItems = rootItems,
+                        onOpenCollection = onOpenCollection,
+                        onOpenMirror = onOpenMirror,
+                        onLongPressCollection = onLongPressCollection,
+                        onToggleCollectionSelection = onToggleCollectionSelection,
+                        empty = {
+                            StateView(
+                                kind = TsuyomiStateKind.EMPTY,
+                                title = when {
+                                    state.updateFilter == LibraryUpdateFilter.UPDATES_ONLY -> "没有待处理更新"
+                                    state.filter == SystemLibraryFilter.CONTINUE -> "没有继续阅读的书籍"
+                                    state.filter == SystemLibraryFilter.READ_LATER -> "稍后再读为空"
+                                    else -> "书架为空"
+                                },
+                                message = when {
+                                    state.updateFilter == LibraryUpdateFilter.UPDATES_ONLY -> "检查发现的新章节会显示在这里。"
+                                    state.filter == SystemLibraryFilter.CONTINUE -> "开始阅读后，未完成的书籍会显示在这里。"
+                                    state.filter == SystemLibraryFilter.READ_LATER -> "在书籍详情中加入稍后再读。"
+                                    else -> "从浏览或搜索中加入书籍。"
+                                },
+                                actionLabel = if (state.isRootProjection) null else "刷新",
+                                onAction = if (state.isRootProjection) null else onRetry,
+                            )
+                        },
+                        modifier = Modifier.fillMaxSize(),
+                    )
+                }
             }
             if (showNavigationNodes && state.isRootProjection) {
                 org.tsuyomi.core.ui.components.TsuyomiPullToRefresh(
@@ -196,3 +208,35 @@ internal fun LibraryPresentation(
         SnackbarHost(snackbarHostState, modifier = Modifier.align(Alignment.BottomCenter))
     }
 }
+
+@Composable
+private fun LibraryTabDestinationFade(
+    tab: SystemLibraryFilter?,
+    content: @Composable () -> Unit,
+) {
+    val staticMotion = LocalDisplayEnvironment.current.instantMotion || rememberSystemReducedMotion()
+    var previousTab by remember { mutableStateOf<SystemLibraryFilter?>(null) }
+    val alpha = remember(tab, staticMotion) {
+        Animatable(if (shouldFadeLibraryTabDestination(previousTab, tab, staticMotion)) 0f else 1f)
+    }
+    LaunchedEffect(tab, staticMotion) {
+        val tabChanged = shouldFadeLibraryTabDestination(previousTab, tab, staticMotion)
+        previousTab = tab
+        if (tabChanged) {
+            alpha.snapTo(0f)
+            alpha.animateTo(
+                targetValue = 1f,
+                animationSpec = tween(TsuyomiMotion.SWITCH_DURATION_MS, easing = TsuyomiMotion.Easing),
+            )
+        } else {
+            alpha.snapTo(1f)
+        }
+    }
+    Box(Modifier.fillMaxSize().graphicsLayer { this.alpha = alpha.value }) { content() }
+}
+
+internal fun shouldFadeLibraryTabDestination(
+    previousTab: SystemLibraryFilter?,
+    nextTab: SystemLibraryFilter?,
+    staticMotion: Boolean,
+): Boolean = previousTab != null && previousTab != nextTab && !staticMotion

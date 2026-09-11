@@ -3,13 +3,13 @@
 
 plugins {
     id("tsuyomi.android.library")
-    alias(libs.plugins.ksp)
+    id("com.google.devtools.ksp")
     id("tsuyomi.android.room")
 }
 
 android {
     namespace = "org.tsuyomi.core.database"
-    sourceSets.getByName("androidTest").assets.srcDir("schemas")
+    sourceSets.getByName("androidTest").assets.directories += "schemas"
 }
 
 ksp {

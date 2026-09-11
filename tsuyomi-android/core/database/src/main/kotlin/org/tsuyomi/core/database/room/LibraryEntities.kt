@@ -185,6 +185,7 @@ internal data class LibraryEntryEntity(
     val rating: Int?,
     @ColumnInfo(name = "read_later", defaultValue = "0") val readLater: Boolean = false,
     @ColumnInfo(name = "display_order", defaultValue = "2147483647") val displayOrder: Int = Int.MAX_VALUE,
+    @ColumnInfo(name = "local_pin", defaultValue = "1") val locallyPinned: Boolean = true,
 )
 
 @Entity(

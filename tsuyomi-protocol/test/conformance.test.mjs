@@ -71,6 +71,9 @@ const transferIssues = (document) => {
     for (const shelfId of book.shelfIds ?? []) {
       if (!shelves.has(shelfId)) issues.push(`missing-shelf:${shelfId}`);
     }
+    if (document.version >= 3 && book.localPin === false && (book.shelfIds?.length ?? 0) > 0) {
+      issues.push(`unpinned-manual-membership:${book.identity.sourceId}\u0000${book.identity.remoteBookId}`);
+    }
   }
   return issues;
 };
@@ -127,6 +130,18 @@ const packagePolicy = ({ active, candidate, revokedKeyIds, rotationVerified }) =
 test('transfer semantic conformance accepts the canonical minimal fixture', async () => {
   const document = await loadJson('../fixtures/transfer/valid-minimal.json');
   assert.deepEqual(transferIssues(document), []);
+});
+
+test('transfer v3 preserves retained unpinned metadata without a manual membership', async () => {
+  const document = await loadJson('../fixtures/transfer/valid-v3-retained-unpinned.json');
+  const retained = document.library.find((book) => book.identity.remoteBookId === 'retained-unpinned');
+  assert.deepEqual(transferIssues(document), []);
+  assert.equal(retained?.localPin, false);
+});
+
+test('transfer v3 rejects manual membership for an unpinned book', async () => {
+  const document = await loadJson('../fixtures/transfer/invalid-v3-unpinned-shelf-membership.json');
+  assert.ok(transferIssues(document).some((issue) => issue.startsWith('unpinned-manual-membership:')));
 });
 
 test('transfer semantic conformance rejects duplicate stable book identities', async () => {

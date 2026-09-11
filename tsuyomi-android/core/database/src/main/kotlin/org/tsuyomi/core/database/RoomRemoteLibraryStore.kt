@@ -193,17 +193,7 @@ internal class RoomRemoteLibraryStore(
         var added = 0
         request.books.forEach { book ->
             saveRemoteBook(book)
-            if (
-                dao.insertLibraryEntry(
-                    LibraryEntryEntity(
-                        book.identity.sourceId,
-                        book.identity.remoteBookId,
-                        request.importedAt.epochSecond,
-                        request.importedAt.nano,
-                        null,
-                    ),
-                ) != -1L
-            ) {
+            if (insertOrPinLibraryEntry(book, request.importedAt)) {
                 added++
             }
         }
@@ -243,16 +233,8 @@ internal class RoomRemoteLibraryStore(
     ): String = database.withTransaction {
         val book = request.book
         saveRemoteBook(book)
-        if (request.operation == "ADD") {
-            dao.insertLibraryEntry(
-                LibraryEntryEntity(
-                    book.identity.sourceId,
-                    book.identity.remoteBookId,
-                    request.startedAt.epochSecond,
-                    request.startedAt.nano,
-                    null,
-                ),
-            )
+        if (request.operation.equals("ADD", ignoreCase = true)) {
+            insertOrPinLibraryEntry(book, request.startedAt)
         }
         val active = dao.activeReconciliation(book.identity.sourceId, book.identity.remoteBookId)
         if (retryingUnresolvedId == null) {
@@ -384,6 +366,17 @@ internal class RoomRemoteLibraryStore(
         } ?: incoming
         catalog.saveBook(merged)
     }
+
+    private suspend fun insertOrPinLibraryEntry(book: LibraryBook, addedAt: Instant): Boolean =
+        dao.insertLibraryEntry(
+            LibraryEntryEntity(
+                sourceId = book.identity.sourceId,
+                remoteBookId = book.identity.remoteBookId,
+                addedAtEpochSecond = addedAt.epochSecond,
+                addedAtNano = addedAt.nano,
+                rating = null,
+            ),
+        ) != -1L || dao.pinLibraryEntry(book.identity.sourceId, book.identity.remoteBookId) != 0
 
 }
 

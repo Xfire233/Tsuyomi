@@ -70,7 +70,7 @@ import org.tsuyomi.core.database.room.UpdateUndoEntity
         UpdateSourceExclusionEntity::class,
         UpdateUndoEntity::class,
     ],
-    version = 9,
+    version = 10,
     exportSchema = true,
 )
 @TypeConverters(RoomConverters::class)
@@ -176,5 +176,11 @@ val MIGRATION_8_9 = object : Migration(8, 9) {
         db.execSQL("CREATE TABLE IF NOT EXISTS update_ignore_undos (token_id TEXT NOT NULL, source_id TEXT NOT NULL, remote_book_id TEXT NOT NULL, title TEXT NOT NULL, anchor TEXT NOT NULL, chapters_json TEXT NOT NULL, new_chapter_ids_json TEXT NOT NULL, last_updated_date TEXT, detected_at_millis INTEGER NOT NULL, revision INTEGER NOT NULL, expires_at_millis INTEGER NOT NULL, PRIMARY KEY(token_id))")
         db.execSQL("CREATE INDEX IF NOT EXISTS index_update_ignore_undos_expires_at_millis ON update_ignore_undos(expires_at_millis)")
         db.execSQL("UPDATE smart_rules SET ast_json = REPLACE(REPLACE(ast_json, '\"field\":\"hasUnreadUpdate\"', '\"field\":\"hasUnresolvedUpdate\"'), '\"field\":\"hasSourceUpdate\"', '\"field\":\"hasUnresolvedUpdate\"')")
+    }
+}
+
+val MIGRATION_9_10 = object : Migration(9, 10) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        db.execSQL("ALTER TABLE library_entries ADD COLUMN local_pin INTEGER NOT NULL DEFAULT 1")
     }
 }

@@ -23,6 +23,7 @@ class RoomLibraryRepository(database: TsuyomiDatabase) {
     suspend fun saveBook(book: LibraryBook) = catalog.saveBook(book)
     suspend fun book(identity: BookIdentity): LibraryBook? = catalog.book(identity)
     suspend fun libraryEntries(): List<LibraryEntry> = catalog.libraryEntries()
+    suspend fun readLaterEntries(): List<LibraryEntry> = catalog.readLaterEntries()
     suspend fun libraryEntry(identity: BookIdentity): LibraryEntry? = catalog.libraryEntry(identity)
     suspend fun addToLibrary(book: LibraryBook): Boolean = catalog.addToLibrary(book)
     suspend fun removeFromLibrary(identity: BookIdentity): Boolean = catalog.removeFromLibrary(identity)

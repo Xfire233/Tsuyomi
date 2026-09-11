@@ -105,7 +105,7 @@ private fun NavGraphBuilder.libraryHomeRoute(
             onOpenUpdateSettings = onOpenUpdateSettings,
             onCancelUpdateScan = onCancelUpdate,
             onRefreshUpdates = onManualUpdate,
-            onEditFilter = {},
+            onEditFilter = { controller.setFilterAndSortPanelExpanded(true) },
             onClearFilter = { scope.launch {
                 controller.setUpdateFilter(org.tsuyomi.feature.library.LibraryUpdateFilter.ALL)
             } },

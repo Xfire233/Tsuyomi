@@ -74,7 +74,7 @@ Apply these rules when relevant:
 - Testing ownership: behavior tests prove actions and state restoration; screenshots prove appearance; layout/semantics prove bounds and accessibility structure; device evidence proves system bars, IME, drag/drop, and other real-window behavior.
 - Canonical defaults: when adopting or migrating a Material component, begin with current official defaults and samples. Do not reproduce an obsolete screenshot by overriding correct platform behavior.
 
-Do not adopt the official Compose Styles skill in the current project: it requires compileSdk 37 and alpha/experimental Compose APIs, while Tsuyomi targets compileSdk 36 and prefers stable, boring implementation. The official Wear Compose Material 3 skill is Wear-only; its APIs, curved layouts, scaffolds, and tokens do not apply to this phone reader. Its reusable process principle is limited to checking canonical component samples before changing component behavior.
+Do not adopt the official Compose Styles skill as part of selective Expressive work: the authorized compileSdk37/toolchain migration satisfies a build prerequisite, not authorization for additional alpha/experimental UI APIs. The Constitution's graduated-API and single-family boundaries still apply. The official Wear Compose Material 3 skill is Wear-only; its APIs, curved layouts, scaffolds, and tokens do not apply to this phone reader. Its reusable process principle is limited to checking canonical component samples before changing component behavior.
 
 Community Material 3/Expressive skills are advisory. Currently accepted cross-checks are: Foundational intensity, no more than one hero moment per screen, standard navigation preserved, labels retained, semantic tokens, reduced-motion support, 48dp touch targets, and contrast verification. Dynamic color, shape morphing, spring motion, and expressive component substitutions are opt-in decisions, not defaults for Tsuyomi.
 
@@ -255,7 +255,7 @@ Run `android studio check` once per IDE-assisted session. Successful compiler/li
 - Compose Preview, Animation Preview and Compose UI Check should preflight isolated components, accessibility and adaptive-layout issues before device review. They do not prove navigation, persistence, system bars or real-window behavior.
 - Live Edit can shorten pure composable function-body iteration on an optional API 30+ development AVD, but the canonical review AVD is API 29, which Google does not support for Live Edit. Live Edit state is not an exact APK and never supplies final evidence; always rebuild and verify the exact API 29 APK.
 - Gemini Transform UI / Match UI can propose Preview diffs, but it is a separate cloud-assisted editor, not the Tsuyomi review authority or OMP comment channel. Use only when explicitly requested and review every diff.
-- Google Journeys may exercise a pre-installed APK without upgrading this AGP 8.13.1 project to the AGP 9 test-suite integration. Keep the existing changed-transition-only rule; AI vision navigation is evidence for the selected Journey, not human qualitative approval.
+- Google Journeys may exercise a pre-installed APK without adopting a new AGP test-suite integration. A build-toolchain upgrade does not authorize replacing existing Journey ownership. Keep the changed-transition-only rule; AI vision navigation is evidence for the selected Journey, not human qualitative approval.
 
 ## Known host failures
 

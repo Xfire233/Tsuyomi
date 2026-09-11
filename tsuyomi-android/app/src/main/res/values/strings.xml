@@ -39,6 +39,7 @@
     <string name="verification_open_directory_page">打开对应目录页面</string>
     <string name="verification_open_chapter_page">打开对应章节页面</string>
     <string name="verification_use_current_page">使用当前页面</string>
+    <string name="verification_snapshot_working">正在读取页面</string>
     <string name="verification_snapshot_unbound">当前页面未与暂停的搜索请求绑定。请点击“打开对应搜索页面”，等待自动跳转和页面加载完成后重试。</string>
     <string name="verification_snapshot_unbound_detail">当前页面未与暂停的详情请求绑定。请点击“打开对应详情页面”，等待自动跳转和页面加载完成后重试。</string>
     <string name="verification_snapshot_unbound_directory">当前页面未与暂停的目录请求绑定。请点击“打开对应目录页面”，等待自动跳转和页面加载完成后重试。</string>
@@ -70,7 +71,7 @@
     <string name="transfer_writing_export">正在写入系统选择的文件。</string>
     <string name="transfer_export_failed">系统文件未能写入。</string>
     <string name="detail_remove_confirm_title">移出书架</string>
-    <string name="detail_remove_confirm_message">移出书架只删除本地 pin；不会在网站上执行任何操作。阅读进度与已缓存来源内容保持不变。</string>
+    <string name="detail_remove_confirm_message">将本书移出本地书架和本地收藏夹。稍后再读、评分、标签、阅读进度及已缓存内容保留，不影响网站收藏。</string>
     <string name="detail_remove_confirm_action">移出书架</string>
     <string name="detail_remove_cancel">取消</string>
 </resources>
