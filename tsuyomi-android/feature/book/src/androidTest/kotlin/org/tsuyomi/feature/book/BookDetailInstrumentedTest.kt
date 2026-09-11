@@ -180,7 +180,7 @@ class BookDetailInstrumentedTest {
 
         compose.waitUntil(5_000) { focusHandled == 1 }
         compose.onNodeWithTag("detail-chapter-v3-c1").assertIsDisplayed()
-        compose.onNodeWithTag("detail-chapter-v1-c1").assert(hasStateDescription("未读，当前"))
+        compose.onNodeWithTag("detail-chapter-v1-c1").assert(hasStateDescription("未读，当前阅读"))
     }
 
     @Test
