@@ -811,7 +811,7 @@ def version_evidence(tools: SdkTools, env: dict[str, str], log: Path) -> dict[st
     versions: dict[str, str] = {}
     for label, command in (
         ("java", ("java", "-version")),
-        ("emulator", (str(tools.emulator), "-version")),
+        ("emulator", (str(tools.emulator), "-no-window", "-version")),
     ):
         try:
             result = capture_command(command, log=log, cwd=None, env=env, timeout=30)

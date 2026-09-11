@@ -21,6 +21,7 @@ import androidx.compose.ui.test.printToString
 import androidx.room.withTransaction
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
+import androidx.work.WorkManager
 import java.io.File
 import java.time.Instant
 import kotlinx.coroutines.flow.first
@@ -263,8 +264,16 @@ class LibraryUpdatesProductionJourneyInstrumentedTest {
             val snapshot = runBlocking { application.updateCoordinator.snapshots.first() }
             val session = snapshot.session
             if (session != null && session.id !in previousIds && session.state in TERMINAL_SESSION_STATES) {
-                terminal = snapshot
-                true
+                val work = WorkManager.getInstance(application)
+                    .getWorkInfosForUniqueWork(WorkManagerUpdateScheduler.ManualWorkName).get()
+                // A terminal business snapshot can precede WorkManager completion. Until then,
+                // KEEP legitimately coalesces the next refresh instead of starting our next fixture.
+                if (work.any { !it.state.isFinished }) {
+                    false
+                } else {
+                    terminal = snapshot
+                    true
+                }
             } else {
                 false
             }
