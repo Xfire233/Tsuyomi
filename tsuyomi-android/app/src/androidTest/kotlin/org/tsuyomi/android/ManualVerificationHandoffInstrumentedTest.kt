@@ -966,6 +966,7 @@ class ManualVerificationHandoffInstrumentedTest {
     private fun waitForVerifiedOutcome(successText: String, unboundText: String) {
         val rejectedText = "当前页面与刚才请求不一致，请重新打开对应页面"
         var failure: String? = null
+        try {
         composeRule.waitUntil(timeoutMillis = 60_000) {
             when {
                 composeHasText(rejectedText) -> {
@@ -979,6 +980,16 @@ class ManualVerificationHandoffInstrumentedTest {
                 !composeHasText("使用当前页面") && composeHasText(successText) -> true
                 else -> false
             }
+        }
+        } catch (error: androidx.compose.ui.test.ComposeTimeoutException) {
+            throw AssertionError(
+                "Verified handoff timed out: success=$successText; " +
+                    "usePage=${composeHasText("使用当前页面")}; " +
+                    "detailRequests=${Phase2SourceGateway.detailRequestCount()}; " +
+                    "directoryRequests=${Phase2SourceGateway.directoryRequestCount()}; " +
+                    "fixtureUi=${platformTextSnapshot()}",
+                error,
+            )
         }
         failure?.let(::error)
     }
