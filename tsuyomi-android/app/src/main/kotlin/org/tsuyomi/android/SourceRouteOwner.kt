@@ -9,15 +9,17 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.Stable
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import org.tsuyomi.feature.library.LibraryDropDestination
 import androidx.compose.ui.platform.LocalContext
-import androidx.navigation.NavBackStackEntry
 import androidx.navigation.NavHostController
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.sync.Mutex
@@ -467,8 +469,7 @@ internal class SourceRouteOwner(
 internal fun rememberSourceRouteOwner(
     application: TsuyomiApplication,
     navController: NavHostController,
-    currentEntry: NavBackStackEntry?,
-    currentRoute: String,
+    currentRoute: String?,
     onLibraryChanged: suspend () -> Unit,
 ): SourceRouteOwner {
     val context = LocalContext.current
@@ -481,18 +482,23 @@ internal fun rememberSourceRouteOwner(
     }
     LaunchedEffect(installer) { installer.restoreInstalled() }
 
-    val ownsSourceFlow = routeOwnsSourceFlow(currentRoute)
-    val sourceFlowEntry = remember(currentEntry) {
-        when {
-            rootRouteFor(currentRoute) == Routes.Library ->
-                runCatching { navController.getBackStackEntry(Routes.Library) }.getOrNull()
-            ownsSourceFlow ->
-                runCatching { navController.getBackStackEntry(Routes.Browse) }.getOrNull()
-                    ?: runCatching { navController.getBackStackEntry(Routes.Library) }.getOrNull()
-            else -> null
+    var retainedSourceFlowRoot by remember { mutableStateOf(Routes.Library) }
+    val browseAnchored = runCatching { navController.getBackStackEntry(Routes.Browse) }.isSuccess
+    val observedSourceFlowRoot = when {
+        currentRoute == null -> null
+        routeOwnsSourceFlow(currentRoute) -> if (browseAnchored) Routes.Browse else Routes.Library
+        rootRouteFor(currentRoute) == Routes.Library -> if (
+            browseAnchored && retainedSourceFlowRoot == Routes.Browse
+        ) null else Routes.Library
+        else -> null
+    }
+    val sourceFlowRoot = observedSourceFlowRoot ?: retainedSourceFlowRoot
+    SideEffect {
+        if (observedSourceFlowRoot != null && observedSourceFlowRoot != retainedSourceFlowRoot) {
+            retainedSourceFlowRoot = observedSourceFlowRoot
         }
     }
-    val flow = remember(sourceFlowEntry) {
+    val flow = remember(sourceFlowRoot) {
         SourceFlowController(
             context.applicationContext,
             application.libraryRepository,

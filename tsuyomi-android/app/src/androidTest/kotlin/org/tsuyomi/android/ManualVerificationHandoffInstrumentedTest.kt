@@ -21,6 +21,7 @@ import androidx.compose.ui.test.hasStateDescription
 import androidx.compose.ui.test.longClick
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsEnabled
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.test.assertTextContains
 import androidx.compose.ui.test.performTextReplacement
 import androidx.compose.ui.test.onAllNodesWithText
@@ -33,7 +34,7 @@ import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollToIndex
 import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.performTouchInput
-import androidx.compose.ui.test.swipeDown
+import androidx.compose.ui.test.swipe
 import androidx.compose.ui.test.performTextInput
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat
@@ -77,8 +78,6 @@ class ManualVerificationHandoffInstrumentedTest {
         assertEquals(0, quickJsLaneCount())
     }
 
-
-
     @Test
     fun standard_profile_completes_blocked_navigation_and_browser_session_handoff() {
         exerciseVerificationHandoff(DisplayPreference.STANDARD)
@@ -94,8 +93,8 @@ class ManualVerificationHandoffInstrumentedTest {
         }
         waitForText("书架")
         performPlatformClick("浏览")
-        waitForText("搜索此来源")
-        performPlatformClick("搜索此来源")
+        waitForText("聚合搜索")
+        performPlatformClick("聚合搜索")
         waitForText("输入关键词后搜索")
         composeRule.onNode(hasSetTextAction()).performTextInput("login")
         waitForText("login")
@@ -164,8 +163,8 @@ class ManualVerificationHandoffInstrumentedTest {
         }
         waitForText("书架")
         performPlatformClick("浏览")
-        waitForText("搜索此来源")
-        performPlatformClick("搜索此来源")
+        waitForText("聚合搜索")
+        performPlatformClick("聚合搜索")
         waitForText("输入关键词后搜索")
         composeRule.onNode(hasSetTextAction()).performTextInput("fixture")
         waitForText("fixture")
@@ -192,9 +191,9 @@ class ManualVerificationHandoffInstrumentedTest {
                 )
                 insets.left.toFloat() to (view.width - insets.right).toFloat()
             }
-            listOf("detail-rating-row", "detail-library-action", "detail-reading-fab").forEach { tag ->
+            listOf("detail-rating-row", "detail-library-action").forEach { tag ->
                 val node = composeRule.onNodeWithTag(tag, useUnmergedTree = true)
-                if (tag != "detail-reading-fab") node.performScrollTo()
+                node.performScrollTo()
                 val bounds = node.assertIsDisplayed().fetchSemanticsNode().boundsInWindow
                 assertTrue("$tag extends beneath the left system bar: $bounds", bounds.left >= safeLeft)
                 assertTrue("$tag extends beneath the right system bar: $bounds > $safeRight", bounds.right <= safeRight)
@@ -224,8 +223,8 @@ class ManualVerificationHandoffInstrumentedTest {
         }
         waitForText("书架")
         performPlatformClick("浏览")
-        waitForText("搜索此来源")
-        performPlatformClick("搜索此来源")
+        waitForText("聚合搜索")
+        performPlatformClick("聚合搜索")
         waitForText("输入关键词后搜索")
         composeRule.onNode(hasSetTextAction()).performTextInput("fixture")
         waitForText("fixture")
@@ -274,8 +273,8 @@ class ManualVerificationHandoffInstrumentedTest {
         }
         waitForText("书架")
         performPlatformClick("浏览")
-        waitForText("搜索此来源")
-        performPlatformClick("搜索此来源")
+        waitForText("聚合搜索")
+        performPlatformClick("聚合搜索")
         waitForText("输入关键词后搜索")
         composeRule.onNode(hasSetTextAction()).performTextInput("fixture")
         waitForText("fixture")
@@ -315,8 +314,8 @@ class ManualVerificationHandoffInstrumentedTest {
         }
         waitForText("书架")
         performPlatformClick("浏览")
-        waitForText("搜索此来源")
-        performPlatformClick("搜索此来源")
+        waitForText("聚合搜索")
+        performPlatformClick("聚合搜索")
         waitForText("输入关键词后搜索")
         composeRule.onNode(hasSetTextAction()).performTextInput("fixture")
         waitForText("fixture")
@@ -324,7 +323,7 @@ class ManualVerificationHandoffInstrumentedTest {
         waitForText("雾港纪事")
         performPlatformClick("雾港纪事")
         waitForText("简介")
-        composeRule.onNodeWithTag("book-detail-scroll").performScrollToIndex(3)
+        waitForDirectoryChapterIndex()
         waitForText("第一章 雾中的灯塔")
         Phase2SourceGateway.requireVerificationForNextChapterRequest()
         performPlatformClick("第一章 雾中的灯塔")
@@ -369,8 +368,8 @@ class ManualVerificationHandoffInstrumentedTest {
         }
         waitForText("书架")
         performPlatformClick("浏览")
-        waitForText("搜索此来源")
-        performPlatformClick("搜索此来源")
+        waitForText("聚合搜索")
+        performPlatformClick("聚合搜索")
         waitForText("输入关键词后搜索")
         waitForQuickJsLaneCount(1)
 
@@ -393,13 +392,13 @@ class ManualVerificationHandoffInstrumentedTest {
         }
         waitForText("书架")
         performPlatformClick("浏览")
-        waitForText("搜索此来源")
-        performPlatformClick("搜索此来源")
+        waitForText("聚合搜索")
+        performPlatformClick("聚合搜索")
         waitForText("输入关键词后搜索")
         waitForQuickJsLaneCount(1)
 
         pressBack()
-        waitForText("搜索此来源")
+        waitForText("聚合搜索")
         waitForQuickJsLaneCount(1)
         pressBack()
         waitForText("书架")
@@ -418,8 +417,8 @@ class ManualVerificationHandoffInstrumentedTest {
         }
         waitForText("书架")
         performPlatformClick("浏览")
-        waitForText("搜索此来源")
-        performPlatformClick("搜索此来源")
+        waitForText("聚合搜索")
+        performPlatformClick("聚合搜索")
         waitForText("输入关键词后搜索")
         composeRule.onNode(hasSetTextAction()).performTextInput("fixture")
         waitForText("fixture")
@@ -453,8 +452,8 @@ class ManualVerificationHandoffInstrumentedTest {
         }
         waitForText("书架")
         performPlatformClick("浏览")
-        waitForText("搜索此来源")
-        performPlatformClick("搜索此来源")
+        waitForText("聚合搜索")
+        performPlatformClick("聚合搜索")
         waitForText("输入关键词后搜索")
         composeRule.onNode(hasSetTextAction()).performTextInput("fixture")
         waitForText("fixture")
@@ -496,8 +495,8 @@ class ManualVerificationHandoffInstrumentedTest {
         }
         waitForText("书架")
         performPlatformClick("浏览")
-        waitForText("搜索此来源")
-        performPlatformClick("搜索此来源")
+        waitForText("聚合搜索")
+        performPlatformClick("聚合搜索")
         waitForText("输入关键词后搜索")
         composeRule.onNode(hasSetTextAction()).performTextInput("fixture")
         waitForText("fixture")
@@ -505,7 +504,7 @@ class ManualVerificationHandoffInstrumentedTest {
         waitForText("雾港纪事")
         performPlatformClick("雾港纪事")
         waitForText("简介")
-        composeRule.onNodeWithTag("book-detail-scroll").performScrollToIndex(3)
+        waitForDirectoryChapterIndex()
         waitForText("第一章 雾中的灯塔")
         composeRule.onNodeWithText("第一章 雾中的灯塔").performClick()
 
@@ -568,7 +567,13 @@ class ManualVerificationHandoffInstrumentedTest {
         expandedSliderWidths.forEachIndexed { index, width ->
             assertTrue(width >= compactSliderWidths[index] + 32f * density)
         }
-        composeRule.onNodeWithTag("reader-settings-content").performTouchInput { swipeDown() }
+        composeRule.onNodeWithTag("reader-settings-content").performTouchInput {
+            swipe(
+                start = center,
+                end = Offset(center.x, bottom + 400f),
+                durationMillis = 500,
+            )
+        }
         composeRule.waitUntil(5_000) {
             composeRule.onAllNodesWithTag("reader-settings-sheet").fetchSemanticsNodes().isEmpty()
         }
@@ -737,6 +742,8 @@ class ManualVerificationHandoffInstrumentedTest {
 
         waitForText("书架")
         performPlatformClick("浏览")
+        waitForText("Wenku8")
+        composeRule.onNodeWithContentDescription("更多 Wenku8 操作").performClick()
         waitForText("网站收藏")
         composeRule.onNodeWithText("网站收藏").performClick()
         composeRule.waitUntil(timeoutMillis = 15_000) {
@@ -800,9 +807,9 @@ class ManualVerificationHandoffInstrumentedTest {
         }
         waitForText("书架")
         performPlatformClick("浏览")
-        val sourceEntryLabel = if (profile == DisplayPreference.EINK) "进入内容源" else "搜索此来源"
+        val sourceEntryLabel = if (profile == DisplayPreference.EINK) "进入内容源" else "聚合搜索"
         waitForText(sourceEntryLabel)
-        composeRule.onNodeWithText(sourceEntryLabel).performClick()
+        performPlatformClick(sourceEntryLabel)
         val queryLabel = if (profile == DisplayPreference.EINK) "搜索书名" else "搜索"
         waitForText(queryLabel)
         composeRule.waitUntil(timeoutMillis = 15_000) {
@@ -853,10 +860,11 @@ class ManualVerificationHandoffInstrumentedTest {
         if (profile != DisplayPreference.STANDARD) return
 
         pressBack()
-        composeRule.waitForIdle()
-        if (composeRule.onAllNodesWithText("登录验证").fetchSemanticsNodes().isEmpty()) {
-            pressBack()
-        }
+        waitForText("聚合搜索")
+        waitForText("Wenku8")
+        performPlatformClick("Wenku8")
+        waitForText("Wenku8 书库")
+        composeRule.onNodeWithContentDescription("更多操作").performClick()
         waitForText("登录验证")
         composeRule.onNodeWithText("登录验证").performClick()
         waitForText(completionLabel)
@@ -869,9 +877,13 @@ class ManualVerificationHandoffInstrumentedTest {
             }
         }
 
-        val cancelLabel = if (profile == DisplayPreference.EINK) "取消" else "取消验证"
-        composeRule.onNodeWithText(cancelLabel).performClick()
-        waitForText(sourceEntryLabel)
+        if (profile == DisplayPreference.EINK) {
+            composeRule.onNodeWithText("取消").performClick()
+            waitForText(sourceEntryLabel)
+        } else {
+            composeRule.onNodeWithContentDescription("取消验证").performClick()
+            waitForText("搜索此来源")
+        }
         val preservedSession = requireNotNull(
             VerifiedBrowserSessionStore(targetContext).getSnapshot(
                 SourceCredentialPartition(WENKU8_SOURCE_ID, WENKU8_ORIGIN),
@@ -957,6 +969,14 @@ class ManualVerificationHandoffInstrumentedTest {
             }
         }
         failure?.let(::error)
+    }
+
+    private fun waitForDirectoryChapterIndex() {
+        composeRule.waitUntil(timeoutMillis = 15_000) {
+            composeRule.onAllNodesWithText("2章", useUnmergedTree = true)
+                .fetchSemanticsNodes().isNotEmpty()
+        }
+        composeRule.onNodeWithTag("book-detail-scroll").performScrollToIndex(5)
     }
 
     private fun waitForText(text: String, timeoutMillis: Long = 15_000) {

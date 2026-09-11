@@ -177,7 +177,8 @@ internal fun TsuyomiApp(
         }
     }
     val currentEntry by navController.currentBackStackEntryAsState()
-    val currentRoute = currentEntry?.destination?.route ?: Routes.Library
+    val observedRoute = currentEntry?.destination?.route ?: navController.currentDestination?.route
+    val currentRoute = observedRoute ?: Routes.Library
     val searchLayoutFlow = remember(currentEntry) {
         currentEntry
             ?.takeIf { it.destination.route == Routes.Search }
@@ -197,8 +198,7 @@ internal fun TsuyomiApp(
     val sourceOwner = rememberSourceRouteOwner(
         application = application,
         navController = navController,
-        currentEntry = currentEntry,
-        currentRoute = currentRoute,
+        currentRoute = observedRoute,
         onLibraryChanged = ::reloadLibrary,
     )
     libraryFlow.configureInstalledMirrorRoots(sourceOwner.installer::installedRemoteLibraryRoots)
@@ -385,7 +385,7 @@ internal fun TsuyomiApp(
                 windowSize = windowSize,
                 topBar = {
                     if (routeOwnsChrome) {
-                        Unit
+                        // Source routes own their chrome.
                     } else if (currentRoute in setOf(
                         Routes.Library,
                         Routes.LibrarySystem,

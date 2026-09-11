@@ -197,6 +197,8 @@ internal object Phase2SourceGateway {
                     request.url.rawQuery.orEmpty().contains("cid=") -> "chapter.html"
                 appendedDirectoryRequest && appendedUpdateDirectory.get() -> "update-directory-appended.html"
                 shortBaselineDirectoryRequest && shortUpdateBaselineDirectory.get() -> "update-directory-first-chapter.html"
+                request.url.path == "/modules/article/reader.php" &&
+                    request.url.rawQuery.orEmpty().split('&').none { it.startsWith("cid=") } -> "directory.html"
                 request.url.path.startsWith("/book/") -> "detail.html"
                 request.url.path.endsWith("/index.htm") -> "directory.html"
                 else -> "chapter.html"
