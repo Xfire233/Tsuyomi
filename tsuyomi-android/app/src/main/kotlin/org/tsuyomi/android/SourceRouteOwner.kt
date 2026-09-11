@@ -373,8 +373,8 @@ internal class SourceRouteOwner(
     }
 
     suspend fun completeVerifiedPage() {
-        flow.reopenAfterVerifiedPage()
         navController.navigateUp()
+        flow.reopenAfterVerifiedPage()
     }
 
     suspend fun homeVerifiedPageRequestUrl(): String? = flow.homeVerifiedPageRequestUrl()
