@@ -177,8 +177,8 @@ internal fun TsuyomiApp(
         }
     }
     val currentEntry by navController.currentBackStackEntryAsState()
-    val observedRoute = currentEntry?.destination?.route ?: navController.currentDestination?.route
-    val currentRoute = observedRoute ?: Routes.Library
+    val observedRoute = currentEntry?.destination?.route
+    val currentRoute = observedRoute ?: navController.currentDestination?.route ?: Routes.Library
     val searchLayoutFlow = remember(currentEntry) {
         currentEntry
             ?.takeIf { it.destination.route == Routes.Search }

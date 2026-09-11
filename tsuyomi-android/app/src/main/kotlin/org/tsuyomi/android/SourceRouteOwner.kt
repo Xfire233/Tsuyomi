@@ -489,9 +489,7 @@ internal fun rememberSourceRouteOwner(
         routeOwnsSourceFlow(currentRoute) -> if (
             browseAnchored || retainedSourceFlowRoot == Routes.Browse
         ) Routes.Browse else Routes.Library
-        rootRouteFor(currentRoute) == Routes.Library -> if (
-            browseAnchored && retainedSourceFlowRoot == Routes.Browse
-        ) null else Routes.Library
+        rootRouteFor(currentRoute) == Routes.Library -> Routes.Library
         else -> null
     }
     val sourceFlowRoot = observedSourceFlowRoot ?: retainedSourceFlowRoot

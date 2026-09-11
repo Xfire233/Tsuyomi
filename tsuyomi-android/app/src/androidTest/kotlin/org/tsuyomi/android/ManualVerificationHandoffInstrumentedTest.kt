@@ -138,7 +138,7 @@ class ManualVerificationHandoffInstrumentedTest {
         installVerifiedPageFixture(searchUrl, searchHtml)
         composeRule.onNodeWithContentDescription("打开对应搜索页面").performClick()
         waitForText("使用当前页面")
-        waitForWebViewSettled()
+        waitForWebViewSettled(searchUrl)
         composeRule.onNodeWithText("使用当前页面").performClick()
         composeRule.waitUntil(15_000) {
             runCatching {
@@ -294,7 +294,7 @@ class ManualVerificationHandoffInstrumentedTest {
         installVerifiedPageFixture(detailUrl, detailHtml)
         composeRule.onNodeWithContentDescription("打开对应详情页面").performClick()
         waitForText("使用当前页面")
-        waitForWebViewSettled()
+        waitForWebViewSettled(detailUrl)
         composeRule.onNodeWithText("使用当前页面").performClick()
         waitForVerifiedOutcome(
             successText = "简介",
@@ -339,7 +339,7 @@ class ManualVerificationHandoffInstrumentedTest {
         installVerifiedPageFixture(chapterUrl, chapterHtml)
         composeRule.onNodeWithContentDescription("打开对应章节页面").performClick()
         waitForText("使用当前页面")
-        waitForWebViewSettled()
+        waitForWebViewSettled(chapterUrl)
         composeRule.onNodeWithText("使用当前页面").performClick()
         waitForVerifiedOutcome(
             successText = "第一章 雾中的灯塔",
@@ -642,7 +642,7 @@ class ManualVerificationHandoffInstrumentedTest {
         installVerifiedPageFixture(homeUrl, homeHtml)
         composeRule.onNodeWithContentDescription("打开对应主页").performClick()
         waitForText("使用当前页面")
-        waitForWebViewSettled()
+        waitForWebViewSettled(homeUrl)
         composeRule.onNodeWithText("使用当前页面").performClick()
 
         waitForVerifiedOutcome(
@@ -902,11 +902,14 @@ class ManualVerificationHandoffInstrumentedTest {
     }
 
 
-    private fun waitForWebViewSettled() {
+    private fun waitForWebViewSettled(expectedUrl: String? = null) {
         composeRule.waitUntil(timeoutMillis = 30_000) {
             composeRule.runOnUiThread {
                 val webView = findWebView(composeRule.activity.window.decorView)
-                webView != null && !webView.url.isNullOrBlank() && webView.progress == 100
+                webView != null &&
+                    !webView.url.isNullOrBlank() &&
+                    (expectedUrl == null || webView.url == expectedUrl) &&
+                    webView.progress == 100
             }
         }
     }
