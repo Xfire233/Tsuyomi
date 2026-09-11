@@ -48,7 +48,6 @@ class AndroidCiPlanTest(unittest.TestCase):
             {
                 ":app:assembleDebug",
                 ":app:testDebugUnitTest",
-                ":app:validateDebugScreenshotTest",
                 ":feature:book:lintDebug",
             },
             set(plan.build_tasks),
@@ -68,7 +67,6 @@ class AndroidCiPlanTest(unittest.TestCase):
             {
                 ":app:assembleDebug",
                 ":app:testDebugUnitTest",
-                ":app:validateDebugScreenshotTest",
                 ":feature:library:lintDebug",
                 ":feature:library:testDebugUnitTest",
                 ":feature:library:validateDebugScreenshotTest",

@@ -34,7 +34,6 @@ FULL_BUILD_TASKS = (
     ":feature:library:testDebugUnitTest",
     ":source:extension-manager:testDebugUnitTest",
     ":source:extension-testkit:testDebugUnitTest",
-    ":app:validateDebugScreenshotTest",
     ":core:ui:validateDebugScreenshotTest",
     ":feature:library:validateDebugScreenshotTest",
     ":feature:browse:validateDebugScreenshotTest",
@@ -74,7 +73,6 @@ JVM_TASKS = {
     ":source:extension-testkit": ":source:extension-testkit:testDebugUnitTest",
 }
 SCREENSHOT_TASKS = {
-    ":app": ":app:validateDebugScreenshotTest",
     ":core:ui": ":core:ui:validateDebugScreenshotTest",
     ":feature:library": ":feature:library:validateDebugScreenshotTest",
     ":feature:browse": ":feature:browse:validateDebugScreenshotTest",
