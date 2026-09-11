@@ -64,6 +64,9 @@ internal class RoomRemoteLibraryStore(
         SourceAvailability(it.sourceId, it.verifiedVersion, it.available, it.generation)
     }
 
+    suspend fun markMissingSourcesUnavailable(installedSourceIds: List<String>): Int =
+        dao.markMissingSourcesUnavailable(installedSourceIds)
+
     suspend fun sourceRemotePolicy(sourceId: String): SourceRemotePolicy? = dao.sourceRemotePolicy(sourceId)?.let {
         SourceRemotePolicy(
             it.sourceId,

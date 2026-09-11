@@ -43,6 +43,16 @@ class TsuyomiApplication : Application() {
     internal val officialRepository by lazy(LazyThreadSafetyMode.SYNCHRONIZED) {
         OfficialRepositoryConfiguration.createClient(this)
     }
+    internal val repositorySubscriptions by lazy(LazyThreadSafetyMode.SYNCHRONIZED) {
+        org.tsuyomi.source.extensionmanager.RepositorySubscriptionRegistry(
+            java.io.File(noBackupFilesDir, "repository-subscriptions"),
+        )
+    }
+    internal val packageTrust by lazy(LazyThreadSafetyMode.SYNCHRONIZED) {
+        org.tsuyomi.source.extensionmanager.PackageTrustRegistry(
+            java.io.File(noBackupFilesDir, "package-trust"),
+        )
+    }
 
     val preferencesDataStore by lazy(LazyThreadSafetyMode.SYNCHRONIZED) {
         createAppPreferencesDataStore(applicationContext)

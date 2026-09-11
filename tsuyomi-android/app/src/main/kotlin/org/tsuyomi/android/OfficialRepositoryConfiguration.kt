@@ -30,31 +30,30 @@ internal object OfficialRepositoryConfiguration {
         return OfficialRepositoryClient(root, File(context.noBackupFilesDir, "official-repository"))
     }
 
-    fun publisherKeys(client: OfficialRepositoryClient?): PublisherKeyResolver {
-        val localKeys = Phase2LocalTrust.resolver()
-        return object : PublisherKeyResolver {
-            override fun resolve(keyId: String): PublisherKey? {
-                val local = localKeys.resolve(keyId)
-                val repository = client?.publisherKeys?.resolve(keyId)
-                if (local != null && repository != null && !local.publicKey.contentEquals(repository.publicKey)) return null
-                return repository ?: local
-            }
-
-            override fun isRevokedFingerprint(fingerprint: String): Boolean =
-                localKeys.isRevokedFingerprint(fingerprint) || client?.publisherKeys?.isRevokedFingerprint(fingerprint) == true
-
-            override fun isRevokedPackage(packageSha256: String): Boolean =
-                localKeys.isRevokedPackage(packageSha256) || client?.publisherKeys?.isRevokedPackage(packageSha256) == true
-        }
-    }
+    fun publisherKeys(
+        client: OfficialRepositoryClient?,
+        application: TsuyomiApplication? = null,
+    ): PublisherKeyResolver = org.tsuyomi.source.extensionmanager.CompositePublisherKeyResolver(
+        listOfNotNull(
+            Phase2LocalTrust.resolver(), client?.publisherKeys,
+            application?.repositorySubscriptions?.publisherKeys,
+            application?.packageTrust?.publisherKeys,
+        ),
+    )
 
     fun isTrusted(packageInfo: VerifiedHxpPackage, keys: PublisherKeyResolver): Boolean =
-        !keys.isRevokedFingerprint(packageInfo.publisherFingerprint) &&
-            !keys.isRevokedPackage(packageInfo.packageSha256) &&
+        !keys.isRevokedPublisher(packageInfo.manifest.publisherKeyId, packageInfo.publisherFingerprint) &&
+            !keys.isRevokedPackage(packageInfo.packageSha256, packageInfo.manifest.publisherKeyId, packageInfo.publisherFingerprint) &&
             keys.resolve(packageInfo.manifest.publisherKeyId)?.fingerprint == packageInfo.publisherFingerprint
 
     fun admission(context: Context): (VerifiedHxpPackage) -> Boolean {
-        val keys = publisherKeys((context.applicationContext as TsuyomiApplication).officialRepository)
-        return { packageInfo -> isTrusted(packageInfo, keys) }
+        val application = context.applicationContext as TsuyomiApplication
+        val keys = publisherKeys(application.officialRepository, application)
+        return { packageInfo ->
+            isTrusted(packageInfo, keys) &&
+                (keys.resolve(packageInfo.manifest.publisherKeyId)?.trust != PublisherTrust.USER_ADDED ||
+                    application.packageTrust.isApproved(packageInfo)) &&
+                File(context.noBackupFilesDir, "extensions/active/${packageInfo.manifest.sourceId.value}.hxp").isFile
+        }
     }
 }

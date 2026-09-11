@@ -43,6 +43,7 @@ internal class SourceHomeController : Closeable {
     private val appendJobs = mutableMapOf<String, Job>()
     private var replacementJob: Job? = null
     private var packageRevision: String? = null
+    private var sourceIdentity: String? = null
     private var generation = 0L
     private var title = ""
     private var primaryFilter: SourceHomeFilter? = null
@@ -75,9 +76,11 @@ internal class SourceHomeController : Closeable {
     }
 
     fun ensureInitial(
+        sourceId: String,
         revision: String?,
         load: suspend (Map<String, String>, String?) -> Result<SourceHomePage>,
     ) {
+        bindSource(sourceId)
         ensurePackageRevision(revision)
         if (state !is SourceHomeViewState.Idle) return
         state = SourceHomeViewState.Loading
@@ -181,7 +184,7 @@ internal class SourceHomeController : Closeable {
     fun retryReplacement(load: suspend (Map<String, String>, String?) -> Result<SourceHomePage>) {
         val entry = activeEntry()
         if (entry == null) {
-            ensureInitial(packageRevision, load)
+            sourceIdentity?.let { ensureInitial(it, packageRevision, load) }
         } else {
             startReplacement(
                 requestedFilters = entry.selectedFilters,
@@ -253,6 +256,15 @@ internal class SourceHomeController : Closeable {
             firstVisibleItemScrollOffset = offset.coerceAtLeast(0),
         )
     }
+    /**
+     * Clears route-local Home state only when a different source becomes active. Package revisions
+     * of the same source deliberately retain cache, feature history, and scroll continuity.
+     */
+    fun bindSource(sourceId: String) {
+        if (sourceIdentity == sourceId) return
+        reset()
+        sourceIdentity = sourceId
+    }
 
     fun reset() {
         generation += 1L
@@ -262,6 +274,7 @@ internal class SourceHomeController : Closeable {
         appendJobs.clear()
         cache.clear()
         lastQueryByPrimary.clear()
+        sourceIdentity = null
         title = ""
         primaryFilter = null
         activePrimary = DEFAULT_PRIMARY

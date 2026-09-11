@@ -119,6 +119,9 @@ internal interface LibraryDao {
     @Query("SELECT * FROM source_availability WHERE source_id = :sourceId")
     suspend fun sourceAvailability(sourceId: String): SourceAvailabilityEntity?
 
+    @Query("UPDATE source_availability SET available = 0, generation = generation + 1 WHERE available = 1 AND source_id NOT IN (:installedSourceIds)")
+    suspend fun markMissingSourcesUnavailable(installedSourceIds: List<String>): Int
+
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun upsertSourceRemotePolicy(entity: SourceRemotePolicyEntity)
 

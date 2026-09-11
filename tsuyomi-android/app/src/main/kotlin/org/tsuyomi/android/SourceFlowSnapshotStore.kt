@@ -64,6 +64,15 @@ class SourceFlowSnapshotStore(private val dataStore: DataStore<Preferences>) {
         SourceFlowSnapshot(book, chapter)
     }.first()
 
+    suspend fun removeSource(sourceId: String) {
+        dataStore.edit { values ->
+            if (values[SourceId] == sourceId) {
+                listOf(SourceId, RemoteBookId, BookTitle, BookAuthor, CoverUrl, CanonicalUrl,
+                    ChapterId, ChapterTitle, ChapterUrl).forEach(values::remove)
+            }
+        }
+    }
+
     private fun putOptional(values: androidx.datastore.preferences.core.MutablePreferences, key: Preferences.Key<String>, value: String?) {
         if (value == null) values.remove(key) else values[key] = value
     }

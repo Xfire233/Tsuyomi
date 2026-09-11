@@ -413,6 +413,124 @@ class RepositoryCatalogTest {
         assertEquals(HxpVerificationError.REVOKED_PACKAGE, rejected.error)
     }
 
+    @Test
+    fun userAddedRootClassifiesCatalogPublishersAndForbidsLegacyMigration() {
+        val officialRoot = repositoryRoot()
+        val userRoot = officialRoot.copy(
+            root = officialRoot.root.copy(
+                signingKey = PublisherKey(
+                    officialRoot.root.signingKey.keyId,
+                    officialRoot.root.signingKey.publicKey.copyOf(),
+                    PublisherTrust.USER_ADDED,
+                ),
+            ),
+        )
+        val extension = signedFixture(version = "1.0.0")
+        val fetcher = FixtureRepositoryFetcher(
+            mapOf(INDEX_URL to signedCatalog(userRoot, sequence = 1, entries = listOf(CatalogEntry(extension)))),
+        )
+        val client = repositoryClient(userRoot, Files.createTempDirectory("user-root-catalog").toFile(), fetcher)
+
+        assertEquals(PublisherTrust.USER_ADDED, client.refresh().publishers.single().trust)
+        fetcher.replace(
+            INDEX_URL,
+            signedCatalog(
+                userRoot,
+                sequence = 2,
+                entries = listOf(CatalogEntry(extension, migration = RepositoryLegacyMigration("a".repeat(64), "b".repeat(64)))),
+            ),
+        )
+        val rejected = assertThrows(RepositoryCatalogException::class.java) { client.refresh() }
+        assertEquals(RepositoryCatalogError.INVALID_CATALOG, rejected.error)
+    }
+
+    @Test
+    fun subscriptionParserRejectsRootRebindingAndRemovalRetainsReplayAndRevocationState() {
+        val officialRoot = repositoryRoot()
+        val userRoot = officialRoot.copy(
+            root = officialRoot.root.copy(
+                signingKey = PublisherKey(
+                    officialRoot.root.signingKey.keyId,
+                    officialRoot.root.signingKey.publicKey.copyOf(),
+                    PublisherTrust.USER_ADDED,
+                ),
+            ),
+        )
+        val extension = signedFixture(version = "1.0.0")
+        val fetcher = FixtureRepositoryFetcher(
+            mapOf(
+                INDEX_URL to signedCatalog(
+                    userRoot,
+                    sequence = 2,
+                    entries = listOf(CatalogEntry(extension)),
+                    revokedPackageDigests = setOf(sha256(extension.bytes)),
+                ),
+            ),
+        )
+        val storage = Files.createTempDirectory("subscription-tombstone").toFile()
+        val registry = RepositorySubscriptionRegistry(storage, fetcher) { NOW }
+        val link = "$INDEX_URL#repositoryId=${userRoot.root.repositoryId}&keyId=${userRoot.root.signingKey.keyId}&publicKey=${Base64.getEncoder().encodeToString(userRoot.root.signingKey.publicKey)}"
+
+        assertEquals(PublisherTrust.USER_ADDED, registry.inspect(link).root.signingKey.trust)
+        registry.add(link)
+        assertEquals(2L, requireNotNull(registry.client(userRoot.root.repositoryId)).refresh().sequence)
+        assertTrue(registry.publisherKeys.isRevokedPackage(sha256(extension.bytes)))
+        assertTrue(registry.remove(userRoot.root.repositoryId))
+        assertEquals(null, registry.client(userRoot.root.repositoryId))
+        assertTrue(registry.publisherKeys.isRevokedPackage(sha256(extension.bytes)))
+
+        val conflictingLink = "$INDEX_URL#repositoryId=${userRoot.root.repositoryId}&keyId=${userRoot.root.signingKey.keyId}&publicKey=${Base64.getEncoder().encodeToString(ByteArray(32) { 9 })}"
+        val conflict = assertThrows(RepositorySubscriptionException::class.java) { registry.add(conflictingLink) }
+        assertEquals(RepositorySubscriptionError.IDENTITY_REBINDING, conflict.error)
+
+        fetcher.replace(INDEX_URL, signedCatalog(userRoot, sequence = 1, entries = listOf(CatalogEntry(extension))))
+        registry.add(link)
+        val rollback = assertThrows(RepositoryCatalogException::class.java) {
+            requireNotNull(registry.client(userRoot.root.repositoryId)).refresh()
+        }
+        assertEquals(RepositoryCatalogError.ROLLBACK_REJECTED, rollback.error)
+    }
+
+    @Test
+    fun rootRevocationStillDisablesPreviouslyAuthenticatedPublisherAfterListingRemoval() {
+        val officialRoot = repositoryRoot()
+        val userRoot = officialRoot.copy(
+            root = officialRoot.root.copy(
+                signingKey = PublisherKey(
+                    officialRoot.root.signingKey.keyId,
+                    officialRoot.root.signingKey.publicKey.copyOf(),
+                    PublisherTrust.USER_ADDED,
+                ),
+            ),
+        )
+        val extension = signedFixture(version = "1.0.0")
+        val fetcher = FixtureRepositoryFetcher(
+            mapOf(INDEX_URL to signedCatalog(userRoot, sequence = 1, entries = listOf(CatalogEntry(extension)))),
+        )
+        val client = repositoryClient(userRoot, Files.createTempDirectory("removed-publisher-revocation").toFile(), fetcher)
+        client.refresh()
+        fetcher.replace(
+            INDEX_URL,
+            signedCatalog(userRoot, sequence = 2, entries = emptyList(), revokedPackageDigests = setOf(sha256(extension.bytes))),
+        )
+        client.refresh()
+
+        val revoked = assertThrows(HxpVerificationException::class.java) {
+            HxpArchiveVerifier(client.publisherKeys).verify(extension.writeToTemporaryFile())
+        }
+        assertEquals(HxpVerificationError.REVOKED_PACKAGE, revoked.error)
+    }
+
+    @Test
+    fun subscriptionLinkRejectsEncodedOrMalformedPublicKeyBootstrap() {
+        val root = repositoryRoot().root
+        val link = "$INDEX_URL#repositoryId=${root.repositoryId}&keyId=${root.signingKey.keyId}&publicKey=${Base64.getEncoder().encodeToString(root.signingKey.publicKey)}"
+        assertEquals(root.repositoryId, parseRepositorySubscriptionLink(link).root.repositoryId)
+        assertThrows(RepositorySubscriptionException::class.java) {
+            parseRepositorySubscriptionLink(link.dropLast(1) + "%3D")
+        }
+    }
+
     private fun repositoryClient(root: RootFixture, storage: File, fetcher: FixtureRepositoryFetcher): OfficialRepositoryClient =
         OfficialRepositoryClient(root.root, storage, fetcher) { NOW }
 

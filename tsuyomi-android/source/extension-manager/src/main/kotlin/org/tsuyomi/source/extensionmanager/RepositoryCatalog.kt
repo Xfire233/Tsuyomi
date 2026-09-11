@@ -5,13 +5,17 @@
 package org.tsuyomi.source.extensionmanager
 
 import java.io.ByteArrayOutputStream
+import java.io.EOFException
 import java.io.File
 import java.io.FileInputStream
 import java.io.RandomAccessFile
 import java.io.FileOutputStream
-import java.net.SocketTimeoutException
+import java.io.InterruptedIOException
 import java.io.IOException
 import java.net.HttpURLConnection
+import java.net.ProtocolException
+import java.net.SocketException
+import java.net.SocketTimeoutException
 import java.net.URI
 import java.net.URL
 import java.nio.ByteBuffer
@@ -47,11 +51,17 @@ data class RepositoryRoot(
 ) {
     init {
         SourceId(repositoryId)
-        require(signingKey.trust == PublisherTrust.BUILT_IN_OFFICIAL) {
-            "Repository root must be an explicitly configured official key"
-        }
+        require(signingKey.trust in setOf(
+            PublisherTrust.BUILT_IN_OFFICIAL,
+            PublisherTrust.BUILT_IN_TEST,
+            PublisherTrust.USER_ADDED,
+        )) { "Repository root has an unsupported trust class" }
         requireHttpsRepositoryUrl(indexUrl)
     }
+
+    /** A root's classification, not link text or catalog content, classifies its publishers. */
+    val publisherTrust: PublisherTrust
+        get() = signingKey.trust
 }
 
 /** Host API interval declared by a repository package and bound to the downloaded HXP manifest. */
@@ -156,7 +166,32 @@ class HttpsRepositoryFetcher(
     override fun fetch(url: String, maxBytes: Int): ByteArray {
         require(maxBytes in 1..MAX_PACKAGE_BYTES) { "Invalid repository response bound" }
         val deadlineNanos = System.nanoTime() + totalTimeoutMs * NANOS_PER_MILLISECOND
-        var current = requireHttpsRepositoryUrl(url).toASCIIString()
+        val initialUrl = requireHttpsRepositoryUrl(url).toASCIIString()
+        var retryingWithFreshConnection = false
+        while (true) {
+            try {
+                return fetchAttempt(initialUrl, maxBytes, deadlineNanos, retryingWithFreshConnection)
+            } catch (error: RepositoryFetchException) {
+                if (
+                    retryingWithFreshConnection ||
+                    error.error != RepositoryFetchError.NETWORK ||
+                    !isRetryableTruncationOrReset(error.cause)
+                ) {
+                    throw error
+                }
+                remainingDeadlineNanos(deadlineNanos)
+                retryingWithFreshConnection = true
+            }
+        }
+    }
+
+    private fun fetchAttempt(
+        initialUrl: String,
+        maxBytes: Int,
+        deadlineNanos: Long,
+        closeConnection: Boolean,
+    ): ByteArray {
+        var current = initialUrl
         repeat(MAX_REDIRECTS + 1) { redirectCount ->
             val connection = try {
                 (URL(current).openConnection() as? HttpURLConnection)
@@ -180,6 +215,7 @@ class HttpsRepositoryFetcher(
                 // Repository traffic is deliberately separate from extension browser sessions.
                 connection.setRequestProperty("Cookie", "")
                 connection.setRequestProperty("Cookie2", "")
+                if (closeConnection) connection.setRequestProperty("Connection", "close")
 
                 val status = connection.responseCode
                 remainingTimeoutMs(deadlineNanos)
@@ -229,11 +265,15 @@ class HttpsRepositoryFetcher(
     ): ByteArray = input.use { stream ->
         val output = ByteArrayOutputStream(minOf(maxBytes, 16 * 1024))
         val buffer = ByteArray(16 * 1024)
+        val expectedLength = connection.contentLengthLong
         while (true) {
             // HttpURLConnection applies the current read timeout to its active socket on Android.
             connection.readTimeout = minOf(readTimeoutMs, remainingTimeoutMs(deadlineNanos))
             val count = stream.read(buffer)
             if (count < 0) {
+                if (expectedLength >= 0L && output.size().toLong() != expectedLength) {
+                    throw EOFException("Repository response ended before its declared length")
+                }
                 remainingTimeoutMs(deadlineNanos)
                 break
             }
@@ -242,6 +282,40 @@ class HttpsRepositoryFetcher(
         }
         output.toByteArray()
     }
+
+    private fun isRetryableTruncationOrReset(error: Throwable?): Boolean {
+        var current = error
+        var truncationOrReset = false
+        repeat(MAX_RETRYABLE_CAUSE_DEPTH) {
+            val cause = current ?: return truncationOrReset
+            when (cause) {
+                is InterruptedIOException,
+                is ProtocolException,
+                is javax.net.ssl.SSLException,
+                -> return false
+                is EOFException -> truncationOrReset = true
+                is SocketException -> {
+                    if (
+                        cause.message?.contains("connection reset", ignoreCase = true) == true ||
+                        isUnexpectedTruncationMessage(cause.message)
+                    ) {
+                        truncationOrReset = true
+                    }
+                }
+                is IOException -> {
+                    if (isUnexpectedTruncationMessage(cause.message)) truncationOrReset = true
+                }
+            }
+            current = cause.cause
+        }
+        return false
+    }
+
+    private fun isUnexpectedTruncationMessage(message: String?): Boolean =
+        message?.let {
+            it.contains("unexpected end of stream", ignoreCase = true) ||
+                it.contains("unexpected end of file", ignoreCase = true)
+        } == true
 
     private fun scheduleDeadlineDisconnect(
         connection: HttpURLConnection,
@@ -272,6 +346,7 @@ class HttpsRepositoryFetcher(
         const val DEFAULT_READ_TIMEOUT_MS = 20_000
         const val DEFAULT_TOTAL_TIMEOUT_MS = 30_000
         const val NANOS_PER_MILLISECOND = 1_000_000L
+        const val MAX_RETRYABLE_CAUSE_DEPTH = 8
         val DEADLINE_EXECUTOR = Executors.newSingleThreadScheduledExecutor { runnable ->
             Thread(runnable, "TsuyomiRepositoryDeadline").apply { isDaemon = true }
         }
@@ -335,7 +410,7 @@ class OfficialRepositoryClient(
     private var cacheFailure: RepositoryCatalogException? = null
 
     /** Resolver for root-authenticated publishers and revocations, suitable for an app composite resolver. */
-    val publisherKeys: PublisherKeyResolver = RepositoryPublisherKeyResolver()
+    val publisherKeys: PublisherKeyResolver = RepositoryPublisherKeyResolver(root.signingKey.trust)
 
     init {
         directory = storageDirectory.canonicalFile
@@ -747,7 +822,8 @@ class OfficialRepositoryClient(
  * A snapshot resolver ensures a refresh atomically changes publisher identity and revocation state.
  * Returning copies prevents a caller from mutating a cached key array.
  */
-private class RepositoryPublisherKeyResolver : PublisherKeyResolver {
+private class RepositoryPublisherKeyResolver(rootTrust: PublisherTrust) : PublisherKeyResolver {
+    override val hasGlobalRevocationAuthority = rootTrust == PublisherTrust.BUILT_IN_OFFICIAL
     @Volatile
     private var snapshot = PublisherSnapshot(emptyMap(), emptySet(), emptySet(), denyAll = false)
 
@@ -758,10 +834,13 @@ private class RepositoryPublisherKeyResolver : PublisherKeyResolver {
     override fun isRevokedPackage(packageSha256: String): Boolean = snapshot.denyAll || packageSha256 in snapshot.revokedPackages
 
     fun replace(catalog: RepositoryCatalog) {
+        val current = snapshot
         snapshot = PublisherSnapshot(
-            keys = catalog.publishers.associateBy(PublisherKey::keyId).mapValues { (_, key) -> copyPublisherKey(key) },
-            revokedFingerprints = catalog.revokedPublisherFingerprints,
-            revokedPackages = catalog.revokedPackageDigests,
+            // Keep prior authenticated identities in-process so a newer catalog can revoke a
+            // removed publisher/package instead of losing the subject before revocation checks.
+            keys = current.keys + catalog.publishers.associateBy(PublisherKey::keyId).mapValues { (_, key) -> copyPublisherKey(key) },
+            revokedFingerprints = current.revokedFingerprints + catalog.revokedPublisherFingerprints,
+            revokedPackages = current.revokedPackages + catalog.revokedPackageDigests,
             denyAll = false,
         )
     }
@@ -880,7 +959,7 @@ private object RepositoryCatalogParser {
         if (!verifyEd25519(root.signingKey.publicKey, repositorySignatureMessage(canonicalSigned), signature)) {
             throw RepositoryCatalogException(RepositoryCatalogError.INVALID_SIGNATURE)
         }
-        val metadata = parseSigned(signed, root.repositoryId, now)
+        val metadata = parseSigned(signed, root, now)
         return RepositoryCatalog(
             repositoryId = metadata.repositoryId,
             sequence = metadata.sequence,
@@ -920,14 +999,14 @@ private object RepositoryCatalogParser {
         return CachedCatalogState(repositoryId, sequence, signedDigest, envelope)
     }
 
-    private fun parseSigned(value: JsonObject, expectedRepositoryId: String, now: Instant): ParsedCatalog {
+    private fun parseSigned(value: JsonObject, root: RepositoryRoot, now: Instant): ParsedCatalog {
         value.requireKeys(setOf("repositoryId", "sequence", "issuedAt", "expiresAt", "publishers", "packages", "revocations"))
         val repositoryId = try {
             SourceId(value.string("repositoryId")).value
         } catch (_: IllegalArgumentException) {
             invalid()
         }
-        if (repositoryId != expectedRepositoryId) invalid()
+        if (repositoryId != root.repositoryId) invalid()
         val sequence = value.long("sequence").also { if (it !in 1..MAX_SAFE_JSON_INTEGER) invalid() }
         val issuedAt = parseUtcInstant(value.string("issuedAt"))
         val expiresAt = parseUtcInstant(value.string("expiresAt"))
@@ -947,7 +1026,7 @@ private object RepositoryCatalogParser {
             val fingerprint = publisher.string("fingerprint").also {
                 if (!SHA_256.matches(it) || it != sha256(publicKey) || !publisherFingerprints.add(it)) invalid()
             }
-            PublisherKey(keyId, publicKey, PublisherTrust.BUILT_IN_OFFICIAL)
+            PublisherKey(keyId, publicKey, root.publisherTrust)
         }
 
         val packages = value.array("packages")
@@ -984,7 +1063,10 @@ private object RepositoryCatalogParser {
                 maxExclusive = parseSemanticVersion(host.string("maxExclusive")),
             )
             val publisherKeyId = entry.string("publisherKeyId").also { if (!KEY_ID.matches(it) || it !in publisherIds) invalid() }
-            val migration = entry["legacyMigration"]?.let { parseLegacyMigration(it.asObject()) }
+            val migration = entry["legacyMigration"]?.let {
+                if (root.signingKey.trust != PublisherTrust.BUILT_IN_OFFICIAL) invalid()
+                parseLegacyMigration(it.asObject())
+            }
             RepositoryPackage(
                 id = id,
                 name = name,
@@ -1115,7 +1197,7 @@ private fun verifyEd25519(publicKey: ByteArray, message: ByteArray, signature: B
     }.verifySignature(signature)
 }.getOrDefault(false)
 
-private fun requireHttpsRepositoryUrl(value: String): URI {
+internal fun requireHttpsRepositoryUrl(value: String): URI {
     val uri = try {
         URI(value)
     } catch (error: Throwable) {
@@ -1127,7 +1209,7 @@ private fun requireHttpsRepositoryUrl(value: String): URI {
     return uri
 }
 
-private fun copyPublisherKey(key: PublisherKey): PublisherKey = PublisherKey(
+internal fun copyPublisherKey(key: PublisherKey): PublisherKey = PublisherKey(
     keyId = key.keyId,
     publicKey = key.publicKey.copyOf(),
     trust = key.trust,

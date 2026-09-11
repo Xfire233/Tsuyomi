@@ -152,6 +152,41 @@ const repositoryIssues = (catalog) => {
   return issues;
 };
 
+const subscriptionLinkIssues = (link) => {
+  const issues = [];
+  if (typeof link !== 'string' || link.length < 12 || link.length > 4512) return ['length'];
+  const separator = link.indexOf('#');
+  if (separator < 12 || separator === link.length - 1 || link.indexOf('#', separator + 1) !== -1) return ['fragment'];
+  let url;
+  try {
+    url = new URL(link.slice(0, separator));
+  } catch {
+    return ['url'];
+  }
+  if (url.protocol !== 'https:' || !url.hostname || url.username || url.password) issues.push('https-index');
+  const fields = link.slice(separator + 1).split('&');
+  const names = ['repositoryId', 'keyId', 'publicKey'];
+  if (fields.length !== names.length) return [...issues, 'field-count'];
+  const values = fields.map((field, index) => {
+    const equals = field.indexOf('=');
+    if (equals <= 0 || field.slice(0, equals) !== names[index]) {
+      issues.push(`field:${names[index]}`);
+      return '';
+    }
+    return field.slice(equals + 1);
+  });
+  if (link.includes('%')) issues.push('percent-encoding');
+  if (!/^[a-z][a-z0-9]*(?:[.-][a-z0-9]+)+$/.test(values[0])) issues.push('repository-id');
+  if (!/^[A-Za-z0-9._-]{8,128}$/.test(values[1])) issues.push('key-id');
+  if (!/^[A-Za-z0-9+/]{43}=$/.test(values[2])) {
+    issues.push('public-key-shape');
+  } else {
+    const raw = Buffer.from(values[2], 'base64');
+    if (raw.length !== 32 || raw.toString('base64') !== values[2]) issues.push('public-key-canonical');
+  }
+  return issues;
+};
+
 test('transfer semantic conformance accepts the canonical minimal fixture', async () => {
   const document = await loadJson('../fixtures/transfer/valid-minimal.json');
   assert.deepEqual(transferIssues(document), []);
@@ -201,6 +236,14 @@ test('repository catalog semantic conformance binds unique publishers and packag
   assert.ok(repositoryIssues(duplicate).includes('duplicate-package-id:org.tsuyomi.fixture'));
   assert.ok(repositoryIssues(duplicate).some((issue) => issue.startsWith('duplicate-publisher-id:')));
   assert.ok(repositoryIssues(duplicate).includes('duplicate-revocation:packageDigests'));
+});
+
+test('subscription bootstrap links are strict local root declarations', async () => {
+  const cases = await loadJson('../fixtures/repository/subscription-link-cases.json');
+  assert.deepEqual(subscriptionLinkIssues(cases.valid), []);
+  for (const invalid of cases.invalid) {
+    assert.notDeepEqual(subscriptionLinkIssues(invalid), [], invalid);
+  }
 });
 
 test('HXP host API v1 accepts each valid network value fixture', async () => {

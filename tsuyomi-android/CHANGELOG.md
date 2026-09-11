@@ -11,6 +11,9 @@ All notable changes use semantic versioning. Future Phase baselines use annotate
 
 - Official source discovery in Standard Browse: installed/available sections, independent plugin search, bounded rows and scrollable source/license/publisher details, explicit installation approval and manual updates; local HXP import remains available.
 - Root-signed static catalog admission, exact HXP binding, durable replay and revocation state, total download deadlines, and shared foreground/background trust reconciliation without removing installed archives or user data. Production keys and formal catalog/package publication are separately authorized; unconfigured builds report the repository as unavailable.
+- Persistent third-party repository subscriptions from canonical explicit-root links, with address/fingerprint confirmation, independent disable/removal, and retained revocation/antirollback history.
+- Verified local publisher-key input and separate non-official execution consent bound to the exact source, publisher and archive; cancelling or supplying the wrong key never authorizes execution. Built-in identities cannot be shadowed by a subscribed root.
+- Cancellable source uninstall and same-identity reinstall retaining host books, progress and credentials, while fencing requests and clearing obsolete source navigation. Cold start reconciles missing archives as dormant without repeatedly invalidating them.
 
 - Phase 4A Standard Library production cutover; accepted Atlas-era behavior was migrated into production and the prototype was retired:
   - Stationary platform-threshold long-press multi-selection across Grid, List, and Compact layouts.
@@ -42,6 +45,9 @@ All notable changes use semantic versioning. Future Phase baselines use annotate
 
 ### Changed
 
+- Repository downloads now detect truncated response bodies and recover once from transient EOF/connection resets within the original total deadline, discarding partial bytes and retaining all HTTPS, size, signature and approval checks.
+- Browse separates download, verification, repository-state and storage failures. Repository download errors retry the exact source/repository instead of opening a file picker; unavailable or removed repositories return to the catalog, and retries still require package approval.
+- Repository link inspection dismisses its input keyboard before root review; official signed revocations remain effective for active sessions even after the publisher leaves the current catalog.
 - Superseded numbered delivery `Gate` scopes with `Phase 0–5` (including 4A/4B/4C); reserved gate terminology for explicit admission, review, authorization and release checkpoints.
 - Restored Atlas resting shortcut tile dimensions (`80×116dp`), media field (`76dp`), single-line labels, and target-specific collection hover feedback.
 - Remote Library refresh now exits its working state after every terminal content, empty, login-required, verification-required, cancelled, or safe-error result instead of leaving refresh controls stuck loading.

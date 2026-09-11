@@ -86,7 +86,11 @@ internal fun signedFixture(
     return SignedFixture(publisher, archive, version)
 }
 
-internal fun newInstaller(root: File, verifier: HxpArchiveVerifier): ExtensionInstaller = ExtensionInstaller(
+internal fun newInstaller(
+    root: File,
+    verifier: HxpArchiveVerifier,
+    packageExecutionTrust: PackageExecutionTrust = BuiltInPackageExecutionTrust,
+): ExtensionInstaller = ExtensionInstaller(
     verifier = verifier,
     store = InstalledExtensionStore(
         QuotaFileStore(
@@ -97,6 +101,7 @@ internal fun newInstaller(root: File, verifier: HxpArchiveVerifier): ExtensionIn
         ),
     ),
     stagingDirectory = File(root, "staging"),
+    packageExecutionTrust = packageExecutionTrust,
 )
 
 internal fun withUnindexedLeadingLocalEntry(archive: ByteArray, name: String, content: ByteArray): ByteArray {

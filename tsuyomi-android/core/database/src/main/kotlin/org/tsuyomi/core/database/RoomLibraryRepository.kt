@@ -36,6 +36,9 @@ class RoomLibraryRepository(database: TsuyomiDatabase) {
     suspend fun setSourceAvailability(sourceId: String, version: String?, available: Boolean, generation: Long) =
         remote.setSourceAvailability(sourceId, version, available, generation)
     suspend fun sourceAvailability(sourceId: String): SourceAvailability? = remote.sourceAvailability(sourceId)
+    /** Caller must serialize this complete active-archive snapshot with package mutations. */
+    suspend fun markMissingSourcesUnavailable(installedSourceIds: List<String>): Int =
+        remote.markMissingSourcesUnavailable(installedSourceIds)
     suspend fun sourceRemotePolicy(sourceId: String): SourceRemotePolicy? = remote.sourceRemotePolicy(sourceId)
     suspend fun mergeRemoteLibrary(request: RemoteLibraryMergeRequest): Int = remote.merge(request)
     suspend fun dismissFirstRemoteImportPrompt(sourceId: String, capabilityFingerprint: String): Boolean =

@@ -13,6 +13,7 @@ class ExtensionInstaller(
     private val verifier: HxpArchiveVerifier,
     private val store: InstalledExtensionStore,
     private val stagingDirectory: File,
+    private val packageExecutionTrust: PackageExecutionTrust = BuiltInPackageExecutionTrust,
 ) {
     init {
         require(stagingDirectory.isDirectory || stagingDirectory.mkdirs()) { "Cannot create HXP staging directory" }
@@ -105,11 +106,13 @@ class ExtensionInstaller(
         ) {
             throw ExtensionInstallException(ExtensionInstallError.APPROVAL_MISMATCH)
         }
+        packageExecutionTrust.requireExecutable(reverified)
         val current = readReplaceableActive(prepared.candidate.manifest.sourceId)
         if (current?.packageSha256 != prepared.active?.packageSha256) {
             throw ExtensionInstallException(ExtensionInstallError.APPROVAL_MISMATCH)
         }
         store.writeActive(reverified)
+        (packageExecutionTrust as? PackageActivationTrust)?.activationSucceeded(prepared)
     }
 
     fun readVerifiedActive(sourceId: SourceId): VerifiedHxpPackage? {

@@ -125,6 +125,7 @@ private fun NavGraphBuilder.browseRoute(navController: NavHostController, owner:
                 navController.navigate(Routes.Detail)
             }
         }
+        val displayedApprovalDigest = (owner.installer.state as? BrowseUiState.Approval)?.packageSha256
         BrowseScreen(
             state = owner.installer.state.takeUnless {
                 profile == org.tsuyomi.core.display.DisplayProfile.EINK && it is BrowseUiState.Approval && it.isLegacyMigration
@@ -149,7 +150,20 @@ private fun NavGraphBuilder.browseRoute(navController: NavHostController, owner:
             onCatalogAction = { action ->
                 when (action) {
                     BrowseCatalogAction.Refresh -> scope.launch { owner.installer.catalog.refresh() }
-                    is BrowseCatalogAction.Install -> scope.launch { owner.installer.catalog.install(action.sourceId) }
+                    is BrowseCatalogAction.Install -> scope.launch {
+                        owner.installer.catalog.install(action.sourceId, action.repositoryId)
+                    }
+                    is BrowseCatalogAction.InspectSubscription -> scope.launch {
+                        owner.installer.catalog.inspectSubscription(action.link)
+                    }
+                    BrowseCatalogAction.ConfirmSubscription -> scope.launch { owner.installer.catalog.confirmSubscription() }
+                    BrowseCatalogAction.CancelSubscription -> owner.installer.catalog.cancelSubscription()
+                    is BrowseCatalogAction.RemoveSubscription -> scope.launch {
+                        owner.installer.catalog.removeSubscription(action.repositoryId)
+                    }
+                    is BrowseCatalogAction.SetSubscriptionEnabled -> scope.launch {
+                        owner.installer.catalog.setSubscriptionEnabled(action.repositoryId, action.enabled)
+                    }
                     is BrowseCatalogAction.OpenSourceCode -> try {
                         uriHandler.openUri(action.url)
                     } catch (_: IllegalArgumentException) {
@@ -162,10 +176,15 @@ private fun NavGraphBuilder.browseRoute(navController: NavHostController, owner:
                     sourceOpening = true
                 scope.launch {
                     try {
+                    if (action is BrowseSourceAction.Uninstall) {
+                        owner.uninstallSource(action.sourceId)
+                        return@launch
+                    }
                     val sourceId = when (action) {
                         is BrowseSourceAction.OpenHome -> action.sourceId
                         is BrowseSourceAction.Search -> action.sourceId
                         is BrowseSourceAction.OpenRemoteLibrary -> action.sourceId
+                        is BrowseSourceAction.Uninstall -> action.sourceId
                     }
                     val selected = owner.installer.activateInstalledSource(sourceId)
                     if (selected != null) when (action) {
@@ -176,6 +195,7 @@ private fun NavGraphBuilder.browseRoute(navController: NavHostController, owner:
                         }
                         is BrowseSourceAction.Search -> owner.openInstalledSource()
                         is BrowseSourceAction.OpenRemoteLibrary -> owner.openRemoteLibrary()
+                        is BrowseSourceAction.Uninstall -> Unit
                     }
                     } finally {
                         sourceOpening = false
@@ -183,11 +203,17 @@ private fun NavGraphBuilder.browseRoute(navController: NavHostController, owner:
                 }
                 }
             },
-            onApproveInstall = { allowDowngrade, allowLegacyMigration ->
-                scope.launch { owner.installer.approve(allowDowngrade, allowLegacyMigration) }
+            onApproveInstall = { allowDowngrade, allowLegacyMigration, allowNonOfficial ->
+                scope.launch {
+                    if (displayedApprovalDigest != null) owner.installer.approve(
+                        allowDowngrade, allowLegacyMigration, allowNonOfficial, displayedApprovalDigest,
+                    )
+                }
             },
             onDismissApproval = owner.installer::dismissApproval,
             onDismissFailure = owner.installer::dismissFailure,
+            onProvidePublisherKey = { publicKey -> scope.launch { owner.installer.providePublisherKey(publicKey) } },
+            onDismissPublisherKey = owner.installer::dismissApproval,
         )
     }
 }
@@ -209,15 +235,17 @@ private fun NavGraphBuilder.sourceHomeRoute(
                 if (packageInfo == null) {
                     Result.failure(IllegalStateException("source-not-installed"))
                 } else {
-                    flow.open(packageInfo)
                     flow.loadHome(filters, cursor, offlineOnly)
                 }
             }
         val load = loader(offlineOnly = false)
         val loadOffline = loader(offlineOnly = true)
 
-        LaunchedEffect(activeRevision) {
-            flow.home.ensureInitial(activeRevision, load)
+        LaunchedEffect(packageInfo?.manifest?.sourceId?.value, activeRevision) {
+            packageInfo?.let { selected ->
+                flow.open(selected)
+                flow.home.ensureInitial(selected.manifest.sourceId.value, activeRevision, load)
+            }
         }
         BackHandler(
             enabled = (flow.homeState as? org.tsuyomi.feature.browse.SourceHomeViewState.Content)

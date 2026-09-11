@@ -20,16 +20,20 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.navigation.NavBackStackEntry
 import androidx.navigation.NavHostController
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.launch
 import org.tsuyomi.core.database.LibraryEntry
 import org.tsuyomi.core.database.RoomLibraryRepository
 import org.tsuyomi.core.webview.CapturedVerifiedPage
 import org.tsuyomi.source.extensionmanager.RemoteOperation
+import org.tsuyomi.source.extensionmanager.VerifiedHxpPackage
 import org.tsuyomi.shared.sourcecontract.SourceDiagnostic
 import org.tsuyomi.shared.sourcecontract.SourceBookSummary
 import org.tsuyomi.shared.model.BookIdentity
 import org.tsuyomi.feature.book.SourceBookState
 import org.tsuyomi.shared.sourcecontract.SourceChapter
+import org.tsuyomi.shared.sourcecontract.SourceException
 
 
 internal const val VerifiedSearchResultSequenceKey = "source.search.verified-page-sequence"
@@ -40,6 +44,14 @@ internal const val ResumeSourceIdKey = "source.resume.source-id"
 internal const val ResumeRemoteBookIdKey = "source.resume.remote-book-id"
 internal const val RemoteBookMembershipKey = "source.detail.remote-book-membership"
 internal const val UpdateFocusChapterIdKey = "updates.detail.focus-chapter-id"
+
+
+internal enum class SourceHomeSwitchResult {
+    CURRENT_SOURCE,
+    OPENED_HOME,
+    OPENED_SEARCH,
+    UNAVAILABLE,
+}
 
 
 
@@ -57,6 +69,8 @@ internal class SourceRouteOwner(
     private val library: RoomLibraryRepository,
     private val onLibraryChanged: suspend () -> Unit,
 ) {
+    private val sourceHomeSwitchMutex = Mutex()
+
     val remoteLibraryAvailable: Boolean
         get() = installer.activePackage?.manifest?.capabilities?.remoteLibrary?.policies
             ?.containsKey(RemoteOperation.READ) == true
@@ -67,8 +81,11 @@ internal class SourceRouteOwner(
     fun requestImport() {
         requestImportAction()
     }
-    fun navigateToSourceHome() {
-        navController.navigate(Routes.SourceHome)
+    suspend fun navigateToSourceHome() {
+        installer.activePackage?.let { packageInfo ->
+            flow.open(packageInfo)
+            navController.navigate(Routes.SourceHome)
+        }
     }
     fun navigateToRemoteLibrary() {
         val sourceId = installer.activePackage?.manifest?.sourceId?.value ?: return
@@ -87,6 +104,22 @@ internal class SourceRouteOwner(
         }
     }
 
+    suspend fun uninstallSource(sourceId: String): Boolean = sourceHomeSwitchMutex.withLock {
+        val removed = installer.uninstall(sourceId) {
+            flow.removeSource(sourceId)
+        }
+        if (removed) {
+            if (navController.currentDestination?.route != Routes.Browse) {
+                navController.navigate(Routes.Browse) {
+                    popUpTo(Routes.Browse) { inclusive = true }
+                    launchSingleTop = true
+                }
+            }
+            onLibraryChanged()
+        }
+        removed
+    }
+
 
     suspend fun openInstalledSource() {
         installer.activePackage?.let { packageInfo ->
@@ -94,10 +127,76 @@ internal class SourceRouteOwner(
             navController.navigate(Routes.Search)
         }
     }
+
+    suspend fun switchSourceHome(sourceId: String): SourceHomeSwitchResult = sourceHomeSwitchMutex.withLock {
+        val current = installer.activePackage ?: return@withLock SourceHomeSwitchResult.UNAVAILABLE
+        if (current.manifest.sourceId.value == sourceId) return@withLock SourceHomeSwitchResult.CURRENT_SOURCE
+        val stagedPackage = installer.resolveInstalledSource(sourceId)
+            ?.takeIf { it.manifest.sourceId.value == sourceId }
+            ?: return@withLock SourceHomeSwitchResult.UNAVAILABLE
+        var prepared = prepareSourceSession(stagedPackage)
+            ?: return@withLock SourceHomeSwitchResult.UNAVAILABLE
+        try {
+            if (!isStillOnSourceHome(current)) return@withLock SourceHomeSwitchResult.UNAVAILABLE
+
+            val selected = installer.activateInstalledSource(sourceId)
+                ?.takeIf {
+                    it.manifest.sourceId.value == sourceId &&
+                        installer.activePackage?.packageSha256 == it.packageSha256
+                }
+                ?: run {
+                    restorePreviousSource(current)
+                    return@withLock SourceHomeSwitchResult.UNAVAILABLE
+                }
+            if (selected.packageSha256 != prepared.packageInfo.packageSha256) {
+                restorePreviousSource(current)
+                return@withLock SourceHomeSwitchResult.UNAVAILABLE
+            }
+            if (!isStillOnSourceHome(selected)) {
+                restorePreviousSource(current)
+                return@withLock SourceHomeSwitchResult.UNAVAILABLE
+            }
+            if (!flow.commitPreparedSourceSession(prepared)) {
+                restorePreviousSource(current)
+                return@withLock SourceHomeSwitchResult.UNAVAILABLE
+            }
+
+            flow.commitSourceSwitch(selected)
+            val destination = if (selected.manifest.capabilities.home.enabled) Routes.SourceHome else Routes.Search
+            navController.navigate(destination) {
+                popUpTo(Routes.SourceHome) { inclusive = true }
+                launchSingleTop = true
+            }
+            if (destination == Routes.SourceHome) {
+                SourceHomeSwitchResult.OPENED_HOME
+            } else {
+                SourceHomeSwitchResult.OPENED_SEARCH
+            }
+        } finally {
+            flow.discardPreparedSourceSession(prepared)
+        }
+    }
+
+    private suspend fun prepareSourceSession(packageInfo: VerifiedHxpPackage): PreparedSourceSession? = try {
+        flow.prepareSourceSession(packageInfo)
+    } catch (cancelled: CancellationException) {
+        throw cancelled
+    } catch (_: SourceException) {
+        null
+    } catch (_: IllegalStateException) {
+        null
+    }
+
+    private fun isStillOnSourceHome(packageInfo: VerifiedHxpPackage): Boolean =
+        navController.currentDestination?.route == Routes.SourceHome &&
+            installer.activePackage?.packageSha256 == packageInfo.packageSha256
+
+    private suspend fun restorePreviousSource(current: VerifiedHxpPackage) {
+        installer.activateInstalledSource(current.manifest.sourceId.value)
+    }
     suspend fun refreshSourceHome() {
-        val packageInfo = installer.activePackage ?: return
+        if (installer.activePackage == null) return
         flow.home.refresh { filters, cursor ->
-            flow.open(packageInfo)
             flow.loadHome(filters, cursor)
         }
     }

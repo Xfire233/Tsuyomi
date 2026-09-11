@@ -6,6 +6,8 @@ package org.tsuyomi.android
 
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import java.util.concurrent.atomic.AtomicInteger
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.runBlocking
@@ -15,6 +17,7 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import kotlinx.coroutines.withTimeoutOrNull
 import org.junit.runner.RunWith
 import org.tsuyomi.feature.browse.SourceHomeViewState
 import org.tsuyomi.shared.model.BookIdentity
@@ -28,7 +31,7 @@ import org.tsuyomi.shared.sourcecontract.SourceHomeSection
 @RunWith(AndroidJUnit4::class)
 internal class SourceHomeControllerInstrumentedTest {
     @Test
-    fun normalized_selection_reuses_query_and_package_revision_keeps_cache() = runBlocking {
+    fun same_source_identity_reuses_query_and_package_revision_keeps_cache() = runBlocking {
         val requests = AtomicInteger()
         val controller = SourceHomeController()
         val load: suspend (Map<String, String>, String?) -> Result<SourceHomePage> = { filters, _ ->
@@ -36,8 +39,10 @@ internal class SourceHomeControllerInstrumentedTest {
             Result.success(recommendPage(filters["recommendation"] ?: "allvote"))
         }
         try {
-            withContext(Dispatchers.Main) { controller.ensureInitial("revision-a", load) }
+            withContext(Dispatchers.Main) { controller.ensureInitial("source-a", "revision-a", load) }
             awaitContent(controller)
+            assertEquals(1, requests.get())
+            withContext(Dispatchers.Main) { controller.bindSource("source-a") }
             assertEquals(1, requests.get())
 
             withContext(Dispatchers.Main) {
@@ -49,7 +54,7 @@ internal class SourceHomeControllerInstrumentedTest {
             assertEquals(1, requests.get())
             assertEquals("allvote", controller.activePage?.selectedFilters?.get("recommendation"))
 
-            withContext(Dispatchers.Main) { controller.ensureInitial("revision-b", load) }
+            withContext(Dispatchers.Main) { controller.ensureInitial("source-a", "revision-b", load) }
             awaitContent(controller)
             assertEquals(1, requests.get())
             assertEquals("推荐 allvote", controller.activePage?.sections?.single()?.title)
@@ -73,7 +78,7 @@ internal class SourceHomeControllerInstrumentedTest {
             }
         }
         try {
-            withContext(Dispatchers.Main) { controller.ensureInitial("revision-a", load) }
+            withContext(Dispatchers.Main) { controller.ensureInitial("source-a", "revision-a", load) }
             awaitContent(controller)
             withContext(Dispatchers.Main) {
                 controller.selectFilters(
@@ -109,7 +114,7 @@ internal class SourceHomeControllerInstrumentedTest {
             Result.success(recommendPage("allvote"))
         }
         try {
-            withContext(Dispatchers.Main) { controller.ensureInitial("revision-a", online) }
+            withContext(Dispatchers.Main) { controller.ensureInitial("source-a", "revision-a", online) }
             withTimeout(5_000) {
                 while (controller.state !is SourceHomeViewState.Failure) delay(10)
             }
@@ -140,7 +145,7 @@ internal class SourceHomeControllerInstrumentedTest {
             Result.success(if (filters["feature"] == "sugoi-2026") award else root)
         }
         try {
-            withContext(Dispatchers.Main) { controller.ensureInitial("revision-a", load) }
+            withContext(Dispatchers.Main) { controller.ensureInitial("source-a", "revision-a", load) }
             awaitContent(controller)
             val rootState = controller.state as SourceHomeViewState.Content
             withContext(Dispatchers.Main) {
@@ -173,6 +178,37 @@ internal class SourceHomeControllerInstrumentedTest {
             controller.close()
         }
     }
+    @Test
+    fun different_source_identity_replaces_home_and_rejects_a_delayed_old_result() = runBlocking {
+        val oldLoadStarted = CompletableDeferred<Unit>()
+        val releaseOldLoad = CompletableDeferred<Unit>()
+        val controller = SourceHomeController()
+        val oldLoad: suspend (Map<String, String>, String?) -> Result<SourceHomePage> = { _, _ ->
+            oldLoadStarted.complete(Unit)
+            withContext(NonCancellable) { releaseOldLoad.await() }
+            Result.success(recommendPage("allvote"))
+        }
+        val newLoad: suspend (Map<String, String>, String?) -> Result<SourceHomePage> = { _, _ ->
+            Result.success(recommendPage("goodnum"))
+        }
+        try {
+            withContext(Dispatchers.Main) { controller.ensureInitial("source-a", "revision-a", oldLoad) }
+            oldLoadStarted.await()
+
+            withContext(Dispatchers.Main) { controller.ensureInitial("source-b", "revision-b", newLoad) }
+            val targetPublished = withTimeoutOrNull(5_000) {
+                while (controller.activePage?.sections?.single()?.title != "推荐 goodnum") delay(10)
+                true
+            } ?: false
+            check(targetPublished) { "Target source Home was not published: ${controller.state}" }
+            releaseOldLoad.complete(Unit)
+            assertEquals("推荐 goodnum", controller.activePage?.sections?.single()?.title)
+        } finally {
+            releaseOldLoad.complete(Unit)
+            controller.close()
+        }
+    }
+
 
     private suspend fun awaitContent(controller: SourceHomeController) {
         withTimeout(5_000) {

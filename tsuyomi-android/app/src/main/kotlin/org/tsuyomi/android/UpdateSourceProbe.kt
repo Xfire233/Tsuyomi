@@ -44,9 +44,10 @@ internal class UpdateSourceRuntime(
     private val libraryRepository: RoomLibraryRepository,
 ) {
     private val applicationContext = context.applicationContext
-    private val repositoryClient = (applicationContext as TsuyomiApplication).officialRepository
+    private val application = applicationContext as TsuyomiApplication
+    private val repositoryClient = application.officialRepository
     private val installer = ExtensionInstaller(
-        verifier = HxpArchiveVerifier(OfficialRepositoryConfiguration.publisherKeys(repositoryClient)),
+        verifier = HxpArchiveVerifier(OfficialRepositoryConfiguration.publisherKeys(repositoryClient, application)),
         store = InstalledExtensionStore(
             QuotaFileStore(
                 roots = StorageRoots.from(applicationContext),
@@ -56,6 +57,7 @@ internal class UpdateSourceRuntime(
             ),
         ),
         stagingDirectory = File(applicationContext.cacheDir, "hxp-update-staging"),
+        packageExecutionTrust = application.packageTrust,
     )
     private val capturedLeases = ConcurrentHashMap<String, UpdateSourceLease>()
 

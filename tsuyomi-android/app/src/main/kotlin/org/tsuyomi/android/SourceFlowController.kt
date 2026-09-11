@@ -107,19 +107,43 @@ internal class SourceFlowController(
         preparedResumeLoad.also { preparedResumeLoad = null }
 
 
-    suspend fun open(packageInfo: VerifiedHxpPackage) {
+    suspend fun open(packageInfo: VerifiedHxpPackage): SourceSessionOpenResult {
         val result = sessionOwner.open(packageInfo) {
             resetReadingState()
             remoteLibrary.reset()
         }
         when (result) {
-            SourceSessionOpenResult.ALREADY_OPEN -> return
+            SourceSessionOpenResult.ALREADY_OPEN -> {
+                commitHomeSource(packageInfo)
+                return result
+            }
             SourceSessionOpenResult.UNAVAILABLE -> sourceBecameUnavailable()
-            SourceSessionOpenResult.OPENED -> searchState = SearchResultState.Idle
-            SourceSessionOpenResult.PACKAGE_CHANGED -> {
+            SourceSessionOpenResult.OPENED, SourceSessionOpenResult.PACKAGE_CHANGED -> {
+                commitHomeSource(packageInfo)
                 searchState = SearchResultState.Idle
             }
         }
+        return result
+    }
+
+    fun commitHomeSource(packageInfo: VerifiedHxpPackage) {
+        home.bindSource(packageInfo.manifest.sourceId.value)
+    }
+
+    fun commitSourceSwitch(packageInfo: VerifiedHxpPackage) {
+        resetReadingState()
+        remoteLibrary.reset()
+        commitHomeSource(packageInfo)
+    }
+
+    suspend fun prepareSourceSession(packageInfo: VerifiedHxpPackage): PreparedSourceSession? =
+        sessionOwner.prepare(packageInfo)
+
+    fun commitPreparedSourceSession(prepared: PreparedSourceSession): Boolean =
+        sessionOwner.commitPrepared(prepared)
+
+    fun discardPreparedSourceSession(prepared: PreparedSourceSession) {
+        sessionOwner.discardPrepared(prepared)
     }
     suspend fun pullRemoteLibrary(packageInfo: VerifiedHxpPackage): RemoteLibraryPullResult {
         open(packageInfo)
@@ -692,6 +716,15 @@ internal class SourceFlowController(
         remoteLibrary.reset()
         home.reset()
         searchState = searchFailure(SourceErrorCode.EXTENSION_RUNTIME_FAILURE, "source-session", "source-untrusted")
+    }
+
+    suspend fun removeSource(sourceId: String) {
+        if (sessionOwner.removeSource(sourceId) || selectedBook?.identity?.sourceId == sourceId) {
+            resetReadingState()
+            remoteLibrary.reset()
+            home.reset()
+        }
+        snapshotStore.removeSource(sourceId)
     }
 
     private fun resetReadingState() {

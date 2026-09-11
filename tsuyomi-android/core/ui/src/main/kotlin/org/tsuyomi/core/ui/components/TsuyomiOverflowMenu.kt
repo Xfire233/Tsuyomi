@@ -60,6 +60,7 @@ fun TsuyomiOverflowMenu(
     onExpandedChange: ((Boolean) -> Unit)? = null,
     requestedSubmenu: TsuyomiOverflowAction? = null,
     panelTitle: String? = null,
+    trigger: @Composable ((onClick: () -> Unit) -> Unit)? = null,
 ) {
     if (actions.isEmpty()) return
     var internalExpanded by remember { mutableStateOf(false) }
@@ -72,11 +73,15 @@ fun TsuyomiOverflowMenu(
         (LocalWindowInfo.current.containerSize.height.toDp() - 96.dp).coerceAtLeast(48.dp)
     }
     Box(modifier) {
-        TsuyomiIconButton(
-            imageVector = triggerIcon,
-            contentDescription = contentDescription,
-            onClick = { setExpanded(true) },
-        )
+        if (trigger == null) {
+            TsuyomiIconButton(
+                imageVector = triggerIcon,
+                contentDescription = contentDescription,
+                onClick = { setExpanded(true) },
+            )
+        } else {
+            trigger { setExpanded(true) }
+        }
         DropdownMenu(
             expanded = isExpanded,
             onDismissRequest = {
@@ -176,16 +181,26 @@ fun TsuyomiOverflowMenu(
                             )
                         }
                     },
-                    trailingIcon = if (action.menu.isNotEmpty()) {
-                        {
-                            Icon(
-                                imageVector = TsuyomiIcons.Next,
-                                contentDescription = null,
-                                tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                            )
+                    trailingIcon = when {
+                        action.selected == true -> {
+                            {
+                                Icon(
+                                    imageVector = TsuyomiIcons.Selected,
+                                    contentDescription = null,
+                                    tint = MaterialTheme.colorScheme.primary,
+                                )
+                            }
                         }
-                    } else {
-                        null
+                        action.menu.isNotEmpty() -> {
+                            {
+                                Icon(
+                                    imageVector = TsuyomiIcons.Next,
+                                    contentDescription = null,
+                                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
+                            }
+                        }
+                        else -> null
                     },
                     enabled = action.enabled,
                     modifier = Modifier.semantics { action.selected?.let { selected = it } },

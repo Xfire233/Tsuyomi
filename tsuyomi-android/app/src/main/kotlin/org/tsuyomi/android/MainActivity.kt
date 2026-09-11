@@ -56,6 +56,7 @@ import org.tsuyomi.core.ui.components.AppScaffold
 import org.tsuyomi.core.ui.components.TsuyomiNavigation
 import org.tsuyomi.core.ui.components.TsuyomiTopBar
 import org.tsuyomi.core.ui.components.TsuyomiTopBarAction
+import org.tsuyomi.core.ui.components.TsuyomiTopBarTitleMenu
 import org.tsuyomi.core.ui.components.TsuyomiOverflowAction
 import org.tsuyomi.core.ui.icons.TsuyomiIcons
 import org.tsuyomi.core.ui.layout.TsuyomiWindowSize
@@ -307,6 +308,8 @@ internal fun TsuyomiApp(
     }
     val sourceHomeContent = sourceOwner.flow.homeState as? SourceHomeViewState.Content
     val sourceHomeSourceName = activeSourcePackage?.manifest?.displayName.orEmpty()
+    val sourceHomeSources = sourceOwner.installer.trustedInstalledPackages
+    var sourceSwitchUnavailable by remember(currentRoute) { mutableStateOf(false) }
     val isRoot = currentRoute in setOf(Routes.Library, Routes.Browse, Routes.More)
     val settingsDependencies = remember(environment, controller, transferCoordinator, readerPreferences, application) {
         SettingsRouteDependencies(
@@ -468,6 +471,38 @@ internal fun TsuyomiApp(
                         TsuyomiTopBar(
                             title = sourceHomeContent?.title?.takeIf(String::isNotBlank)
                                 ?: sourceHomeSourceName.ifBlank { stringResource(R.string.title_source_home_standard_fallback) },
+                            subtitle = if (sourceSwitchUnavailable) {
+                                stringResource(R.string.source_home_switch_unavailable)
+                            } else {
+                                null
+                            },
+                            titleMenu = sourceHomeSources.takeIf { it.size > 1 }?.let { sources ->
+                                TsuyomiTopBarTitleMenu(
+                                    contentDescription = stringResource(R.string.source_home_switch_sources),
+                                    panelTitle = stringResource(R.string.source_home_switch_sources_title),
+                                    testTag = "source-home-switcher",
+                                    actions = sources.map { source ->
+                                        TsuyomiOverflowAction(
+                                            label = if (source.manifest.capabilities.home.enabled) {
+                                                source.manifest.displayName
+                                            } else {
+                                                stringResource(
+                                                    R.string.source_home_switch_search_only,
+                                                    source.manifest.displayName,
+                                                )
+                                            },
+                                            selected = source.manifest.sourceId == activeSourcePackage?.manifest?.sourceId,
+                                            onClick = {
+                                                scope.launch {
+                                                    sourceSwitchUnavailable = sourceOwner.switchSourceHome(
+                                                        source.manifest.sourceId.value,
+                                                    ) == SourceHomeSwitchResult.UNAVAILABLE
+                                                }
+                                            },
+                                        )
+                                    },
+                                )
+                            },
                             onNavigateUp = {
                                 if (!sourceOwner.flow.home.navigateBackFromFeature()) navController.navigateUp()
                             },

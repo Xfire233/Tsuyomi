@@ -23,9 +23,11 @@ The manifest's signature metadata is therefore signed but the detached signature
 
 A publisher key is trusted only through current or previously authenticated root-signed repository metadata, a user-added publisher key, or one explicit local-import confirmation. Trust is recorded by public-key fingerprint and key ID, not a mutable display name. A production repository root is explicit application configuration; no fixture or local key is a production fallback.
 
+User-added key material establishes only signature verification. Executing a user-added package additionally requires one durable explicit grant bound to its exact `(sourceId, publisherKeyId, publisher fingerprint, complete archive SHA-256)`. An exact grant neither trusts another package under the same key nor authorizes another source. The host preserves the publisher identity pin across uninstall, so a missing active archive cannot be used to launder a same-source publisher takeover.
+
 A root-signed catalog revocation for a publisher fingerprint or complete HXP archive SHA-256 disables affected installed packages and rejects new installs/updates. Current metadata is required to authorize an installation. Expired cached metadata may retain already authenticated identity and revocation state for installed packages, but cannot authorize a new download.
 
-Repository updates must retain their publisher key ID and strictly increase the installed semantic version. The sole key-change exception is an exact root-authorized `legacyMigration` entry whose prior publisher fingerprint and archive digest match the active package, followed by a separate explicit migration confirmation. A bare key-ID change and a fixture-key cross-signature are not migration authority. Local import behavior remains distinct.
+Repository updates must retain their publisher key ID and strictly increase the installed semantic version. The sole key-change exception is an exact built-in-official-root-authorized `legacyMigration` entry whose prior publisher fingerprint and archive digest match the active package, followed by a separate explicit migration confirmation. A bare key-ID change, fixture-key cross-signature or user-added repository root is not migration authority. Local import behavior remains distinct.
 
 ## Updates, rollback, and grants
 

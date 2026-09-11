@@ -1,0 +1,10 @@
+{
+  "valid": "https://publisher.example/extensions/index-v1.json#repositoryId=org.example.extensions&keyId=example-root-key&publicKey=11qYAYKxCrfVS/7TyWQHOg7hcvPapiMlrwIaaPcHURo=",
+  "invalid": [
+    "http://publisher.example/extensions/index-v1.json#repositoryId=org.example.extensions&keyId=example-root-key&publicKey=11qYAYKxCrfVS/7TyWQHOg7hcvPapiMlrwIaaPcHURo=",
+    "https://publisher.example/extensions/index-v1.json#keyId=example-root-key&repositoryId=org.example.extensions&publicKey=11qYAYKxCrfVS/7TyWQHOg7hcvPapiMlrwIaaPcHURo=",
+    "https://publisher.example/extensions/index-v1.json#repositoryId=org.example.extensions&keyId=example-root-key&publicKey=11qYAYKxCrfVS%2F7TyWQHOg7hcvPapiMlrwIaaPcHURo%3D",
+    "https://publisher.example/extensions/index-v1.json#repositoryId=org.example.extensions&keyId=example-root-key&publicKey=11qYAYKxCrfVS/7TyWQHOg7hcvPapiMlrwIaaPcHURo=&repositoryId=org.attacker.extensions",
+    "https://publisher.example/extensions/index-v1.json#repositoryId=org.example.extensions&keyId=example-root-key&publicKey=not-a-raw-ed25519-key"
+  ]
+}

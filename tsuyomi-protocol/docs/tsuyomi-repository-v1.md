@@ -44,6 +44,8 @@ The catalog binds a download to its source ID, version, archive size and digest,
 
 `revocations.publisherFingerprints` and `revocations.packageDigests` are root-signed, unique, bounded lists. A valid current or previously authenticated catalog revocation disables affected installed packages and rejects new packages. A missing or stale catalog alone does not disable an otherwise valid installed package.
 
+An explicitly configured official root's authenticated revocation remains effective even when the affected publisher is no longer listed. Hosts must propagate that authority through composed resolvers; filtering only by a currently resolvable publisher must not revive an already-revoked active session.
+
 Repository packages must strictly increase the installed semantic version. Equal versions, rollbacks, and any repository downgrade override are rejected. A publisher key change is rejected unless the root-signed target package has `legacyMigration` whose `fromPublisherFingerprint` and `fromPackageSha256` exactly match the active archive. The host still requires an explicit, separate migration confirmation at approval. This migration mechanism is not a publisher cross-signature and does not change local-import rules.
 
 ## Transport and cache
@@ -55,3 +57,49 @@ The durable cache first fsyncs an authenticated recovery envelope, then appends 
 ## Fixtures and conformance
 
 `fixtures/repository/valid-catalog.json` and its matching `fixture-root-key.json` are deterministic injected test data only. They are not a publication channel and do not represent an official index, release, or production root. Conformance covers schema shape, duplicate identities, expiry and sequence policy, key/digest revocation, digest and manifest binding, rollback/equivocation rejection, and explicit root-authorized legacy migration.
+
+## User-added subscription bootstrap
+
+A user-added repository is discovered only through one bounded HTTPS link. The existing
+`tsuyomi-repository` v1 catalog envelope and schema are unchanged; the fragment is bootstrap
+metadata and is removed before every network fetch:
+
+```text
+https://publisher.example/extensions/index-v1.json#repositoryId=org.example.extensions&keyId=example-root-key&publicKey=<canonical-base64-raw-ed25519-key>
+```
+
+The link is at most 4,512 ASCII characters. Its fragment has exactly the ordered fields shown,
+with no percent encoding, duplicate fields, unknown fields or alternate base64 encoding.
+`repositoryId` uses the catalog source-ID grammar, `keyId` uses the catalog key-ID grammar, and
+`publicKey` is exactly 32 raw Ed25519 bytes in canonical standard base64. Hosts parse and display
+the root fingerprint locally; parsing performs no network I/O. Only the HTTPS portion before `#`
+is passed to the existing bounded catalog transport.
+
+The user-visible confirmation makes the exact `(repositoryId, indexUrl, keyId, root fingerprint)`
+durable in caller-provided no-backup storage. A repository ID, index URL, or root key may not be
+rebound to another identity, including after removal. Disable and removal retain the authenticated
+catalog cache, high-water floor and signed revocations; re-adding the identical root reuses them.
+A removed or disabled root may continue to supply previously authenticated key identity and
+revocations for an installed archive, but it cannot be selected to fetch or authorize a new
+catalog package.
+
+Roots, publishers and executable-package approval are separate authorities. A link root is always
+`USER_ADDED`: publishers in its valid catalog are `USER_ADDED`, never official, even if their
+names or key IDs resemble official values. A built-in official identity takes precedence over a
+built-in test identity, and either takes precedence over user-added declarations for that key ID.
+User-added material or revocations cannot shadow those pinned identities. Within the selected trust
+tier, different raw keys for one ID fail closed. Identical user-added material may be shared by a
+local grant and declaring repositories; their scoped revocations apply to that declared identity.
+Scoped checks preserve official root authority recursively; legacy unscoped consumers fail closed. A
+user-added root cannot carry `legacyMigration`;
+only the built-in official root may authorize that exact exception. A package still requires its
+own valid HXP signature, catalog byte binding, compatibility and revocation checks.
+
+For a user-added publisher, signing key material permits verification but not execution. A host
+persists an explicit exact grant for `(sourceId, publisherKeyId, publisher fingerprint, archive
+SHA-256)` after visible package consent. The grant does not authorize another archive, source or
+publisher. Hosts preserve the source publisher pin across uninstall; a different publisher for the
+same source is rejected unless the built-in official root's separately authenticated exact
+`legacyMigration` is approved and activated. A local HXP reveals no public key: an untrusted,
+bounded manifest key-ID extraction is only a key-entry label, and the user-entered raw public key
+must cryptographically verify the complete archive before consent.

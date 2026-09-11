@@ -45,6 +45,11 @@ for (const { label, schemaPath, fixturePath } of [
     schemaPath: '../schemas/tsuyomi-repository-v1.schema.json',
     fixturePath: '../fixtures/repository/valid-catalog.json',
   },
+  {
+    label: 'tsuyomi repository subscription link v1',
+    schemaPath: '../schemas/tsuyomi-repository-subscription-link-v1.schema.json',
+    fixturePath: '../fixtures/repository/valid-subscription-link.json',
+  },
 ]) {
   test(`${label} accepts its valid fixture`, async () => {
     const ajv = createAjv();

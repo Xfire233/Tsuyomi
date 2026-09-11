@@ -55,6 +55,7 @@ class HxpRemoteContractVerificationTest {
                 manifest,
                 verified.packageSha256,
                 verified.publisherFingerprint,
+                verified.publisherTrust,
                 verified.archiveBytes,
                 verified.readVerifiedEntryModule(),
             )

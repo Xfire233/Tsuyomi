@@ -166,6 +166,16 @@ internal enum class SourceSessionOpenResult {
     UNAVAILABLE,
 }
 
+internal class PreparedSourceSession internal constructor(
+    internal val owner: SourceSessionOwner,
+    internal val packageInfo: VerifiedHxpPackage,
+    internal val expectedPackageSha256: String?,
+    internal val expectedGeneration: Long,
+    internal val client: SourceFlowSession,
+) {
+    internal var consumed = false
+}
+
 
 internal class SourceSessionOwner(
     val directActionTokens: DirectActionTokenRegistry,
@@ -222,10 +232,71 @@ internal class SourceSessionOwner(
         return if (packageChanged) SourceSessionOpenResult.PACKAGE_CHANGED else SourceSessionOpenResult.OPENED
     }
 
+    suspend fun prepare(packageInfo: VerifiedHxpPackage): PreparedSourceSession? {
+        if (!isPackageTrusted(packageInfo)) return null
+        val (expectedPackageSha256, expectedGeneration) = synchronized(lock) {
+            checkOpen()
+            activePackage?.packageSha256 to openGeneration
+        }
+        val preparedClient = openSession(packageInfo)
+        val retained = synchronized(lock) { !closed && isPackageTrusted(packageInfo) }
+        if (!retained) {
+            preparedClient.close()
+            synchronized(lock) { checkOpen() }
+            return null
+        }
+        return PreparedSourceSession(
+            owner = this,
+            packageInfo = packageInfo,
+            expectedPackageSha256 = expectedPackageSha256,
+            expectedGeneration = expectedGeneration,
+            client = preparedClient,
+        )
+    }
+
+    fun commitPrepared(prepared: PreparedSourceSession): Boolean {
+        val committed: Pair<SourceFlowSession?, Boolean>? = synchronized(lock) {
+            check(prepared.owner === this) { "Prepared session belongs to another owner" }
+            checkOpen()
+            if (
+                prepared.consumed ||
+                !isPackageTrusted(prepared.packageInfo) ||
+                activePackage?.packageSha256 != prepared.expectedPackageSha256 ||
+                openGeneration != prepared.expectedGeneration
+            ) {
+                null
+            } else {
+                prepared.consumed = true
+                openGeneration += 1
+                val previous = client
+                client = prepared.client
+                activePackage = prepared.packageInfo
+                val changed = statePackageSha256 != prepared.packageInfo.packageSha256
+                statePackageSha256 = prepared.packageInfo.packageSha256
+                previous to changed
+            }
+        }
+        val (previousClient, _) = committed ?: return false
+        previousClient?.close()
+        return true
+    }
+
+    fun discardPrepared(prepared: PreparedSourceSession) {
+        val client = synchronized(lock) {
+            check(prepared.owner === this) { "Prepared session belongs to another owner" }
+            if (prepared.consumed) null else {
+                prepared.consumed = true
+                prepared.client
+            }
+        }
+        client?.close()
+    }
+
     fun active(): ActiveSourceSession? = synchronized(lock) {
         checkOpen()
         activePackage?.takeIf(isPackageTrusted)?.let { ActiveSourceSession(it, openGeneration) }
     }
+
 
     fun requireClient(): SourceFlowSession = requireClientOrNull() ?: throw SourceException(
         code = SourceErrorCode.EXTENSION_RUNTIME_FAILURE,
@@ -244,6 +315,22 @@ internal class SourceSessionOwner(
         } ?: return null
         closeActiveClient()
         return open(packageInfo)
+    }
+
+    /** Invalidates pending preparations without permanently closing the reusable session owner. */
+    fun removeSource(sourceId: String): Boolean {
+        val removed = synchronized(lock) {
+            checkOpen()
+            openGeneration += 1
+            if (activePackage?.manifest?.sourceId?.value != sourceId) return false
+            val previous = client
+            client = null
+            activePackage = null
+            statePackageSha256 = null
+            previous
+        }
+        removed?.close()
+        return true
     }
 
     private fun closeActiveClient() {

@@ -172,9 +172,16 @@ data class PublisherKey(
 }
 
 interface PublisherKeyResolver {
+    /** Only explicitly configured official repository roots may revoke without a publisher listing. */
+    val hasGlobalRevocationAuthority: Boolean get() = false
     fun resolve(keyId: String): PublisherKey?
     fun isRevokedFingerprint(fingerprint: String): Boolean
     fun isRevokedPackage(packageSha256: String): Boolean
+
+    /** Scoped overloads preserve publisher provenance and explicitly configured root authority. */
+    fun isRevokedPublisher(keyId: String, fingerprint: String): Boolean = isRevokedFingerprint(fingerprint)
+    fun isRevokedPackage(packageSha256: String, keyId: String, fingerprint: String): Boolean =
+        isRevokedPackage(packageSha256)
 }
 
 class InMemoryPublisherKeyStore(keys: Iterable<PublisherKey>) : PublisherKeyResolver {
@@ -227,6 +234,8 @@ class VerifiedHxpPackage(
     val manifest: HxpManifest,
     val packageSha256: String,
     val publisherFingerprint: String,
+    /** Origin classification comes from the resolver, never from a package manifest. */
+    val publisherTrust: PublisherTrust,
     archiveBytes: ByteArray,
     entryModuleBytes: ByteArray,
 ) {
