@@ -119,7 +119,7 @@ python ../tools/android_api29.py --repo-root .. --base $base --head HEAD --mode 
 
 共享 profile 固定 `system-images;android-29;default;x86_64`、`pixel_2`、`swiftshader`、1080×2400/420dpi、font scale 1.0、portrait（rotation 0）和 animation 0；CLI 的默认 `--mode` 是 `low`，但本地 runner 在接触 SDK/AVD/Gradle 前就拒绝默认或显式 `low`，只接受显式 `--mode high`；`--mode ci` 仅保留给 `GITHUB_ACTIONS=true` 的 hosted execution。`--prepare-only` 仅允许 AVD 生命周期证据，拒绝 `--build` 与 focused flags。`environment.json` 标明 run、mode、scope、`full_gate`、planner base/head/fallback/reasons、resolved head/worktree overlay、已解析 profile/AVD、host、SDK packages/revisions、tool versions、task selection、logs、exit/failure，以及 `webview_dumpsys`、system fingerprint、resolved device settings 和 `timings_seconds.precompile`、`timings_seconds.emulator_prepare`、`timings_seconds.instrumentation`（prepare-only 不含）与 `timings_seconds.total`；同一 run 另保存 emulator/adb/build/instrumentation logs 与对应的 WebView、system-fingerprint、device-settings 文件。
 
-仅在出现明确的 Windows 主机差异且 WSL2 可用 KVM 时，才使用 Linux；把 checkout 与 SDK 放在 Linux 文件系统而非 `/mnt/c`，仍运行同一个 runner/profile：
+只有本地通过、hosted 失败的证据确认了实质性主机差异，且 Windows 原生配置对齐、输入固定与同步修复均无法解决时，才把 WSL2 作为最后手段；还必须具备可用 KVM。把 checkout 与 SDK 放在 Linux 文件系统而非 `/mnt/c`，仍运行同一个 runner/profile：
 
 ```bash
 export ANDROID_SDK_ROOT="$HOME/Android/Sdk"

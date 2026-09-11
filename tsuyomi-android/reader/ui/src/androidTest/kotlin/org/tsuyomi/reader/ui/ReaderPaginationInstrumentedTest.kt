@@ -409,8 +409,11 @@ class ReaderPaginationInstrumentedTest {
             }
         }
 
-        composeRule.onNodeWithText("下一章").performClick()
-        composeRule.onNodeWithText("下一章").performClick()
+        composeRule.onNodeWithText("最终章完整显示。").assertIsDisplayed()
+        val content = composeRule.onNodeWithTag("reader-content-surface")
+        content.performTouchInput { click(Offset(width * 0.9f, center.y)) }
+        composeRule.runOnIdle { assertEquals(listOf(finalChapter.chapterId), completed) }
+        content.performTouchInput { click(Offset(width * 0.9f, center.y)) }
 
         composeRule.runOnIdle { assertEquals(listOf(finalChapter.chapterId), completed) }
     }
