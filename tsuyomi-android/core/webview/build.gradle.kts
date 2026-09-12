@@ -10,6 +10,7 @@ android {
 }
 
 dependencies {
+    implementation(project(":core:network"))
     implementation(project(":core:security"))
     implementation(project(":shared:source-contract"))
     implementation(libs.kotlinx.coroutines.android)

@@ -33,14 +33,12 @@ data class DetailCollectionDestination(
 @Composable
 fun BookDestinationMenu(
     readLater: Boolean,
-    shortcutPinned: Boolean,
     collections: List<DetailCollectionDestination>,
     remoteTargets: List<RemoteTarget>,
     selectedRemoteTargetId: String?,
     loadingRemoteTargets: Boolean,
     websiteGroupingEnabled: Boolean,
     onToggleReadLater: () -> Unit,
-    onToggleShortcut: () -> Unit,
     onToggleCollection: (String) -> Unit,
     onApplyWebsite: (String) -> Unit,
     onDismiss: () -> Unit,
@@ -58,28 +56,6 @@ fun BookDestinationMenu(
             onDismiss()
         },
     )
-    HorizontalDivider()
-    DestinationSectionLabel("加入其它位置")
-    DestinationMenuItem(
-        label = "快捷书架",
-        icon = TsuyomiIcons.Shelf,
-        selected = shortcutPinned,
-        onClick = {
-            onToggleShortcut()
-            onDismiss()
-        },
-    )
-    collections.forEach { destination ->
-        DestinationMenuItem(
-            label = destination.label,
-            icon = TsuyomiIcons.Folder,
-            selected = destination.selected,
-            onClick = {
-                onToggleCollection(destination.id)
-                onDismiss()
-            },
-        )
-    }
     HorizontalDivider()
     DestinationSectionLabel("网站收藏")
     when {
@@ -119,6 +95,19 @@ fun BookDestinationMenu(
                 },
             )
         }
+    }
+    HorizontalDivider()
+    DestinationSectionLabel("本地收藏夹")
+    collections.forEach { destination ->
+        DestinationMenuItem(
+            label = destination.label,
+            icon = TsuyomiIcons.Folder,
+            selected = destination.selected,
+            onClick = {
+                onToggleCollection(destination.id)
+                onDismiss()
+            },
+        )
     }
 }
 

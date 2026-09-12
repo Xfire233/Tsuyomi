@@ -8,8 +8,10 @@ package org.tsuyomi.feature.library
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.width
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
@@ -35,8 +37,10 @@ import androidx.test.ext.junit.runners.AndroidJUnit4
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Rule
+import kotlin.math.abs
 import org.junit.Test
 import org.junit.runner.RunWith
+import java.time.Instant
 import org.tsuyomi.core.display.ColorSchemePreference
 import org.tsuyomi.core.display.DisplayDecisionReason
 import org.tsuyomi.core.display.DisplayEnvironment
@@ -46,10 +50,13 @@ import org.tsuyomi.core.display.DisplayPreferences
 import org.tsuyomi.core.display.DisplayProfile
 import org.tsuyomi.core.display.MotionPolicy
 import org.tsuyomi.core.media.api.CoverUiState
+import org.tsuyomi.core.database.LibraryBook
+import org.tsuyomi.core.database.LibraryEntry
 import org.tsuyomi.core.media.api.FallbackSpec
 import org.tsuyomi.core.ui.icons.TsuyomiIcons
 import org.tsuyomi.core.ui.theme.TsuyomiTheme
 import org.tsuyomi.shared.model.BookIdentity
+import androidx.compose.ui.unit.dp
 import org.tsuyomi.shared.sourcecontract.RemoteTarget
 import org.tsuyomi.shared.sourcecontract.SourceBookSummary
 
@@ -59,8 +66,7 @@ class RemoteLibraryScreenInstrumentedTest {
     val composeRule = createComposeRule()
 
     @Test
-    fun groupedMirrorUsesFolderFirstSharedLibrarySurfaceAndPinAction() {
-        var pinned: Boolean? = null
+    fun groupedMirrorUsesFolderFirstSharedLibrarySurfaceWithoutPinAction() {
         var openedTarget: String? = null
         composeRule.setContent {
             DisplayEnvironmentProvider(environment) {
@@ -84,8 +90,6 @@ class RemoteLibraryScreenInstrumentedTest {
                         onOpenBook = {},
                         targets = targets,
                         groupingEnabled = true,
-                        mirrorPinned = false,
-                        onToggleMirrorPinned = { pinned = true },
                         onOpenTarget = { openedTarget = it },
                     )
                 }
@@ -96,9 +100,7 @@ class RemoteLibraryScreenInstrumentedTest {
         assertEquals("favorites", openedTarget)
         composeRule.onNodeWithTag("library-book-$SourceId-1").assertIsDisplayed()
         composeRule.onNodeWithContentDescription("更多操作").performClick()
-        composeRule.onNodeWithText("固定到快捷书架").assertIsDisplayed().performClick()
-        assertEquals(true, pinned)
-        composeRule.onNodeWithContentDescription("更多操作").performClick()
+        composeRule.onNodeWithText("固定到快捷书架").assertDoesNotExist()
         composeRule.onNodeWithText("全部复制到本地书架").assertIsDisplayed()
     }
 
@@ -337,63 +339,46 @@ class RemoteLibraryScreenInstrumentedTest {
     }
 
     @Test
-    fun expandedShortcutGridUsesRootCoverGeometryAndCompactDragPreview() {
+    fun listDragPreviewRetainsLeadingCoverAndCurrentTextStack() {
         composeRule.setContent {
             DisplayEnvironmentProvider(environment) {
                 TsuyomiTheme(environment) {
-                    val coordinator = remember { LibraryDragCoordinator() }
-                    Box(Modifier.fillMaxSize().libraryDragOverlayHost(coordinator)) {
-                        ShortcutAllPage(
-                            shortcuts = listOf(
-                                ProductionShortcut("continue", "继续阅读", TsuyomiIcons.ContinueReading),
-                                ProductionShortcut("recent", "最近阅读", TsuyomiIcons.Recent),
-                                ProductionShortcut("read-later", "稍后再读", TsuyomiIcons.Bookmark),
-                            ),
-                            locked = false,
-                            onLocked = {},
-                            onCreate = {},
-                            onDismiss = {},
-                            onOpen = {},
-                            dragCoordinator = coordinator,
-                            selectionKind = null,
-                            selectedBookIds = emptySet(),
-                            selectedCollectionIds = emptySet(),
-                            onLongPressBook = {},
-                            onToggleBookSelection = {},
-                            onLongPressCollection = {},
-                            onToggleCollectionSelection = {},
-                            coverState = { CoverUiState.Fallback(FallbackSpec(it.book.title, it.book.identity.sourceId)) },
-                            modifier = Modifier.fillMaxSize(),
-                        )
-                        LibraryDragVisualOverlay(
-                            coordinator = coordinator,
-                            entries = emptyList(),
-                            shortcuts = listOf(ProductionShortcut("continue", "继续阅读", TsuyomiIcons.ContinueReading)),
-                            layout = LibraryLayout.GRID,
-                            coverState = { CoverUiState.Fallback(FallbackSpec(it.book.title, it.book.identity.sourceId)) },
-                            modifier = Modifier.fillMaxSize(),
-                        )
-                    }
+                    LibraryBookDragPreview(
+                        entries = listOf(shortcutEntry),
+                        layout = LibraryLayout.LIST,
+                        coverState = { CoverUiState.Fallback(FallbackSpec(it.book.title, it.book.identity.sourceId)) },
+                    )
                 }
             }
         }
 
-        val tile = composeRule.onNodeWithTag("library-shortcut-continue")
-        val tileBounds = tile.fetchSemanticsNode().boundsInRoot
-        assertTrue(kotlin.math.abs(tileBounds.width / tileBounds.height - 0.75f) < 0.02f)
+        composeRule.onNodeWithTag("library-drag-preview-list-content").assertIsDisplayed()
+        val coverBounds = composeRule.onNodeWithTag("library-drag-preview-list-cover", useUnmergedTree = true)
+            .fetchSemanticsNode().boundsInRoot
+        assertTrue(kotlin.math.abs(coverBounds.width / coverBounds.height - 0.75f) < 0.02f)
+        composeRule.onNodeWithText("快捷书籍").assertIsDisplayed()
+        composeRule.onNodeWithText("测试作者").assertIsDisplayed()
+        composeRule.onNodeWithText("未开始").assertIsDisplayed()
+    }
 
-        tile.performTouchInput {
-            down(center)
-            advanceEventTime(700)
+    @Test
+    fun compactDragPreviewRetainsHeadlineSupportingAndTrailingStructure() {
+        composeRule.setContent {
+            DisplayEnvironmentProvider(environment) {
+                TsuyomiTheme(environment) {
+                    LibraryBookDragPreview(
+                        entries = listOf(shortcutEntry),
+                        layout = LibraryLayout.COMPACT,
+                        coverState = { CoverUiState.Fallback(FallbackSpec(it.book.title, it.book.identity.sourceId)) },
+                    )
+                }
+            }
         }
-        composeRule.onNodeWithTag("library-drag-preview").assertDoesNotExist()
-        tile.performTouchInput { moveBy(Offset(80f, 0f), delayMillis = 120) }
-        composeRule.waitUntil(5_000) {
-            composeRule.onAllNodesWithTag("library-drag-preview").fetchSemanticsNodes().isNotEmpty()
-        }
-        val previewBounds = composeRule.onNodeWithTag("library-drag-preview").fetchSemanticsNode().boundsInRoot
-        assertTrue(previewBounds.width > previewBounds.height * 2f)
-        tile.performTouchInput { up() }
+
+        composeRule.onNodeWithTag("library-drag-preview-compact-content").assertIsDisplayed()
+        composeRule.onNodeWithText("快捷书籍").assertIsDisplayed()
+        composeRule.onNodeWithText("测试作者").assertIsDisplayed()
+        composeRule.onNodeWithText("★ 4").assertIsDisplayed()
     }
 
     @Test
@@ -425,8 +410,86 @@ class RemoteLibraryScreenInstrumentedTest {
         assertEquals(-1, coordinator.libraryInsertionIndex)
     }
 
+    @Test
+    fun mirrorGridCardKeepsBookGeometryAndBottomMetadataSlot() {
+        val coordinator = LibraryDragCoordinator()
+        val mirror = LibraryMirrorShortcut(
+            sourceId = SourceId,
+            targetId = null,
+            label = "Wenku8 超长网站来源名称用于验证省略",
+            count = 4,
+            frozen = false,
+        )
+        composeRule.setContent {
+            DisplayEnvironmentProvider(environment) {
+                TsuyomiTheme(environment) {
+                    Column(Modifier.width(180.dp)) {
+                        LibraryRootNodeGridCard(
+                            item = LibraryRootItem.Mirror(mirror),
+                            index = 0,
+                            selected = false,
+                            selectionActive = false,
+                            reorderEnabled = false,
+                            dragCoordinator = coordinator,
+                            onOpenCollection = {},
+                            onOpenMirror = {},
+                            onLongPressCollection = {},
+                            onToggleCollectionSelection = {},
+                        )
+                        LibraryBookGridCard(
+                            entry = shortcutEntry,
+                            update = null,
+                            index = 1,
+                            selected = false,
+                            selectionActive = false,
+                            selectedBookIds = emptySet(),
+                            dragCoordinator = coordinator,
+                            dragEnabled = false,
+                            canRemove = false,
+                            coverState = { CoverUiState.Fallback(FallbackSpec(it.book.title, it.book.identity.sourceId)) },
+                            onCoverVisibility = { _, _ -> },
+                            onOpenBook = {},
+                            onLongPressBook = {},
+                            onToggleBookSelection = {},
+                            onIgnoreUpdate = {},
+                        )
+                    }
+                }
+            }
+        }
+
+        val rootBounds = composeRule.onNodeWithTag("library-root-node-${libraryMirrorRootId(SourceId)}")
+            .fetchSemanticsNode().boundsInRoot
+        val bookBounds = composeRule.onNodeWithTag("library-book-$SourceId-shortcut-book")
+            .fetchSemanticsNode().boundsInRoot
+        val rootMetadataBounds = composeRule.onNodeWithTag("library-root-node-metadata-${libraryMirrorRootId(SourceId)}")
+            .fetchSemanticsNode().boundsInRoot
+        val bookMetadataBounds = composeRule.onNodeWithTag("library-book-metadata-$SourceId-shortcut-book")
+            .fetchSemanticsNode().boundsInRoot
+
+        assertTrue(abs(rootBounds.height - bookBounds.height) <= 1f)
+        assertTrue(abs(rootBounds.width - bookBounds.width) <= 1f)
+        assertTrue(rootMetadataBounds.bottom <= rootBounds.bottom)
+        assertTrue(abs((rootBounds.bottom - rootMetadataBounds.bottom) - (bookBounds.bottom - bookMetadataBounds.bottom)) <= 1f)
+        composeRule.onNodeWithText("网站收藏 · 4 本").assertIsDisplayed()
+    }
+
     private companion object {
         const val SourceId = "org.tsuyomi.wenku8"
+        val shortcutEntry = LibraryEntry(
+            book = LibraryBook(
+                identity = BookIdentity(SourceId, "shortcut-book"),
+                title = "快捷书籍",
+                addedAt = Instant.EPOCH,
+                metadataUpdatedAt = Instant.EPOCH,
+                author = "测试作者",
+            ),
+            libraryAddedAt = Instant.EPOCH,
+            rating = 4,
+            localTags = emptySet(),
+            sourceAvailable = true,
+            reconciliation = null,
+        )
         val books = listOf(
             SourceBookSummary(BookIdentity(SourceId, "1"), "文学少女", "野村美月", null, "https://example.com/1"),
             SourceBookSummary(BookIdentity(SourceId, "2"), "狼与香辛料", "支仓冻砂", null, "https://example.com/2"),

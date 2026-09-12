@@ -9,6 +9,12 @@ All notable changes use semantic versioning. Future Phase baselines use annotate
 
 ### Added
 
+- Official source discovery in Standard Browse: installed/available sections, independent plugin search, bounded rows and scrollable source/license/publisher details, explicit installation approval and manual updates; local HXP import remains available.
+- Root-signed static catalog admission, exact HXP binding, durable replay and revocation state, total download deadlines, and shared foreground/background trust reconciliation without removing installed archives or user data. Production keys and formal catalog/package publication are separately authorized; unconfigured builds report the repository as unavailable.
+- Persistent third-party repository subscriptions from canonical explicit-root links, with address/fingerprint confirmation, independent disable/removal, and retained revocation/antirollback history.
+- Verified local publisher-key input and separate non-official execution consent bound to the exact source, publisher and archive; cancelling or supplying the wrong key never authorizes execution. Built-in identities cannot be shadowed by a subscribed root.
+- Cancellable source uninstall and same-identity reinstall retaining host books, progress and credentials, while fencing requests and clearing obsolete source navigation. Cold start reconciles missing archives as dormant without repeatedly invalidating them.
+
 - Phase 4A Standard Library production cutover; accepted Atlas-era behavior was migrated into production and the prototype was retired:
   - Stationary platform-threshold long-press multi-selection across Grid, List, and Compact layouts.
   - `SelectionAppBar` with item count, select all, clear all, batch add/move to collections, and local deletion.
@@ -28,10 +34,20 @@ All notable changes use semantic versioning. Future Phase baselines use annotate
   - Root/group mirror shortcuts, frozen missing-target restoration and Library-native grid/list/compact rendering.
   - Operation-specific `ADD`/`MOVE`/`REMOVE` authorization, separately signed target discovery, cancellation-safe retry and process-resumable targeted ADD→MOVE.
   - Local-only COPY and ordinary `加入书架`, with website actions and persistent outcomes kept visually and semantically distinct.
-- `tsuyomi-transfer` v2 export with strict v1/v2 import, completed chapter IDs and expanded reader preferences.
+- `tsuyomi-transfer` v3 export with explicit local pin state and strict v1/v2/v3 import, preserving retained unpinned annotations without repinning during restoration.
+- Phase 4C local update inbox and optional scheduling:
+  - Signed, read-only `update-check-v2` and Wenku8 ordered-directory evidence; the first trusted baseline is silent, and ambiguous directory changes preserve pending updates.
+  - Room v9 sessions, fenced recovery, incremental inbox, bounded reports, per-book/source exclusions and exact-anchor handling/Undo.
+  - Default-off WorkManager schedules with persistent constraints and in-app progress/results/cancellation even when notifications are denied.
+  - Library-native cover grid, cover list and compact layouts; canonical Detail focus and direct reading also work for mirror-only books without creating local pins.
+  - Automatic handling requires durable completion of every admitted new chapter, never a locator or only the last chapter.
+- Dedicated local Library search with latest-wins metadata/folder matching, bounded recommendations and immediate explicit submission; source search remains separate.
 
 ### Changed
 
+- Repository downloads now detect truncated response bodies and recover once from transient EOF/connection resets within the original total deadline, discarding partial bytes and retaining all HTTPS, size, signature and approval checks.
+- Browse separates download, verification, repository-state and storage failures. Repository download errors retry the exact source/repository instead of opening a file picker; unavailable or removed repositories return to the catalog, and retries still require package approval.
+- Repository link inspection dismisses its input keyboard before root review; official signed revocations remain effective for active sessions even after the publisher leaves the current catalog.
 - Superseded numbered delivery `Gate` scopes with `Phase 0–5` (including 4A/4B/4C); reserved gate terminology for explicit admission, review, authorization and release checkpoints.
 - Restored Atlas resting shortcut tile dimensions (`80×116dp`), media field (`76dp`), single-line labels, and target-specific collection hover feedback.
 - Remote Library refresh now exits its working state after every terminal content, empty, login-required, verification-required, cancelled, or safe-error result instead of leaving refresh controls stuck loading.
@@ -41,12 +57,25 @@ All notable changes use semantic versioning. Future Phase baselines use annotate
 - Interface reset removes only display/reader/library-layout/introduction keys and preserves source-flow and import-digest state.
 - Retired the `:prototype:ui-atlas` module and duplicate review fixtures; production modules and Review Graph catalog version 9 are the only active UI path.
 - Active screenshot evidence now follows the review-policy profile set: retained E-ink previews and goldens stay frozen and unregistered until the explicit restoration pass.
-- API 29 regression coverage now keeps long-press movement in one pointer stream, bounds aggregate-limit fixtures without large allocations, and deterministically replaces in-flight WebView navigation before verified-page parsing.
+- API 29 regression coverage keeps long-press movement in one pointer stream, bounds aggregate-limit fixtures without large allocations, and waits for the exact fixture DOM before verified-page capture instead of treating a matching URL and 100% load progress as document readiness.
 - Detail exposes website MOVE and REMOVE only for books present in the durable website mirror; remote removal keeps local Library and reading data.
 - Remote mutation recovery now keeps operation and state from one reconciliation record, makes pre-acceptance cancelled ADD retryable, cancels complete acknowledged MOVE/REMOVE retry chains, and preserves operation-specific receipts across package restoration.
 - Remote target decoding now rejects malformed, duplicate, oversized, cross-source, unsupported, and invalid-parent collections as typed source failures instead of leaking model-constructor exceptions.
 - Transfer v2 now requires `completedChapterIds` to be an explicit bounded array of unique nonblank strings without tightening legacy v1 author/tag/shelf values.
+- Shared segmented selectors now constrain their dividers to intrinsic content height instead of consuming a weighted list's viewport.
 - Android CI planning now computes reverse transitive Gradle consumers and selects their existing unit, screenshot, and API 29 instrumentation families for shared production changes.
+- HIGH-mode local CI and hosted Android checks share one planner-driven disposable API 29 runner and profile, with isolated device ownership, failure artifacts and phase timings; LOW uses hosted CI only.
+- Accepted verified pages reopen their native source session before returning to the requesting route, preventing resumed directory reads from racing a closed session while preserving the parsed result without native replay.
+- Update-check reports preserve source error category, host stage and bounded safe diagnostic code instead of collapsing failures to an uninformative message; raw exception messages, URLs, credentials and response bodies remain excluded.
+- Detail's destination dropdown puts website actions before all local manual collections so long local lists cannot bury a frequent remote action; preserves immediate independent actions and the complete local list without extra menu levels.
+- Detail's SplitButton primary is text-only, with no redundant bookshelf icon or icon spacer; compact 12dp horizontal padding and content-sized fallback preserve full labels and the 48dp disclosure target.
+- Selectively migrated ordinary Standard text buttons to graduated Material3 ButtonShapes with restrained press corners, unchanged labels/touch geometry, and immediate visible feedback under static motion. Toggle/IconButton families and the global theme identity are unchanged; E-ink remains frozen.
+- Migrated existing Detail SplitButtonLayout and full-screen verification-toolbar ownership to the pinned graduated APIs without adding Expressive caller opt-ins or changing their business actions.
+- Upgraded the compatible Compose/Material3, AGP/Gradle, built-in Kotlin/KSP, Screenshot and compile-SDK toolchain while retaining minSdk29, targetSdk36 and JVM17.
+- Library now combines immediately applied filtering and sorting in one bounded panel, with separate sections, filter-only clearing and independent layout switching. System tabs preserve but do not expose the root filter.
+- Fixed Library tabs use a short destination-only fade on tap; initial rendering, data updates and reduced-motion navigation remain immediate, without a horizontal pager.
+- Detail's selected `已在书架` primary now requests the existing local-removal confirmation; its independent destination disclosure and working-state guard remain intact.
+- Room v10 separates the local pin from retained annotations. Confirmed removal clears the pin and direct manual memberships while preserving rating, tags, Read Later and reading state; Read Later remains independently accessible and re-add preserves metadata.
 
 ## [0.1.0] - 2026-08-09
 

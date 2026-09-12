@@ -61,7 +61,9 @@ import org.tsuyomi.core.ui.components.TsuyomiButton
 import org.tsuyomi.core.ui.components.TsuyomiStateKind
 import org.tsuyomi.core.ui.icons.TsuyomiIcons
 
-enum class SystemLibraryFilter { ALL, CONTINUE, RECENT, READ_LATER, UNREAD, DORMANT }
+enum class SystemLibraryFilter { ALL, CONTINUE, READ_LATER, UNREAD, DORMANT }
+
+enum class LibraryUpdateFilter { ALL, UPDATES_ONLY }
 
 enum class LibraryLayout {
     GRID,
@@ -72,6 +74,7 @@ enum class LibraryLayout {
 }
 
 enum class LibrarySortMode(val label: String) {
+    SMART("智能"),
     CUSTOM("自定义"),
     TITLE("书名"),
     ADDED("加入时间"),
@@ -92,13 +95,19 @@ data class LibraryUiState(
     val failure: String? = null,
     val refreshing: Boolean = false,
     val refreshFailure: String? = null,
-    val shortcutOrder: List<String> = emptyList(),
-    val shortcutLocked: Boolean = false,
+    val rootNodePlacements: List<LibraryRootNodePlacement> = emptyList(),
+    val collectionCounts: Map<String, Int> = emptyMap(),
     val filter: SystemLibraryFilter = SystemLibraryFilter.ALL,
+    val updateFilter: LibraryUpdateFilter = LibraryUpdateFilter.ALL,
+    val isRootProjection: Boolean = true,
+    val updates: Map<BookIdentity, org.tsuyomi.shared.librarydomain.UnresolvedUpdate> = emptyMap(),
+    val updateSession: org.tsuyomi.shared.librarydomain.UpdateSessionSummary? = null,
+    val updateOnlyEntries: List<LibraryEntry> = emptyList(),
     val layout: LibraryLayout = LibraryLayout.GRID,
-    val sortMode: LibrarySortMode = LibrarySortMode.CUSTOM,
+    val sortMode: LibrarySortMode = LibrarySortMode.SMART,
     val sortDescending: Boolean = false,
-    val sortOpen: Boolean = false,
+    val firstVisibleIndex: Int = 0,
+    val firstVisibleOffset: Int = 0,
     val selectionKind: LibrarySelectionKind? = null,
     val selectedBookIds: Set<BookIdentity> = emptySet(),
     val selectedCollectionIds: Set<String> = emptySet(),
@@ -106,13 +115,20 @@ data class LibraryUiState(
     val mirrorShortcuts: List<LibraryMirrorShortcut> = emptyList(),
     val websiteGroupingSourceIds: Set<String> = emptySet(),
 )
+
 fun LibraryUiState.projectedEntries(): List<LibraryEntry> {
-    val filtered = entries.filter(filter::accepts)
+    val candidates = if (isRootProjection && updateFilter == LibraryUpdateFilter.UPDATES_ONLY) {
+        entries + updateOnlyEntries
+    } else {
+        entries
+    }
+    val filtered = candidates
+        .filter(filter::accepts)
+        .filter { !isRootProjection || updateFilter == LibraryUpdateFilter.ALL || it.book.identity in updates }
     return when (sortMode) {
+        LibrarySortMode.SMART -> if (isRootProjection) smartOrder(filtered, updates) else filtered
         LibrarySortMode.CUSTOM -> when (filter) {
-            SystemLibraryFilter.CONTINUE,
-            SystemLibraryFilter.RECENT,
-            -> filtered.sortedByDescending { it.progress?.updatedAt }
+            SystemLibraryFilter.CONTINUE -> filtered.sortedByDescending { it.progress?.updatedAt }
             SystemLibraryFilter.UNREAD -> filtered.sortedByDescending { it.book.metadataUpdatedAt }
             SystemLibraryFilter.ALL,
             SystemLibraryFilter.READ_LATER,
@@ -129,12 +145,28 @@ fun LibraryUiState.projectedEntries(): List<LibraryEntry> {
     }
 }
 
+private fun smartOrder(
+    entries: List<LibraryEntry>,
+    updates: Map<BookIdentity, org.tsuyomi.shared.librarydomain.UnresolvedUpdate>,
+): List<LibraryEntry> {
+    val updated = entries.filter { it.book.identity in updates }
+    val lastRead = updated.filter { it.progress != null }.maxByOrNull { requireNotNull(it.progress).updatedAt }
+    val remainingUpdates = updated.filterNot { it === lastRead }.sortedWith(
+        compareByDescending<LibraryEntry> { entry ->
+            val update = requireNotNull(updates[entry.book.identity])
+            update.lastUpdatedDate?.let { raw ->
+                runCatching { java.time.LocalDate.parse(raw).toEpochDay() * 86_400_000L }.getOrNull()
+            } ?: update.detectedAt
+        }.thenByDescending { entry -> requireNotNull(updates[entry.book.identity]).detectedAt },
+    )
+    return listOfNotNull(lastRead) + remainingUpdates + entries.filterNot { it.book.identity in updates }
+}
+
 private fun SystemLibraryFilter.accepts(entry: LibraryEntry): Boolean = when (this) {
     SystemLibraryFilter.ALL -> true
     SystemLibraryFilter.CONTINUE -> entry.progress?.locator?.bookProgress?.let { it < 1.0 } ?: (entry.progress != null)
-    SystemLibraryFilter.RECENT -> entry.progress != null
     SystemLibraryFilter.READ_LATER -> entry.readLater
-    SystemLibraryFilter.UNREAD -> entry.book.hasUnreadUpdate
+    SystemLibraryFilter.UNREAD -> false
     SystemLibraryFilter.DORMANT -> !entry.sourceAvailable
 }
 
@@ -145,30 +177,36 @@ fun LibraryScreen(
     collections: List<LibraryCollection>,
     showNavigationNodes: Boolean,
     onOpenSystemNode: (SystemLibraryFilter) -> Unit,
+    modifier: Modifier = Modifier,
+    onSelectTab: (SystemLibraryFilter) -> Unit = onOpenSystemNode,
     onOpenCollection: (LibraryCollection) -> Unit,
     onOpenBook: (LibraryEntry) -> Unit,
-    modifier: Modifier = Modifier,
     onOpenMirror: (LibraryMirrorShortcut) -> Unit = {},
+    onOpenUpdateSettings: () -> Unit = {},
+    onCancelUpdateScan: () -> Unit = {},
+    onRefreshUpdates: () -> Unit = {},
+    onEditFilter: () -> Unit = {},
+    onClearFilter: () -> Unit = {},
     onCreateCollection: () -> Unit,
     onRetry: () -> Unit,
-    onDismissSort: () -> Unit,
-    onSelectSort: (LibrarySortMode) -> Unit,
-    onSelectSortDirection: (Boolean) -> Unit,
     onLongPressBook: (BookIdentity) -> Unit = {},
     onToggleBookSelection: (BookIdentity) -> Unit = {},
     onLongPressCollection: (String) -> Unit = {},
     onToggleCollectionSelection: (String) -> Unit = {},
     onDropBooks: (LibraryDragPayload, LibraryDropDestination) -> Unit = { _, _ -> },
     reorderEnabled: Boolean = false,
-    onShortcutLockedChanged: (Boolean) -> Unit = {},
     onDismissSelectionDialog: () -> Unit = {},
     onCreateCollectionFromSelection: (String) -> Unit = {},
     onAddSelectionToCollection: (String) -> Unit = {},
     onRemoveSelection: () -> Unit = {},
+    onViewportChanged: (LibraryViewport) -> Unit = {},
+    onViewportSettled: suspend (Int, Int) -> Unit = { _, _ -> },
     coverState: @Composable (LibraryEntry) -> CoverUiState = { entry ->
         CoverUiState.Fallback(FallbackSpec(entry.book.title, entry.book.identity.sourceId))
     },
     onCoverVisibility: (LibraryEntry, Boolean) -> Unit = { _, _ -> },
+    onIgnoreUpdate: suspend (org.tsuyomi.shared.librarydomain.UnresolvedUpdate) -> org.tsuyomi.shared.librarydomain.UpdateUndo? = { null },
+    onUndoUpdate: suspend (org.tsuyomi.shared.librarydomain.UpdateUndo) -> Unit = {},
 ) {
     when {
         state.loading -> StateView(TsuyomiStateKind.LOADING, stringResource(R.string.library_loading), modifier = modifier)
@@ -195,23 +233,28 @@ fun LibraryScreen(
             showNavigationNodes = showNavigationNodes,
             onOpenSystemNode = onOpenSystemNode,
             onOpenCollection = onOpenCollection,
+            onSelectTab = onSelectTab,
             onOpenBook = onOpenBook,
             onOpenMirror = onOpenMirror,
+            onOpenUpdateSettings = onOpenUpdateSettings,
+            onCancelUpdateScan = onCancelUpdateScan,
             coverState = coverState,
             onCoverVisibility = onCoverVisibility,
+            onRefreshUpdates = onRefreshUpdates,
+            onEditFilter = onEditFilter,
+            onClearFilter = onClearFilter,
             onCreateCollection = onCreateCollection,
             onRetry = onRetry,
-            onDismissSort = onDismissSort,
-            onSelectSort = onSelectSort,
-            onSelectSortDirection = onSelectSortDirection,
             onLongPressBook = onLongPressBook,
             onToggleBookSelection = onToggleBookSelection,
             onLongPressCollection = onLongPressCollection,
+            onUndoUpdate = onUndoUpdate,
             onToggleCollectionSelection = onToggleCollectionSelection,
-            onShortcutLockedChanged = onShortcutLockedChanged,
             onDropBooks = onDropBooks,
             reorderEnabled = reorderEnabled,
-            modifier = modifier,
+            onIgnoreUpdate = onIgnoreUpdate,
+            onViewportChanged = onViewportChanged,
+            onViewportSettled = onViewportSettled,
         )
     }
     LibrarySelectionDialogs(
@@ -336,7 +379,6 @@ private fun FrozenEInkLibraryContent(
         buildList {
             listOf(
                 SystemLibraryFilter.CONTINUE,
-                SystemLibraryFilter.RECENT,
                 SystemLibraryFilter.READ_LATER,
                 SystemLibraryFilter.DORMANT,
             ).forEach { filter ->
@@ -347,7 +389,6 @@ private fun FrozenEInkLibraryContent(
                         kind = stringResource(R.string.library_node_system),
                         icon = when (filter) {
                             SystemLibraryFilter.CONTINUE -> TsuyomiIcons.ContinueReading
-                            SystemLibraryFilter.RECENT -> TsuyomiIcons.Recent
                             SystemLibraryFilter.READ_LATER -> TsuyomiIcons.Bookmark
                             SystemLibraryFilter.DORMANT -> TsuyomiIcons.Dormant
                             SystemLibraryFilter.ALL, SystemLibraryFilter.UNREAD -> TsuyomiIcons.Shelf
@@ -572,7 +613,6 @@ private fun libraryEntryKey(entry: LibraryEntry): String =
 internal fun SystemLibraryFilter.label(): Int = when (this) {
     SystemLibraryFilter.ALL -> R.string.library_filter_all
     SystemLibraryFilter.CONTINUE -> R.string.library_filter_continue
-    SystemLibraryFilter.RECENT -> R.string.library_filter_recent
     SystemLibraryFilter.READ_LATER -> R.string.library_filter_read_later
     SystemLibraryFilter.UNREAD -> R.string.library_filter_unread
     SystemLibraryFilter.DORMANT -> R.string.library_filter_dormant

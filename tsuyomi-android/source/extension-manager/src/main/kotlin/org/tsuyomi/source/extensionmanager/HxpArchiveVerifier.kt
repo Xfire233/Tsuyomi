@@ -18,7 +18,7 @@ import org.erdtman.jcs.JsonCanonicalizer
 
 class HxpArchiveVerifier(
     private val publisherKeys: PublisherKeyResolver,
-    private val hostApiVersion: SemanticVersion = SemanticVersion.parse("1.1.0"),
+    private val hostApiVersion: SemanticVersion = SemanticVersion.parse("1.2.0"),
     private val limits: HxpArchiveLimits = HxpArchiveLimits(),
 ) {
     fun verify(file: File): VerifiedHxpPackage {
@@ -27,6 +27,80 @@ class HxpArchiveVerifier(
         }
         val archiveBytes = runCatching { file.readBytes() }
             .getOrElse { fail(HxpVerificationError.INVALID_ARCHIVE_ENTRY) }
+        return verify(archiveBytes)
+    }
+
+    /**
+     * Reads only an untrusted manifest key ID for key-entry UI. This performs bounded ZIP and
+     * manifest validation, but it neither verifies the archive signature nor establishes trust.
+     */
+    fun inspectPublisherKeyId(file: File): String {
+        if (!file.isFile || file.length() !in 1..limits.maxArchiveBytes) {
+            fail(HxpVerificationError.ARCHIVE_TOO_LARGE)
+        }
+        val archiveBytes = runCatching { file.readBytes() }
+            .getOrElse { fail(HxpVerificationError.INVALID_ARCHIVE_ENTRY) }
+        return inspectPublisherKeyId(archiveBytes)
+    }
+
+    private fun inspectPublisherKeyId(archiveBytes: ByteArray): String {
+        if (archiveBytes.size.toLong() !in 1..limits.maxArchiveBytes) fail(HxpVerificationError.ARCHIVE_TOO_LARGE)
+        return runCatching {
+            ZipFile.builder().setSeekableByteChannel(SeekableInMemoryByteChannel(archiveBytes)).get().use { zip ->
+                val names = mutableSetOf<String>()
+                var totalUncompressed = 0L
+                var manifestBytes: ByteArray? = null
+                val enumeration = zip.entries
+                while (enumeration.hasMoreElements()) {
+                    val entry = enumeration.nextElement()
+                    if (names.size >= limits.maxFileCount) fail(HxpVerificationError.TOO_MANY_FILES)
+                    if (!isSafeArchivePath(entry.name) || entry.isDirectory || !names.add(entry.name)) {
+                        fail(HxpVerificationError.INVALID_ARCHIVE_ENTRY)
+                    }
+                    if (entry.generalPurposeBit.usesEncryption()) fail(HxpVerificationError.ENCRYPTED_ENTRY)
+                    if (entry.isUnixSymlink) fail(HxpVerificationError.SYMLINK_ENTRY)
+                    if (entry.method != ZipEntry.STORED && entry.method != ZipEntry.DEFLATED) {
+                        fail(HxpVerificationError.UNSUPPORTED_COMPRESSION)
+                    }
+                    if (entry.size < 0 || entry.size > limits.maxFileBytes || entry.compressedSize < 0) {
+                        fail(HxpVerificationError.FILE_TOO_LARGE)
+                    }
+                    if (entry.size > 0 && entry.compressedSize == 0L ||
+                        entry.compressedSize > 0 && entry.size > entry.compressedSize * limits.maxCompressionRatio
+                    ) {
+                        fail(HxpVerificationError.COMPRESSION_RATIO_EXCEEDED)
+                    }
+                    totalUncompressed += entry.size
+                    if (totalUncompressed > limits.maxUncompressedBytes) fail(HxpVerificationError.ARCHIVE_TOO_LARGE)
+                    if (entry.name == MANIFEST) {
+                        manifestBytes = zip.getInputStream(entry).use { input ->
+                            val output = ByteArrayOutputStream(entry.size.toInt())
+                            val buffer = ByteArray(DEFAULT_BUFFER_SIZE)
+                            var total = 0L
+                            while (true) {
+                                val count = input.read(buffer)
+                                if (count < 0) break
+                                total += count
+                                if (total > entry.size || total > limits.maxFileBytes) fail(HxpVerificationError.FILE_TOO_LARGE)
+                                output.write(buffer, 0, count)
+                            }
+                            if (total != entry.size) fail(HxpVerificationError.INVALID_ARCHIVE_ENTRY)
+                            output.toByteArray()
+                        }
+                    }
+                }
+                HxpManifestParser.parse(manifestBytes ?: fail(HxpVerificationError.MISSING_REQUIRED_FILE), hostApiVersion)
+                    .manifest
+                    .publisherKeyId
+            }
+        }.getOrElse { error ->
+            if (error is HxpVerificationException) throw error
+            fail(HxpVerificationError.INVALID_ARCHIVE_ENTRY)
+        }
+    }
+
+    /** Re-verifies an already prepared archive against the resolver's current revocation snapshot. */
+    fun verify(archiveBytes: ByteArray): VerifiedHxpPackage {
         if (archiveBytes.size.toLong() !in 1..limits.maxArchiveBytes) fail(HxpVerificationError.ARCHIVE_TOO_LARGE)
         return runCatching { verifyArchive(archiveBytes) }
             .getOrElse { error ->
@@ -36,6 +110,7 @@ class HxpArchiveVerifier(
     }
 
     private fun verifyArchive(archiveBytes: ByteArray): VerifiedHxpPackage {
+        val packageSha256 = sha256(archiveBytes)
         ZipFile.builder().setSeekableByteChannel(SeekableInMemoryByteChannel(archiveBytes)).get().use { zip ->
             val entries = mutableMapOf<String, ByteArray>()
             var totalUncompressed = 0L
@@ -99,10 +174,10 @@ class HxpArchiveVerifier(
 
             val publisher = publisherKeys.resolve(manifest.publisherKeyId)
                 ?: fail(HxpVerificationError.UNKNOWN_PUBLISHER)
-            if (publisherKeys.isRevokedFingerprint(publisher.fingerprint)) {
+            if (publisherKeys.isRevokedPublisher(manifest.publisherKeyId, publisher.fingerprint)) {
                 fail(HxpVerificationError.REVOKED_PUBLISHER)
             }
-            if (publisherKeys.isRevokedPackage(manifest.contentDigest)) {
+            if (publisherKeys.isRevokedPackage(packageSha256, manifest.publisherKeyId, publisher.fingerprint)) {
                 fail(HxpVerificationError.REVOKED_PACKAGE)
             }
             val signedMessage = signatureMessage(parsed.canonicalBytes, manifest.contentDigest)
@@ -111,8 +186,9 @@ class HxpArchiveVerifier(
             }
             return VerifiedHxpPackage(
                 manifest = manifest,
-                packageSha256 = sha256(archiveBytes),
+                packageSha256 = packageSha256,
                 publisherFingerprint = publisher.fingerprint,
+                publisherTrust = publisher.trust,
                 archiveBytes = archiveBytes,
                 entryModuleBytes = entries.getValue(manifest.entry),
             )

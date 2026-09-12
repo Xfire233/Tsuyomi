@@ -11,9 +11,6 @@ import androidx.compose.ui.test.assertIsEnabled
 import androidx.compose.ui.test.junit4.v2.createComposeRule
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithText
-import androidx.compose.ui.test.performClick
-import androidx.compose.ui.test.performScrollTo
-import org.junit.Assert.assertEquals
 import org.junit.Rule
 import org.junit.Test
 import org.tsuyomi.core.display.ColorSchemePreference
@@ -50,18 +47,10 @@ class DisplaySettingsScreenTest {
     }
 
     @Test
-    fun interfaceResetRequiresConfirmationBeforeInvokingCanonicalAction() {
-        var resets = 0
-        render(
-            profile = DisplayProfile.STANDARD,
-            actions = actions(onReset = { resets++ }),
-        )
+    fun displayDoesNotExposeCanonicalReset() {
+        render(DisplayProfile.STANDARD)
 
-        composeRule.onNodeWithText("重置界面设置").performScrollTo().performClick()
-        assertEquals(0, resets)
-        composeRule.onNodeWithText("确认重置").performClick()
-
-        assertEquals(1, resets)
+        composeRule.onAllNodesWithText("重置界面与阅读偏好").assertCountEquals(0)
     }
 
     private fun render(
@@ -109,15 +98,6 @@ class DisplaySettingsScreenTest {
     )
 
 
-    private fun actions(onReset: () -> Unit) = DisplaySettingsActions(
-        onDisplayPreferenceChange = {},
-        onColorSchemePreferenceChange = {},
-        onDynamicColorEnabledChange = {},
-        onRefreshNow = {},
-        onRetryWrite = {},
-        onAcknowledgeWriteFailure = {},
-        onResetInterfacePreferences = onReset,
-    )
     private companion object {
         val noOpActions = DisplaySettingsActions(
             onDisplayPreferenceChange = {},
@@ -126,7 +106,6 @@ class DisplaySettingsScreenTest {
             onRefreshNow = {},
             onRetryWrite = {},
             onAcknowledgeWriteFailure = {},
-            onResetInterfacePreferences = {},
         )
     }
 }

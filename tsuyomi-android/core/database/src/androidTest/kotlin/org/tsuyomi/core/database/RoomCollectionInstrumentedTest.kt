@@ -87,6 +87,9 @@ class RoomCollectionInstrumentedTest {
         )
 
         assertEquals(listOf(matching), repository.collectionEntries("smart", Instant.EPOCH.plusSeconds(10)).map { it.book.identity })
+        assertTrue(repository.removeFromLibrary(matching))
+        assertTrue(repository.collectionEntries("smart", Instant.EPOCH.plusSeconds(10)).isEmpty())
+        assertTrue(repository.addToLibrary(LibraryBook(matching, "100% 奇幻", Instant.EPOCH, Instant.EPOCH)))
         repository.setLocalTags(matching, emptyList())
         assertTrue(repository.collectionEntries("smart", Instant.EPOCH.plusSeconds(10)).isEmpty())
     }

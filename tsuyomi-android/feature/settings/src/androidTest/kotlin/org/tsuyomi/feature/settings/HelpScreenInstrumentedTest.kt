@@ -6,6 +6,8 @@ package org.tsuyomi.feature.settings
 
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.ui.test.junit4.v2.createComposeRule
+import androidx.compose.ui.test.assertCountEquals
+import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
@@ -37,7 +39,6 @@ class HelpScreenInstrumentedTest {
                         onIntroductionsEnabledChanged = {},
                         onIntroductionSeen = { id, version -> seen = id to version },
                         onResetSeenVersions = {},
-                        onOpenDisplayReset = {},
                     )
                 }
             }
@@ -48,6 +49,25 @@ class HelpScreenInstrumentedTest {
         composeRule.onNodeWithText("知道了").performClick()
 
         assertEquals("website-mirror" to 1, seen)
+    }
+
+    @Test
+    fun helpDoesNotExposeInterfacePreferenceReset() {
+        composeRule.setContent {
+            DisplayEnvironmentProvider(standardEnvironment) {
+                MaterialTheme {
+                    HelpScreen(
+                        introductionsEnabled = true,
+                        seenVersions = emptySet(),
+                        onIntroductionsEnabledChanged = {},
+                        onIntroductionSeen = { _, _ -> },
+                        onResetSeenVersions = {},
+                    )
+                }
+            }
+        }
+
+        composeRule.onAllNodesWithText("重置界面与阅读偏好").assertCountEquals(0)
     }
 
     private companion object {

@@ -124,6 +124,7 @@ internal fun StandardBookDetailScreen(
     onSelectChapter: (SourceChapter) -> Unit,
     onContinueReading: (SourceChapter) -> Unit,
     onAddToLibrary: () -> Unit,
+    onRequestRemoveFromLibrary: () -> Unit,
     onRetry: () -> Unit,
     onUseOfflineCache: () -> Unit,
     onOpenVerification: () -> Unit,
@@ -137,6 +138,8 @@ internal fun StandardBookDetailScreen(
     onRetryMoveOnly: () -> Unit = {},
     onRetryRemoteReconciliation: () -> Unit = {},
     onAcknowledgeRemoteReconciliation: () -> Unit = {},
+    focusChapterId: String? = null,
+    onFocusHandled: () -> Unit = {},
 ) {
     Column(modifier.fillMaxSize()) {
         mutation?.let { DetailMutationBanner(it) }
@@ -183,6 +186,8 @@ internal fun StandardBookDetailScreen(
                 onSelectChapter = onSelectChapter,
                 onContinueReading = onContinueReading,
                 onAddToLibrary = onAddToLibrary,
+                onRequestRemoveFromLibrary = onRequestRemoveFromLibrary,
+                primaryActionEnabled = mutation?.phase != DetailMutationPhase.WORKING,
                 onOpenDestinations = onOpenDestinations,
                 destinationMenuExpanded = destinationMenuExpanded,
                 onDestinationMenuExpandedChange = onDestinationMenuExpandedChange,
@@ -190,6 +195,8 @@ internal fun StandardBookDetailScreen(
                 onRetryDirectory = onRetry,
                 onUseOfflineCache = onUseOfflineCache,
                 onOpenVerification = onOpenVerification,
+                focusChapterId = focusChapterId,
+                onFocusHandled = onFocusHandled,
                 modifier = Modifier.weight(1f),
             )
         }
@@ -240,6 +247,8 @@ private fun DetailContent(
     onSelectChapter: (SourceChapter) -> Unit,
     onContinueReading: (SourceChapter) -> Unit,
     onAddToLibrary: () -> Unit,
+    onRequestRemoveFromLibrary: () -> Unit,
+    primaryActionEnabled: Boolean,
     onOpenDestinations: () -> Unit,
     destinationMenuExpanded: Boolean,
     onDestinationMenuExpandedChange: (Boolean) -> Unit,
@@ -247,6 +256,8 @@ private fun DetailContent(
     onRetryDirectory: () -> Unit,
     onUseOfflineCache: () -> Unit,
     onOpenVerification: () -> Unit,
+    focusChapterId: String?,
+    onFocusHandled: () -> Unit,
     modifier: Modifier,
 ) {
     val listState = rememberLazyListState()
@@ -291,6 +302,36 @@ private fun DetailContent(
             expandedVolumeKeys = listOf(volumeGroups.first().key)
         }
     }
+    val focusVolumeKey = focusChapterId
+        ?.let { chapterId -> visibleChapters.firstOrNull { it.chapter.chapterId == chapterId } }
+        ?.chapter
+        ?.volumeTitle
+        .orEmpty()
+        .takeIf { key -> volumeGroups.any { it.key == key } }
+    LaunchedEffect(focusChapterId, focusVolumeKey) {
+        if (focusVolumeKey != null && focusVolumeKey !in expandedVolumeKeys) {
+            expandedVolumeKeys = expandedVolumeKeys + focusVolumeKey
+        }
+    }
+    val focusItemIndex = focusChapterId?.let { chapterId ->
+        val volumeIndex = volumeGroups.indexOfFirst { volume ->
+            volume.items.any { item -> item.chapter.chapterId == chapterId }
+        }
+        if (volumeIndex < 0 || volumeGroups[volumeIndex].key !in expandedVolumeKeys) {
+            null
+        } else {
+            val chapterIndex = volumeGroups[volumeIndex].items.indexOfFirst { item -> item.chapter.chapterId == chapterId }
+            4 + volumeGroups.take(volumeIndex).sumOf { volume ->
+                1 + if (volume.key in expandedVolumeKeys) volume.items.size else 0
+            } + 1 + chapterIndex
+        }
+    }
+    LaunchedEffect(focusChapterId, focusItemIndex) {
+        if (focusChapterId != null && focusItemIndex != null) {
+            listState.scrollToItem(focusItemIndex)
+            onFocusHandled()
+        }
+    }
     val continueChapter = allChapters.firstOrNull { it.chapterId == currentChapterId } ?: allChapters.firstOrNull()
 
     Box(modifier) {
@@ -306,6 +347,8 @@ private fun DetailContent(
                     onSetRating = onSetRating,
                     onSearchAuthor = onSearchAuthor,
                     onAddToLibrary = onAddToLibrary,
+                    onRequestRemoveFromLibrary = onRequestRemoveFromLibrary,
+                    primaryActionEnabled = primaryActionEnabled,
                     onOpenDestinations = onOpenDestinations,
                     destinationMenuExpanded = destinationMenuExpanded,
                     onDestinationMenuExpandedChange = onDestinationMenuExpandedChange,

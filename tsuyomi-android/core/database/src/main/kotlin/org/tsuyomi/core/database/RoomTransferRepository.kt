@@ -222,6 +222,9 @@ class RoomTransferRepository(private val database: TsuyomiDatabase) {
             val existing = library.book(incoming.identity)
             val accepted = existing == null || incoming.updatedAt > existing.metadataUpdatedAt
             val book = requireNotNull(if (accepted) incoming.toLibraryBook(plan.sourceCreatedAt) else existing)
+            require(incoming.localPin || incoming.shelfIds.isEmpty()) {
+                "Unpinned transfer books cannot have manual collection memberships"
+            }
             library.saveBook(book)
             val entryInserted = dao.insertLibraryEntry(
                 org.tsuyomi.core.database.room.LibraryEntryEntity(
@@ -231,8 +234,12 @@ class RoomTransferRepository(private val database: TsuyomiDatabase) {
                     (incoming.addedAt ?: plan.sourceCreatedAt).nano,
                     incoming.rating?.takeIf { it > 0.0 }?.toInt()?.coerceIn(1, 5),
                     incoming.readLater,
+                    locallyPinned = incoming.localPin,
                 ),
             )
+            if (entryInserted == -1L && incoming.localPin) {
+                dao.pinLibraryEntry(incoming.identity.sourceId, incoming.identity.remoteBookId)
+            }
             val incomingRating = incoming.rating
             if (entryInserted == -1L && accepted && incomingRating != null && incomingRating > 0.0) {
                 dao.updateRating(incoming.identity.sourceId, incoming.identity.remoteBookId, incomingRating.toInt().coerceIn(1, 5))
@@ -262,21 +269,23 @@ class RoomTransferRepository(private val database: TsuyomiDatabase) {
             incoming.completedChapterIds.sorted().forEach { chapterId ->
                 library.markChapterCompleted(incoming.identity, chapterId, plan.sourceCreatedAt)
             }
-            incoming.shelfIds.sorted().forEach { shelfId ->
-                if (dao.collection(shelfId)?.kind == CollectionKind.MANUAL) {
-                    val existingMemberships = dao.manualMemberships(shelfId)
-                    if (existingMemberships.none { it.sourceId == incoming.identity.sourceId && it.remoteBookId == incoming.identity.remoteBookId }) {
-                        val addedAt = incoming.addedAt ?: plan.sourceCreatedAt
-                        dao.insertManualMembership(
-                            ManualCollectionMembershipEntity(
-                                shelfId,
-                                incoming.identity.sourceId,
-                                incoming.identity.remoteBookId,
-                                addedAt.epochSecond,
-                                addedAt.nano,
-                                dao.nextManualMembershipOrder(shelfId),
-                            ),
-                        )
+            if (incoming.localPin) {
+                incoming.shelfIds.sorted().forEach { shelfId ->
+                    if (dao.collection(shelfId)?.kind == CollectionKind.MANUAL) {
+                        val existingMemberships = dao.manualMemberships(shelfId)
+                        if (existingMemberships.none { it.sourceId == incoming.identity.sourceId && it.remoteBookId == incoming.identity.remoteBookId }) {
+                            val addedAt = incoming.addedAt ?: plan.sourceCreatedAt
+                            dao.insertManualMembership(
+                                ManualCollectionMembershipEntity(
+                                    shelfId,
+                                    incoming.identity.sourceId,
+                                    incoming.identity.remoteBookId,
+                                    addedAt.epochSecond,
+                                    addedAt.nano,
+                                    dao.nextManualMembershipOrder(shelfId),
+                                ),
+                            )
+                        }
                     }
                 }
             }
@@ -343,6 +352,10 @@ class RoomTransferRepository(private val database: TsuyomiDatabase) {
                 val identity = BookIdentity(entry.sourceId, entry.remoteBookId)
                 val book = books[identity] ?: return@mapNotNull null
                 val domain = library.book(identity) ?: return@mapNotNull null
+                val shelfIds = memberships[identity].orEmpty().mapTo(sortedSetOf()) { it.collectionId }
+                require(entry.locallyPinned || shelfIds.isEmpty()) {
+                    "Unpinned library entries cannot have manual collection memberships"
+                }
                 TransferBook(
                     identity = identity,
                     title = domain.title,
@@ -352,9 +365,10 @@ class RoomTransferRepository(private val database: TsuyomiDatabase) {
                     status = domain.status ?: "unknown",
                     remoteTags = domain.remoteTags,
                     localTags = dao.localTags(identity.sourceId, identity.remoteBookId).mapTo(sortedSetOf()) { it.displayTag },
-                    shelfIds = memberships[identity].orEmpty().mapTo(sortedSetOf()) { it.collectionId },
+                    shelfIds = shelfIds,
                     rating = entry.rating?.toDouble(),
                     readLater = entry.readLater,
+                    localPin = entry.locallyPinned,
                     addedAt = Instant.ofEpochSecond(entry.addedAtEpochSecond, entry.addedAtNano.toLong()),
                     updatedAt = domain.metadataUpdatedAt,
                     progress = dao.progress(identity.sourceId, identity.remoteBookId)?.let { progress ->

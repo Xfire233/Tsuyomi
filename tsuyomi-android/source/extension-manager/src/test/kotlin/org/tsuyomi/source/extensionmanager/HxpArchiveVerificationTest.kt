@@ -110,6 +110,47 @@ class HxpArchiveVerificationTest {
     }
 
     @Test
+    fun updateCheckCapabilityIsSignedReadOnlyAndApprovalVisible() {
+        val updateCheck = JsonObject(
+            mapOf(
+                "version" to JsonPrimitive(2),
+                "origin" to JsonPrimitive("https://www.wenku8.net"),
+                "method" to JsonPrimitive("GET"),
+                "path" to JsonPrimitive("/modules/article/reader.php"),
+                "parameters" to JsonObject(
+                    mapOf("aid" to JsonObject(mapOf("kind" to JsonPrimitive("remoteBookId")))),
+                ),
+            ),
+        )
+        val fixture = signedFixture(updateCheck = updateCheck)
+        val verifier = HxpArchiveVerifier(InMemoryPublisherKeyStore(listOf(fixture.publisher)))
+        val verified = verifier.verify(fixture.writeToTemporaryFile())
+        assertEquals(2, verified.manifest.capabilities.updateCheck?.version)
+        assertEquals("aid", verified.manifest.capabilities.updateCheck?.policy?.parameters?.singleOrNull()?.name)
+        val prepared = newInstaller(Files.createTempDirectory("hxp-update-check").toFile(), verifier)
+            .prepare(fixture.writeToTemporaryFile())
+        assertEquals(true, "source-update:read" in prepared.addedCapabilities)
+
+        val invalid = signedFixture(
+            updateCheck = JsonObject(
+                mapOf(
+                    "version" to JsonPrimitive(2),
+                    "origin" to JsonPrimitive("https://www.wenku8.net"),
+                    "method" to JsonPrimitive("POST"),
+                    "path" to JsonPrimitive("/modules/article/reader.php"),
+                    "parameters" to JsonObject(
+                        mapOf("aid" to JsonObject(mapOf("kind" to JsonPrimitive("remoteBookId")))),
+                    ),
+                ),
+            ),
+        )
+        val failure = assertThrows(HxpVerificationException::class.java) {
+            HxpArchiveVerifier(InMemoryPublisherKeyStore(listOf(invalid.publisher))).verify(invalid.writeToTemporaryFile())
+        }
+        assertEquals(HxpVerificationError.CAPABILITY_POLICY_VIOLATION, failure.error)
+    }
+
+    @Test
     fun payloadMutationIsRejectedBeforeRuntimeEvaluation() {
         val fixture = signedFixture(payloadInArchive = "export const changed = true;".toByteArray())
         val error = assertThrows(HxpVerificationException::class.java) {
@@ -151,6 +192,14 @@ class HxpArchiveVerificationTest {
             HxpArchiveVerifier(revokedStore).verify(fixture.writeToTemporaryFile())
         }
         assertEquals(HxpVerificationError.REVOKED_PUBLISHER, revoked.error)
+
+        val packageStore = InMemoryPublisherKeyStore(listOf(fixture.publisher)).also {
+            it.revokePackage(sha256(fixture.bytes))
+        }
+        val packageRevoked = assertThrows(HxpVerificationException::class.java) {
+            HxpArchiveVerifier(packageStore).verify(fixture.writeToTemporaryFile())
+        }
+        assertEquals(HxpVerificationError.REVOKED_PACKAGE, packageRevoked.error)
     }
 
 

@@ -89,63 +89,35 @@ jobs:
       - name: Set up Gradle cache
         if: steps.plan.outputs.device_needed == 'true'
         uses: gradle/actions/setup-gradle@ed408507eac070d1f99cc633dbcf757c94c7933a
-      - name: Compile affected production instrumentation APKs
-        if: steps.plan.outputs.instrumentation_compile_tasks != ''
-        run: >-
-          ./gradlew --no-daemon --console=plain --dependency-verification strict
-          ${{ steps.plan.outputs.instrumentation_compile_tasks }}
       - name: Install API 29 emulator image
         if: steps.plan.outputs.device_needed == 'true'
         run: |
-          export ANDROID_AVD_HOME="$RUNNER_TEMP/tsuyomi-avd"
-          mkdir -p "$ANDROID_AVD_HOME"
-          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "platform-tools" "emulator" "system-images;android-29;default;x86_64"
-          echo no | "$ANDROID_HOME/cmdline-tools/latest/bin/avdmanager" create avd --force --name tsuyomi-ci-api29 --package "system-images;android-29;default;x86_64" --device pixel_2
-          "$ANDROID_HOME/emulator/emulator" -list-avds
+          image=$(python -c 'import json; print(json.load(open("../tools/android_api29_profile.json"))["system_image"])')
+          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "platform-tools" "emulator" "$image"
       - name: Enable KVM
         if: steps.plan.outputs.device_needed == 'true'
         run: |
           echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
           sudo udevadm control --reload-rules
           sudo udevadm trigger --name-match=kvm
-      - name: Start emulator
+      - name: Run shared API 29 verification
         if: steps.plan.outputs.device_needed == 'true'
-        run: |
-          export ANDROID_AVD_HOME="$RUNNER_TEMP/tsuyomi-avd"
-          ADB="$ANDROID_HOME/platform-tools/adb"
-          "$ANDROID_HOME/emulator/emulator" -avd tsuyomi-ci-api29 -no-window -no-audio -no-boot-anim -no-snapshot -gpu swiftshader_indirect > "$RUNNER_TEMP/emulator.log" 2>&1 &
-          emulator_pid=$!
-          "$ADB" start-server
-          booted=false
-          for attempt in {1..120}; do
-            if "$ADB" get-state >/dev/null 2>&1 && [ "$("$ADB" shell getprop sys.boot_completed 2>/dev/null | tr -d '\r')" = "1" ]; then
-              booted=true
-              break
-            fi
-            if ! kill -0 "$emulator_pid" 2>/dev/null; then
-              break
-            fi
-            sleep 2
-          done
-          if [ "$booted" != true ]; then
-            cat "$RUNNER_TEMP/emulator.log"
-            "$ADB" devices -l
-            kill "$emulator_pid" 2>/dev/null || true
-            exit 1
-          fi
-          "$ADB" shell wm size 1080x2400
-          "$ADB" shell wm density 420
-          "$ADB" shell wm size
-          "$ADB" shell wm density
-          "$ADB" shell settings put global window_animation_scale 0
-          "$ADB" shell settings put global transition_animation_scale 0
-          "$ADB" shell settings put global animator_duration_scale 0
-      - name: Run affected production API 29 instrumentation
-        if: steps.plan.outputs.instrumentation_tasks != ''
+        env:
+          CI_BASE: ${{ github.event.pull_request.base.sha || github.event.before }}
         run: >-
-          ./gradlew --no-daemon --console=plain --dependency-verification strict
-          --max-workers=1
-          ${{ steps.plan.outputs.instrumentation_tasks }}
+          python ../tools/android_api29.py --repo-root "$GITHUB_WORKSPACE"
+          --mode ci --base "$CI_BASE" --head "$GITHUB_SHA"
+      - name: Preserve API 29 diagnostics
+        if: always() && steps.plan.outputs.device_needed == 'true'
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: android-api29-diagnostics
+          path: |
+            tsuyomi-android/build/api29-ci/
+            tsuyomi-android/**/build/outputs/androidTest-results/connected/
+            tsuyomi-android/**/build/reports/androidTests/connected/
+          retention-days: 7
+          if-no-files-found: warn
 
   android-api29-managed-device-pilot:
     if: github.event_name == 'workflow_dispatch' && inputs.managed_device_pilot

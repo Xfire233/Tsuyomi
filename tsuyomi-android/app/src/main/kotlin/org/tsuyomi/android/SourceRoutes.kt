@@ -6,6 +6,9 @@
 package org.tsuyomi.android
 
 import androidx.activity.compose.BackHandler
+import android.widget.Toast
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.foundation.layout.Column
 import androidx.compose.runtime.Composable
 import androidx.compose.material3.AlertDialog
@@ -36,11 +39,13 @@ import org.tsuyomi.feature.book.DetailCollectionDestination
 import org.tsuyomi.feature.book.SourceBookState
 import org.tsuyomi.feature.book.BookDirectoryScreen
 import org.tsuyomi.feature.browse.BrowseInstalledSource
+import org.tsuyomi.feature.browse.BrowseCatalogAction
+import org.tsuyomi.feature.browse.BrowseSourceAction
 import org.tsuyomi.feature.browse.BrowseScreen
+import org.tsuyomi.feature.browse.BrowseUiState
 import org.tsuyomi.feature.browse.SourceHomeScreen
 import org.tsuyomi.feature.library.RemoteLibraryScreen
 import org.tsuyomi.feature.reader.ReaderScreen
-import org.tsuyomi.feature.library.LibraryMirrorShortcut
 import org.tsuyomi.feature.library.RemoteLibraryViewState
 import org.tsuyomi.feature.search.SearchScreen
 import org.tsuyomi.shared.model.BookIdentity
@@ -55,6 +60,8 @@ internal fun NavGraphBuilder.sourceRoutes(
     coverRepository: CoverRepository?,
     packageRevision: String?,
     credentialRevision: String?,
+    onExactChapterCompleted: suspend (BookIdentity) -> Unit,
+    onRequestRemoveFromLibrary: () -> Unit,
 ) {
     browseRoute(navController, owner)
     sourceHomeRoute(navController, owner, coverRepository, packageRevision, credentialRevision)
@@ -66,7 +73,15 @@ internal fun NavGraphBuilder.sourceRoutes(
         packageRevision = packageRevision,
         credentialRevision = credentialRevision,
     )
-    detailRoute(navController, owner, libraryFlow, coverRepository, packageRevision, credentialRevision)
+    detailRoute(
+        navController = navController,
+        owner = owner,
+        libraryFlow = libraryFlow,
+        coverRepository = coverRepository,
+        packageRevision = packageRevision,
+        credentialRevision = credentialRevision,
+        onRequestRemoveFromLibrary = onRequestRemoveFromLibrary,
+    )
     directoryRoute(navController, owner)
     readerRoute(
         navController,
@@ -76,6 +91,7 @@ internal fun NavGraphBuilder.sourceRoutes(
         coverRepository,
         packageRevision,
         credentialRevision,
+        onExactChapterCompleted,
     )
     verificationRoutes(navController, owner)
 }
@@ -83,6 +99,13 @@ internal fun NavGraphBuilder.sourceRoutes(
 private fun NavGraphBuilder.browseRoute(navController: NavHostController, owner: SourceRouteOwner) {
     composable(Routes.Browse) { entry ->
         val scope = rememberCoroutineScope()
+        val context = LocalContext.current
+        val uriHandler = LocalUriHandler.current
+        var sourceOpening by remember { mutableStateOf(false) }
+        val profile = org.tsuyomi.core.display.LocalDisplayEnvironment.current.effectiveProfile
+        LaunchedEffect(profile, owner.installer.state) {
+            if (profile == org.tsuyomi.core.display.DisplayProfile.EINK) owner.installer.dismissRepositoryApproval()
+        }
         val packageInfo = owner.installer.activePackage
         val resumeSourceId by entry.savedStateHandle
             .getStateFlow(ResumeSourceIdKey, "")
@@ -102,27 +125,95 @@ private fun NavGraphBuilder.browseRoute(navController: NavHostController, owner:
                 navController.navigate(Routes.Detail)
             }
         }
+        val displayedApprovalDigest = (owner.installer.state as? BrowseUiState.Approval)?.packageSha256
         BrowseScreen(
-            state = owner.installer.state,
-            installedSource = packageInfo?.let { verified ->
+            state = owner.installer.state.takeUnless {
+                profile == org.tsuyomi.core.display.DisplayProfile.EINK && it is BrowseUiState.Approval && it.isLegacyMigration
+            } ?: packageInfo?.let { BrowseUiState.Installed(it.manifest.displayName, it.manifest.version.original) }
+                ?: BrowseUiState.Empty,
+            activeSourceId = packageInfo?.manifest?.sourceId?.value,
+            installedSources = owner.installer.installedPackages.map { verified ->
                 BrowseInstalledSource(
                     sourceId = verified.manifest.sourceId.value,
                     name = verified.manifest.displayName,
                     version = verified.manifest.version.original,
                     summary = verified.manifest.summary,
-                    homeAvailable = owner.sourceHomeAvailable,
-                    remoteLibraryAvailable = owner.remoteLibraryAvailable,
+                    homeAvailable = verified.manifest.capabilities.home.enabled,
+                    remoteLibraryAvailable = verified.manifest.capabilities.remoteLibrary.policies.containsKey(
+                        org.tsuyomi.source.extensionmanager.RemoteOperation.READ,
+                    ),
                     verificationAvailable = verified.manifest.capabilities.webLogin.enabled,
                 )
             },
             onRequestImport = owner::requestImport,
-            onOpenHome = owner::navigateToSourceHome,
-            onOpenInstalledSource = { scope.launch { owner.openInstalledSource() } },
-            onOpenRemoteLibrary = { scope.launch { owner.openRemoteLibrary() } },
-            onOpenVerification = owner::navigateToVerification,
-            onApproveInstall = { allowDowngrade -> scope.launch { owner.installer.approve(allowDowngrade) } },
+            catalog = owner.installer.catalog.state,
+            onCatalogAction = { action ->
+                when (action) {
+                    BrowseCatalogAction.Refresh -> scope.launch { owner.installer.catalog.refresh() }
+                    is BrowseCatalogAction.Install -> scope.launch {
+                        owner.installer.catalog.install(action.sourceId, action.repositoryId)
+                    }
+                    is BrowseCatalogAction.InspectSubscription -> scope.launch {
+                        owner.installer.catalog.inspectSubscription(action.link)
+                    }
+                    BrowseCatalogAction.ConfirmSubscription -> scope.launch { owner.installer.catalog.confirmSubscription() }
+                    BrowseCatalogAction.CancelSubscription -> owner.installer.catalog.cancelSubscription()
+                    is BrowseCatalogAction.RemoveSubscription -> scope.launch {
+                        owner.installer.catalog.removeSubscription(action.repositoryId)
+                    }
+                    is BrowseCatalogAction.SetSubscriptionEnabled -> scope.launch {
+                        owner.installer.catalog.setSubscriptionEnabled(action.repositoryId, action.enabled)
+                    }
+                    is BrowseCatalogAction.OpenSourceCode -> try {
+                        uriHandler.openUri(action.url)
+                    } catch (_: IllegalArgumentException) {
+                        Toast.makeText(context, R.string.source_repository_no_browser, Toast.LENGTH_LONG).show()
+                    }
+                }
+            },
+            onSourceAction = { action ->
+                if (!sourceOpening) {
+                    sourceOpening = true
+                scope.launch {
+                    try {
+                    if (action is BrowseSourceAction.Uninstall) {
+                        owner.uninstallSource(action.sourceId)
+                        return@launch
+                    }
+                    val sourceId = when (action) {
+                        is BrowseSourceAction.OpenHome -> action.sourceId
+                        is BrowseSourceAction.Search -> action.sourceId
+                        is BrowseSourceAction.OpenRemoteLibrary -> action.sourceId
+                        is BrowseSourceAction.Uninstall -> action.sourceId
+                    }
+                    val selected = owner.installer.activateInstalledSource(sourceId)
+                    if (selected != null) when (action) {
+                        is BrowseSourceAction.OpenHome -> if (selected.manifest.capabilities.home.enabled) {
+                            owner.navigateToSourceHome()
+                        } else {
+                            owner.openInstalledSource()
+                        }
+                        is BrowseSourceAction.Search -> owner.openInstalledSource()
+                        is BrowseSourceAction.OpenRemoteLibrary -> owner.openRemoteLibrary()
+                        is BrowseSourceAction.Uninstall -> Unit
+                    }
+                    } finally {
+                        sourceOpening = false
+                    }
+                }
+                }
+            },
+            onApproveInstall = { allowDowngrade, allowLegacyMigration, allowNonOfficial ->
+                scope.launch {
+                    if (displayedApprovalDigest != null) owner.installer.approve(
+                        allowDowngrade, allowLegacyMigration, allowNonOfficial, displayedApprovalDigest,
+                    )
+                }
+            },
             onDismissApproval = owner.installer::dismissApproval,
             onDismissFailure = owner.installer::dismissFailure,
+            onProvidePublisherKey = { publicKey -> scope.launch { owner.installer.providePublisherKey(publicKey) } },
+            onDismissPublisherKey = owner.installer::dismissApproval,
         )
     }
 }
@@ -144,15 +235,17 @@ private fun NavGraphBuilder.sourceHomeRoute(
                 if (packageInfo == null) {
                     Result.failure(IllegalStateException("source-not-installed"))
                 } else {
-                    flow.open(packageInfo)
                     flow.loadHome(filters, cursor, offlineOnly)
                 }
             }
         val load = loader(offlineOnly = false)
         val loadOffline = loader(offlineOnly = true)
 
-        LaunchedEffect(activeRevision) {
-            flow.home.ensureInitial(activeRevision, load)
+        LaunchedEffect(packageInfo?.manifest?.sourceId?.value, activeRevision) {
+            packageInfo?.let { selected ->
+                flow.open(selected)
+                flow.home.ensureInitial(selected.manifest.sourceId.value, activeRevision, load)
+            }
         }
         BackHandler(
             enabled = (flow.homeState as? org.tsuyomi.feature.browse.SourceHomeViewState.Content)
@@ -261,17 +354,6 @@ private fun NavGraphBuilder.remoteLibraryRoute(
             }
             else -> null
         }
-        val mirrorTarget = remote.targets.firstOrNull { it.targetId == visibleTargetId }
-        val mirrorShortcut = mirrorBindingId?.let { sourceId ->
-            LibraryMirrorShortcut(
-                sourceId = sourceId,
-                targetId = visibleTargetId,
-                label = mirrorTarget?.displayName ?: owner.installer.activePackage?.manifest?.displayName.orEmpty(),
-                count = if (visibleTargetId == null) remote.books.size else remote.visibleBooks.size,
-                frozen = false,
-            )
-        }
-        val mirrorPinned = mirrorShortcut?.let { libraryFlow.isMirrorShortcutPinned(it.sourceId, it.targetId) }
         val pinFailureMessage = stringResource(R.string.library_read_failure_safe)
         RemoteLibraryScreen(
             sourceId = mirrorBindingId ?: owner.installer.activePackage?.manifest?.sourceId?.value.orEmpty(),
@@ -310,14 +392,6 @@ private fun NavGraphBuilder.remoteLibraryRoute(
             },
             onOpenTarget = { targetId ->
                 if (groupingEnabled) navController.navigate(Routes.libraryMirrorFolder(mirrorBindingId.orEmpty(), targetId))
-            },
-            mirrorPinned = mirrorPinned,
-            onToggleMirrorPinned = {
-                mirrorShortcut?.let { shortcut ->
-                    scope.launch {
-                        libraryFlow.setMirrorShortcutPinned(shortcut, mirrorPinned != true, pinFailureMessage)
-                    }
-                }
             },
             groupingEnabled = groupingEnabled,
             onGroupingEnabledChange = { enabled ->
@@ -457,6 +531,7 @@ private fun NavGraphBuilder.detailRoute(
     coverRepository: CoverRepository?,
     packageRevision: String?,
     credentialRevision: String?,
+    onRequestRemoveFromLibrary: () -> Unit,
 ) {
     composable(Routes.Detail) { entry ->
         val scope = rememberCoroutineScope()
@@ -505,6 +580,9 @@ private fun NavGraphBuilder.detailRoute(
         val remoteMoveRequest by remember(entry) {
             entry.savedStateHandle.getStateFlow(RemoteMoveRequestKey, 0L)
         }.collectAsStateWithLifecycle()
+        val updateFocusChapterId by remember(entry) {
+            entry.savedStateHandle.getStateFlow<String?>(UpdateFocusChapterIdKey, null)
+        }.collectAsStateWithLifecycle()
         val summary = (detail.state as? SourceBookState.Content)?.value?.summary ?: detail.selectedBook
         val websiteGroupingEnabled = summary?.identity?.sourceId?.let(libraryFlow::isWebsiteGroupingEnabled) == true
         val coverState = summary?.let {
@@ -525,9 +603,6 @@ private fun NavGraphBuilder.detailRoute(
         var destinationTargets by remember { mutableStateOf<List<org.tsuyomi.shared.sourcecontract.RemoteTarget>>(emptyList()) }
         var loadingDestinationTargets by remember { mutableStateOf(false) }
         var selectedDestinationCollections by remember { mutableStateOf<Set<String>>(emptySet()) }
-        var destinationShortcutPinned by remember(summary?.identity) {
-            mutableStateOf(summary?.identity?.let(libraryFlow::isBookShortcutPinned) == true)
-        }
         var remoteRemoveConfirmationVisible by remember { mutableStateOf(false) }
         var remoteMoveTargetSelectionVisible by remember { mutableStateOf(false) }
         var pendingRemoteMoveOnly by remember { mutableStateOf(false) }
@@ -588,7 +663,6 @@ private fun NavGraphBuilder.detailRoute(
         }
         suspend fun applyLocalDestinations(
             book: org.tsuyomi.shared.sourcecontract.SourceBookSummary,
-            shortcutPinned: Boolean,
             collectionIds: Set<String>,
         ) {
             if (!detail.localState.inLibrary) {
@@ -597,7 +671,6 @@ private fun NavGraphBuilder.detailRoute(
             }
             val applied = libraryFlow.applyBookDestinations(
                 book.identity,
-                shortcutPinned,
                 collectionIds,
                 localDestinationFailure,
             )
@@ -657,7 +730,6 @@ private fun NavGraphBuilder.detailRoute(
         LaunchedEffect(remoteDestinationRequest) {
             if (remoteDestinationRequest <= 0L) return@LaunchedEffect
             destinationMenuExpanded = true
-            destinationShortcutPinned = summary?.identity?.let(libraryFlow::isBookShortcutPinned) == true
             selectedDestinationCollections = summary?.identity?.let { selectedManualDestinations(it) }.orEmpty()
             loadingDestinationTargets = true
             val requestedTargetId = entry.savedStateHandle.remove<String>(RemoteDestinationTargetIdKey)
@@ -679,6 +751,8 @@ private fun NavGraphBuilder.detailRoute(
             coverState = coverState,
             unreadOnly = unreadOnly,
             descending = descending,
+            focusChapterId = updateFocusChapterId,
+            onFocusHandled = { entry.savedStateHandle[UpdateFocusChapterIdKey] = null },
             selectedChapterId = detail.selectedChapter?.chapterId,
             onSetRating = { rating -> scope.launch { detail.setRating(rating) } },
             onSearchAuthor = { author ->
@@ -697,7 +771,6 @@ private fun NavGraphBuilder.detailRoute(
                 scope.launch { detail.execute(SourceDetailRouteOwner.Command.ADD_TO_LIBRARY.name) }
             },
             onOpenDestinations = {
-                destinationShortcutPinned = summary?.identity?.let(libraryFlow::isBookShortcutPinned) == true
                 loadingDestinationTargets = true
                 scope.launch {
                     selectedDestinationCollections = summary?.identity?.let { selectedManualDestinations(it) }.orEmpty()
@@ -711,7 +784,6 @@ private fun NavGraphBuilder.detailRoute(
             destinationMenuContent = { dismissMenu ->
                 BookDestinationMenu(
                     readLater = detail.localState.readLater,
-                    shortcutPinned = destinationShortcutPinned,
                     collections = libraryFlow.collections
                         .filter { it.kind == org.tsuyomi.core.database.CollectionKind.MANUAL }
                         .map {
@@ -726,15 +798,6 @@ private fun NavGraphBuilder.detailRoute(
                     loadingRemoteTargets = loadingDestinationTargets,
                     websiteGroupingEnabled = websiteGroupingEnabled,
                     onToggleReadLater = { scope.launch { detail.toggleReadLater() } },
-                    onToggleShortcut = {
-                        val nextPinned = !destinationShortcutPinned
-                        destinationShortcutPinned = nextPinned
-                        summary?.let { book ->
-                            scope.launch {
-                                applyLocalDestinations(book, nextPinned, selectedDestinationCollections)
-                            }
-                        }
-                    },
                     onToggleCollection = { id ->
                         val nextCollections = if (id in selectedDestinationCollections) {
                             selectedDestinationCollections - id
@@ -744,7 +807,7 @@ private fun NavGraphBuilder.detailRoute(
                         selectedDestinationCollections = nextCollections
                         summary?.let { book ->
                             scope.launch {
-                                applyLocalDestinations(book, destinationShortcutPinned, nextCollections)
+                                applyLocalDestinations(book, nextCollections)
                             }
                         }
                     },
@@ -785,6 +848,7 @@ private fun NavGraphBuilder.detailRoute(
             onRemoveFromLibrary = {
                 scope.launch { detail.execute(SourceDetailRouteOwner.Command.REMOVE_FROM_LIBRARY.name) }
             },
+            onRequestRemoveFromLibrary = onRequestRemoveFromLibrary,
             onOpenDirectory = { navController.navigate(Routes.Directory) },
             onRetry = { scope.launch { detail.loadAll() } },
             onUseOfflineCache = { scope.launch { detail.loadAll(offlineOnly = true) } },
@@ -961,6 +1025,7 @@ private fun NavGraphBuilder.readerRoute(
     coverRepository: CoverRepository?,
     packageRevision: String?,
     credentialRevision: String?,
+    onExactChapterCompleted: suspend (BookIdentity) -> Unit,
 ) {
     composable(Routes.Reader) { entry ->
         val scope = rememberCoroutineScope()
@@ -1000,7 +1065,10 @@ private fun NavGraphBuilder.readerRoute(
             onChapterCompleted = { chapterId ->
                 val activeDocument = reader.document ?: return@ReaderScreen
                 val identity = BookIdentity(activeDocument.sourceId, activeDocument.remoteBookId)
-                scope.launch { owner.flow.markChapterCompleted(identity, chapterId) }
+                scope.launch {
+                    owner.flow.markChapterCompleted(identity, chapterId)
+                    onExactChapterCompleted(identity)
+                }
             },
             preferences = readerPreferences,
             onPreferencesChanged = onReaderPreferencesChanged,
@@ -1012,6 +1080,11 @@ private fun NavGraphBuilder.readerRoute(
 }
 
 private enum class VerifiedPageOperation { NONE, HOME, SEARCH, DETAIL, DIRECTORY, CHAPTER }
+
+private data class VerificationPageRequest(
+    val resolved: Boolean,
+    val url: String?,
+)
 
 private fun NavGraphBuilder.verificationRoutes(navController: NavHostController, owner: SourceRouteOwner) {
     verificationRoute(navController, owner, Routes.Verification, VerifiedPageOperation.NONE)
@@ -1031,8 +1104,11 @@ private fun NavGraphBuilder.verificationRoute(
     composable(route) {
         val scope = rememberCoroutineScope()
         owner.installer.activePackage?.let { packageInfo ->
-            val requestUrl by produceState<String?>(
-                initialValue = null,
+            val pageRequest by produceState(
+                initialValue = VerificationPageRequest(
+                    resolved = operation == VerifiedPageOperation.NONE,
+                    url = null,
+                ),
                 operation,
                 owner.flow.query,
                 owner.flow.selectedBook?.identity?.remoteBookId,
@@ -1041,14 +1117,17 @@ private fun NavGraphBuilder.verificationRoute(
                 owner.flow.selectedChapter?.chapterId,
                 owner.flow.selectedChapter?.url,
             ) {
-                value = when (operation) {
-                    VerifiedPageOperation.NONE -> null
-                    VerifiedPageOperation.HOME -> owner.homeVerifiedPageRequestUrl()
-                    VerifiedPageOperation.SEARCH -> owner.searchVerifiedPageRequestUrl()
-                    VerifiedPageOperation.DETAIL -> owner.detailVerifiedPageRequestUrl()
-                    VerifiedPageOperation.DIRECTORY -> owner.directoryVerifiedPageRequestUrl()
-                    VerifiedPageOperation.CHAPTER -> owner.chapterVerifiedPageRequestUrl()
-                }
+                value = VerificationPageRequest(
+                    resolved = true,
+                    url = when (operation) {
+                        VerifiedPageOperation.NONE -> null
+                        VerifiedPageOperation.HOME -> owner.homeVerifiedPageRequestUrl()
+                        VerifiedPageOperation.SEARCH -> owner.searchVerifiedPageRequestUrl()
+                        VerifiedPageOperation.DETAIL -> owner.detailVerifiedPageRequestUrl()
+                        VerifiedPageOperation.DIRECTORY -> owner.directoryVerifiedPageRequestUrl()
+                        VerifiedPageOperation.CHAPTER -> owner.chapterVerifiedPageRequestUrl()
+                    },
+                )
             }
             val openLabel = when (operation) {
                 VerifiedPageOperation.NONE -> null
@@ -1071,7 +1150,8 @@ private fun NavGraphBuilder.verificationRoute(
                 onCompleted = { scope.launch { owner.completeVerification() } },
                 onVerifiedPageCompleted = { owner.completeVerifiedPage() },
                 onCancel = { navController.navigateUp() },
-                verifiedPageRequestUrl = requestUrl,
+                verifiedPageRequestUrl = pageRequest.url,
+                verifiedPageRequestResolved = pageRequest.resolved,
                 onUseVerifiedPage = when (operation) {
                     VerifiedPageOperation.NONE -> null
                     VerifiedPageOperation.SEARCH -> owner::useSearchVerifiedPage

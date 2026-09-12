@@ -3,6 +3,7 @@
 <resources>
     <string name="app_name">月读</string>
     <string name="nav_library">书架</string>
+    <string name="title_library_search">搜索书架</string>
     <string name="nav_browse">浏览</string>
     <string name="nav_more">更多</string>
     <string name="title_display_settings">显示</string>
@@ -16,7 +17,15 @@
     <string name="title_source_home_remote_library">网站收藏</string>
     <string name="title_source_home_verification">登录验证</string>
     <string name="title_source_home_refresh">刷新当前目录</string>
+    <string name="source_home_switch_sources">切换来源</string>
+    <string name="source_home_switch_sources_title">选择来源</string>
+    <string name="source_home_switch_unavailable">无法切换到所选来源。</string>
+    <string name="source_home_switch_search_only">%1$s（仅可搜索）</string>
     <string name="title_collections">本地集合</string>
+    <string name="title_updates_settings">更新设置</string>
+    <string name="updates_notification_channel">更新检查</string>
+    <string name="updates_notification_running">正在检查更新</string>
+    <string name="updates_notification_cancel">取消</string>
     <string name="title_library_tags">标签</string>
     <string name="collection_saved">集合已保存。</string>
     <string name="collection_invalid">规则或集合名称无效，未保存。</string>
@@ -25,11 +34,7 @@
     <string name="title_book_directory">章节目录</string>
     <string name="title_reader">阅读</string>
     <string name="title_verification">手动登录或验证</string>
-    <string name="verification_atlas_title">登录验证</string>
-    <string name="verification_atlas_subtitle">%1$s · %2$s</string>
-    <string name="verification_host_notice">此验证由宿主应用发起。页面内容由 %1$s 提供；Tsuyomi 不记录你在页面中的任何输入。</string>
-    <string name="verification_status_waiting">状态：等待你在页面中完成验证</string>
-    <string name="verification_webview_caption">受控网页视图仅允许此内容源声明的 HTTPS 站点。“保存会话并返回”只保存匹配站点的加密登录状态，不会重试来源操作；操作失败页可打开对应页面并使用当前页面。</string>
+    <string name="verification_host_identity">受控网页 · %1$s</string>
     <string name="verification_complete_action">保存会话并返回</string>
     <string name="verification_cancel_action">取消验证</string>
     <string name="verification_open_home_page">打开对应主页</string>
@@ -38,6 +43,7 @@
     <string name="verification_open_directory_page">打开对应目录页面</string>
     <string name="verification_open_chapter_page">打开对应章节页面</string>
     <string name="verification_use_current_page">使用当前页面</string>
+    <string name="verification_snapshot_working">正在读取页面</string>
     <string name="verification_snapshot_unbound">当前页面未与暂停的搜索请求绑定。请点击“打开对应搜索页面”，等待自动跳转和页面加载完成后重试。</string>
     <string name="verification_snapshot_unbound_detail">当前页面未与暂停的详情请求绑定。请点击“打开对应详情页面”，等待自动跳转和页面加载完成后重试。</string>
     <string name="verification_snapshot_unbound_directory">当前页面未与暂停的目录请求绑定。请点击“打开对应目录页面”，等待自动跳转和页面加载完成后重试。</string>
@@ -56,6 +62,7 @@
     <string name="title_remote_library">网站收藏</string>
     <string name="remote_library_copy_result">已复制 %1$d 本，新增 %2$d 本到本地书架；未向网站写入。</string>
     <string name="transfer_recovery_working">正在核对内部导入记录并继续未完成的步骤。</string>
+    <string name="updates_loading_settings">正在读取更新设置</string>
     <string name="transfer_recovery_blocked">内部恢复文件缺失或校验失败。可重试恢复，或在尚未合并书库时放弃此次导入。</string>
     <string name="transfer_reading_file">正在按 32 MiB 上限读取并检查文件。</string>
     <string name="transfer_import_failed_code">文件未通过检查：%1$s</string>
@@ -68,7 +75,12 @@
     <string name="transfer_writing_export">正在写入系统选择的文件。</string>
     <string name="transfer_export_failed">系统文件未能写入。</string>
     <string name="detail_remove_confirm_title">移出书架</string>
-    <string name="detail_remove_confirm_message">移出书架只删除本地 pin；不会在网站上执行任何操作。阅读进度与已缓存来源内容保持不变。</string>
+    <string name="detail_remove_confirm_message">将本书移出本地书架和本地收藏夹。稍后再读、评分、标签、阅读进度及已缓存内容保留，不影响网站收藏。</string>
     <string name="detail_remove_confirm_action">移出书架</string>
     <string name="detail_remove_cancel">取消</string>
+    <string name="source_repository_unconfigured">暂无可用插件仓库。可添加仓库订阅，已安装来源和本地导入仍可使用。</string>
+    <string name="source_repository_failure">部分仓库目录暂不可用或验证失败。请重试；已安装来源不会因目录加载失败而删除。</string>
+    <string name="source_repository_no_browser">没有可打开源码链接的浏览器。</string>
+    <string name="source_subscription_invalid">无法添加此订阅。请使用包含仓库标识、根公钥标识和公钥的 HTTPS 订阅链接；已有仓库的身份不能被替换。</string>
+    <string name="source_repository_official">官方仓库</string>
 </resources>

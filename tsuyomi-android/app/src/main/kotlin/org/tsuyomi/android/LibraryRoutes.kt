@@ -7,18 +7,22 @@ package org.tsuyomi.android
 
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.platform.LocalResources
 import androidx.compose.ui.res.stringResource
 import androidx.navigation.NavGraphBuilder
 import androidx.navigation.NavHostController
 import androidx.navigation.compose.composable
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.launch
 import org.tsuyomi.core.database.LibraryEntry
 import org.tsuyomi.core.media.api.CoverUiState
 import org.tsuyomi.feature.library.CollectionManagerScreen
 import org.tsuyomi.feature.library.LibraryScreen
+import org.tsuyomi.feature.library.LibrarySearchScreen
 import org.tsuyomi.feature.library.LibraryDragPayload
 import org.tsuyomi.feature.library.LibraryDropDestination
 import org.tsuyomi.feature.library.LibrarySelectionDialog
@@ -33,9 +37,28 @@ internal fun NavGraphBuilder.libraryRoutes(
     openBookDetail: suspend (LibraryEntry) -> Boolean,
     onCoverVisibility: (LibraryEntry, Boolean) -> Unit,
     openRemoteDestination: suspend (LibraryEntry, LibraryDropDestination.RemoteMirror) -> Unit,
+    onManualUpdate: () -> Unit,
+    onCancelUpdate: () -> Unit,
+    onOpenUpdateSettings: () -> Unit,
+    onIgnoreUpdate: suspend (org.tsuyomi.shared.librarydomain.UnresolvedUpdate) -> org.tsuyomi.shared.librarydomain.UpdateUndo?,
+    onUndoUpdate: suspend (org.tsuyomi.shared.librarydomain.UpdateUndo) -> Unit,
 ) {
-    libraryHomeRoute(navController, controller, coverState, onCoverVisibility, openBookDetail, openRemoteDestination)
-    libraryNodeRoutes(navController, controller, coverState, onCoverVisibility, resumeReading, openBookDetail, openRemoteDestination)
+    libraryHomeRoute(
+        navController,
+        controller,
+        coverState,
+        onCoverVisibility,
+        resumeReading,
+        openBookDetail,
+        openRemoteDestination,
+        onManualUpdate,
+        onCancelUpdate,
+        onOpenUpdateSettings,
+        onIgnoreUpdate,
+        onUndoUpdate,
+    )
+    librarySearchRoute(navController, controller, coverState, onCoverVisibility, openBookDetail)
+    libraryNodeRoutes(navController, controller, coverState, onCoverVisibility, openBookDetail, openRemoteDestination)
     libraryTagsRoutes(navController, controller, coverState, onCoverVisibility, openBookDetail, openRemoteDestination)
     collectionsRoute(controller)
 }
@@ -45,22 +68,30 @@ private fun NavGraphBuilder.libraryHomeRoute(
     controller: LibraryFlowController,
     coverState: @Composable (LibraryEntry) -> CoverUiState,
     onCoverVisibility: (LibraryEntry, Boolean) -> Unit,
+    resumeReading: suspend (LibraryEntry) -> Boolean,
     openBookDetail: suspend (LibraryEntry) -> Boolean,
     openRemoteDestination: suspend (LibraryEntry, LibraryDropDestination.RemoteMirror) -> Unit,
+    onManualUpdate: () -> Unit,
+    onCancelUpdate: () -> Unit,
+    onOpenUpdateSettings: () -> Unit,
+    onIgnoreUpdate: suspend (org.tsuyomi.shared.librarydomain.UnresolvedUpdate) -> org.tsuyomi.shared.librarydomain.UpdateUndo?,
+    onUndoUpdate: suspend (org.tsuyomi.shared.librarydomain.UpdateUndo) -> Unit,
 ) {
     composable(Routes.Library) {
         val scope = rememberCoroutineScope()
         val failureMessage = stringResource(R.string.library_read_failure_safe)
+        LaunchedEffect(Unit) { controller.restoreLibraryHome() }
         LibraryScreen(
             state = controller.state,
             collections = controller.collections,
             showNavigationNodes = true,
             coverState = coverState,
             onCoverVisibility = onCoverVisibility,
-            onOpenSystemNode = { filter ->
-                controller.selectSystemFilter(filter)
-                navController.navigate(Routes.librarySystem(filter))
-            },
+            onSelectTab = { filter -> scope.launch { controller.selectTab(filter) } },
+            onOpenSystemNode = { filter -> scope.launch {
+                controller.selectTab(filter)
+                navController.navigate(Routes.Library) { launchSingleTop = true }
+            } },
             onOpenCollection = { collection ->
                 controller.selectCollection(collection.collectionId)
                 navController.navigate(Routes.libraryCollection(collection.collectionId))
@@ -71,15 +102,27 @@ private fun NavGraphBuilder.libraryHomeRoute(
                         ?: Routes.libraryMirror(mirror.sourceId),
                 )
             },
+            onOpenUpdateSettings = onOpenUpdateSettings,
+            onCancelUpdateScan = onCancelUpdate,
+            onRefreshUpdates = onManualUpdate,
+            onEditFilter = { controller.setFilterAndSortPanelExpanded(true) },
+            onClearFilter = { scope.launch {
+                controller.setUpdateFilter(org.tsuyomi.feature.library.LibraryUpdateFilter.ALL)
+            } },
             onOpenBook = { entry ->
                 controller.openOrToggleEntry(entry)
-                scope.launch { openBookDetail(entry) }
+                scope.launch {
+                    if (controller.state.filter == SystemLibraryFilter.CONTINUE && entry.progress != null && entry.sourceAvailable) {
+                        if (!resumeReading(entry)) openBookDetail(entry)
+                    } else {
+                        openBookDetail(entry)
+                    }
+                }
             },
             onCreateCollection = { navController.navigate(Routes.Collections) },
             onRetry = { scope.launch { controller.reload(failureMessage) } },
-            onDismissSort = controller::dismissSort,
-            onSelectSort = controller::selectSort,
-            onSelectSortDirection = controller::selectSortDirection,
+            onIgnoreUpdate = onIgnoreUpdate,
+            onUndoUpdate = onUndoUpdate,
             onLongPressBook = controller::longPressBook,
             onToggleBookSelection = controller::toggleBookSelection,
             onLongPressCollection = controller::longPressCollection,
@@ -87,9 +130,13 @@ private fun NavGraphBuilder.libraryHomeRoute(
             onDropBooks = { payload, destination ->
                 handleLibraryDrop(controller, scope, failureMessage, true, payload, destination, openRemoteDestination)
             },
+            onViewportChanged = { viewport ->
+                controller.updateViewport(viewport.firstVisibleIndex, viewport.firstVisibleOffset)
+            },
+            onViewportSettled = { index, offset -> controller.persistViewport(index, offset) },
             reorderEnabled = controller.state.sortMode == org.tsuyomi.feature.library.LibrarySortMode.CUSTOM &&
-                controller.state.filter == SystemLibraryFilter.ALL,
-            onShortcutLockedChanged = { locked -> scope.launch { controller.setShortcutLocked(locked) } },
+                controller.state.filter == SystemLibraryFilter.ALL &&
+                controller.state.updateFilter == org.tsuyomi.feature.library.LibraryUpdateFilter.ALL,
             onDismissSelectionDialog = controller::dismissSelectionDialog,
             onCreateCollectionFromSelection = { title -> scope.launch {
                 controller.createCollectionFromSelection(title, failureMessage)
@@ -102,68 +149,83 @@ private fun NavGraphBuilder.libraryHomeRoute(
     }
 }
 
+private fun NavGraphBuilder.librarySearchRoute(
+    navController: NavHostController,
+    controller: LibraryFlowController,
+    coverState: @Composable (LibraryEntry) -> CoverUiState,
+    onCoverVisibility: (LibraryEntry, Boolean) -> Unit,
+    openBookDetail: suspend (LibraryEntry) -> Boolean,
+) {
+    composable(Routes.LibrarySearch) { entry ->
+        val scope = rememberCoroutineScope()
+        val failureMessage = stringResource(R.string.library_read_failure_safe)
+        val query by entry.savedStateHandle
+            .getStateFlow(LibrarySearchQueryKey, "")
+            .collectAsStateWithLifecycle()
+        val searchQuery by entry.savedStateHandle
+            .getStateFlow(LibrarySearchEffectiveQueryKey, "")
+            .collectAsStateWithLifecycle()
+        val preferredCollectionId by entry.savedStateHandle
+            .getStateFlow(LibrarySearchCallerCollectionKey, controller.selectedCollectionId)
+            .collectAsStateWithLifecycle()
+        LaunchedEffect(query) {
+            val nextQuery = query.trim()
+            if (nextQuery.isNotEmpty()) delay(LibrarySearchDebounceMillis)
+            entry.savedStateHandle[LibrarySearchEffectiveQueryKey] = nextQuery
+        }
+        LibrarySearchScreen(
+            query = query,
+            searchQuery = searchQuery,
+            books = controller.searchableEntries,
+            collections = controller.collections,
+            preferredCollectionId = preferredCollectionId,
+            loading = controller.state.loading,
+            failure = controller.state.failure,
+            onQueryChange = { value -> entry.savedStateHandle[LibrarySearchQueryKey] = value },
+            onSearch = {
+                entry.savedStateHandle[LibrarySearchEffectiveQueryKey] = query.trim()
+            },
+            onRetry = { scope.launch { controller.reload(failureMessage) } },
+            onOpenCollection = { collection ->
+                controller.selectCollection(collection.collectionId)
+                navController.navigate(Routes.libraryCollection(collection.collectionId))
+            },
+            onOpenBook = { book ->
+                controller.openOrToggleEntry(book)
+                scope.launch { openBookDetail(book) }
+            },
+            coverState = coverState,
+            onCoverVisibility = onCoverVisibility,
+        )
+    }
+}
+
+private const val LibrarySearchQueryKey = "library.search.query"
+private const val LibrarySearchEffectiveQueryKey = "library.search.effective-query"
+private const val LibrarySearchCallerCollectionKey = "library.search.caller-collection"
+private const val LibrarySearchDebounceMillis = 120L
+
 private fun NavGraphBuilder.libraryNodeRoutes(
     navController: NavHostController,
     controller: LibraryFlowController,
     coverState: @Composable (LibraryEntry) -> CoverUiState,
     onCoverVisibility: (LibraryEntry, Boolean) -> Unit,
-    resumeReading: suspend (LibraryEntry) -> Boolean,
     openBookDetail: suspend (LibraryEntry) -> Boolean,
     openRemoteDestination: suspend (LibraryEntry, LibraryDropDestination.RemoteMirror) -> Unit,
 ) {
     composable(Routes.LibrarySystem) { backStackEntry ->
-        val scope = rememberCoroutineScope()
         val failureMessage = stringResource(R.string.library_read_failure_safe)
         val filter = backStackEntry.arguments?.getString("filter")
             ?.let { name -> runCatching { SystemLibraryFilter.valueOf(name) }.getOrNull() }
-            ?.takeUnless { it == SystemLibraryFilter.ALL }
+            ?.takeIf { it == SystemLibraryFilter.CONTINUE || it == SystemLibraryFilter.READ_LATER }
+            ?: SystemLibraryFilter.ALL
         LaunchedEffect(filter) {
-            if (filter != null) {
-                controller.selectSystemFilter(filter)
-                controller.reload(failureMessage)
+            controller.selectTab(filter)
+            navController.navigate(Routes.Library) {
+                popUpTo(Routes.Library) { inclusive = false }
+                launchSingleTop = true
             }
         }
-        LibraryScreen(
-            state = controller.state,
-            collections = controller.collections,
-            showNavigationNodes = false,
-            coverState = coverState,
-            onCoverVisibility = onCoverVisibility,
-            onOpenSystemNode = {},
-            onOpenCollection = {},
-            onOpenBook = { entry ->
-                controller.openOrToggleEntry(entry)
-                scope.launch {
-                    if (filter == SystemLibraryFilter.CONTINUE && entry.progress != null && entry.sourceAvailable) {
-                        if (!resumeReading(entry)) openBookDetail(entry)
-                    } else {
-                        openBookDetail(entry)
-                    }
-                }
-            },
-            onCreateCollection = { navController.navigate(Routes.Collections) },
-            onRetry = { scope.launch { controller.reload(failureMessage) } },
-            onDismissSort = controller::dismissSort,
-            onSelectSort = controller::selectSort,
-            onSelectSortDirection = controller::selectSortDirection,
-            onLongPressBook = controller::longPressBook,
-            onToggleBookSelection = controller::toggleBookSelection,
-            onLongPressCollection = controller::longPressCollection,
-            onToggleCollectionSelection = controller::toggleCollectionSelection,
-            onDropBooks = { payload, destination ->
-                handleLibraryDrop(controller, scope, failureMessage, false, payload, destination, openRemoteDestination)
-            },
-            reorderEnabled = false,
-            onShortcutLockedChanged = { locked -> scope.launch { controller.setShortcutLocked(locked) } },
-            onDismissSelectionDialog = controller::dismissSelectionDialog,
-            onCreateCollectionFromSelection = { title -> scope.launch {
-                controller.createCollectionFromSelection(title, failureMessage)
-            } },
-            onAddSelectionToCollection = { id -> scope.launch {
-                controller.addSelectionToCollection(id, failureMessage)
-            } },
-            onRemoveSelection = { scope.launch { controller.removeSelection(failureMessage) } },
-        )
     }
     composable(Routes.LibraryCollection) { backStackEntry ->
         val scope = rememberCoroutineScope()
@@ -179,19 +241,19 @@ private fun NavGraphBuilder.libraryNodeRoutes(
             state = controller.state,
             collections = controller.collections,
             showNavigationNodes = false,
+            onOpenSystemNode = {},
+            onOpenCollection = { collection ->
+                controller.selectCollection(collection.collectionId)
+                navController.navigate(Routes.libraryCollection(collection.collectionId))
+            },
             coverState = coverState,
             onCoverVisibility = onCoverVisibility,
-            onOpenSystemNode = {},
-            onOpenCollection = {},
             onOpenBook = { entry ->
                 controller.openOrToggleEntry(entry)
                 scope.launch { openBookDetail(entry) }
             },
             onCreateCollection = { navController.navigate(Routes.Collections) },
             onRetry = { scope.launch { controller.reload(failureMessage) } },
-            onDismissSort = controller::dismissSort,
-            onSelectSort = controller::selectSort,
-            onSelectSortDirection = controller::selectSortDirection,
             onLongPressBook = controller::longPressBook,
             onToggleBookSelection = controller::toggleBookSelection,
             onLongPressCollection = controller::longPressCollection,
@@ -204,7 +266,6 @@ private fun NavGraphBuilder.libraryNodeRoutes(
                 controller.collections.any {
                     it.collectionId == collectionId && it.kind == org.tsuyomi.core.database.CollectionKind.MANUAL
                 },
-            onShortcutLockedChanged = { locked -> scope.launch { controller.setShortcutLocked(locked) } },
             onDismissSelectionDialog = controller::dismissSelectionDialog,
             onCreateCollectionFromSelection = { title -> scope.launch {
                 controller.createCollectionFromSelection(title, failureMessage)
@@ -252,9 +313,6 @@ private fun NavGraphBuilder.libraryTagsRoutes(
             },
             onCreateCollection = { navController.navigate(Routes.Collections) },
             onRetry = { scope.launch { controller.reload(failureMessage) } },
-            onDismissSort = controller::dismissSort,
-            onSelectSort = controller::selectSort,
-            onSelectSortDirection = controller::selectSortDirection,
             onLongPressBook = controller::longPressBook,
             onToggleBookSelection = controller::toggleBookSelection,
             onLongPressCollection = controller::longPressCollection,
@@ -263,7 +321,6 @@ private fun NavGraphBuilder.libraryTagsRoutes(
                 handleLibraryDrop(controller, scope, failureMessage, false, payload, destination, openRemoteDestination)
             },
             reorderEnabled = false,
-            onShortcutLockedChanged = { locked -> scope.launch { controller.setShortcutLocked(locked) } },
             onDismissSelectionDialog = controller::dismissSelectionDialog,
             onCreateCollectionFromSelection = { title -> scope.launch {
                 controller.createCollectionFromSelection(title, failureMessage)
@@ -286,66 +343,53 @@ private fun handleLibraryDrop(
 ) {
     when (payload) {
         is LibraryDragPayload.Books -> when (destination) {
-            is LibraryDropDestination.Root -> scope.launch {
-                controller.dropBooksOnShortcutRoot(payload.identities, destination.index, failureMessage)
+            LibraryDropDestination.CreateCollection -> {
+                controller.requestRootCollectionCreation(payload.identities)
             }
             is LibraryDropDestination.Collection -> {
                 controller.prepareDraggedBooks(payload.identities)
                 scope.launch { controller.addSelectionToCollection(destination.id, failureMessage) }
             }
             is LibraryDropDestination.Book -> {
-                val shortcutId = destination.shortcutId
-                if (shortcutId != null) {
-                    controller.requestShortcutCollectionCreation(
-                        moved = payload.identities,
-                        target = destination.identity,
-                        insertionIndex = controller.shortcutIndex(shortcutId),
-                        replacementShortcutIds = buildSet {
-                            add(shortcutId)
-                            if (payload.fromShortcut) {
-                                payload.identities.forEach {
-                                    add(org.tsuyomi.feature.library.libraryBookShortcutId(it))
-                                }
-                            }
-                        },
-                    )
-                } else {
-                    controller.requestBookDropOnBook(payload.identities, destination.identity)
-                }
+                controller.requestRootCollectionCreation(payload.identities, destination.identity)
             }
-            is LibraryDropDestination.Library -> if (allowLibraryReorder && !payload.fromShortcut) {
-                scope.launch { controller.reorderBooks(payload.identities, destination.index, failureMessage) }
+            is LibraryDropDestination.Library -> if (allowLibraryReorder) {
+                scope.launch {
+                    if (controller.state.isRootProjection) {
+                        controller.reorderRootBooks(payload.identities, destination.index, failureMessage)
+                    } else {
+                        controller.reorderBooks(payload.identities, destination.index, failureMessage)
+                    }
+                }
             }
             is LibraryDropDestination.RemoteMirror -> payload.identities.singleOrNull()?.let { identity ->
                 controller.state.entries.firstOrNull { it.book.identity == identity }?.let { entry ->
                     scope.launch { openRemoteDestination(entry, destination) }
                 }
             }
+            is LibraryDropDestination.Root,
             LibraryDropDestination.LocalCopy,
             LibraryDropDestination.RemoteRemove,
             -> Unit
             LibraryDropDestination.Remove -> {
-                if (payload.fromShortcut && payload.identities.size == 1) {
-                    scope.launch { controller.removeBookShortcut(payload.identities.single(), failureMessage) }
-                } else {
-                    controller.prepareDraggedBooks(payload.identities)
-                    controller.requestSelectionDialog(LibrarySelectionDialog.CONFIRM_REMOVE)
-                }
+                controller.prepareDraggedBooks(payload.identities)
+                controller.requestSelectionDialog(LibrarySelectionDialog.CONFIRM_REMOVE)
             }
         }
         is LibraryDragPayload.Shortcut -> when (destination) {
-            is LibraryDropDestination.Root -> scope.launch {
-                controller.moveShortcut(payload.id, destination.index, failureMessage)
+            is LibraryDropDestination.Library -> scope.launch {
+                controller.reorderRootNode(payload.id, destination.index, failureMessage)
             }
-            LibraryDropDestination.Remove -> scope.launch {
-                controller.removeShortcut(payload.id, failureMessage)
+            is LibraryDropDestination.Root -> scope.launch {
+                controller.reorderRootNode(payload.id, destination.index, failureMessage)
             }
             is LibraryDropDestination.Book,
             is LibraryDropDestination.Collection,
-            is LibraryDropDestination.Library,
+            LibraryDropDestination.CreateCollection,
             is LibraryDropDestination.RemoteMirror,
             LibraryDropDestination.LocalCopy,
             LibraryDropDestination.RemoteRemove,
+            LibraryDropDestination.Remove,
             -> Unit
         }
     }

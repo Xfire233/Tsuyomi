@@ -150,7 +150,7 @@ internal class SourceDetailRouteOwner(
     val localState: DetailLocalState
         get() = flow.remoteLibrary.selectedLibraryEntry?.let { entry ->
             DetailLocalState(
-                inLibrary = true,
+                inLibrary = entry.localMembership,
                 rating = entry.rating,
                 localTags = entry.localTags.toList(),
                 readLater = entry.readLater,

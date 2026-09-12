@@ -6,13 +6,14 @@
 本地优先、面向墨水屏的原生 Android 轻小说阅读器。使用 Kotlin 与 Jetpack Compose 构建，目标平台为 Android 10 及以上版本（`minSdk 29`）。
 
 > [!NOTE]
-> 项目目前已完成 **Phase 0 到 Phase 3** 的基础设施、数据与契约，以及 **Phase 4A (Standard UI/UX 生产级交互切片)**。已实现 Wenku8 在线搜索、详情、目录、章节正文阅读、双排/单排排版、语义进度持久化、书架拖拽与快捷栏交互、数据导入导出迁移。墨水屏全局适配（E-ink）处于临时冻结状态，待 Standard 阶段闭环后开展专项恢复。
+> 项目已完成 **Phase 0 到 Phase 3** 的基础设施、数据与契约；**Phase 4 Standard 功能已完成主要实现并进入验收收口**。在线搜索、阅读、Library、远端书架镜像与显式回写、更新协调，以及独立签名来源仓库的发现、安装、更新、卸载和订阅均已接通。人工视觉、辅助技术和完整真实在线验收仍待完成；墨水屏全局适配（E-ink）保持冻结。
+
 ## 项目目标
 
 - **本地优先**：不要求 Tsuyomi 账号，不依赖 Google Play Services，不接入遥测、远程 feature flag 或自动崩溃上报。
 - **原生 Android**：Kotlin、Jetpack Compose、Room、DataStore；不继承 Flutter 页面树或组件实现。
 - **全局墨水屏模式**：Standard 与 E-ink 复用同一路由、业务状态和持久数据；E-ink 是应用根级显示配置，不是阅读器内的局部开关。
-- **来源与宿主分离**：规划中的内容来源以签名、平台无关的 `.hxp` 包交付，通过版本化 Host API 运行；不是 Android APK 插件。
+- **来源与宿主分离**：内容来源以签名、平台无关的 `.hxp` 包交付，通过版本化 Host API 运行；不是 Android APK 插件。维护源码位于独立的 [tsuyomi-extensions](https://github.com/Chachaanteng/tsuyomi-extensions) 仓库。
 - **语义阅读进度**：持久化章节与文本语义位置，而不是依赖易失效的页码、像素偏移或滚动百分比。
 - **可审计发布**：面向 GitHub Releases 与 F-Droid；依赖锁、校验元数据、第三方声明、REUSE、Phase 证据和 gate 判定随代码版本化。
 
@@ -20,20 +21,20 @@
 
 项目采用阶段化递进架构，已完成的核心能力如下：
 
-- **Phase 0：协议与安全基线（已完成）**：HXP 签名扩展包规范、Host API 1.1、加密安全凭据分区（Android Keystore AES-GCM）、跨平台传输/备份协议契约。
+- **Phase 0：协议与安全基线（已完成）**：HXP 签名扩展包规范、Host API 1.2、加密安全凭据分区（Android Keystore AES-GCM）、跨平台传输/备份协议契约。
 - **Phase 1：Android 宿主骨架与全局显示模式（已完成）**：Jetpack Compose + Material 3 原生界面架构、Room 数据模型与事务不变量、Standard / E-ink 双模式配置架构与 API 29 验证基线。
 - **Phase 2：Wenku8 只读垂直阅读切片（已完成）**：QuickJS 隔离执行沙箱、受控 WebView 登录验证、搜索 → 详情 → 目录 → 章节阅读 → 语义进度保存与恢复端到端闭环。
 - **Phase 3：本地书架与迁移体系（已完成）**：多层级系统/手动/智能收藏夹、`tsuyomi-transfer` 数据导入导出、从旧版 Hikari 无凭据安全平滑迁移、远端书架只读拉取与同步。
-- **Phase 4A：Standard 交互与 UI Atlas 生产级落地（已完成）**：
-  - **书架交互全套迁移**：网格、列表、紧凑三布局长按多选，`SelectionAppBar` 批量移动/添加至收藏夹及本地删除。
-  - **书籍拖拽与归类**：书籍拖至书籍创建收藏夹、拖入现有收藏夹、根目录横向展开插入位并挤开相邻元素。
-  - **快捷栏双模式重构**：
-    - **常驻锁定模式**：快捷栏固定于 AppBar 下方，便于大量书籍拖拽归类，保持完整拖拽、插入、重排与交互能力。
-    - **内联收折模式**：跟随页面滚动，滑出视口后收折为 ≥48dp 悬浮手柄，支持点击、上滑或拖拽书籍悬停动态展开。
-  - **单次长按连续拖拽**：非多选模式下长按书籍达到平台阈值即刻拾取拖动，无需二次手势；拖拽时具备动态让位与收藏夹缩放高亮反馈。
-  - **自定义排序持久化**：Room v4 引入 `display_order`，支持书架根目录及手动收藏夹自由重排与持久化。
-  - **发现页与推荐源站化**：原生解析 Wenku8 首页推荐栏目（7 月新番、新书风云榜、本周会员推荐榜）及《这本轻小说真厉害！》专属榜单页。
-  - **界面细节与规范**：对称标签栏、200ms M3 展开收起动效、滚动方向自适应 FAB。
+- **Phase 4A：Standard 交互生产实现（实现完成，验收待收口）**：
+  - **Library 内容系统**：网格、列表、紧凑三布局，固定 `书架 / 继续阅读 / 稍后再读` 点按分栏，统一筛选与排序，收藏夹、网站镜像与书籍共享同一根内容流。
+  - **拖拽、多选与本地保留**：支持连续长按拖拽、批量归类和自定义排序；Room v10 将本地书架归属与书籍元数据分离，移出书架不删除阅读进度、标注、缓存或网站镜像状态。
+  - **来源页面**：原生呈现 Wenku8 推荐栏目与榜单；来源切换先验证新会话，再原子替换当前会话，失败时继续保留可用来源。
+- **Phase 4B：网站书架镜像与显式回写（实现完成，验收待收口）**：
+  - 持久化网站分组与书籍镜像；`ADD / MOVE / REMOVE` 分别授权、分别对账，网站操作不隐式改变本地书架状态。
+  - 取消、失败、恢复和重试均保留明确状态；不会把一次模糊网络结果伪装成成功写入。
+- **Phase 4C：更新协调与来源生命周期（实现完成，验收待收口）**：
+  - 本地更新收件箱、默认关闭的计划检查、精确处理与撤销，以及来源/书籍排除和逐章完成联动。
+  - Browse 提供官方目录与用户订阅仓库、签名包审批、精确第三方包同意、安全卸载/重装和保留安全历史；下载截断仅在总期限内有限恢复，持续失败提供来源正确的重试入口。
 
 完整阶段规划与历史证据参见 [`docs/phases/`](docs/phases/) 与 [`docs/architecture/DELIVERY_PHASES_0_3.md`](docs/architecture/DELIVERY_PHASES_0_3.md)。
 
@@ -41,11 +42,13 @@
 
 详细版本变更历史见 [`CHANGELOG.md`](CHANGELOG.md)。近期主要更新：
 
-### [Unreleased] (Phase 4A Standard UX Cutover)
-- **书架交互与 Atlas 对齐**：长按多选、SelectionAppBar、书籍拖拽归类与合集创建、Room v4 自定义排序持久化。
-- **快捷书架双模式**：常驻锁定（保持固定且全交互可用）与内联收折（悬浮把手动态展开），单次长按连续拾取。
-- **Wenku8 发现与推荐栏目**：首页三大推荐栏目、轻小说排行榜专页、对称标签栏与 200ms M3 动效。
-- **稳定性与测试**：消除 Compose 触摸输入与手势事件循环死锁，CI 全自动化测试（API 29 Instrumentation、Lint、Goldens）全绿通过。
+### [Unreleased] (Phase 4 Standard)
+- **Library 控件与数据保留**：立即生效的统一筛选与排序、固定点按分栏、独立布局选择，以及保留本地数据的移出书架操作。
+- **签名来源目录**：Browse 已安装/可安装分区、插件搜索与详情、明确确认安装和手动更新；本地 `.hxp` 导入继续保留。
+- **生产信任边界**：正式签名目录及 Wenku8 `0.2.31` 已于 2026-09-11 发布；默认构建已固定授权的生产公钥。`tsuyomi.repository.keyId` 与 `tsuyomi.repository.publicKey` 必须成对配置；后者是原始 32 字节 Ed25519 公钥的 Base64，不是私钥。显式未配置的构建仍显示目录不可用，公开测试密钥不能充当生产根。
+- **来源生命周期**：可通过显式根公钥链接订阅第三方仓库；仓库根认证只负责发现，非官方包仍须完成签名验证和绑定到精确包摘要的风险确认。卸载来源不删除宿主中的书籍、进度或凭据，也不重置发布者身份、撤销和防回滚记录。
+- **下载失败恢复**：官方或订阅仓库下载会区分网络、仓库、验签和存储错误；连接提前中断只在原总期限内重试一次并丢弃残缺字节，显式重试仍重新校验并进入正常安装审批。
+- **验证边界**：严格依赖校验、针对性测试与隔离设备证据不等于人工批准；不自动接受 goldens 或替换 canonical。
 
 ### [0.1.0] - 2026-08-09
 - Phase 1 Android 宿主骨架、全局 Standard/E-ink 配置、Room 架构与 API 29 基线。
@@ -54,12 +57,9 @@
 
 项目后续迭代遵循公开阶段规划与本地架构契约：
 
-- [ ] **Phase 4B: 授权远端回写与云端书架镜像**
-  - 基于 Host API 1.2 / HXP v2 写入能力子集；
-  - 提供用户显式授权的远端书架目标选择、远端移出与移入对账机制，确保网络操作完全透明可控。
-- [ ] **Phase 4C: 更新协调中心与可控计划检查**
-  - 前台显式小说更新状态汇总与未读指示；
-  - 提供用户可配置的手动检查与后台定时轻量更新检查。
+- [ ] **Phase 4 Standard 验收收口**
+  - 完成剩余真实在线 S/X 证据、TalkBack / Switch Access、人工视觉判断和未接受的截图差异；
+  - 验收证据不自动扩大生产授权，也不解除 E-ink 冻结。
 - [ ] **E-ink 墨水屏全量复苏与真机适配**
   - 解除 E-ink 临时冻结状态，执行专项 E-ink 恢复工程；
   - 对齐 28 个 Review 节点的墨水屏高对比度浅色样式、即时动效策略与残影重绘触发机制；
@@ -73,37 +73,66 @@
 
 ## 组件边界
 
-Tsuyomi Monorepo 包含三个独立版本、独立发布和独立回退的组件：
+Tsuyomi Monorepo 包含两个独立版本、独立发布和独立回退的组件：
 
 | 目录 | 职责 |
 |---|---|
 | `tsuyomi-android` | 原生 Android 宿主、Reader、持久化、安全、UI 与系统集成 |
 | `tsuyomi-protocol` | JSON Schema、fixtures、Host API、transfer/backup 与一致性测试 |
-| `tsuyomi-extensions` | 签名来源扩展、构建工具和来源验收 fixtures |
 
-一个 PR 可以原子更新多个组件，但源码边界仍只允许通过版本化协议、签名制品、脱敏 fixtures 和 release metadata 互操作。组件发布顺序为 protocol → extensions → Android。
+维护中的来源扩展、打包工具和来源验收 fixtures 位于独立的 [Chachaanteng/tsuyomi-extensions](https://github.com/Chachaanteng/tsuyomi-extensions) 仓库。Android 与 protocol 可以原子更新；跨仓库仅通过版本化协议、签名制品、固定脱敏 fixtures 和发布元数据互操作，兼容性顺序为 protocol → extensions → Android。宿主构建不要求检出相邻插件仓库。
 
-## 构建
+## 构建与本地 API 29 预检
 
 要求：
 
 - JDK 17
-- Android SDK Platform 36
-- Android API 29 default x86_64 system image（instrumentation/AVD 验收）
+- Android SDK Platform 37、platform-tools、emulator 与 `system-images;android-29;default;x86_64`
 - Python 与 [REUSE Tool](https://reuse.software/)
 
-Windows：
+仅在显式 **HIGH** 模式下，提交前先完成最小复现和相邻顺序诊断，再运行由 `tools/android_ci_plan.py` 选择的本地 API 29 gate；不要把完整选中矩阵当作重试循环。顺序为有界诊断 → 本地 planned gate → 受保护的 hosted checks。**LOW 模式绝不运行本地 API 29 runner，包括 `--prepare-only`、预检和矩阵；LOW 的 CI 仅由 hosted protected checks 执行。** 有界直接开发编译仍是独立操作，不构成 CI。任何本地结果都不能跳过 hosted 最终验收或授予批准。
+
+**Windows 原生优先**（当前没有通用 WSL 发行版时不要为此安装一个）：
 
 ```powershell
 $env:ANDROID_SDK_ROOT = '<your-android-sdk>'
 ./tools/Doctor.ps1
-./gradlew.bat --no-daemon --console=plain --dependency-verification strict :app:assembleDebug
-python -m reuse lint
-python ../tools/check_repository.py --scope android
+$base = git -C .. merge-base origin/main HEAD
+python ../tools/android_api29.py --repo-root .. --base $base --head HEAD --mode high --build
 ```
 
-完整质量命令和固定 AVD 参数分别见：
+除 `--prepare-only` 外，每次运行都会先编译 planner 选择的 instrumentation `:module:assembleDebug` 与 `:module:assembleDebugAndroidTest`，再创建或启动 AVD。`HIGH` 在预编译与串行 instrumentation 中省略 `--no-daemon`，允许 Gradle 在 phase 间复用 daemon；hosted `ci` 保持 `--no-daemon`。`--build` 还会在此阶段加入 planner 选择的 build/lint/JVM/screenshot tasks；仅非 focused 的 `--build` 运行是完整 gate（`scope=planner_selected_preflight`、`full_gate=true`）。默认运行的 scope 为 `planner_selected_instrumentation`、`full_gate=false`。一次有界的 focused 诊断可显式覆盖 instrumentation 任务；它只产生诊断证据，不是完整 gate：
 
+```powershell
+python ../tools/android_api29.py --repo-root .. --base $base --head HEAD --mode high `
+  --task :app:connectedDebugAndroidTest `
+  --test-class org.tsuyomi.android.UpdatesProductionJourneyInstrumentedTest
+```
+
+可重复传入 `--task`。仅检查环境、隔离 AVD 配置和清理路径时使用：
+
+```powershell
+python ../tools/android_api29.py --repo-root .. --base $base --head HEAD --mode high --prepare-only
+```
+
+工具默认从 `ANDROID_SDK_ROOT` 或 `ANDROID_HOME` 取得 SDK；可用 `--sdk PATH` 覆盖，`--repo-root` 省略时由工具推导。`--head` 默认为 `HEAD`；本地仅接受 `HEAD`，并把 tracked dirty 与未忽略 untracked paths 作为相对该 head 的 planner overlay，记录 resolved head 和 overlay。 有可用 merge-base 时传入 `--base`；没有有效 base 时省略它，planner 会保守回退到完整选择。工具共享 `tools/android_api29_profile.json`；不要手工复刻 AVD 参数。它使用独立临时 AVD home、唯一 `tsuyomi-ci-*` AVD 与可用端口，证据保存在 `build/api29-ci/<run>/`，随后清理自己的 emulator/AVD。缺少固定 system image 时按报出的 `sdkmanager` 安装提示处理；工具不会自动安装或接受许可证。
+
+共享 profile 固定 `system-images;android-29;default;x86_64`、`pixel_2`、`swiftshader`、1080×2400/420dpi、font scale 1.0、portrait（rotation 0）和 animation 0；CLI 的默认 `--mode` 是 `low`，但本地 runner 在接触 SDK/AVD/Gradle 前就拒绝默认或显式 `low`，只接受显式 `--mode high`；`--mode ci` 仅保留给 `GITHUB_ACTIONS=true` 的 hosted execution。`--prepare-only` 仅允许 AVD 生命周期证据，拒绝 `--build` 与 focused flags。`environment.json` 标明 run、mode、scope、`full_gate`、planner base/head/fallback/reasons、resolved head/worktree overlay、已解析 profile/AVD、host、SDK packages/revisions、tool versions、task selection、logs、exit/failure，以及 `webview_dumpsys`、system fingerprint、resolved device settings 和 `timings_seconds.precompile`、`timings_seconds.emulator_prepare`、`timings_seconds.instrumentation`（prepare-only 不含）与 `timings_seconds.total`；同一 run 另保存 emulator/adb/build/instrumentation logs 与对应的 WebView、system-fingerprint、device-settings 文件。
+
+只有本地通过、hosted 失败的证据确认了实质性主机差异，且 Windows 原生配置对齐、输入固定与同步修复均无法解决时，才把 WSL2 作为最后手段；还必须具备可用 KVM。把 checkout 与 SDK 放在 Linux 文件系统而非 `/mnt/c`，仍运行同一个 runner/profile：
+
+```bash
+export ANDROID_SDK_ROOT="$HOME/Android/Sdk"
+base="$(git -C .. merge-base origin/main HEAD)"
+python3 ../tools/android_api29.py --repo-root .. --base "$base" --head HEAD --mode high --build
+```
+
+本地、WSL2 与 hosted 环境并不保证相同的 host、kernel 或 emulator build。每次运行记录已安装 image/emulator revision、system fingerprint 与 WebView 版本，供差异比较。这个 automation AVD 只服务 CI-style instrumentation；它不替代 `Tsuyomi_Review_Work_API29` 的视觉/人工 Review_Work 所有权，绝不替换 canonical，也不产生批准。
+性能比较必须使用相同 resolved `HEAD`/worktree-overlay policy、scope、selected tasks、profile/image revision 和 host evidence，并比较上述各 phase timing；它们用于定位性能差异，不证明 Windows、WSL2 Linux 与 hosted 的 host、kernel 或 emulator build 相同。
+
+完整质量门、固定人工/视觉 AVD 配方分别见：
+
+- [`CONTRIBUTING.md`](CONTRIBUTING.md)
 - [`docs/process/QUALITY_GATES.md`](docs/process/QUALITY_GATES.md)
 - [`docs/verification/AVD_MATRIX.md`](docs/verification/AVD_MATRIX.md)
 - [`tools/avd/Create-ReviewAvds.ps1`](tools/avd/Create-ReviewAvds.ps1)

@@ -12,6 +12,10 @@ import org.tsuyomi.shared.model.BookIdentity
 private val SOURCE_ID = Regex("^[a-z][a-z0-9]*(?:[.-][a-z0-9]+)+$")
 private val SHA_256 = Regex("^[a-f0-9]{64}$")
 private val SOURCE_CALENDAR_DATE = Regex("^\\d{4}-\\d{2}-\\d{2}$")
+private const val MAX_UPDATE_CHAPTERS = 20_000
+private const val MAX_UPDATE_ANCHOR_LENGTH = 128
+private val UPDATE_ANCHOR = Regex("^[A-Za-z0-9._:-]{1,$MAX_UPDATE_ANCHOR_LENGTH}$")
+private val UPDATE_REASON = Regex("^[a-z][a-z0-9._-]{0,127}$")
 
 @JvmInline
 value class SourceId(val value: String) {
@@ -341,6 +345,84 @@ data class SourceDirectory(
     init {
         require(chapters.isNotEmpty()) { "Directory cannot be empty" }
         require(chapters.map { it.chapterId }.distinct().size == chapters.size) { "Duplicate chapter identity" }
+    }
+}
+
+data class SourceUpdateChapter(
+    val chapterId: String,
+    val title: String,
+) {
+    init {
+        require(chapterId.codePointCount(0, chapterId.length) in 1..256) { "Invalid update chapter ID" }
+        require(title.codePointCount(0, title.length) in 1..512) { "Invalid update chapter title" }
+    }
+}
+
+enum class SourceUpdateOutcome {
+    UNCHANGED,
+    UPDATED,
+    UNAVAILABLE,
+    FAILED,
+}
+
+/**
+ * Host-admitted, normalized update evidence from one verified source package.
+ *
+ * Anchors are opaque, bounded adapter-owned values. They must prove the complete prior ordered
+ * chapter prefix; callers persist no source URL, HTML, or chapter text in this result.
+ */
+data class SourceUpdateProbeResult(
+    val identity: BookIdentity,
+    val sourceVersion: String,
+    val packageSha256: String,
+    val checkedAt: Long,
+    val outcome: SourceUpdateOutcome,
+    val previousAnchor: String?,
+    val anchor: String?,
+    val chapters: List<SourceUpdateChapter>,
+    val newChapterIds: List<String>,
+    val lastUpdatedDate: String?,
+    val reason: String?,
+) {
+    init {
+        require(sourceVersion.codePointCount(0, sourceVersion.length) in 1..128) { "Invalid source version" }
+        require(SHA_256.matches(packageSha256)) { "Invalid source package digest" }
+        require(checkedAt >= 0) { "Invalid update checked time" }
+        previousAnchor?.let { require(UPDATE_ANCHOR.matches(it)) { "Invalid previous update anchor" } }
+        anchor?.let { require(UPDATE_ANCHOR.matches(it)) { "Invalid update anchor" } }
+        require(chapters.size in 0..MAX_UPDATE_CHAPTERS) { "Invalid update chapter count" }
+        val chapterIds = chapters.map(SourceUpdateChapter::chapterId)
+        val uniqueChapterIds = chapterIds.toHashSet()
+        require(uniqueChapterIds.size == chapters.size) { "Duplicate update chapter identity" }
+        val uniqueNewChapterIds = newChapterIds.toHashSet()
+        require(newChapterIds.size <= chapters.size && uniqueNewChapterIds.size == newChapterIds.size) {
+            "Invalid update chapter delta"
+        }
+        require(newChapterIds.all { it in uniqueChapterIds }) {
+            "Unknown update chapter delta"
+        }
+        lastUpdatedDate?.let { date ->
+            require(SOURCE_CALENDAR_DATE.matches(date) && runCatching { LocalDate.parse(date) }.isSuccess) {
+                "Invalid source update calendar date"
+            }
+        }
+        reason?.let { require(UPDATE_REASON.matches(it)) { "Invalid update reason" } }
+        when (outcome) {
+            SourceUpdateOutcome.UNCHANGED -> {
+                require(anchor != null && chapters.isNotEmpty() && newChapterIds.isEmpty() && reason == null) {
+                    "Invalid unchanged update result"
+                }
+            }
+            SourceUpdateOutcome.UPDATED -> {
+                require(previousAnchor != null && anchor != null && chapters.isNotEmpty() && newChapterIds.isNotEmpty() && reason == null) {
+                    "Invalid updated update result"
+                }
+            }
+            SourceUpdateOutcome.UNAVAILABLE,
+            SourceUpdateOutcome.FAILED -> require(anchor == null && chapters.isEmpty() && newChapterIds.isEmpty() && lastUpdatedDate == null && reason != null) {
+                "Invalid unavailable update result"
+            }
+        }
     }
 }
 

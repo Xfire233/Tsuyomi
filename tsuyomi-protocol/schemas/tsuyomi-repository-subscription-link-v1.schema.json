@@ -1,0 +1,10 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://protocol.tsuyomi.dev/schema/tsuyomi-repository-subscription-link-v1.schema.json",
+  "title": "Tsuyomi user-added repository subscription link v1",
+  "description": "Bootstrap link only; it does not alter the signed tsuyomi-repository v1 catalog producer schema.",
+  "type": "string",
+  "minLength": 12,
+  "maxLength": 4512,
+  "pattern": "^https://[^/?#@]+(?:/[^#]*)?#repositoryId=[a-z][a-z0-9]*(?:[.-][a-z0-9]+)+&keyId=[A-Za-z0-9._-]{8,128}&publicKey=[A-Za-z0-9+/]{43}=$"
+}

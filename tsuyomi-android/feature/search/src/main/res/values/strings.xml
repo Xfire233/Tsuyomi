@@ -10,7 +10,7 @@
     <string name="search_loading_title">正在搜索</string>
     <string name="search_empty_title">没有找到「%1$s」</string>
     <string name="search_empty_message">可调整关键词后重新搜索。</string>
-    <string name="search_topbar_title">搜索</string>
+    <string name="search_topbar_title">聚合搜索</string>
     <string name="search_layout_list">切换布局；当前为列表</string>
     <string name="search_layout_compact">切换布局；当前为紧凑列表</string>
     <string name="search_layout_grid">切换布局；当前为网格</string>

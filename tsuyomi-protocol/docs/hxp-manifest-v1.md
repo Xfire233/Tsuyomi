@@ -15,7 +15,7 @@ An `.hxp` archive contains `manifest.json`, `index.mjs`, optional `assets/` and 
 
 ## Trust and updates
 
-Installation requires a signature chaining to a user-trusted key or an explicit local-import confirmation. A same-key update with no capability expansion may be offered as a normal update. Any added domain, cookie scope, controlled-WebView permission, file ability, or storage quota requires a new explicit grant. Revocation and key-rotation data is signed and evaluated before updates.
+Installation requires a publisher signature trusted through current or retained root-signed repository metadata, a user-trusted key, or an explicit local-import confirmation. A same-key update with no capability expansion may be offered as a normal update. Any added domain, cookie scope, controlled-WebView permission, file ability, or storage quota requires a new explicit grant. Catalog expiry, root-signed revocation, and the exact legacy-migration exception are rechecked before repository activation.
 
 ## Host security boundary
 
@@ -30,6 +30,12 @@ Archive integrity, publisher trust, revocation, rotation, rollback, and capabili
 `capabilities.home` is optional. When present, it contains only `{ "enabled": boolean }`; absence and `enabled: false` are equivalent. Enabling it is a capability expansion that requires explicit install/update approval.
 
 The capability permits the host to invoke the versioned normalized Home projection in [`hxp-host-api-v1.md`](hxp-host-api-v1.md). It does not grant UI injection, arbitrary navigation, background refresh, browser/WebView access, website mutation, additional origins, cookies, or storage. All requests still pass through `capabilities.network` and the host starts them only after an explicit user action.
+
+## Signed update check v2
+
+`capabilities.updateCheck` is optional. When present, it declares exactly `{ version: 2, origin, method: "GET", path, parameters, referrerPath? }`. Its parameters permit fixed literals plus exactly one `remoteBookId` binding; `cursor`, target and write bindings are forbidden. The origin must already be in the signed network allowlist. Enabling this capability is a visible `source-update:read` grant during install/update approval.
+
+The host invokes an update check only through this exact signed policy, with `NETWORK_ONLY` GET and no body. A generic source request is not an update-check fallback. Redirects are not permitted. A source may use the same site endpoint for ordinary directory reads, but that does not authorize the update-check API to substitute generic directory transport or a same-origin GET mutation.
 
 ## Signed remote-library operations
 

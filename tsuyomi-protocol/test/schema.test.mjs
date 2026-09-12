@@ -26,9 +26,29 @@ for (const { label, schemaPath, fixturePath } of [
     fixturePath: '../fixtures/transfer/valid-v2.json',
   },
   {
+    label: 'tsuyomi-transfer v3',
+    schemaPath: '../schemas/tsuyomi-transfer-v3.schema.json',
+    fixturePath: '../fixtures/transfer/valid-v3-retained-unpinned.json',
+  },
+  {
     label: 'hxp manifest v1',
     schemaPath: '../schemas/hxp-manifest-v1.schema.json',
     fixturePath: '../fixtures/hxp/valid-minimal-manifest.json',
+  },
+  {
+    label: 'hxp update check v2',
+    schemaPath: '../schemas/hxp-update-check-v2.schema.json',
+    fixturePath: '../fixtures/hxp/valid-update-check-v2.json',
+  },
+  {
+    label: 'tsuyomi signed extension repository v1',
+    schemaPath: '../schemas/tsuyomi-repository-v1.schema.json',
+    fixturePath: '../fixtures/repository/valid-catalog.json',
+  },
+  {
+    label: 'tsuyomi repository subscription link v1',
+    schemaPath: '../schemas/tsuyomi-repository-subscription-link-v1.schema.json',
+    fixturePath: '../fixtures/repository/valid-subscription-link.json',
   },
 ]) {
   test(`${label} accepts its valid fixture`, async () => {
@@ -53,6 +73,27 @@ test('tsuyomi-transfer v1 rejects v2-only completion and reader fields', async (
   document.library[0].completedChapterIds = ['67889'];
   document.preferences = { reader: { horizontalMargin: 32 } };
   assert.equal(validate(document), false);
+});
+
+test('tsuyomi-transfer v3 requires local pin state and rejects unpinned manual membership', async () => {
+  const ajv = createAjv();
+  const validate = ajv.compile(await loadJson('../schemas/tsuyomi-transfer-v3.schema.json'));
+  const valid = await loadJson('../fixtures/transfer/valid-v3-retained-unpinned.json');
+  const invalid = await loadJson('../fixtures/transfer/invalid-v3-unpinned-shelf-membership.json');
+
+  delete valid.library[0].localPin;
+  assert.equal(validate(valid), false);
+  assert.equal(validate(invalid), false);
+});
+test('tsuyomi repository v1 rejects unsigned shape changes and unsafe package URLs', async () => {
+  const ajv = createAjv();
+  const validate = ajv.compile(await loadJson('../schemas/tsuyomi-repository-v1.schema.json'));
+  const unknown = await loadJson('../fixtures/repository/invalid-catalog-unknown-field.json');
+  assert.equal(validate(unknown), false);
+
+  const credentialed = await loadJson('../fixtures/repository/valid-catalog.json');
+  credentialed.signed.packages[0].downloadUrl = 'https://user@example.test/fixture.hxp';
+  assert.equal(validate(credentialed), false);
 });
 
 test('hxp manifest v1 rejects non-HTTPS network origins', async () => {
@@ -81,6 +122,38 @@ test('hxp manifest v1 keeps source Home optional and rejects source-controlled l
   const injectedLayout = await loadJson('../fixtures/hxp/valid-minimal-manifest.json');
   injectedLayout.capabilities.home.layout = 'source-controlled';
   assert.equal(validate(injectedLayout), false);
+});
+
+test('hxp update check v2 requires explicit complete source-order evidence', async () => {
+  const ajv = createAjv();
+  const validate = ajv.compile(await loadJson('../schemas/hxp-update-check-v2.schema.json'));
+  assert.equal(validate(await loadJson('../fixtures/hxp/valid-update-check-v2.json')), true, ajv.errorsText(validate.errors));
+  for (const fixture of [
+    'invalid-update-check-v2-raw-url.json',
+    'invalid-update-check-v2-incomplete.json',
+    'invalid-update-check-v2-missing-order.json',
+  ]) {
+    assert.equal(validate(await loadJson(`../fixtures/hxp/${fixture}`)), false, fixture);
+  }
+});
+
+test('hxp manifest v1 permits only the signed read-only update check grammar', async () => {
+  const ajv = createAjv();
+  const validate = ajv.compile(await loadJson('../schemas/hxp-manifest-v1.schema.json'));
+  const manifest = await loadJson('../fixtures/hxp/valid-minimal-manifest.json');
+  manifest.capabilities.updateCheck = {
+    version: 2,
+    origin: 'https://www.wenku8.net',
+    method: 'GET',
+    path: '/modules/article/reader.php',
+    parameters: { aid: { kind: 'remoteBookId' } },
+  };
+  assert.equal(validate(manifest), true, ajv.errorsText(validate.errors));
+  manifest.capabilities.updateCheck.method = 'POST';
+  assert.equal(validate(manifest), false);
+  manifest.capabilities.updateCheck.method = 'GET';
+  manifest.capabilities.updateCheck.parameters.aid = { kind: 'cursor' };
+  assert.equal(validate(manifest), false);
 });
 
 test('hxp manifest v1 requires signed policies for remote read, targets, and writes', async () => {

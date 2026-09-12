@@ -1,0 +1,124 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://protocol.tsuyomi.dev/schema/tsuyomi-repository-v1.schema.json",
+  "title": "Tsuyomi signed extension repository catalog v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["format", "version", "keyId", "signed", "signature"],
+  "properties": {
+    "format": { "const": "tsuyomi-repository" },
+    "version": { "const": 1 },
+    "keyId": { "type": "string", "pattern": "^[A-Za-z0-9._-]{8,128}$" },
+    "signed": { "$ref": "#/$defs/signedCatalog" },
+    "signature": { "type": "string", "pattern": "^[A-Za-z0-9+/]{86}==$" }
+  },
+  "$defs": {
+    "sourceId": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9]*(?:[.-][a-z0-9]+)+$",
+      "maxLength": 128
+    },
+    "semver": {
+      "type": "string",
+      "pattern": "^(0|[1-9]\\d*)\\.(0|[1-9]\\d*)\\.(0|[1-9]\\d*)(?:-[0-9A-Za-z-]+(?:\\.[0-9A-Za-z-]+)*)?(?:\\+[0-9A-Za-z-]+(?:\\.[0-9A-Za-z-]+)*)?$"
+    },
+    "sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "keyId": { "type": "string", "pattern": "^[A-Za-z0-9._-]{8,128}$" },
+    "httpsUrl": {
+      "type": "string",
+      "minLength": 12,
+      "maxLength": 4096,
+      "pattern": "^https://[^/?#@]+(?:/[^#]*)?$"
+    },
+    "hostApi": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["minInclusive", "maxExclusive"],
+      "properties": {
+        "minInclusive": { "$ref": "#/$defs/semver" },
+        "maxExclusive": { "$ref": "#/$defs/semver" }
+      }
+    },
+    "publisher": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["keyId", "publicKey", "fingerprint"],
+      "properties": {
+        "keyId": { "$ref": "#/$defs/keyId" },
+        "publicKey": { "type": "string", "pattern": "^[A-Za-z0-9+/]{43}=$" },
+        "fingerprint": { "$ref": "#/$defs/sha256" }
+      }
+    },
+    "legacyMigration": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["fromPublisherFingerprint", "fromPackageSha256"],
+      "properties": {
+        "fromPublisherFingerprint": { "$ref": "#/$defs/sha256" },
+        "fromPackageSha256": { "$ref": "#/$defs/sha256" }
+      }
+    },
+    "repositoryPackage": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "name", "version", "summary", "language", "license", "sourceUrl", "sourceRevision", "downloadUrl", "size", "sha256", "hostApi", "publisherKeyId"],
+      "properties": {
+        "id": { "$ref": "#/$defs/sourceId" },
+        "name": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "version": { "$ref": "#/$defs/semver" },
+        "summary": { "type": "string", "minLength": 1, "maxLength": 1024 },
+        "language": { "type": "string", "minLength": 1, "maxLength": 64 },
+        "license": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "sourceUrl": { "$ref": "#/$defs/httpsUrl" },
+        "sourceRevision": { "type": "string", "pattern": "^[a-f0-9]{40}$" },
+        "downloadUrl": { "$ref": "#/$defs/httpsUrl" },
+        "size": { "type": "integer", "minimum": 1, "maximum": 16777216 },
+        "sha256": { "$ref": "#/$defs/sha256" },
+        "hostApi": { "$ref": "#/$defs/hostApi" },
+        "publisherKeyId": { "$ref": "#/$defs/keyId" },
+        "legacyMigration": { "$ref": "#/$defs/legacyMigration" }
+      }
+    },
+    "revocations": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["publisherFingerprints", "packageDigests"],
+      "properties": {
+        "publisherFingerprints": {
+          "type": "array",
+          "maxItems": 32,
+          "uniqueItems": true,
+          "items": { "$ref": "#/$defs/sha256" }
+        },
+        "packageDigests": {
+          "type": "array",
+          "maxItems": 512,
+          "uniqueItems": true,
+          "items": { "$ref": "#/$defs/sha256" }
+        }
+      }
+    },
+    "signedCatalog": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["repositoryId", "sequence", "issuedAt", "expiresAt", "publishers", "packages", "revocations"],
+      "properties": {
+        "repositoryId": { "$ref": "#/$defs/sourceId" },
+        "sequence": { "type": "integer", "minimum": 1, "maximum": 9007199254740991 },
+        "issuedAt": { "type": "string", "format": "date-time", "pattern": "Z$", "maxLength": 64 },
+        "expiresAt": { "type": "string", "format": "date-time", "pattern": "Z$", "maxLength": 64 },
+        "publishers": {
+          "type": "array",
+          "maxItems": 32,
+          "items": { "$ref": "#/$defs/publisher" }
+        },
+        "packages": {
+          "type": "array",
+          "maxItems": 512,
+          "items": { "$ref": "#/$defs/repositoryPackage" }
+        },
+        "revocations": { "$ref": "#/$defs/revocations" }
+      }
+    }
+  }
+}

@@ -33,9 +33,9 @@ internal data class BookEntity(
     @ColumnInfo(name = "remote_tags_json", defaultValue = "'[]'")
     val remoteTagsJson: String,
     @ColumnInfo(name = "source_update_key")
-    val sourceUpdateKey: String?,
+    val legacySourceUpdateKey: String? = null,
     @ColumnInfo(name = "has_unread_update", defaultValue = "0")
-    val hasUnreadUpdate: Boolean,
+    val legacyHasUnreadUpdate: Boolean = false,
     @ColumnInfo(name = "added_at_epoch_second")
     val addedAtEpochSecond: Long,
     @ColumnInfo(name = "added_at_nano")
@@ -185,6 +185,7 @@ internal data class LibraryEntryEntity(
     val rating: Int?,
     @ColumnInfo(name = "read_later", defaultValue = "0") val readLater: Boolean = false,
     @ColumnInfo(name = "display_order", defaultValue = "2147483647") val displayOrder: Int = Int.MAX_VALUE,
+    @ColumnInfo(name = "local_pin", defaultValue = "1") val locallyPinned: Boolean = true,
 )
 
 @Entity(

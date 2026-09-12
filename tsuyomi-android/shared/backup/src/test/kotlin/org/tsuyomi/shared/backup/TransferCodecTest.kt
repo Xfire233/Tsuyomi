@@ -28,13 +28,45 @@ class TransferCodecTest {
     }
 
     @Test
-    fun exporter_emits_v2_and_v1_rejects_v2_only_fields() {
+    fun exporter_emits_v3_and_legacy_inputs_decode_as_pinned() {
         val instant = Instant.parse("2026-08-08T00:00:00Z")
         val encoded = TransferCodec.encode(TransferSnapshot(instant, emptyList(), emptyList())).decodeToString()
-        assertTrue("\"version\":2" in encoded)
+        val pinned = TransferCodec.encode(
+            TransferSnapshot(instant, listOf(TransferBook(BookIdentity("org.tsuyomi.wenku8", "pinned"), "Pinned", updatedAt = instant)), emptyList()),
+        ).decodeToString()
+        assertTrue("\"version\":3" in encoded)
+        assertTrue("\"localPin\":true" in pinned)
 
         val widenedV1 = """{"format":"tsuyomi-transfer","version":1,"createdAt":"2026-08-08T00:00:00Z","library":[{"identity":{"sourceId":"org.tsuyomi.wenku8","remoteBookId":"1"},"title":"A","updatedAt":"2026-08-08T00:00:00Z","completedChapterIds":["chapter"]}],"shelves":[]}""".encodeToByteArray()
+        val v1 = """{"format":"tsuyomi-transfer","version":1,"createdAt":"2026-08-08T00:00:00Z","library":[{"identity":{"sourceId":"org.tsuyomi.wenku8","remoteBookId":"1"},"title":"A","updatedAt":"2026-08-08T00:00:00Z"}],"shelves":[]}""".encodeToByteArray()
+        val v2 = """{"format":"tsuyomi-transfer","version":2,"createdAt":"2026-08-08T00:00:00Z","library":[{"identity":{"sourceId":"org.tsuyomi.wenku8","remoteBookId":"2"},"title":"B","updatedAt":"2026-08-08T00:00:00Z","completedChapterIds":[]}],"shelves":[]}""".encodeToByteArray()
+
         assertEquals("invalid-book", assertIs<ImportParseResult.Fatal>(TransferCodec.parse(widenedV1)).safeCode)
+        assertTrue(assertIs<ImportParseResult.Ready>(TransferCodec.parse(v1)).plan.books.single().localPin)
+        assertTrue(assertIs<ImportParseResult.Ready>(TransferCodec.parse(v2)).plan.books.single().localPin)
+    }
+
+    @Test
+    fun v3_preserves_explicit_unpinned_state_and_rejects_unpinned_shelf_memberships() {
+        val instant = Instant.parse("2026-08-08T00:00:00Z")
+        val snapshot = TransferSnapshot(
+            instant,
+            listOf(TransferBook(BookIdentity("org.tsuyomi.wenku8", "unpinned"), "保留元数据", localPin = false, updatedAt = instant)),
+            emptyList(),
+        )
+        val encoded = TransferCodec.encode(snapshot).decodeToString()
+        val missingLocalPin = encoded.replace("\"localPin\":false,", "")
+        val stringLocalPin = encoded.replace("\"localPin\":false", "\"localPin\":\"false\"")
+        val unpinnedShelfMembership = encoded.replace("\"updatedAt\":", "\"shelfIds\":[\"manual\"],\"updatedAt\":")
+
+        assertTrue("\"localPin\":false" in encoded)
+        assertEquals(false, assertIs<ImportParseResult.Ready>(TransferCodec.parse(encoded.encodeToByteArray())).plan.books.single().localPin)
+        assertEquals("invalid-book", assertIs<ImportParseResult.Fatal>(TransferCodec.parse(missingLocalPin.encodeToByteArray())).safeCode)
+        assertEquals("invalid-book", assertIs<ImportParseResult.Fatal>(TransferCodec.parse(stringLocalPin.encodeToByteArray())).safeCode)
+        assertEquals("invalid-book", assertIs<ImportParseResult.Fatal>(TransferCodec.parse(unpinnedShelfMembership.encodeToByteArray())).safeCode)
+        assertFailsWith<IllegalArgumentException> {
+            TransferCodec.encode(snapshot.copy(library = listOf(snapshot.library.single().copy(shelfIds = setOf("manual")))))
+        }
     }
 
     @Test
@@ -175,6 +207,7 @@ class TransferCodecTest {
         assertTrue(result.plan.warnings.any { it.safeCode == "credential-field-skipped" && it.fieldName == "payload.auth.cookies" })
         assertTrue(result.plan.warnings.none { it.toString().contains("secret") })
         assertEquals("paged", result.plan.readerPreferences?.flow)
+        assertTrue(result.plan.books.all { it.localPin })
     }
     @Test
     fun parser_enforces_byte_bound_and_strict_utf8_before_json() {
@@ -203,6 +236,7 @@ class TransferCodecTest {
         val decoded = ImportPlanCodec.decode(encoded).getOrThrow()
         assertContentEquals(encoded, ImportPlanCodec.encode(decoded))
         assertEquals(plan.kind, decoded.kind)
+        assertEquals(plan.books, decoded.books)
         assertEquals(true, decoded.forceManualEInk)
         assertEquals(plan.searchHistory, decoded.searchHistory)
         assertEquals(plan.browsingHistory, decoded.browsingHistory)

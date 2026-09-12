@@ -1,0 +1,38 @@
+{
+  "format": "tsuyomi-transfer",
+  "version": 3,
+  "createdAt": "2026-09-10T00:00:00Z",
+  "library": [
+    {
+      "identity": {
+        "sourceId": "org.tsuyomi.wenku8",
+        "remoteBookId": "pinned-member"
+      },
+      "title": "Pinned manual member fixture",
+      "shelfIds": ["favorites"],
+      "localPin": true,
+      "updatedAt": "2026-09-10T00:00:00Z",
+      "completedChapterIds": []
+    },
+    {
+      "identity": {
+        "sourceId": "org.tsuyomi.wenku8",
+        "remoteBookId": "retained-unpinned"
+      },
+      "title": "Retained metadata fixture",
+      "localTags": ["favorite"],
+      "rating": 4,
+      "readLater": true,
+      "localPin": false,
+      "updatedAt": "2026-09-10T00:00:00Z",
+      "completedChapterIds": ["chapter-1"]
+    }
+  ],
+  "shelves": [
+    {
+      "id": "favorites",
+      "name": "Favorites",
+      "position": 0
+    }
+  ]
+}

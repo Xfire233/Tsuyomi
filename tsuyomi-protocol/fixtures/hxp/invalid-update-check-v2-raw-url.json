@@ -1,0 +1,14 @@
+{
+  "sourceId": "org.tsuyomi.wenku8",
+  "remoteBookId": "1234",
+  "complete": true,
+  "order": "source",
+  "chapters": [
+    {
+      "chapterId": "10001",
+      "title": "第一章 雾中的灯塔",
+      "url": "https://www.wenku8.net/modules/article/reader.php?aid=1234&cid=10001"
+    }
+  ],
+  "lastUpdatedDate": null
+}

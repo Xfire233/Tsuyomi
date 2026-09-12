@@ -17,6 +17,7 @@ path = [
   "tsuyomi-protocol/fixtures/**/*.json",
   "tsuyomi-android/**/*gradle.lockfile",
   ".agents/skills/tsuyomi-android-review/*.json",
+  "tools/android_api29_profile.json",
   "tsuyomi-android/core/database/schemas/**",
   "tsuyomi-android/core/ui/src/screenshotTestDebug/reference/**",
   "tsuyomi-android/feature/*/src/screenshotTestDebug/reference/**",
@@ -31,10 +32,8 @@ path = [
   "tsuyomi-android/docs/verification/AVD_MATRIX.md",
   "tsuyomi-android/docs/process/REPOSITORY_GOVERNANCE.md",
   "tsuyomi-android/docs/process/PHASE_2_RETROSPECTIVE.md",
-  "tsuyomi-extensions/package.json",
-  "tsuyomi-extensions/package-lock.json",
-  "tsuyomi-extensions/tsconfig.json",
-  "tsuyomi-extensions/fixtures/**",
+  "tsuyomi-android/source/extension-testkit/fixtures/**",
+  "tsuyomi-android/app/src/androidTest/assets/repository/*.json",
 ]
 
 precedence = "aggregate"

@@ -5,19 +5,18 @@
 
 ## 组件边界
 
-一个 Git 仓库包含三个独立版本组件：
+本 Git 仓库包含两个独立版本组件：
 
 - `tsuyomi-protocol`：Schema、fixtures、规范和 conformance；
-- `tsuyomi-extensions`：TypeScript 扩展与 `.hxp` 工具；
 - `tsuyomi-android`：Android Host。
 
-Monorepo 允许一个 PR 原子修改协议、生产者和消费者，但禁止源码边界泄漏。组件只通过版本化协议、脱敏 fixture、签名制品和 release metadata 互操作。
+来源扩展在公开的 `Chachaanteng/tsuyomi-extensions` 独立仓库维护。宿主/协议可在本仓库原子变更；跨仓库只通过版本化协议、固定提交、不可变脱敏 replay fixture、签名制品和 release metadata 互操作。Android 构建不得依赖相邻插件 checkout，主仓库不保留第二份可维护插件源码。
 
 ## 分支与 PR
 
 - `main` 始终可构建、可验证；启用 branch protection 和 required checks。
-- 使用短生命周期分支；禁止把 Android、protocol、extensions 放在三个长期 branch。
-- 一个 PR 只承担一个可回退意图；跨组件变更在同一 PR 中按 protocol → extensions → Android 顺序组织。
+- 使用短生命周期分支；独立插件仓库不是本仓库的长期功能分支。
+- 一个 PR 只承担一个可回退意图；跨仓库变更按 protocol → extensions → Android 衔接，并固定每一步的可验证版本与制品摘要。
 - 路径过滤 CI 只运行受影响组件，但根级 REUSE 和仓库制品检查对每个 PR 必跑。
 - 禁止 force-push 已发布 tag 和受保护 `main`。
 
@@ -41,8 +40,8 @@ Monorepo 允许一个 PR 原子修改协议、生产者和消费者，但禁止�
 
 ## 版本与 tag
 
-- 三个组件分别使用 SemVer；0.x 阶段仍必须明确 breaking change。
-- tag 使用组件前缀：`protocol-vX.Y.Z`、`extensions-vX.Y.Z`、`android-vX.Y.Z`。
+- 宿主、协议和独立插件仓库分别使用 SemVer；0.x 阶段仍必须明确 breaking change。
+- 本仓库 tag 使用 `protocol-vX.Y.Z`、`android-vX.Y.Z`；新的 `extensions-vX.Y.Z` tag 位于插件仓库，历史本仓库标签不移动。
 - Future delivery baselines use one annotated tag named `phase-N-baseline`, pointing to the Monorepo commit that passed every applicable component and admission/release gate.
 - Immutable historical tags `gate-1-baseline` and `gate-2-baseline` remain exact published facts and never move; they are not active naming templates.
 - Annotated tag messages record the owning Phase document, three component versions and artifact digest; tags do not move.
@@ -54,7 +53,7 @@ Monorepo 允许一个 PR 原子修改协议、生产者和消费者，但禁止�
 ```text
 monorepo Git SHA
 protocol version + schema/fixture digest
-extensions package/tool version + deterministic artifact digest
+extensions repository Git SHA + package/tool version + deterministic artifact digest
 android versionName/versionCode + APK digest
 ```
 

@@ -1,0 +1,194 @@
+{
+  "format": "tsuyomi-test-source-switch-overlay",
+  "version": 1,
+  "testOnly": true,
+  "sourceId": "org.tsuyomi.switch-home",
+  "displayName": "测试来源",
+  "homeAvailable": true,
+  "archive": {
+    "path": ".local/source-switch-replay/source-switch-home.hxp",
+    "sha256": "d7d24f2b2aed6de68bb18efe4018de784270d7276d65784e0adf9e5fe10cf5d2"
+  },
+  "provenance": {
+    "baseFixture": {
+      "path": "source/extension-testkit/fixtures/wenku8/wenku8-fixture.hxp",
+      "sha256": "36db147337636ddc1b5bb00a979e42bb82e97f419ab374c6a5cb62ce852d6af6",
+      "license": "Apache-2.0",
+      "upstream": {
+        "repository": "https://github.com/Chachaanteng/tsuyomi-extensions",
+        "commit": "b6cb6d33e67d7ab56b8af195ab294a75da0ac230",
+        "tree": "34d662106a47d4bece6eb359864b78b581b96c16",
+        "originalRepository": "https://github.com/Xfire233/Tsuyomi",
+        "originalCommit": "09e0cb7326b0310495083bc8eaf8b3a7e89e1420",
+        "originalPath": "tsuyomi-extensions/fixtures"
+      }
+    },
+    "publisher": {
+      "keyId": "tsuyomi-phase2-fixture",
+      "publicKeyHex": "79b5562e8fe654f94078b112e8a98ba7901f853ae695bed7e0e3910bad049664",
+      "trust": "BUILT_IN_TEST"
+    },
+    "entryReplacement": {
+      "reason": "Source identity must match the signed manifest for real extension-runtime results.",
+      "sha256": "a77f70a55da37217a5257a075384fd4a3032f6e5ff409c29ffbaafe49df3dc32"
+    }
+  },
+  "manifest": {
+    "format": "tsuyomi-hxp",
+    "manifestVersion": 1,
+    "id": "org.tsuyomi.switch-home",
+    "version": "0.2.30",
+    "display": {
+      "name": "测试来源",
+      "summary": "测试来源 的确定性测试回放；仅用于来源切换回归。",
+      "homepage": "https://www.wenku8.net"
+    },
+    "hostApi": {
+      "minInclusive": "1.2.0",
+      "maxExclusive": "2.0.0"
+    },
+    "entry": "index.mjs",
+    "integrity": {
+      "algorithm": "sha256",
+      "contentDigest": "0954a5794a65ba044d40509aec538c4b6a2bf3197e14c1b8a7ae8a225701a96d",
+      "files": {
+        "index.mjs": "a77f70a55da37217a5257a075384fd4a3032f6e5ff409c29ffbaafe49df3dc32"
+      }
+    },
+    "signing": {
+      "algorithm": "Ed25519",
+      "keyId": "tsuyomi-phase2-fixture",
+      "signatureFile": "signature.ed25519"
+    },
+    "capabilities": {
+      "network": {
+        "origins": [
+          "https://www.wenku8.net",
+          "https://img.wenku8.com",
+          "https://pic.wenku8.com",
+          "https://pic.777743.xyz"
+        ],
+        "maxConcurrentRequests": 2,
+        "requestTimeoutMs": 15000,
+        "maxResponseBytes": 2097152
+      },
+      "cookies": {
+        "mode": "sourceScoped",
+        "origins": [
+          "https://www.wenku8.net"
+        ]
+      },
+      "webLogin": {
+        "enabled": true,
+        "origins": [
+          "https://www.wenku8.net"
+        ]
+      },
+      "home": {
+        "enabled": true
+      },
+      "updateCheck": {
+        "version": 2,
+        "origin": "https://www.wenku8.net",
+        "method": "GET",
+        "path": "/modules/article/reader.php",
+        "parameters": {
+          "aid": {
+            "kind": "remoteBookId"
+          }
+        }
+      },
+      "remoteLibrary": {
+        "read": true,
+        "writeOperations": [
+          "add",
+          "remove",
+          "move"
+        ],
+        "policies": {
+          "read": {
+            "origin": "https://www.wenku8.net",
+            "method": "GET",
+            "path": "/modules/article/bookcase.php",
+            "parameters": {
+              "action": {
+                "kind": "fixed",
+                "value": "list"
+              },
+              "cursor": {
+                "kind": "cursor"
+              }
+            }
+          },
+          "targets": {
+            "origin": "https://www.wenku8.net",
+            "method": "GET",
+            "path": "/modules/article/bookcase.php",
+            "parameters": {
+              "action": {
+                "kind": "fixed",
+                "value": "targets"
+              }
+            }
+          },
+          "add": {
+            "origin": "https://www.wenku8.net",
+            "method": "GET",
+            "path": "/modules/article/addbookcase.php",
+            "parameters": {
+              "bid": {
+                "kind": "remoteBookId"
+              }
+            }
+          },
+          "remove": {
+            "origin": "https://www.wenku8.net",
+            "method": "POST",
+            "path": "/modules/article/bookcase.php",
+            "parameters": {
+              "action": {
+                "kind": "fixed",
+                "value": "remove"
+              },
+              "aid": {
+                "kind": "remoteBookId"
+              }
+            }
+          },
+          "move": {
+            "origin": "https://www.wenku8.net",
+            "method": "POST",
+            "path": "/modules/article/bookcase.php",
+            "parameters": {
+              "action": {
+                "kind": "fixed",
+                "value": "move"
+              },
+              "aid": {
+                "kind": "remoteBookId"
+              },
+              "target": {
+                "kind": "targetId"
+              }
+            }
+          }
+        }
+      },
+      "storage": {
+        "quotaBytes": 1048576
+      }
+    },
+    "resourceLimits": {
+      "maxExecutionWallTimeMs": 15000,
+      "maxMemoryBytes": 16777216
+    },
+    "update": {
+      "channel": "stable"
+    }
+  },
+  "signature": "PWM6WbaoRNo0vRbvEEwsm/6VeHUjbZH/5EZZyxBIZPJCx+YeoO+QCOOzHVuzGrdImRkIrloVNSoLnXnpRlRQDg==",
+  "entrySourceIdReplacement": {
+    "from": "org.tsuyomi.wenku8",
+    "to": "org.tsuyomi.switch-home"
+  }
+}

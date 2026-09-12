@@ -6,6 +6,9 @@ package org.tsuyomi.core.network
 
 import java.net.URI
 import java.nio.charset.Charset
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.CoroutineStart
+import kotlinx.coroutines.async
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
@@ -19,6 +22,33 @@ import org.tsuyomi.shared.sourcecontract.SourceNetworkRequest
 import org.tsuyomi.shared.sourcecontract.SourceCookieMode
 
 class HostNetworkGatewayPolicyTest {
+    @Test
+    fun foreground_and_background_gateways_share_a_source_lane_across_versions() = runBlocking {
+        val release = CompletableDeferred<Unit>()
+        val calls = mutableListOf<String>()
+        fun transport(name: String, blocked: Boolean = false) = HostHttpTransport { received ->
+            calls += name
+            if (blocked) release.await()
+            HostHttpResponse(200, received.url, emptyMap(), "fixture".encodeToByteArray())
+        }
+        val foreground = async(start = CoroutineStart.UNDISPATCHED) {
+            HostNetworkGateway(transport("foreground", blocked = true)).request(grant, request())
+        }
+        val background = async(start = CoroutineStart.UNDISPATCHED) {
+            HostNetworkGateway(transport("background"))
+                .request(grant.copy(extensionVersion = "0.1.1"), request())
+        }
+        try {
+            HostNetworkGateway(transport("other-source"))
+                .request(grant.copy(sourceId = "fixture.independent.source"), request())
+            assertEquals(listOf("foreground", "other-source"), calls)
+        } finally {
+            release.complete(Unit)
+            foreground.await()
+            background.await()
+        }
+        assertEquals(listOf("foreground", "other-source", "background"), calls)
+    }
 
     @Test
     fun disallowed_origin_and_protected_headers_never_reach_transport() = runBlocking {
@@ -37,7 +67,7 @@ class HostNetworkGatewayPolicyTest {
     }
 
     @Test
-    fun cache_is_namespaced_by_extension_version_and_offline_returns_stale_marker() = runBlocking {
+    fun cache_is_shared_across_extension_versions_and_offline_returns_stale_marker() = runBlocking {
         val transport = RecordingTransport()
         val gateway = HostNetworkGateway(transport)
         val request = request(cache = NetworkCacheMode.DEFAULT, semanticCacheKey = "detail:1234")
@@ -51,8 +81,8 @@ class HostNetworkGatewayPolicyTest {
         assertEquals(1, transport.requests.size)
 
         val updatedGrant = grant.copy(extensionVersion = "0.1.1")
-        assertEquals(NetworkCacheState.MISS, gateway.request(updatedGrant, request).cacheState)
-        assertEquals(2, transport.requests.size)
+        assertEquals(NetworkCacheState.FRESH, gateway.request(updatedGrant, request).cacheState)
+        assertEquals(1, transport.requests.size)
     }
 
     @Test
@@ -87,7 +117,7 @@ class HostNetworkGatewayPolicyTest {
     }
 
     @Test
-    fun host_managed_cookies_are_hidden_and_isolated_by_source_version() = runBlocking {
+    fun host_managed_cookies_are_hidden_and_shared_across_source_versions() = runBlocking {
         val requests = mutableListOf<HostHttpRequest>()
         val gateway = HostNetworkGateway(HostHttpTransport { received ->
             requests += received
@@ -105,7 +135,7 @@ class HostNetworkGatewayPolicyTest {
 
         assertEquals(null, first.headers["set-cookie"])
         assertEquals("session=opaque", requests[1].headers["cookie"])
-        assertEquals(null, requests[2].headers["cookie"])
+        assertEquals("session=opaque", requests[2].headers["cookie"])
     }
 
     @Test
@@ -202,6 +232,28 @@ class HostNetworkGatewayPolicyTest {
         assertEquals(2, transport.requests.size)
         val bodyFailure = assertHostFailure { gateway.request(grant, post.copy(utf8Body = "x".repeat(65 * 1024))) }
         assertEquals(HostNetworkError.BODY_LIMIT, bodyFailure.error)
+    }
+
+    @Test
+    fun network_only_is_not_last_good_until_remembered() = runBlocking {
+        val transport = RecordingTransport()
+        val gateway = HostNetworkGateway(transport)
+        val live = request(cache = NetworkCacheMode.NETWORK_ONLY, semanticCacheKey = "home:ranking")
+        val challenge = gateway.request(grant, live)
+        val miss = assertHostFailure {
+            gateway.request(grant, live.copy(cache = NetworkCacheMode.OFFLINE_ONLY))
+        }
+        assertEquals(HostNetworkError.OFFLINE_MISS, miss.error)
+        gateway.rememberLastGood(grant, live, challenge)
+        val offline = gateway.request(grant.copy(extensionVersion = "0.2.29"), live.copy(cache = NetworkCacheMode.OFFLINE_ONLY))
+        assertEquals("fixture", offline.text)
+        assertEquals(NetworkCacheState.STALE_OFFLINE, offline.cacheState)
+        gateway.forgetLastGood(grant, live)
+        val forgotten = assertHostFailure {
+            gateway.request(grant, live.copy(cache = NetworkCacheMode.OFFLINE_ONLY))
+        }
+        assertEquals(HostNetworkError.OFFLINE_MISS, forgotten.error)
+        assertEquals(1, transport.requests.size)
     }
 
 

@@ -35,7 +35,7 @@ internal data class FixtureLimits(
     val maxResponseBytes: Int = 1_048_576,
 )
 
-internal data class SignedFixture(val publisher: PublisherKey, val bytes: ByteArray) {
+internal data class SignedFixture(val publisher: PublisherKey, val bytes: ByteArray, val version: String) {
     fun writeToTemporaryFile(archive: ByteArray = bytes): File =
         Files.createTempFile("wenku8-fixture", ".hxp").toFile().apply {
             writeBytes(archive)
@@ -51,16 +51,19 @@ internal fun signedFixture(
         mapOf("read" to JsonPrimitive(false), "writeOperations" to JsonArray(emptyList())),
     ),
     home: JsonObject? = null,
+    updateCheck: JsonObject? = null,
+    publisherKeyId: String = "tsuyomi-fixture-key",
+    publisherPrivateKey: ByteArray = ByteArray(32) { (it + 1).toByte() },
 ): SignedFixture {
-    val privateKey = Ed25519PrivateKeyParameters(ByteArray(32) { (it + 1).toByte() }, 0)
+    val privateKey = Ed25519PrivateKeyParameters(publisherPrivateKey, 0)
     val publisher = PublisherKey(
-        keyId = "tsuyomi-fixture-key",
+        keyId = publisherKeyId,
         publicKey = privateKey.generatePublicKey().encoded,
         trust = PublisherTrust.BUILT_IN_TEST,
     )
     val files = JsonObject(mapOf(ENTRY_PATH to JsonPrimitive(sha256(ENTRY_BYTES))))
     val contentDigest = sha256(JsonCanonicalizer(files.toString()).encodedUTF8)
-    val manifest = manifest(contentDigest, files, version, limits, remoteLibrary, home)
+    val manifest = manifest(contentDigest, files, version, limits, remoteLibrary, home, updateCheck, publisherKeyId)
     val canonicalManifest = JsonCanonicalizer(manifest).encodedUTF8
     val message = ByteArrayOutputStream().use { output ->
         output.write("tsuyomi-hxp-v1\u0000".toByteArray(StandardCharsets.US_ASCII))
@@ -80,10 +83,14 @@ internal fun signedFixture(
             "signature.ed25519" to signature,
         ),
     )
-    return SignedFixture(publisher, archive)
+    return SignedFixture(publisher, archive, version)
 }
 
-internal fun newInstaller(root: File, verifier: HxpArchiveVerifier): ExtensionInstaller = ExtensionInstaller(
+internal fun newInstaller(
+    root: File,
+    verifier: HxpArchiveVerifier,
+    packageExecutionTrust: PackageExecutionTrust = BuiltInPackageExecutionTrust,
+): ExtensionInstaller = ExtensionInstaller(
     verifier = verifier,
     store = InstalledExtensionStore(
         QuotaFileStore(
@@ -94,6 +101,7 @@ internal fun newInstaller(root: File, verifier: HxpArchiveVerifier): ExtensionIn
         ),
     ),
     stagingDirectory = File(root, "staging"),
+    packageExecutionTrust = packageExecutionTrust,
 )
 
 internal fun withUnindexedLeadingLocalEntry(archive: ByteArray, name: String, content: ByteArray): ByteArray {
@@ -123,6 +131,8 @@ private fun manifest(
     limits: FixtureLimits,
     remoteLibrary: JsonObject,
     home: JsonObject?,
+    updateCheck: JsonObject?,
+    publisherKeyId: String,
 ): String = JsonObject(
     linkedMapOf(
         "format" to JsonPrimitive("tsuyomi-hxp"),
@@ -142,7 +152,7 @@ private fun manifest(
         "signing" to JsonObject(
             mapOf(
                 "algorithm" to JsonPrimitive("Ed25519"),
-                "keyId" to JsonPrimitive("tsuyomi-fixture-key"),
+                "keyId" to JsonPrimitive(publisherKeyId),
                 "signatureFile" to JsonPrimitive("signature.ed25519"),
             ),
         ),
@@ -178,6 +188,7 @@ private fun manifest(
                     ),
                 )
                 home?.let { put("home", it) }
+                updateCheck?.let { put("updateCheck", it) }
                 put("remoteLibrary", remoteLibrary)
                 put("storage", JsonObject(mapOf("quotaBytes" to JsonPrimitive(limits.storageQuotaBytes))))
             },

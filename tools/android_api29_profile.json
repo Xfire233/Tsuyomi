@@ -1,0 +1,17 @@
+{
+  "SPDX-FileCopyrightText": "2026 Tsuyomi Contributors",
+  "SPDX-License-Identifier": "Apache-2.0",
+  "system_image": "system-images;android-29;default;x86_64",
+  "avd_device": "pixel_2",
+  "renderer": "swiftshader",
+  "boot_timeout_seconds": 300,
+  "shutdown_timeout_seconds": 60,
+  "display": {
+    "width": 1080,
+    "height": 2400,
+    "density": 420,
+    "font_scale": "1.0",
+    "rotation": 0,
+    "animations": "0"
+  }
+}

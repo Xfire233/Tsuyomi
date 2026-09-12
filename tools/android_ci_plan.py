@@ -30,6 +30,7 @@ FULL_BUILD_TASKS = (
     ":core:media:testDebugUnitTest",
     ":core:security:testDebugUnitTest",
     ":core:network:testDebugUnitTest",
+    ":core:preferences:testDebugUnitTest",
     ":feature:library:testDebugUnitTest",
     ":source:extension-manager:testDebugUnitTest",
     ":source:extension-testkit:testDebugUnitTest",
@@ -40,6 +41,7 @@ FULL_BUILD_TASKS = (
 )
 FULL_INSTRUMENTATION_TASKS = (
     ":app:connectedDebugAndroidTest",
+    ":feature:backup:connectedDebugAndroidTest",
     ":feature:book:connectedDebugAndroidTest",
     ":feature:browse:connectedDebugAndroidTest",
     ":feature:library:connectedDebugAndroidTest",
@@ -64,6 +66,7 @@ JVM_TASKS = {
     ":core:files": ":core:files:testDebugUnitTest",
     ":core:media": ":core:media:testDebugUnitTest",
     ":core:security": ":core:security:testDebugUnitTest",
+    ":core:preferences": ":core:preferences:testDebugUnitTest",
     ":core:network": ":core:network:testDebugUnitTest",
     ":feature:library": ":feature:library:testDebugUnitTest",
     ":source:extension-manager": ":source:extension-manager:testDebugUnitTest",
@@ -77,6 +80,7 @@ SCREENSHOT_TASKS = {
 }
 INSTRUMENTED_MODULES = {
     ":app",
+    ":feature:backup",
     ":feature:book",
     ":feature:browse",
     ":feature:library",
@@ -92,6 +96,8 @@ INSTRUMENTED_MODULES = {
 GLOBAL_ANDROID_INPUTS = {
     ".github/workflows/android-quality.yml",
     "tools/android_ci_plan.py",
+    "tools/android_api29.py",
+    "tools/android_api29_profile.json",
     "tsuyomi-android/build.gradle.kts",
     "tsuyomi-android/settings.gradle.kts",
     "tsuyomi-android/gradle.properties",

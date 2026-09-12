@@ -42,6 +42,7 @@ import androidx.compose.material.icons.filled.OpenInFull
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.PushPin
+import androidx.compose.material.icons.outlined.PushPin
 import androidx.compose.material.icons.filled.SelectAll
 import androidx.compose.material.icons.filled.Reorder
 import androidx.compose.material.icons.filled.Search
@@ -95,6 +96,7 @@ object TsuyomiIcons {
     val ToBottom: ImageVector = Icons.Filled.ArrowDownward
     val Close: ImageVector = Icons.Filled.Close
     val Pin: ImageVector = Icons.Filled.PushPin
+    val PinOutline: ImageVector = Icons.Outlined.PushPin
     val Copy: ImageVector = Icons.Filled.ContentCopy
     val Delete: ImageVector = Icons.Filled.Delete
     val CreateFolder: ImageVector = Icons.Filled.CreateNewFolder

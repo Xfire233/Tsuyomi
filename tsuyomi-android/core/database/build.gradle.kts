@@ -3,13 +3,13 @@
 
 plugins {
     id("tsuyomi.android.library")
-    alias(libs.plugins.ksp)
+    id("com.google.devtools.ksp")
     id("tsuyomi.android.room")
 }
 
 android {
     namespace = "org.tsuyomi.core.database"
-    sourceSets.getByName("androidTest").assets.srcDir("schemas")
+    sourceSets.getByName("androidTest").assets.directories += "schemas"
 }
 
 ksp {
@@ -21,6 +21,9 @@ dependencies {
     implementation(project(":shared:model"))
     implementation(project(":shared:backup"))
     implementation(project(":shared:smart-shelf"))
+    implementation(project(":shared:library-domain"))
+    implementation(project(":shared:source-contract"))
     implementation(libs.kotlinx.serialization.json)
+    implementation(libs.kotlinx.coroutines.android)
     androidTestImplementation(libs.androidx.room.testing)
 }

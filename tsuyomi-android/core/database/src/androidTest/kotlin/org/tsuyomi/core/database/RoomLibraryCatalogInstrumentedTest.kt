@@ -85,6 +85,56 @@ class RoomLibraryCatalogInstrumentedTest {
     }
 
     @Test
+    fun removingLocalPinRetainsMetadataAndReadLaterUntilReadded() = runBlocking {
+        val identity = BookIdentity("fixture.source", "retained-state")
+        val addedAt = Instant.parse("2026-09-01T12:00:00Z")
+        val book = LibraryBook(identity, "保留状态", addedAt, addedAt)
+        val savedProgress = progress(identity, "chapter-7", 23, 0.4, addedAt.plusSeconds(1))
+        repository.addToLibrary(book)
+        repository.setRating(identity, 4)
+        repository.setReadLater(identity, true)
+        repository.setLocalTags(identity, setOf("离线", "保留"))
+        repository.saveProgress(savedProgress)
+        assertTrue(repository.markChapterCompleted(identity, "chapter-7", addedAt.plusSeconds(2)))
+        repository.createCollection(LibraryCollection("favorites", CollectionKind.MANUAL, "收藏", null, 0))
+        assertTrue(repository.addManualMembership("favorites", identity))
+
+        assertTrue(repository.removeFromLibrary(identity))
+        assertFalse(repository.removeFromLibrary(identity))
+        assertTrue(repository.libraryEntries().isEmpty())
+        repository.reorderLibrary(emptyList())
+        assertTrue(database.libraryDao().manualMemberships("favorites").isEmpty())
+
+        val retained = requireNotNull(repository.libraryEntry(identity))
+        assertFalse(retained.localMembership)
+        assertEquals(addedAt, retained.libraryAddedAt)
+        assertEquals(4, retained.rating)
+        assertTrue(retained.readLater)
+        assertEquals(setOf("离线", "保留"), retained.localTags)
+        assertEquals(savedProgress, retained.progress)
+        assertEquals(setOf("chapter-7"), repository.completedChapterIds(identity))
+        assertEquals(listOf(identity), repository.readLaterEntries().map { it.book.identity })
+        repository.setReadLater(identity, false)
+        assertTrue(repository.readLaterEntries().isEmpty())
+        assertFalse(requireNotNull(repository.libraryEntry(identity)).readLater)
+        repository.setReadLater(identity, true)
+        assertTrue(repository.collectionEntries("favorites").isEmpty())
+        assertTrue(repository.manualCollectionIds(identity).isEmpty())
+        assertTrue(runCatching { repository.addManualMembership("favorites", identity) }.isFailure)
+
+        assertTrue(repository.addToLibrary(book))
+        val restored = requireNotNull(repository.libraryEntry(identity))
+        assertTrue(restored.localMembership)
+        assertEquals(addedAt, restored.libraryAddedAt)
+        assertEquals(4, restored.rating)
+        assertTrue(restored.readLater)
+        assertEquals(setOf("离线", "保留"), restored.localTags)
+        assertEquals(savedProgress, restored.progress)
+        assertEquals(setOf("chapter-7"), repository.completedChapterIds(identity))
+        assertEquals(listOf(identity), repository.libraryEntries().map { it.book.identity })
+    }
+
+    @Test
     fun manualMembershipAppendUsesNextFreeOrderAfterDeletion() = runBlocking {
         val identities = (1..4).map { BookIdentity("fixture.source", "ordered-$it") }
         identities.forEach { identity ->
@@ -226,7 +276,7 @@ class RoomLibraryCatalogInstrumentedTest {
     @Test
     fun importReviewRetainsCollidingSmartRulesAndSubscriptionDrafts() = runBlocking {
         val transfer = RoomTransferRepository(database)
-        val existingRule = SmartRule(root = SmartRuleNode.Predicate(SmartPredicate.HasUnreadUpdate))
+        val existingRule = SmartRule(root = SmartRuleNode.Predicate(SmartPredicate.HasUnresolvedUpdate))
         val importedRule = SmartRule(root = SmartRuleNode.Predicate(SmartPredicate.ProgressIn(setOf(ProgressState.READING))))
         val existingRuleJson = SmartRuleCodec.encode(existingRule)
         repository.createSmartCollection(

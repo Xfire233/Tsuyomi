@@ -16,9 +16,11 @@ import org.tsuyomi.shared.model.BookIdentity
 
 internal object Routes {
     const val Library = "library"
+    const val LibrarySearch = "library/search"
     const val LibrarySystem = "library/system/{filter}"
     const val LibraryCollection = "library/collection/{collectionId}"
     const val LibraryTags = "library/tags"
+    const val UpdateSettings = "library/update-settings"
     const val LibraryTagBooks = "library/tag/{tag}"
     const val Browse = "browse"
     const val Collections = "library/collections"
@@ -59,12 +61,14 @@ internal object Routes {
 
 internal fun rootRouteFor(route: String): String = when (route) {
     Routes.Collections,
+    Routes.LibrarySearch,
     Routes.LibrarySystem,
     Routes.LibraryCollection,
     Routes.LibraryTags,
     Routes.LibraryTagBooks,
     Routes.LibraryMirror,
     Routes.LibraryMirrorFolder,
+    Routes.UpdateSettings,
     -> Routes.Library
     Routes.Display, Routes.ReaderSettings, Routes.Help, Routes.About, Routes.Transfer -> Routes.More
     Routes.SourceHome,
@@ -116,9 +120,11 @@ internal fun navigationItems(): List<TsuyomiNavigationItem> = listOf(
 @Composable
 internal fun routeTitle(route: String): String = when (route) {
     Routes.Library -> stringResource(R.string.nav_library)
+    Routes.LibrarySearch -> stringResource(R.string.title_library_search)
     Routes.Collections -> stringResource(R.string.title_collections)
     Routes.LibrarySystem, Routes.LibraryCollection -> stringResource(R.string.nav_library)
     Routes.LibraryTags, Routes.LibraryTagBooks -> stringResource(R.string.title_library_tags)
+    Routes.UpdateSettings -> stringResource(R.string.title_updates_settings)
     Routes.Browse -> stringResource(R.string.nav_browse)
     Routes.More -> stringResource(R.string.nav_more)
     Routes.Display -> stringResource(R.string.title_display_settings)

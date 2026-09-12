@@ -1,0 +1,32 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://protocol.tsuyomi.dev/schema/hxp-update-check-v2.schema.json",
+  "title": "Tsuyomi HXP Update Check v2 normalized result",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["sourceId", "remoteBookId", "complete", "order", "chapters", "lastUpdatedDate"],
+  "properties": {
+    "sourceId": { "type": "string", "pattern": "^[a-z][a-z0-9]*(?:[.-][a-z0-9]+)+$", "maxLength": 128 },
+    "remoteBookId": { "type": "string", "minLength": 1, "maxLength": 256 },
+    "complete": { "const": true },
+    "order": { "const": "source" },
+    "chapters": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 20000,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["chapterId", "title"],
+        "properties": {
+          "chapterId": { "type": "string", "minLength": 1, "maxLength": 256 },
+          "title": { "type": "string", "minLength": 1, "maxLength": 512 }
+        }
+      }
+    },
+    "lastUpdatedDate": {
+      "type": ["string", "null"],
+      "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
+    }
+  }
+}

@@ -33,9 +33,9 @@ class SmartShelfTest {
 
     @Test
     fun validator_enforces_depth_nodes_terms_and_code_points() {
-        var deep: SmartRuleNode = SmartRuleNode.Predicate(SmartPredicate.HasUnreadUpdate)
+        var deep: SmartRuleNode = SmartRuleNode.Predicate(SmartPredicate.HasUnresolvedUpdate)
         repeat(MAX_DEPTH) { deep = SmartRuleNode.Not(deep) }
-        val tooManyNodes = SmartRuleNode.All(List(MAX_NODES) { SmartRuleNode.Predicate(SmartPredicate.HasSourceUpdate) })
+        val tooManyNodes = SmartRuleNode.All(List(MAX_NODES) { SmartRuleNode.Predicate(SmartPredicate.HasUnresolvedUpdate) })
         val longTerm = "𠮷".repeat(MAX_TEXT_CODE_POINTS + 1)
 
         assertTrue(SmartRuleValidator.validate(SmartRule(root = deep)).any { it.code == "max-depth" })

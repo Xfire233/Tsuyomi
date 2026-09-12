@@ -3,18 +3,17 @@
 
 # Tsuyomi monorepo workspace
 
-This directory is one Git repository containing three independently versioned components.
+This directory is one Git repository containing two independently versioned components. Source extensions are maintained separately in the public [Chachaanteng/tsuyomi-extensions](https://github.com/Chachaanteng/tsuyomi-extensions) repository.
 
 | Component | Responsibility |
 |---|---|
 | `tsuyomi-android` | Kotlin/Compose Android host application. |
 | `tsuyomi-protocol` | Platform-neutral JSON Schemas, fixtures, Host API, transfer/backup contracts, and conformance rules. |
-| `tsuyomi-extensions` | TypeScript `.hxp` source extensions, packager, signing tools, and sanitized acceptance fixtures. |
 
 ## Local prerequisites
 
 - JDK 17.
-- Android SDK with API 36, platform-tools, emulator, and `system-images;android-29;default;x86_64`.
+- Android SDK with API 37, platform-tools, emulator, and `system-images;android-29;default;x86_64`.
 - Node.js and npm versions accepted by CI.
 - Python with `python -m reuse` 6.2.0.
 
@@ -29,6 +28,10 @@ Android UI, navigation, interaction, display-profile, accessibility, screenshot 
 [`TOOLING.md`](TOOLING.md) is the repository inventory and dispatch policy for development instructions, Skills, MCP servers, plugins, Android device tooling, and their discovery checks. User Skills have one canonical source under `~/.agents/skills`; the repository-owned Android review Skill lives under `.agents/skills`. Provider-specific links are generated rather than copied.
 
 [`DOCUMENTATION.md`](DOCUMENTATION.md) is the canonical responsibility registry for first-party documents. It states each document's purpose, trigger, method, scope/exclusions, completion/stop condition and lifecycle. A link is not itself a trigger: read only the owning document rows that match the task.
+
+At each new request, material scope change or context recovery, check whether ownership is unresolved: unknown owners, authority/history conflicts, missing handoff ownership, or cross-component questions needing distinct authorities trigger [tsuyomi-context-router](.agents/skills/tsuyomi-context-router/SKILL.md). Read the Skill once when triggered; it owns the routing algorithm and exclusions. Known-file/symbol tasks and an already-running specialist workflow bypass routing. Do not reload unchanged context or build a plan on every tool call. Mandatory bootstrap and specialist prerequisites still apply.
+
+This versioned entry is the direct-file fallback for clients without Skill discovery. Supported clients discover `.agents/skills`; newly installed Skills require a fresh session/reload, and already-running conversations need an explicit instruction. No repository prompt can enforce compliance by clients that never load its instructions or guarantee identical judgment across models. Private memory and ignored handoff state are not required to discover the router.
 
 ## Governance object model
 
@@ -53,11 +56,11 @@ Agent-assisted design work follows [`tsuyomi-android/docs/process/DESIGN_MEMORY_
 
 ## Component boundary
 
-The monorepo permits atomic cross-component PRs but not source-level boundary violations. Android, protocol, and extensions interoperate through versioned schemas, DTOs, sanitized fixtures, signed `.hxp` artifacts, and release metadata. Android must not import extension implementation code, and extensions must not receive Android platform handles.
+The monorepo permits atomic Android/protocol PRs but not source-level boundary violations. Android, protocol, and the independent extension repository interoperate through versioned schemas, DTOs, immutable sanitized replay fixtures, signed `.hxp` artifacts, and release metadata. Android must not import extension implementation code or require a sibling plugin checkout to build; extensions must not receive Android platform handles.
 
 ## Change and release order
 
-A cross-component PR updates protocol contracts and fixtures first, extension producers second, and Android consumers last within the same commit series. Components retain independent SemVer and tags:
+Cross-repository changes establish the protocol contract first, extension producers second, and Android consumers last. Each transition pins immutable compatible inputs; no consumer follows an external default branch or `latest`. Android and protocol changes may share a PR here. Components retain independent SemVer; extension tags belong to the extension repository:
 
 ```text
 protocol-vX.Y.Z
@@ -66,4 +69,4 @@ android-vX.Y.Z
 phase-N-baseline
 ```
 
-Every Phase evidence document records one monorepo Git SHA plus the exact protocol, extension manifest/SDK, and Android application versions. `latest`, uncommitted local paths, and branch names are not compatibility references.
+Every Phase evidence document records the main repository Git SHA, the independent extension Git SHA when exercised, exact protocol/manifest/SDK/application versions and artifact digests. `latest`, uncommitted local paths, and branch names are not compatibility references. Host-only replay tests use explicitly pinned Apache-licensed historical fixtures, not a second maintained extension implementation.

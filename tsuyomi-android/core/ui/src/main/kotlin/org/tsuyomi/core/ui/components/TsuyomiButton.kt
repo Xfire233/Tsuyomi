@@ -10,21 +10,28 @@ import androidx.compose.foundation.LocalIndication
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsFocusedAsState
+import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.AssistChip
+import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.ButtonShapes
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
@@ -34,14 +41,16 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.semantics.Role
-import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.stateDescription
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import org.tsuyomi.core.display.DisplayProfile
 import org.tsuyomi.core.display.LocalDisplayEnvironment
 import org.tsuyomi.core.ui.theme.TsuyomiEInkPalette
 import org.tsuyomi.core.ui.theme.TsuyomiSpacing
+import org.tsuyomi.core.ui.theme.instantMotion
+import org.tsuyomi.core.ui.theme.rememberSystemReducedMotion
 import org.tsuyomi.core.ui.theme.tsuyomiFocusRing
 
 /** Visual weight of a [TsuyomiButton]. Only one primary action should be visible per surface. */
@@ -52,9 +61,8 @@ enum class TsuyomiButtonStyle {
 }
 
 /**
- * Semantic button honoring the global display profile. Standard uses tonal fills; E-ink uses
- * opaque fill inversion with explicit borders. Disabled states always pair color with a border or
- * fill change, never color alone. Minimum touch target is 48dp.
+ * Semantic button honoring the global display profile. Standard delegates to the Material button
+ * family; E-ink retains its opaque, bordered implementation. Minimum touch target is 48dp.
  */
 @Composable
 fun TsuyomiButton(
@@ -64,33 +72,146 @@ fun TsuyomiButton(
     style: TsuyomiButtonStyle = TsuyomiButtonStyle.PRIMARY,
     enabled: Boolean = true,
 ) {
-    val eInk = LocalDisplayEnvironment.current.effectiveProfile == DisplayProfile.EINK
+    if (LocalDisplayEnvironment.current.effectiveProfile == DisplayProfile.EINK) {
+        EInkTsuyomiButton(text, onClick, modifier, style, enabled)
+        return
+    }
+
     val interactionSource = remember { MutableInteractionSource() }
     val focused by interactionSource.collectIsFocusedAsState()
+    val staticMotion = LocalDisplayEnvironment.current.instantMotion || rememberSystemReducedMotion()
+    val shape = MaterialTheme.shapes.medium
+    val pressedShape = MaterialTheme.shapes.large
+    val buttonModifier = modifier
+        .heightIn(min = 48.dp)
+        .widthIn(min = 64.dp)
+        .tsuyomiFocusRing(shape, focused, MaterialTheme.colorScheme.primary)
+    val scheme = MaterialTheme.colorScheme
+    val colors = when (style) {
+        TsuyomiButtonStyle.PRIMARY -> ButtonDefaults.buttonColors(
+            containerColor = scheme.primary,
+            contentColor = scheme.onPrimary,
+            disabledContainerColor = scheme.surfaceVariant,
+            disabledContentColor = scheme.onSurfaceVariant,
+        )
+        TsuyomiButtonStyle.SECONDARY -> ButtonDefaults.outlinedButtonColors(
+            containerColor = Color.Transparent,
+            contentColor = scheme.primary,
+            disabledContainerColor = Color.Transparent,
+            disabledContentColor = scheme.onSurfaceVariant,
+        )
+        TsuyomiButtonStyle.TEXT -> ButtonDefaults.textButtonColors(
+            containerColor = Color.Transparent,
+            contentColor = scheme.primary,
+            disabledContainerColor = Color.Transparent,
+            disabledContentColor = scheme.onSurfaceVariant,
+        )
+    }
+    val border = if (style == TsuyomiButtonStyle.SECONDARY) {
+        BorderStroke(1.dp, if (enabled) scheme.outline else scheme.outlineVariant)
+    } else {
+        null
+    }
 
-    val shape: Shape = RoundedCornerShape(if (eInk) 4.dp else 12.dp)
+    if (staticMotion) {
+        val pressed by interactionSource.collectIsPressedAsState()
+        Button(
+            onClick = onClick,
+            modifier = buttonModifier,
+            enabled = enabled,
+            shape = if (pressed && enabled) pressedShape else shape,
+            colors = if (pressed && enabled && style == TsuyomiButtonStyle.TEXT) {
+                colors.copy(
+                    containerColor = scheme.secondaryContainer,
+                    contentColor = scheme.onSecondaryContainer,
+                )
+            } else {
+                colors
+            },
+            elevation = if (style == TsuyomiButtonStyle.PRIMARY) ButtonDefaults.buttonElevation() else null,
+            border = border,
+            contentPadding = TsuyomiButtonContentPadding,
+            interactionSource = interactionSource,
+        ) {
+            TsuyomiButtonLabel(text)
+        }
+        return
+    }
+    val shapes = remember(shape, pressedShape) { ButtonShapes(shape, pressedShape) }
+
+    when (style) {
+        TsuyomiButtonStyle.PRIMARY -> Button(
+            onClick = onClick,
+            modifier = buttonModifier,
+            enabled = enabled,
+            shapes = shapes,
+            colors = colors,
+            contentPadding = TsuyomiButtonContentPadding,
+            interactionSource = interactionSource,
+        ) {
+            TsuyomiButtonLabel(text)
+        }
+        TsuyomiButtonStyle.SECONDARY -> OutlinedButton(
+            onClick = onClick,
+            modifier = buttonModifier,
+            enabled = enabled,
+            shapes = shapes,
+            colors = colors,
+            border = border,
+            contentPadding = TsuyomiButtonContentPadding,
+            interactionSource = interactionSource,
+        ) {
+            TsuyomiButtonLabel(text)
+        }
+        TsuyomiButtonStyle.TEXT -> TextButton(
+            onClick = onClick,
+            modifier = buttonModifier,
+            enabled = enabled,
+            shapes = shapes,
+            colors = colors,
+            contentPadding = TsuyomiButtonContentPadding,
+            interactionSource = interactionSource,
+        ) {
+            TsuyomiButtonLabel(text)
+        }
+    }
+}
+
+private val TsuyomiButtonContentPadding = PaddingValues(
+    horizontal = TsuyomiSpacing.Lg,
+    vertical = TsuyomiSpacing.Sm,
+)
+
+@Composable
+private fun TsuyomiButtonLabel(text: String) {
+    Text(
+        text = text,
+        style = MaterialTheme.typography.labelLarge,
+        textAlign = TextAlign.Center,
+    )
+}
+
+@Composable
+private fun EInkTsuyomiButton(
+    text: String,
+    onClick: () -> Unit,
+    modifier: Modifier,
+    style: TsuyomiButtonStyle,
+    enabled: Boolean,
+) {
+    val interactionSource = remember { MutableInteractionSource() }
+    val focused by interactionSource.collectIsFocusedAsState()
+    val shape: Shape = RoundedCornerShape(4.dp)
     val containerColor: Color
     val contentColor: Color
     val border: BorderStroke?
     when {
-        !enabled && eInk -> {
+        !enabled -> {
             containerColor = TsuyomiEInkPalette.Paper
             contentColor = TsuyomiEInkPalette.N50
             border = BorderStroke(1.5.dp, TsuyomiEInkPalette.N50)
         }
-        !enabled -> {
-            containerColor = when (style) {
-                TsuyomiButtonStyle.PRIMARY -> MaterialTheme.colorScheme.surfaceVariant
-                else -> Color.Transparent
-            }
-            contentColor = MaterialTheme.colorScheme.onSurfaceVariant
-            border = when (style) {
-                TsuyomiButtonStyle.SECONDARY ->
-                    BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)
-                else -> null
-            }
-        }
-        eInk -> when (style) {
+        else -> when (style) {
             TsuyomiButtonStyle.PRIMARY -> {
                 containerColor = TsuyomiEInkPalette.Ink
                 contentColor = TsuyomiEInkPalette.Paper
@@ -104,23 +225,6 @@ fun TsuyomiButton(
             TsuyomiButtonStyle.TEXT -> {
                 containerColor = TsuyomiEInkPalette.Paper
                 contentColor = TsuyomiEInkPalette.Ink
-                border = null
-            }
-        }
-        else -> when (style) {
-            TsuyomiButtonStyle.PRIMARY -> {
-                containerColor = MaterialTheme.colorScheme.primary
-                contentColor = MaterialTheme.colorScheme.onPrimary
-                border = null
-            }
-            TsuyomiButtonStyle.SECONDARY -> {
-                containerColor = Color.Transparent
-                contentColor = MaterialTheme.colorScheme.primary
-                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline)
-            }
-            TsuyomiButtonStyle.TEXT -> {
-                containerColor = Color.Transparent
-                contentColor = MaterialTheme.colorScheme.primary
                 border = null
             }
         }

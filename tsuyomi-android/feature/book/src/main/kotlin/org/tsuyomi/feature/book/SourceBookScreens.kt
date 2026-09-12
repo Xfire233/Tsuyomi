@@ -57,6 +57,7 @@ fun BookDetailScreen(
     onContinueReading: (SourceChapter) -> Unit,
     onAddToLibrary: () -> Unit,
     onRemoveFromLibrary: () -> Unit,
+    onRequestRemoveFromLibrary: () -> Unit,
     onOpenDirectory: () -> Unit,
     onRetry: () -> Unit,
     onUseOfflineCache: () -> Unit,
@@ -71,6 +72,8 @@ fun BookDetailScreen(
     onRetryMoveOnly: () -> Unit = {},
     onRetryRemoteReconciliation: () -> Unit = {},
     onAcknowledgeRemoteReconciliation: () -> Unit = {},
+    focusChapterId: String? = null,
+    onFocusHandled: () -> Unit = {},
 ) {
     if (LocalDisplayEnvironment.current.effectiveProfile == DisplayProfile.EINK) {
         FrozenEInkBookDetailScreen(
@@ -103,6 +106,7 @@ fun BookDetailScreen(
         onSelectChapter = onSelectChapter,
         onContinueReading = onContinueReading,
         onAddToLibrary = onAddToLibrary,
+        onRequestRemoveFromLibrary = onRequestRemoveFromLibrary,
         onOpenDestinations = onOpenDestinations,
         destinationMenuExpanded = destinationMenuExpanded,
         onDestinationMenuExpandedChange = onDestinationMenuExpandedChange,
@@ -115,6 +119,8 @@ fun BookDetailScreen(
         onOpenVerification = onOpenVerification,
         onRetryRemoteReconciliation = onRetryRemoteReconciliation,
         onAcknowledgeRemoteReconciliation = onAcknowledgeRemoteReconciliation,
+        focusChapterId = focusChapterId,
+        onFocusHandled = onFocusHandled,
         modifier = modifier,
     )
 }

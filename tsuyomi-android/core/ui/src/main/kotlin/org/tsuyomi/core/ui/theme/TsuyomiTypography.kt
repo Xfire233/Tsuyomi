@@ -78,6 +78,13 @@ val TsuyomiTypography: Typography = Typography(
     labelSmall = captionStyle,
 )
 
+/** Library-only selection hierarchy; other navigation retains the base type scale. */
+val Typography.libraryTabSelected: TextStyle
+    get() = titleLarge.copy(fontSize = 20.sp, lineHeight = 30.sp, fontWeight = FontWeight.Bold)
+
+val Typography.libraryTabUnselected: TextStyle
+    get() = titleLarge.copy(fontWeight = FontWeight.Normal)
+
 /** Corner radii for the standard profile. E-ink components use explicit angular geometry. */
 val TsuyomiShapes: Shapes = Shapes(
     small = RoundedCornerShape(8.dp),

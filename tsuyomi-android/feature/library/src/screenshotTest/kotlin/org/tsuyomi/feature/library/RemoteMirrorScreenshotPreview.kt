@@ -68,7 +68,6 @@ fun RemoteMirrorStandardScreenshot() {
                         RemoteTarget("0", "默认书架", kind = "default"),
                         RemoteTarget("1", "特别收藏"),
                     ),
-                    mirrorPinned = true,
                 )
             }
         }

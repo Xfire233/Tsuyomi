@@ -34,7 +34,9 @@ class QuotaFileStore(
         val rootDirectory = roots.directory(root).canonicalFile
         namespaceDirectory = File(rootDirectory, namespace).canonicalFile
         require(isDescendant(rootDirectory, namespaceDirectory)) { "Invalid storage namespace" }
-        require(namespaceDirectory.isDirectory || namespaceDirectory.mkdirs()) { "Cannot create storage namespace" }
+        require(namespaceDirectory.isDirectory || namespaceDirectory.mkdirs() || namespaceDirectory.isDirectory) {
+            "Cannot create storage namespace"
+        }
         lastAccessMillis = scanEntries().maxOfOrNull { it.file.lastModified() } ?: 0L
     }
 

@@ -16,6 +16,24 @@ const createAjv = () => {
 const compare = (left, right) => (left < right ? -1 : left > right ? 1 : 0);
 const transferMaxBytes = 32 * 1024 * 1024;
 
+const updateCheckIssues = (document) => {
+  const issues = [];
+  if (document.complete !== true) issues.push('incomplete-evidence');
+  if (document.order !== 'source') issues.push('non-source-order');
+  const chapterIds = new Set();
+  for (const chapter of document.chapters) {
+    if (chapterIds.has(chapter.chapterId)) issues.push(`duplicate-chapter:${chapter.chapterId}`);
+    chapterIds.add(chapter.chapterId);
+  }
+  if (document.lastUpdatedDate !== null) {
+    const parsed = new Date(`${document.lastUpdatedDate}T00:00:00.000Z`);
+    if (Number.isNaN(parsed.valueOf()) || parsed.toISOString().slice(0, 10) !== document.lastUpdatedDate) {
+      issues.push('invalid-calendar-date');
+    }
+  }
+  return issues;
+};
+
 const transferIssues = (document) => {
   const issues = [];
   if (Buffer.byteLength(JSON.stringify(document), 'utf8') > transferMaxBytes) issues.push('document-size');
@@ -52,6 +70,9 @@ const transferIssues = (document) => {
   for (const book of document.library) {
     for (const shelfId of book.shelfIds ?? []) {
       if (!shelves.has(shelfId)) issues.push(`missing-shelf:${shelfId}`);
+    }
+    if (document.version >= 3 && book.localPin === false && (book.shelfIds?.length ?? 0) > 0) {
+      issues.push(`unpinned-manual-membership:${book.identity.sourceId}\u0000${book.identity.remoteBookId}`);
     }
   }
   return issues;
@@ -105,10 +126,82 @@ const packagePolicy = ({ active, candidate, revokedKeyIds, rotationVerified }) =
   if (candidate.keyId !== active.keyId && !rotationVerified) return 'rejected-key-rotation';
   return hasCapabilityExpansion(active.capabilities, candidate.capabilities) ? 'requires-grant' : 'accepted';
 };
+const repositoryIssues = (catalog) => {
+  const issues = [];
+  const publisherIds = new Set();
+  const publisherFingerprints = new Set();
+  for (const publisher of catalog.signed.publishers) {
+    if (publisherIds.has(publisher.keyId)) issues.push(`duplicate-publisher-id:${publisher.keyId}`);
+    if (publisherFingerprints.has(publisher.fingerprint)) issues.push(`duplicate-publisher-fingerprint:${publisher.fingerprint}`);
+    publisherIds.add(publisher.keyId);
+    publisherFingerprints.add(publisher.fingerprint);
+  }
+  const packageIds = new Set();
+  for (const entry of catalog.signed.packages) {
+    if (packageIds.has(entry.id)) issues.push(`duplicate-package-id:${entry.id}`);
+    packageIds.add(entry.id);
+    if (!publisherIds.has(entry.publisherKeyId)) issues.push(`unknown-package-publisher:${entry.id}`);
+    if (compareSemver(entry.hostApi.minInclusive, entry.hostApi.maxExclusive) >= 0) issues.push(`invalid-host-api:${entry.id}`);
+  }
+  for (const [name, values] of Object.entries(catalog.signed.revocations)) {
+    if (new Set(values).size !== values.length) issues.push(`duplicate-revocation:${name}`);
+  }
+  const issuedAt = Date.parse(catalog.signed.issuedAt);
+  const expiresAt = Date.parse(catalog.signed.expiresAt);
+  if (!(expiresAt > issuedAt) || expiresAt - issuedAt > 30 * 24 * 60 * 60 * 1000) issues.push('invalid-lifetime');
+  return issues;
+};
+
+const subscriptionLinkIssues = (link) => {
+  const issues = [];
+  if (typeof link !== 'string' || link.length < 12 || link.length > 4512) return ['length'];
+  const separator = link.indexOf('#');
+  if (separator < 12 || separator === link.length - 1 || link.indexOf('#', separator + 1) !== -1) return ['fragment'];
+  let url;
+  try {
+    url = new URL(link.slice(0, separator));
+  } catch {
+    return ['url'];
+  }
+  if (url.protocol !== 'https:' || !url.hostname || url.username || url.password) issues.push('https-index');
+  const fields = link.slice(separator + 1).split('&');
+  const names = ['repositoryId', 'keyId', 'publicKey'];
+  if (fields.length !== names.length) return [...issues, 'field-count'];
+  const values = fields.map((field, index) => {
+    const equals = field.indexOf('=');
+    if (equals <= 0 || field.slice(0, equals) !== names[index]) {
+      issues.push(`field:${names[index]}`);
+      return '';
+    }
+    return field.slice(equals + 1);
+  });
+  if (link.includes('%')) issues.push('percent-encoding');
+  if (!/^[a-z][a-z0-9]*(?:[.-][a-z0-9]+)+$/.test(values[0])) issues.push('repository-id');
+  if (!/^[A-Za-z0-9._-]{8,128}$/.test(values[1])) issues.push('key-id');
+  if (!/^[A-Za-z0-9+/]{43}=$/.test(values[2])) {
+    issues.push('public-key-shape');
+  } else {
+    const raw = Buffer.from(values[2], 'base64');
+    if (raw.length !== 32 || raw.toString('base64') !== values[2]) issues.push('public-key-canonical');
+  }
+  return issues;
+};
 
 test('transfer semantic conformance accepts the canonical minimal fixture', async () => {
   const document = await loadJson('../fixtures/transfer/valid-minimal.json');
   assert.deepEqual(transferIssues(document), []);
+});
+
+test('transfer v3 preserves retained unpinned metadata without a manual membership', async () => {
+  const document = await loadJson('../fixtures/transfer/valid-v3-retained-unpinned.json');
+  const retained = document.library.find((book) => book.identity.remoteBookId === 'retained-unpinned');
+  assert.deepEqual(transferIssues(document), []);
+  assert.equal(retained?.localPin, false);
+});
+
+test('transfer v3 rejects manual membership for an unpinned book', async () => {
+  const document = await loadJson('../fixtures/transfer/invalid-v3-unpinned-shelf-membership.json');
+  assert.ok(transferIssues(document).some((issue) => issue.startsWith('unpinned-manual-membership:')));
 });
 
 test('transfer semantic conformance rejects duplicate stable book identities', async () => {
@@ -131,6 +224,26 @@ test('transfer progress conflict cases use newer valid updatedAt only', async ()
 test('transfer size limit is 32 MiB of UTF-8 JSON', () => {
   const oversized = { library: [], shelves: [], padding: 'x'.repeat(transferMaxBytes) };
   assert.ok(transferIssues(oversized).includes('document-size'));
+});
+test('repository catalog semantic conformance binds unique publishers and packages', async () => {
+  const catalog = await loadJson('../fixtures/repository/valid-catalog.json');
+  assert.deepEqual(repositoryIssues(catalog), []);
+
+  const duplicate = structuredClone(catalog);
+  duplicate.signed.packages.push(structuredClone(duplicate.signed.packages[0]));
+  duplicate.signed.publishers.push(structuredClone(duplicate.signed.publishers[0]));
+  duplicate.signed.revocations.packageDigests = ['a'.repeat(64), 'a'.repeat(64)];
+  assert.ok(repositoryIssues(duplicate).includes('duplicate-package-id:org.tsuyomi.fixture'));
+  assert.ok(repositoryIssues(duplicate).some((issue) => issue.startsWith('duplicate-publisher-id:')));
+  assert.ok(repositoryIssues(duplicate).includes('duplicate-revocation:packageDigests'));
+});
+
+test('subscription bootstrap links are strict local root declarations', async () => {
+  const cases = await loadJson('../fixtures/repository/subscription-link-cases.json');
+  assert.deepEqual(subscriptionLinkIssues(cases.valid), []);
+  for (const invalid of cases.invalid) {
+    assert.notDeepEqual(subscriptionLinkIssues(invalid), [], invalid);
+  }
 });
 
 test('HXP host API v1 accepts each valid network value fixture', async () => {
@@ -165,6 +278,14 @@ test('HXP host API requires query and queryEncoding together', async () => {
   request.queryEncoding = 'gb18030';
   delete request.query;
   assert.equal(validate(request), false);
+});
+
+test('update-check-v2 semantic conformance admits normalized evidence only', async () => {
+  const valid = await loadJson('../fixtures/hxp/valid-update-check-v2.json');
+  const invalid = await loadJson('../fixtures/hxp/invalid-update-check-v2-duplicate.json');
+  assert.deepEqual(updateCheckIssues(valid), []);
+  assert.ok(updateCheckIssues(invalid).includes('duplicate-chapter:10001'));
+  assert.ok(updateCheckIssues(invalid).includes('invalid-calendar-date'));
 });
 
 test('HXP manifest semantic origins keep cookie and WebView scope within network scope', async () => {

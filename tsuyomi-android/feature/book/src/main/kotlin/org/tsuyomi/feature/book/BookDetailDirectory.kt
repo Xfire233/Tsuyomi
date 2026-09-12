@@ -29,6 +29,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.heading
@@ -165,14 +166,16 @@ internal fun DetailChapterRow(item: DetailChapterItem, onSelectChapter: (SourceC
         if (item.current) add(stringResource(R.string.book_chapter_current))
     }.joinToString("，")
     Surface(
-        modifier = Modifier.fillMaxWidth().semantics(mergeDescendants = true) {
-            if (status.isNotEmpty()) stateDescription = status
-        },
+        modifier = Modifier.fillMaxWidth(),
         color = if (item.current) MaterialTheme.colorScheme.surfaceVariant else MaterialTheme.colorScheme.surface,
     ) {
         Row(
             modifier = Modifier
                 .clickable(role = Role.Button) { onSelectChapter(item.chapter) }
+                .testTag("detail-chapter-${item.chapter.chapterId}")
+                .semantics(mergeDescendants = true) {
+                    if (status.isNotEmpty()) stateDescription = status
+                }
                 .heightIn(min = 56.dp)
                 .padding(horizontal = TsuyomiSpacing.Md, vertical = TsuyomiSpacing.Sm),
             verticalAlignment = Alignment.CenterVertically,

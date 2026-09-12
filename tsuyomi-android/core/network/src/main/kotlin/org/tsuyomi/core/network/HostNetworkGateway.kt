@@ -40,6 +40,7 @@ data class SourceNetworkGrant(
     val remoteAddPolicy: RemoteOperationRequestPolicy? = null,
     val remoteRemovePolicy: RemoteOperationRequestPolicy? = null,
     val remoteMovePolicy: RemoteOperationRequestPolicy? = null,
+    val updateCheckPolicy: RemoteOperationRequestPolicy? = null,
 ) {
     init {
         require(sourceId.isNotBlank() && extensionVersion.isNotBlank())
@@ -66,6 +67,12 @@ data class SourceNetworkGrant(
         require(remoteMovePolicy == null || remoteMovePolicy.targetIdParameter != null)
         require(remoteMovePolicy == null || remoteMovePolicy.cursorParameter == null)
         require(remoteMovePolicy == null || origins.any { it.canonical == remoteMovePolicy.origin.canonical })
+        require(updateCheckPolicy == null || updateCheckPolicy.method == NetworkMethod.GET)
+        require(updateCheckPolicy == null || updateCheckPolicy.remoteBookIdParameter != null)
+        require(updateCheckPolicy == null || updateCheckPolicy.targetIdParameter == null)
+        require(updateCheckPolicy == null || updateCheckPolicy.cursorParameter == null)
+        require(updateCheckPolicy == null || updateCheckPolicy.redirects.isEmpty())
+        require(updateCheckPolicy == null || origins.any { it.canonical == updateCheckPolicy.origin.canonical })
     }
 
     fun allowsCookies(origin: HttpsOrigin): Boolean =
@@ -120,8 +127,9 @@ class HostNetworkException(
 ) : Exception(error.name)
 
 /**
- * Validates all extension-controlled fields before a host transport runs. Caches are source/version
- * namespaced; no request headers or raw bytes leave this class through [SourceNetworkResponse].
+ * Validates all extension-controlled fields before a host transport runs. Last-good GET pages and
+ * source-scoped cookies are namespaced by source identity and credential partition, not package
+ * version; no request headers or raw bytes leave this class through [SourceNetworkResponse].
  */
 class HostNetworkGateway(
     private val transport: HostHttpTransport,
@@ -130,14 +138,14 @@ class HostNetworkGateway(
 ) {
     private val cookieJar = SourceCookieJar()
 
-    /** Imports user-approved request cookies into exactly one signed source/version origin scope. */
+    /** Imports user-approved request cookies into exactly one signed source origin scope. */
     fun importSourceCookies(grant: SourceNetworkGrant, origin: HttpsOrigin, rawCookie: String) {
         require(grant.allowsCookies(origin)) { "Cookie origin is not granted" }
         cookieJar.seed(grant, URI(origin.canonical), rawCookie)
     }
 
     /**
-     * Fetches one display image through the same source/version cookie and verified-identity transport
+     * Fetches one display image through the same source-scoped cookie and verified-identity transport
      * as source documents. Callers provide only a manifest-granted HTTPS URL and canonical referrer.
      */
     suspend fun fetchMedia(grant: SourceNetworkGrant, url: String, referrerUrl: String?): HostMediaResponse {
@@ -180,7 +188,6 @@ class HostNetworkGateway(
         }
         throw HostNetworkException(HostNetworkError.REDIRECT_LIMIT)
     }
-    private val locks = ConcurrentHashMap<String, Mutex>()
 
     suspend fun request(
         grant: SourceNetworkGrant,
@@ -200,7 +207,7 @@ class HostNetworkGateway(
         if (request.cache == NetworkCacheMode.DEFAULT && cached != null) {
             return cached.copy(cacheState = NetworkCacheState.FRESH)
         }
-        val lock = locks.computeIfAbsent("${grant.sourceId}\u0000${grant.extensionVersion}") { Mutex() }
+        val lock = sourceLanes.computeIfAbsent(grant.sourceId) { Mutex() }
         return lock.withLock {
             val current = cacheKey?.let(cache::get)
             if (request.cache == NetworkCacheMode.DEFAULT && current != null) {
@@ -238,6 +245,19 @@ class HostNetworkGateway(
             }
             value
         }
+    }
+
+    fun rememberLastGood(grant: SourceNetworkGrant, request: SourceNetworkRequest, response: SourceNetworkResponse) {
+        if (request.method == NetworkMethod.POST || response.text.isNullOrEmpty()) return
+        val uri = parseAllowedUri(request.url, grant)
+        val key = cacheKey(grant, request, uri) ?: return
+        cache.put(key, response)
+    }
+
+    fun forgetLastGood(grant: SourceNetworkGrant, request: SourceNetworkRequest) {
+        val uri = runCatching { parseAllowedUri(request.url, grant) }.getOrNull() ?: return
+        val key = cacheKey(grant, request, uri) ?: return
+        cache.remove(key)
     }
 
     private fun parseAllowedUri(value: String, grant: SourceNetworkGrant): URI {
@@ -373,6 +393,16 @@ class HostNetworkGateway(
                 operationContext.validate(request)
                 return
             }
+            SourceOperationKind.UPDATE_CHECK -> {
+                if (grant.updateCheckPolicy != operationContext.policy || request.cache != NetworkCacheMode.NETWORK_ONLY ||
+                    request.method != NetworkMethod.GET || request.form != null || request.utf8Body != null
+                ) {
+                    throw HostNetworkException(HostNetworkError.INVALID_REQUEST)
+                }
+                operationContext.validate(request)
+                validateProtectedSurfaces(grant, request, operationContext)
+                return
+            }
             SourceOperationKind.REMOTE_LIBRARY_ADD -> {
                 if (grant.remoteAddPolicy != operationContext.policy || request.cache != NetworkCacheMode.NETWORK_ONLY) {
                     throw HostNetworkException(HostNetworkError.INVALID_REQUEST)
@@ -463,7 +493,7 @@ class HostNetworkGateway(
     }
 
     private fun cacheKey(grant: SourceNetworkGrant, request: SourceNetworkRequest, uri: URI): HostNetworkCacheKey? {
-        if (request.method == NetworkMethod.POST || request.cache == NetworkCacheMode.NETWORK_ONLY) return null
+        if (request.method == NetworkMethod.POST) return null
         return HostNetworkCacheKey(
             sourceId = grant.sourceId,
             extensionVersion = grant.extensionVersion,
@@ -513,6 +543,8 @@ class HostNetworkGateway(
     private data class DecodedText(val text: String, val mode: DecodeMode)
 
     private companion object {
+        // Separate foreground/background gateways must share the source's request lane.
+        val sourceLanes = ConcurrentHashMap<String, Mutex>()
         const val MAX_BODY_BYTES = 64 * 1024
         const val MAX_REDIRECTS = 5
         val UTF8_BOM = byteArrayOf(0xef.toByte(), 0xbb.toByte(), 0xbf.toByte())
@@ -527,7 +559,7 @@ private class SourceCookieJar {
 
     fun requestHeader(grant: SourceNetworkGrant, uri: URI): Map<String, String> {
         if (!grant.allowsCookies(uri.asHttpsOrigin())) return emptyMap()
-        val scope = SourceScope(grant.sourceId, grant.extensionVersion)
+        val scope = SourceScope(grant.sourceId)
         val host = uri.host.lowercase()
         val path = uri.path.ifBlank { "/" }
         val values = cookies[scope]?.let { entries ->
@@ -541,7 +573,7 @@ private class SourceCookieJar {
 
     fun seed(grant: SourceNetworkGrant, origin: URI, rawCookie: String) {
         require(grant.allowsCookies(origin.asHttpsOrigin())) { "Cookie origin is not granted" }
-        val scope = SourceScope(grant.sourceId, grant.extensionVersion)
+        val scope = SourceScope(grant.sourceId)
         val entries = cookies.getOrPut(scope) { mutableListOf() }
         val host = origin.host.lowercase()
         rawCookie.split(';').map(String::trim).filter(String::isNotEmpty).forEach { pair ->
@@ -560,7 +592,7 @@ private class SourceCookieJar {
 
     fun store(grant: SourceNetworkGrant, requestUri: URI, headers: Map<String, String>) {
         if (!grant.allowsCookies(requestUri.asHttpsOrigin())) return
-        val scope = SourceScope(grant.sourceId, grant.extensionVersion)
+        val scope = SourceScope(grant.sourceId)
         val entries = cookies.getOrPut(scope) { mutableListOf() }
         headers.filterKeys { it.equals("set-cookie", ignoreCase = true) }.values
             .flatMap { value -> runCatching { HttpCookie.parse(value) }.getOrDefault(emptyList()) }
@@ -583,7 +615,7 @@ private class SourceCookieJar {
             }
     }
 
-    private data class SourceScope(val sourceId: String, val extensionVersion: String)
+    private data class SourceScope(val sourceId: String)
 
     private data class StoredCookie(
         val cookie: HttpCookie,

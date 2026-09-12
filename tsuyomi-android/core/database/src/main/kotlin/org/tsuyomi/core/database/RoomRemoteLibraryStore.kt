@@ -64,6 +64,9 @@ internal class RoomRemoteLibraryStore(
         SourceAvailability(it.sourceId, it.verifiedVersion, it.available, it.generation)
     }
 
+    suspend fun markMissingSourcesUnavailable(installedSourceIds: List<String>): Int =
+        dao.markMissingSourcesUnavailable(installedSourceIds)
+
     suspend fun sourceRemotePolicy(sourceId: String): SourceRemotePolicy? = dao.sourceRemotePolicy(sourceId)?.let {
         SourceRemotePolicy(
             it.sourceId,
@@ -193,17 +196,7 @@ internal class RoomRemoteLibraryStore(
         var added = 0
         request.books.forEach { book ->
             saveRemoteBook(book)
-            if (
-                dao.insertLibraryEntry(
-                    LibraryEntryEntity(
-                        book.identity.sourceId,
-                        book.identity.remoteBookId,
-                        request.importedAt.epochSecond,
-                        request.importedAt.nano,
-                        null,
-                    ),
-                ) != -1L
-            ) {
+            if (insertOrPinLibraryEntry(book, request.importedAt)) {
                 added++
             }
         }
@@ -243,16 +236,8 @@ internal class RoomRemoteLibraryStore(
     ): String = database.withTransaction {
         val book = request.book
         saveRemoteBook(book)
-        if (request.operation == "ADD") {
-            dao.insertLibraryEntry(
-                LibraryEntryEntity(
-                    book.identity.sourceId,
-                    book.identity.remoteBookId,
-                    request.startedAt.epochSecond,
-                    request.startedAt.nano,
-                    null,
-                ),
-            )
+        if (request.operation.equals("ADD", ignoreCase = true)) {
+            insertOrPinLibraryEntry(book, request.startedAt)
         }
         val active = dao.activeReconciliation(book.identity.sourceId, book.identity.remoteBookId)
         if (retryingUnresolvedId == null) {
@@ -380,12 +365,21 @@ internal class RoomRemoteLibraryStore(
                 canonicalUrl = incoming.canonicalUrl ?: current.canonicalUrl,
                 status = current.status,
                 remoteTags = current.remoteTags,
-                sourceUpdateKey = current.sourceUpdateKey,
-                hasUnreadUpdate = current.hasUnreadUpdate,
             )
         } ?: incoming
         catalog.saveBook(merged)
     }
+
+    private suspend fun insertOrPinLibraryEntry(book: LibraryBook, addedAt: Instant): Boolean =
+        dao.insertLibraryEntry(
+            LibraryEntryEntity(
+                sourceId = book.identity.sourceId,
+                remoteBookId = book.identity.remoteBookId,
+                addedAtEpochSecond = addedAt.epochSecond,
+                addedAtNano = addedAt.nano,
+                rating = null,
+            ),
+        ) != -1L || dao.pinLibraryEntry(book.identity.sourceId, book.identity.remoteBookId) != 0
 
 }
 

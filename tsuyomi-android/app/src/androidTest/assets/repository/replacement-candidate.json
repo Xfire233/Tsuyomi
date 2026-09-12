@@ -1,0 +1,156 @@
+{
+  "manifest": {
+    "format": "tsuyomi-hxp",
+    "manifestVersion": 1,
+    "id": "org.tsuyomi.wenku8",
+    "version": "0.2.31",
+    "display": {
+      "name": "Wenku8",
+      "summary": "Wenku8 阅读与显式远程收藏来源（测试发布者）",
+      "homepage": "https://www.wenku8.net"
+    },
+    "hostApi": {
+      "minInclusive": "1.2.0",
+      "maxExclusive": "2.0.0"
+    },
+    "entry": "index.mjs",
+    "integrity": {
+      "algorithm": "sha256",
+      "contentDigest": "7cda2230ec7ff803d384c79b7fc7b3300c07ff6ae05b3710b92b6e0191e4d789",
+      "files": {
+        "index.mjs": "0539ae3278245dfa74f6a122c0ea693f588e7d47fe89ea683ce032f14ccf9771"
+      }
+    },
+    "signing": {
+      "algorithm": "Ed25519",
+      "keyId": "tsuyomi-phase2-fixture",
+      "signatureFile": "signature.ed25519"
+    },
+    "capabilities": {
+      "network": {
+        "origins": [
+          "https://www.wenku8.net",
+          "https://img.wenku8.com",
+          "https://pic.wenku8.com",
+          "https://pic.777743.xyz"
+        ],
+        "maxConcurrentRequests": 2,
+        "requestTimeoutMs": 15000,
+        "maxResponseBytes": 2097152
+      },
+      "cookies": {
+        "mode": "sourceScoped",
+        "origins": [
+          "https://www.wenku8.net"
+        ]
+      },
+      "webLogin": {
+        "enabled": true,
+        "origins": [
+          "https://www.wenku8.net"
+        ]
+      },
+      "home": {
+        "enabled": true
+      },
+      "updateCheck": {
+        "version": 2,
+        "origin": "https://www.wenku8.net",
+        "method": "GET",
+        "path": "/modules/article/reader.php",
+        "parameters": {
+          "aid": {
+            "kind": "remoteBookId"
+          }
+        }
+      },
+      "remoteLibrary": {
+        "read": true,
+        "writeOperations": [
+          "add",
+          "remove",
+          "move"
+        ],
+        "policies": {
+          "read": {
+            "origin": "https://www.wenku8.net",
+            "method": "GET",
+            "path": "/modules/article/bookcase.php",
+            "parameters": {
+              "action": {
+                "kind": "fixed",
+                "value": "list"
+              },
+              "cursor": {
+                "kind": "cursor"
+              }
+            }
+          },
+          "targets": {
+            "origin": "https://www.wenku8.net",
+            "method": "GET",
+            "path": "/modules/article/bookcase.php",
+            "parameters": {
+              "action": {
+                "kind": "fixed",
+                "value": "targets"
+              }
+            }
+          },
+          "add": {
+            "origin": "https://www.wenku8.net",
+            "method": "GET",
+            "path": "/modules/article/addbookcase.php",
+            "parameters": {
+              "bid": {
+                "kind": "remoteBookId"
+              }
+            }
+          },
+          "remove": {
+            "origin": "https://www.wenku8.net",
+            "method": "POST",
+            "path": "/modules/article/bookcase.php",
+            "parameters": {
+              "action": {
+                "kind": "fixed",
+                "value": "remove"
+              },
+              "aid": {
+                "kind": "remoteBookId"
+              }
+            }
+          },
+          "move": {
+            "origin": "https://www.wenku8.net",
+            "method": "POST",
+            "path": "/modules/article/bookcase.php",
+            "parameters": {
+              "action": {
+                "kind": "fixed",
+                "value": "move"
+              },
+              "aid": {
+                "kind": "remoteBookId"
+              },
+              "target": {
+                "kind": "targetId"
+              }
+            }
+          }
+        }
+      },
+      "storage": {
+        "quotaBytes": 1048576
+      }
+    },
+    "resourceLimits": {
+      "maxExecutionWallTimeMs": 15000,
+      "maxMemoryBytes": 16777216
+    },
+    "update": {
+      "channel": "stable"
+    }
+  },
+  "signature": "wud1wQst4/SfQLndqNu4SBLeSRhmlJCg1zSl32GOcac5n1t/bleSww7YIt3IVVwB+dMw2XyaPH5/akHi/1TqCA=="
+}

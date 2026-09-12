@@ -32,8 +32,8 @@ internal interface LibraryDao {
             canonical_url = :canonicalUrl,
             status = :status,
             remote_tags_json = :remoteTagsJson,
-            source_update_key = :sourceUpdateKey,
-            has_unread_update = :hasUnreadUpdate,
+            source_update_key = NULL,
+            has_unread_update = 0,
             metadata_updated_at_epoch_second = :metadataUpdatedAtEpochSecond,
             metadata_updated_at_nano = :metadataUpdatedAtNano
         WHERE source_id = :sourceId AND remote_book_id = :remoteBookId
@@ -49,8 +49,6 @@ internal interface LibraryDao {
         canonicalUrl: String?,
         status: String?,
         remoteTagsJson: String,
-        sourceUpdateKey: String?,
-        hasUnreadUpdate: Boolean,
         metadataUpdatedAtEpochSecond: Long,
         metadataUpdatedAtNano: Int,
     ): Int
@@ -58,8 +56,11 @@ internal interface LibraryDao {
     @Query("SELECT * FROM books WHERE source_id = :sourceId AND remote_book_id = :remoteBookId")
     suspend fun book(sourceId: String, remoteBookId: String): BookEntity?
 
-    @Query("SELECT books.* FROM books INNER JOIN library_entries USING(source_id, remote_book_id) ORDER BY library_entries.display_order, library_entries.added_at_epoch_second DESC, books.title COLLATE NOCASE, books.source_id, books.remote_book_id")
+    @Query("SELECT books.* FROM books INNER JOIN library_entries USING(source_id, remote_book_id) WHERE library_entries.local_pin = 1 ORDER BY library_entries.display_order, library_entries.added_at_epoch_second DESC, books.title COLLATE NOCASE, books.source_id, books.remote_book_id")
     suspend fun libraryBooks(): List<BookEntity>
+
+    @Query("SELECT books.* FROM books INNER JOIN library_entries USING(source_id, remote_book_id) WHERE library_entries.read_later = 1 ORDER BY library_entries.display_order, library_entries.added_at_epoch_second DESC, books.title COLLATE NOCASE, books.source_id, books.remote_book_id")
+    suspend fun readLaterBooks(): List<BookEntity>
 
     @Query("SELECT * FROM books ORDER BY source_id, remote_book_id")
     suspend fun allBooks(): List<BookEntity>
@@ -70,10 +71,10 @@ internal interface LibraryDao {
     @Query("SELECT * FROM collections ORDER BY parent_collection_id, display_order, collection_id")
     suspend fun allCollections(): List<CollectionEntity>
 
-    @Query("SELECT source_id, remote_book_id FROM manual_collection_memberships WHERE collection_id = :collectionId ORDER BY display_order, source_id, remote_book_id")
+    @Query("SELECT m.source_id, m.remote_book_id FROM manual_collection_memberships m INNER JOIN library_entries le ON le.source_id = m.source_id AND le.remote_book_id = m.remote_book_id WHERE m.collection_id = :collectionId AND le.local_pin = 1 ORDER BY m.display_order, m.source_id, m.remote_book_id")
     suspend fun manualCollectionIdentities(collectionId: String): List<BookIdentityRow>
 
-    @Query("SELECT collection_id FROM manual_collection_memberships WHERE source_id = :sourceId AND remote_book_id = :remoteBookId ORDER BY collection_id")
+    @Query("SELECT m.collection_id FROM manual_collection_memberships m INNER JOIN library_entries le ON le.source_id = m.source_id AND le.remote_book_id = m.remote_book_id WHERE m.source_id = :sourceId AND m.remote_book_id = :remoteBookId AND le.local_pin = 1 ORDER BY m.collection_id")
     suspend fun manualCollectionIds(sourceId: String, remoteBookId: String): List<String>
 
     @RawQuery
@@ -88,8 +89,11 @@ internal interface LibraryDao {
     @Query("SELECT * FROM library_entries WHERE source_id = :sourceId AND remote_book_id = :remoteBookId")
     suspend fun libraryEntry(sourceId: String, remoteBookId: String): LibraryEntryEntity?
 
-    @Query("DELETE FROM library_entries WHERE source_id = :sourceId AND remote_book_id = :remoteBookId")
-    suspend fun deleteLibraryEntry(sourceId: String, remoteBookId: String): Int
+    @Query("UPDATE library_entries SET local_pin = 1 WHERE source_id = :sourceId AND remote_book_id = :remoteBookId AND local_pin = 0")
+    suspend fun pinLibraryEntry(sourceId: String, remoteBookId: String): Int
+
+    @Query("UPDATE library_entries SET local_pin = 0 WHERE source_id = :sourceId AND remote_book_id = :remoteBookId AND local_pin = 1")
+    suspend fun unpinLibraryEntry(sourceId: String, remoteBookId: String): Int
 
     @Query("UPDATE library_entries SET rating = :rating WHERE source_id = :sourceId AND remote_book_id = :remoteBookId")
     suspend fun updateRating(sourceId: String, remoteBookId: String, rating: Int?): Int
@@ -114,6 +118,9 @@ internal interface LibraryDao {
 
     @Query("SELECT * FROM source_availability WHERE source_id = :sourceId")
     suspend fun sourceAvailability(sourceId: String): SourceAvailabilityEntity?
+
+    @Query("UPDATE source_availability SET available = 0, generation = generation + 1 WHERE available = 1 AND source_id NOT IN (:installedSourceIds)")
+    suspend fun markMissingSourcesUnavailable(installedSourceIds: List<String>): Int
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun upsertSourceRemotePolicy(entity: SourceRemotePolicyEntity)
@@ -246,6 +253,14 @@ internal interface LibraryDao {
         """,
     )
     suspend fun deleteManualMembership(collectionId: String, sourceId: String, remoteBookId: String): Int
+
+    @Query(
+        """
+        DELETE FROM manual_collection_memberships
+        WHERE source_id = :sourceId AND remote_book_id = :remoteBookId
+        """,
+    )
+    suspend fun deleteManualMembershipsForLibraryEntry(sourceId: String, remoteBookId: String): Int
 
     @Query("UPDATE manual_collection_memberships SET display_order = :displayOrder WHERE collection_id = :collectionId AND source_id = :sourceId AND remote_book_id = :remoteBookId")
     suspend fun updateManualMembershipDisplayOrder(

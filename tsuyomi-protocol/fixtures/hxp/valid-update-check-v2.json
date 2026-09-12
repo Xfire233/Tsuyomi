@@ -1,0 +1,12 @@
+{
+  "sourceId": "org.tsuyomi.wenku8",
+  "remoteBookId": "1234",
+  "complete": true,
+  "order": "source",
+  "chapters": [
+    { "chapterId": "10001", "title": "第一章 雾中的灯塔" },
+    { "chapterId": "10002", "title": "第二章 旧船票" },
+    { "chapterId": "10003", "title": "第三章 潮汐信标" }
+  ],
+  "lastUpdatedDate": "2026-09-07"
+}

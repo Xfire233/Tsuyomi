@@ -13,20 +13,57 @@ class ExtensionInstaller(
     private val verifier: HxpArchiveVerifier,
     private val store: InstalledExtensionStore,
     private val stagingDirectory: File,
+    private val packageExecutionTrust: PackageExecutionTrust = BuiltInPackageExecutionTrust,
 ) {
     init {
         require(stagingDirectory.isDirectory || stagingDirectory.mkdirs()) { "Cannot create HXP staging directory" }
     }
 
-    fun prepare(candidateFile: File): PreparedExtensionInstall {
+    /** Prepares a normal local import; local key-rotation and downgrade rules remain unchanged. */
+    fun prepare(candidateFile: File): PreparedExtensionInstall = prepareInternal(candidateFile, repositoryBinding = null)
+
+    /**
+     * Prepares an archive obtained through a root-verified catalog. [RepositoryInstallBinding] has
+     * no public constructor, preventing a local import from manufacturing repository authority.
+     */
+    fun prepareRepository(candidateFile: File, repositoryBinding: RepositoryInstallBinding): PreparedExtensionInstall =
+        prepareInternal(candidateFile, repositoryBinding)
+
+    private fun prepareInternal(
+        candidateFile: File,
+        repositoryBinding: RepositoryInstallBinding?,
+    ): PreparedExtensionInstall {
         val candidate = verifier.verify(candidateFile)
-        val active = readVerifiedActive(candidate.manifest.sourceId)
-        if (active != null) {
-            if (candidate.manifest.version == active.manifest.version) {
-                throw ExtensionInstallException(ExtensionInstallError.REPLAY_REJECTED)
+        if (repositoryBinding != null && !repositoryBinding.matches(candidate)) {
+            throw ExtensionInstallException(ExtensionInstallError.REPOSITORY_BINDING_MISMATCH)
+        }
+        val active = if (repositoryBinding == null) readReplaceableActive(candidate.manifest.sourceId) else readRepositoryActive(candidate.manifest.sourceId)
+        val isLegacyMigration = if (repositoryBinding == null) {
+            if (active != null) {
+                if (candidate.manifest.version == active.manifest.version) {
+                    throw ExtensionInstallException(ExtensionInstallError.REPLAY_REJECTED)
+                }
+                if (candidate.manifest.publisherKeyId != active.manifest.publisherKeyId) {
+                    throw ExtensionInstallException(ExtensionInstallError.KEY_ROTATION_NOT_AUTHORIZED)
+                }
             }
-            if (candidate.manifest.publisherKeyId != active.manifest.publisherKeyId) {
-                throw ExtensionInstallException(ExtensionInstallError.KEY_ROTATION_NOT_AUTHORIZED)
+            false
+        } else {
+            if (active != null) {
+                if (candidate.manifest.version <= active.manifest.version) {
+                    throw ExtensionInstallException(ExtensionInstallError.REPOSITORY_VERSION_REJECTED)
+                }
+                val keyChanged = candidate.manifest.publisherKeyId != active.manifest.publisherKeyId
+                if (keyChanged) {
+                    val authorized = repositoryBinding.legacyMigration?.let { migration ->
+                        migration.fromPublisherFingerprint == active.publisherFingerprint &&
+                            migration.fromPackageSha256 == active.packageSha256
+                    } == true
+                    if (!authorized) throw ExtensionInstallException(ExtensionInstallError.KEY_ROTATION_NOT_AUTHORIZED)
+                }
+                keyChanged
+            } else {
+                false
             }
         }
         val addedCapabilities = addedCapabilities(candidate.manifest, active?.manifest)
@@ -38,10 +75,13 @@ class ExtensionInstaller(
             resourceLimitIncreases = resourceLimitIncreases,
             capabilityGrantFingerprint = capabilityGrantFingerprint(candidate, addedCapabilities, resourceLimitIncreases),
             remoteCapabilitySetFingerprint = remoteCapabilitySetFingerprint(candidate.manifest, candidate.publisherFingerprint),
-            isDowngrade = active != null && candidate.manifest.version < active.manifest.version,
+            isDowngrade = repositoryBinding == null && active != null && candidate.manifest.version < active.manifest.version,
+            isLegacyMigration = isLegacyMigration,
+            repositoryBinding = repositoryBinding,
         )
     }
 
+    /** Revalidates the candidate and active snapshot immediately before the atomic replacement. */
     fun activate(prepared: PreparedExtensionInstall, approval: ExtensionInstallApproval) {
         if (approval.packageSha256 != prepared.candidate.packageSha256 ||
             approval.publisherFingerprint != prepared.candidate.publisherFingerprint ||
@@ -52,7 +92,27 @@ class ExtensionInstaller(
         if (prepared.isDowngrade && !approval.allowLocalDowngrade) {
             throw ExtensionInstallException(ExtensionInstallError.DOWNGRADE_REQUIRES_CONFIRMATION)
         }
-        store.writeActive(prepared.candidate)
+        if (prepared.isLegacyMigration && !approval.allowLegacyMigration) {
+            throw ExtensionInstallException(ExtensionInstallError.LEGACY_MIGRATION_REQUIRES_CONFIRMATION)
+        }
+        val reverified = try {
+            verifier.verify(prepared.candidate.archiveBytes)
+        } catch (error: HxpVerificationException) {
+            throw ExtensionInstallException(ExtensionInstallError.CANDIDATE_RECHECK_FAILED, error)
+        }
+        if (reverified.packageSha256 != prepared.candidate.packageSha256 ||
+            reverified.publisherFingerprint != prepared.candidate.publisherFingerprint ||
+            reverified.manifest != prepared.candidate.manifest
+        ) {
+            throw ExtensionInstallException(ExtensionInstallError.APPROVAL_MISMATCH)
+        }
+        packageExecutionTrust.requireExecutable(reverified)
+        val current = readReplaceableActive(prepared.candidate.manifest.sourceId)
+        if (current?.packageSha256 != prepared.active?.packageSha256) {
+            throw ExtensionInstallException(ExtensionInstallError.APPROVAL_MISMATCH)
+        }
+        store.writeActive(reverified)
+        (packageExecutionTrust as? PackageActivationTrust)?.activationSucceeded(prepared)
     }
 
     fun readVerifiedActive(sourceId: SourceId): VerifiedHxpPackage? {
@@ -66,6 +126,22 @@ class ExtensionInstaller(
         } finally {
             temporary.delete()
         }
+    }
+
+    private fun readReplaceableActive(sourceId: SourceId): VerifiedHxpPackage? = try {
+        readVerifiedActive(sourceId)
+    } catch (error: ExtensionInstallException) {
+        if (error.error == ExtensionInstallError.INSTALLED_PACKAGE_INVALID) null else throw error
+    }
+
+    /** Repository updates never treat a disabled or untrusted same-source archive as absent. */
+    private fun readRepositoryActive(sourceId: SourceId): VerifiedHxpPackage? = try {
+        readVerifiedActive(sourceId)
+    } catch (error: ExtensionInstallException) {
+        if (error.error == ExtensionInstallError.INSTALLED_PACKAGE_INVALID) {
+            throw ExtensionInstallException(ExtensionInstallError.REPOSITORY_ACTIVE_UNVERIFIABLE, error)
+        }
+        throw error
     }
 
     fun remoteCapabilitySetFingerprint(packageInfo: VerifiedHxpPackage): String =
@@ -87,6 +163,9 @@ class ExtensionInstaller(
             .filterNot { it in activeCapabilities?.webLogin?.origins.orEmpty() }
             .forEach { add("web-login-origin:${it.canonical}") }
         if (candidate.capabilities.home.enabled && activeCapabilities?.home?.enabled != true) add("source-home:read")
+        if (candidate.capabilities.updateCheck != null && candidate.capabilities.updateCheck != activeCapabilities?.updateCheck) {
+            add("source-update:read")
+        }
         if (candidate.capabilities.remoteLibrary.read && activeCapabilities?.remoteLibrary?.read != true) {
             add("remote-library:read")
         }
@@ -218,6 +297,9 @@ data class PreparedExtensionInstall(
     val capabilityGrantFingerprint: String,
     val remoteCapabilitySetFingerprint: String,
     val isDowngrade: Boolean,
+    /** Root-authorized publisher transition requiring a separate explicit approval. */
+    val isLegacyMigration: Boolean = false,
+    internal val repositoryBinding: RepositoryInstallBinding? = null,
 )
 
 enum class ResourceLimit {
@@ -240,14 +322,19 @@ data class ExtensionInstallApproval(
     val publisherFingerprint: String,
     val capabilityGrantFingerprint: String,
     val allowLocalDowngrade: Boolean,
+    val allowLegacyMigration: Boolean = false,
 ) {
     companion object {
-        fun approve(prepared: PreparedExtensionInstall, allowLocalDowngrade: Boolean = false) =
-            ExtensionInstallApproval(
-                packageSha256 = prepared.candidate.packageSha256,
-                publisherFingerprint = prepared.candidate.publisherFingerprint,
-                capabilityGrantFingerprint = prepared.capabilityGrantFingerprint,
-                allowLocalDowngrade = allowLocalDowngrade,
-            )
+        fun approve(
+            prepared: PreparedExtensionInstall,
+            allowLocalDowngrade: Boolean = false,
+            allowLegacyMigration: Boolean = false,
+        ) = ExtensionInstallApproval(
+            packageSha256 = prepared.candidate.packageSha256,
+            publisherFingerprint = prepared.candidate.publisherFingerprint,
+            capabilityGrantFingerprint = prepared.capabilityGrantFingerprint,
+            allowLocalDowngrade = allowLocalDowngrade,
+            allowLegacyMigration = allowLegacyMigration,
+        )
     }
 }

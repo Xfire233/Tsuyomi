@@ -228,5 +228,4 @@ private val PreviewActions = DisplaySettingsActions(
     onRefreshNow = {},
     onRetryWrite = {},
     onAcknowledgeWriteFailure = {},
-    onResetInterfacePreferences = {},
 )

@@ -7,22 +7,25 @@ Direct dependencies and checked-in build tools in the Phase 1 baseline are recor
 
 | Project | Pinned version | License | Scope / distribution |
 |---|---:|---|---|
-| Gradle Wrapper | 8.14.3 | Apache-2.0 | `gradle-wrapper.jar` is checked in; build tooling only |
-| Android Gradle Plugin | 8.13.1 | Apache-2.0 | build tooling only |
-| Kotlin compiler and Compose plugin | 2.3.0 | Apache-2.0 | build tooling/runtime metadata |
+| Gradle Wrapper | 9.3.1 | Apache-2.0 | `gradle-wrapper.jar` is checked in; build tooling only |
+| Android Gradle Plugin | 9.1.1 | Apache-2.0 | build tooling; built-in Kotlin, compile SDK37 |
+| Kotlin compiler and Compose plugin | 2.4.0 | Apache-2.0 | aligned build tooling/runtime metadata |
 | Kotlin Symbol Processing | 2.3.11 | Apache-2.0 | Room code generation only |
-| AndroidX Compose BOM and UI/Foundation/Material3 | 2026.06.01 | Apache-2.0 | application runtime |
+| AndroidX Compose BOM / UI / Foundation | 2026.08.00 / 1.12.0 | Apache-2.0 | application runtime and matching screenshot classpaths |
+| AndroidX Compose Material3 | 1.5.0-alpha27 | Apache-2.0 | application runtime; selective graduated APIs only, shared product/screenshot version |
 | AndroidX Core | 1.19.0 | Apache-2.0 | application runtime |
 | AndroidX Activity | 1.13.0 | Apache-2.0 | application runtime |
 | AndroidX Lifecycle | 2.10.0 | Apache-2.0 | application runtime |
 | AndroidX Navigation | 2.9.8 | Apache-2.0 | application runtime |
 | AndroidX DataStore | 1.2.1 | Apache-2.0 | application runtime |
+| AndroidX WorkManager | 2.11.2 | Apache-2.0 | application runtime and persistent update scheduling |
+| AndroidX Concurrent Futures | 1.2.0 | Apache-2.0 | application runtime compatibility pin for WorkManager |
 | AndroidX Room | 2.8.4 | Apache-2.0 | application runtime and test tooling |
-| Material3 Adaptive | 1.2.0 | Apache-2.0 | application runtime |
+| Material3 Adaptive | 1.3.0 | Apache-2.0 | application runtime |
 | actions/checkout | 4.2.2 (`11bd71901bbe5b1630ceea73d27597364c9af683`) | MIT | GitHub Actions source checkout only |
 | REUSE Tool | 6.2.0 | GPL-3.0-or-later | local/CI license validation only; not distributed |
 | Kotlinx Coroutines | 1.10.2 | Apache-2.0 | application runtime and tests |
-| Compose Preview Screenshot Testing | 0.0.1-alpha11 | Apache-2.0 | screenshot test tooling only |
+| Compose Preview Screenshot Testing | 0.0.1-alpha15 | Apache-2.0 | AGP9-compatible screenshot test tooling only |
 | AndroidX Test runner/JUnit extension/Espresso | 1.7.0 / 1.3.0 / 3.7.0 | Apache-2.0 | instrumentation tests only |
 | JUnit 4 | 4.13.2 | EPL-1.0 | JVM tests only; not shipped in the APK |
 

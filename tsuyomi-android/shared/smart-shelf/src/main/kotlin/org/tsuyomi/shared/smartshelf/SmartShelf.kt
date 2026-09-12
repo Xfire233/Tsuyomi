@@ -40,8 +40,7 @@ sealed interface SmartPredicate {
     data class LastReadWithinDays(val days: Long) : SmartPredicate
     data class MetadataUpdatedWithinDays(val days: Long) : SmartPredicate
     data class ProgressIn(val states: Set<ProgressState>) : SmartPredicate
-    data object HasUnreadUpdate : SmartPredicate
-    data object HasSourceUpdate : SmartPredicate
+    data object HasUnresolvedUpdate : SmartPredicate
     data object IsDormantSource : SmartPredicate
 }
 
@@ -95,7 +94,7 @@ object SmartRuleValidator {
                     is SmartPredicate.LastReadWithinDays -> if (predicate.days !in 0..MAX_WINDOW_DAYS) violations += SmartRuleViolation("invalid-time-window", path)
                     is SmartPredicate.MetadataUpdatedWithinDays -> if (predicate.days !in 0..MAX_WINDOW_DAYS) violations += SmartRuleViolation("invalid-time-window", path)
                     is SmartPredicate.ProgressIn -> if (predicate.states.isEmpty() || predicate.states.size > MAX_TERMS) violations += SmartRuleViolation("invalid-term-count", "$path.states")
-                    SmartPredicate.HasUnreadUpdate, SmartPredicate.HasSourceUpdate, SmartPredicate.IsDormantSource -> Unit
+                    SmartPredicate.HasUnresolvedUpdate, SmartPredicate.IsDormantSource -> Unit
                 }
             }
         }
@@ -158,8 +157,7 @@ object SmartRuleCodec {
             is SmartPredicate.LastReadWithinDays -> { put("field", "lastReadWithinDays"); put("days", predicate.days) }
             is SmartPredicate.MetadataUpdatedWithinDays -> { put("field", "metadataUpdatedWithinDays"); put("days", predicate.days) }
             is SmartPredicate.ProgressIn -> { put("field", "progress"); putStrings("values", predicate.states.mapTo(sortedSetOf()) { it.name.lowercase() }) }
-            SmartPredicate.HasUnreadUpdate -> put("field", "hasUnreadUpdate")
-            SmartPredicate.HasSourceUpdate -> put("field", "hasSourceUpdate")
+            SmartPredicate.HasUnresolvedUpdate -> put("field", "hasUnresolvedUpdate")
             SmartPredicate.IsDormantSource -> put("field", "isDormantSource")
         }
     }
@@ -191,8 +189,7 @@ object SmartRuleCodec {
         "lastReadWithinDays" -> days(value, SmartPredicate::LastReadWithinDays)
         "metadataUpdatedWithinDays" -> days(value, SmartPredicate::MetadataUpdatedWithinDays)
         "progress" -> { requireKeys(value, "type", "field", "values"); SmartPredicate.ProgressIn(value.strings("values").mapTo(linkedSetOf()) { ProgressState.valueOf(it.uppercase()) }) }
-        "hasUnreadUpdate" -> flag(value, SmartPredicate.HasUnreadUpdate)
-        "hasSourceUpdate" -> flag(value, SmartPredicate.HasSourceUpdate)
+        "hasUnresolvedUpdate" -> flag(value, SmartPredicate.HasUnresolvedUpdate)
         "isDormantSource" -> flag(value, SmartPredicate.IsDormantSource)
         else -> error("unknown-field:$field")
     }
@@ -243,8 +240,7 @@ object HikariSmartRuleTranslator {
                 "lastread", "date" -> SmartPredicate.LastReadWithinDays(condition.days ?: return HikariSmartRuleTranslation.DisabledDraft("invalid-smart-window"))
                 "metadataupdated" -> SmartPredicate.MetadataUpdatedWithinDays(condition.days ?: return HikariSmartRuleTranslation.DisabledDraft("invalid-smart-window"))
                 "progress" -> SmartPredicate.ProgressIn(condition.values.mapTo(linkedSetOf()) { ProgressState.valueOf(it.uppercase()) })
-                "unread" -> SmartPredicate.HasUnreadUpdate
-                "sourceupdate" -> SmartPredicate.HasSourceUpdate
+                "unread", "sourceupdate" -> SmartPredicate.HasUnresolvedUpdate
                 "dormant" -> SmartPredicate.IsDormantSource
                 "section", "subscription" -> return HikariSmartRuleTranslation.DisabledDraft("unsupported-smart-condition")
                 else -> return HikariSmartRuleTranslation.DisabledDraft("unknown-smart-condition")

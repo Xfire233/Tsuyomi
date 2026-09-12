@@ -5,9 +5,12 @@
 
 ## Unreleased
 
-- Consolidated Android, protocol, and extension components into one public monorepo.
+- Added a repository-owned context-router Skill with bounded trigger/bypass rules, existing-authority routing, versioned cross-session discovery fallback, and adoption gated on preserved answer quality plus measured time and token savings.
+- Split maintained source extensions into the public `Chachaanteng/tsuyomi-extensions` repository under AGPL-3.0-only with retained Apache provenance and notices; the Android/protocol monorepo remains Apache-2.0 and builds against pinned historical replay inputs without a sibling checkout.
 - Preserved independent component versions and path-scoped quality workflows.
 - Added public provenance, licensing boundaries, and local-only development-state rules.
+- Added the root-signed official extension catalog, exact signed-package binding, durable replay/revocation protection, bounded downloads, and installed-first Browse discovery with explicit installation and manual updates. The separately authorized first production catalog and Wenku80.2.31 publication completed on2026-09-11.
+- Activated automation-first independent distribution under the explicitly selected single-maintainer PR+strict-CI policy: explicit maintainer merges authorize routine publication, and signed-catalog renewal preserves manual client installation/local HXP import. One separately authorized canonical overlay and official-path migration were verified; further deployments and human/golden approval are not implied.
 - Added the Phase 3 local-first library, explicit bounded transfer migration, smart collections, and signed add-only remote favourites with credential-gated retries and exact redirect policy.
 - Superseded numbered delivery `Gate` scopes with `Phase 0–5`; future baselines use `phase-N-baseline`, while published `gate-1-baseline` and `gate-2-baseline` tags remain immutable historical facts.
 - Added Phase 4A Standard Library cutover from UI Atlas: stationary long-press selection across Grid/List/Compact, SelectionAppBar, drag-and-drop book/collection/shelf management, locked/unlocked shortcut shelf with hover expansion, one-hold pickup, and Room v4 custom order persistence.

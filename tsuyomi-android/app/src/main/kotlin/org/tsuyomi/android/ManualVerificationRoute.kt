@@ -5,9 +5,11 @@
 package org.tsuyomi.android
 
 import android.webkit.WebView
-import androidx.compose.foundation.BorderStroke
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.WindowInsetsSides
@@ -17,8 +19,14 @@ import androidx.compose.foundation.layout.only
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.layout.windowInsetsPadding
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.material3.Button
+import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -33,10 +41,16 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.LiveRegionMode
+import androidx.compose.ui.semantics.liveRegion
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
+import androidx.compose.ui.zIndex
 import kotlinx.coroutines.launch
+import kotlin.coroutines.cancellation.CancellationException
 import org.tsuyomi.core.display.DisplayProfile
 import org.tsuyomi.core.display.LocalDisplayEnvironment
 import org.tsuyomi.core.security.SourceCredentialStore
@@ -44,11 +58,13 @@ import org.tsuyomi.core.ui.components.StateView
 import org.tsuyomi.core.ui.components.TsuyomiButton
 import org.tsuyomi.core.ui.components.TsuyomiButtonStyle
 import org.tsuyomi.core.ui.components.TsuyomiStateKind
-import org.tsuyomi.core.ui.components.TsuyomiTopBar
+import org.tsuyomi.core.ui.components.TsuyomiVerificationToolbar
 import org.tsuyomi.core.ui.icons.TsuyomiIcons
 import org.tsuyomi.core.ui.theme.TsuyomiSpacing
-import org.tsuyomi.core.webview.ControlledWebLoginSession
+import org.tsuyomi.core.ui.theme.instantMotion
+import org.tsuyomi.core.ui.theme.rememberSystemReducedMotion
 import org.tsuyomi.core.webview.CapturedVerifiedPage
+import org.tsuyomi.core.webview.ControlledWebLoginSession
 import org.tsuyomi.shared.sourcecontract.SourceDiagnostic
 import org.tsuyomi.source.extensionmanager.VerifiedHxpPackage
 
@@ -63,21 +79,6 @@ private enum class VerificationRouteFailure {
     START_FAILED,
 }
 
-@Composable
-fun ManualVerificationTopBar(
-    packageInfo: VerifiedHxpPackage,
-    onNavigateUp: () -> Unit,
-) {
-    TsuyomiTopBar(
-        title = stringResource(R.string.verification_atlas_title),
-        subtitle = stringResource(
-            R.string.verification_atlas_subtitle,
-            packageInfo.manifest.displayName,
-            packageInfo.manifest.sourceId.value,
-        ),
-        onNavigateUp = onNavigateUp,
-    )
-}
 
 @Composable
 fun ManualVerificationRoute(
@@ -86,6 +87,7 @@ fun ManualVerificationRoute(
     onCancel: () -> Unit,
     modifier: Modifier = Modifier,
     verifiedPageRequestUrl: String? = null,
+    verifiedPageRequestResolved: Boolean = true,
     onVerifiedPageCompleted: suspend () -> Unit = { onCompleted() },
     onUseVerifiedPage: (suspend (CapturedVerifiedPage) -> VerifiedPageUseResult)? = null,
     verifiedPageOpenLabel: String? = null,
@@ -109,21 +111,30 @@ fun ManualVerificationRoute(
             onBlockedNavigation = { blockedNavigation = true },
         )
     }
-    val initialUrl = packageInfo.manifest.homepage
+    val homepageUrl = packageInfo.manifest.homepage
         ?.takeIf { homepage -> origins.any { homepage.startsWith(it.canonical) } }
         ?: origins.firstOrNull()?.canonical
+    val requestUrl = verifiedPageRequestUrl?.takeIf { url ->
+        origins.any { url.startsWith(it.canonical) }
+    }
+    val initialUrl = requestUrl ?: homepageUrl
     val effectiveVerifiedPageOpenLabel = verifiedPageOpenLabel
         ?: stringResource(R.string.verification_open_requested_page)
     val effectiveVerifiedPageUnboundMessage = verifiedPageUnboundMessage
         ?: stringResource(R.string.verification_snapshot_unbound)
 
-    LaunchedEffect(session, initialUrl) {
+    LaunchedEffect(session, initialUrl, requestUrl, verifiedPageRequestResolved) {
+        if (!verifiedPageRequestResolved) return@LaunchedEffect
         if (!packageInfo.manifest.capabilities.webLogin.enabled || initialUrl == null) {
             failure = VerificationRouteFailure.NOT_AUTHORIZED
         } else {
-            runCatching { session.open(initialUrl) }
-                .onSuccess { webView = it }
-                .onFailure { failure = VerificationRouteFailure.START_FAILED }
+            try {
+                webView = session.open(initialUrl, bindAsVerifiedPage = requestUrl != null)
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (_: Throwable) {
+                failure = VerificationRouteFailure.START_FAILED
+            }
         }
     }
     DisposableEffect(session) {
@@ -231,163 +242,160 @@ private fun VerificationContent(
     onComplete: () -> Unit,
     modifier: Modifier,
 ) {
-    Column(
-        modifier
-            .fillMaxSize()
-            .windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Bottom)),
-    ) {
-        Surface(
-            modifier = Modifier.fillMaxWidth().padding(
-                start = TsuyomiSpacing.Md,
-                end = TsuyomiSpacing.Md,
-                top = TsuyomiSpacing.Md,
-            ),
-            color = MaterialTheme.colorScheme.surfaceVariant,
-            shape = MaterialTheme.shapes.medium,
+    val staticMotion = LocalDisplayEnvironment.current.instantMotion || rememberSystemReducedMotion()
+    BackHandler {
+        if (webView.canGoBack()) webView.goBack() else onCancel()
+    }
+
+    Box(modifier.fillMaxSize()) {
+        TsuyomiVerificationToolbar(
+            modifier = Modifier
+                .align(Alignment.BottomCenter)
+                .windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Bottom))
+                .padding(horizontal = TsuyomiSpacing.Md, vertical = TsuyomiSpacing.Sm)
+                .widthIn(max = VerificationToolbarMaxWidth)
+                .testTag("verification-action-dock")
+                .zIndex(2f),
         ) {
-            Row(
-                modifier = Modifier.padding(TsuyomiSpacing.Md),
-                verticalAlignment = Alignment.Top,
-            ) {
+            IconButton(onClick = onCancel) {
                 Icon(
-                    imageVector = TsuyomiIcons.Info,
-                    contentDescription = null,
-                    modifier = Modifier.size(24.dp),
+                    imageVector = TsuyomiIcons.Close,
+                    contentDescription = stringResource(R.string.verification_cancel_action),
                 )
-                Column(Modifier.padding(start = TsuyomiSpacing.Md)) {
-                    Text(
-                        stringResource(R.string.verification_host_notice, sourceName),
-                        style = MaterialTheme.typography.bodyMedium,
-                    )
-                    Text(
-                        stringResource(R.string.verification_status_waiting),
-                        style = MaterialTheme.typography.labelMedium,
+            }
+            if (onOpenRequestedPage != null) {
+                IconButton(onClick = onOpenRequestedPage, enabled = !snapshotWorking) {
+                    Icon(
+                        imageVector = TsuyomiIcons.Refresh,
+                        contentDescription = verifiedPageOpenLabel,
                     )
                 }
             }
+            if (onUseCurrentPage != null) {
+                Button(
+                    onClick = onUseCurrentPage,
+                    enabled = !snapshotWorking,
+                    modifier = Modifier.testTag("verification-use-current-page"),
+                    contentPadding = VerificationButtonPadding,
+                ) {
+                    if (snapshotWorking && staticMotion) {
+                        Text(
+                            text = stringResource(R.string.verification_snapshot_working),
+                            modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite },
+                        )
+                    } else if (snapshotWorking) {
+                        CircularProgressIndicator(
+                            modifier = Modifier.size(18.dp),
+                            strokeWidth = 2.dp,
+                        )
+                    } else {
+                        Text(stringResource(R.string.verification_use_current_page))
+                    }
+                }
+            }
+            if (snapshotActionAvailable) {
+                FilledTonalButton(
+                    onClick = onComplete,
+                    enabled = !snapshotWorking,
+                    contentPadding = VerificationButtonPadding,
+                ) {
+                    Text(stringResource(R.string.verification_complete_action))
+                }
+            } else {
+                Button(
+                    onClick = onComplete,
+                    enabled = !snapshotWorking,
+                    contentPadding = VerificationButtonPadding,
+                ) {
+                    Text(stringResource(R.string.verification_complete_action))
+                }
+            }
         }
-        if (blockedNavigation) {
-            Surface(
-                modifier = Modifier.fillMaxWidth().padding(
-                    horizontal = TsuyomiSpacing.Md,
-                    vertical = TsuyomiSpacing.Sm,
-                ),
-                color = MaterialTheme.colorScheme.errorContainer,
-                shape = MaterialTheme.shapes.small,
+
+        AndroidView(
+            factory = { webView },
+            modifier = Modifier
+                .fillMaxSize()
+                .testTag("verification-webview"),
+        )
+
+        Surface(
+            modifier = Modifier
+                .align(Alignment.TopEnd)
+                .windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Top))
+                .padding(top = TsuyomiSpacing.Sm, end = TsuyomiSpacing.Md)
+                .testTag("verification-host-identity")
+                .zIndex(2f),
+            shape = CircleShape,
+            color = MaterialTheme.colorScheme.surfaceContainerHigh,
+            shadowElevation = 2.dp,
+        ) {
+            Row(
+                modifier = Modifier.padding(horizontal = TsuyomiSpacing.Md, vertical = TsuyomiSpacing.Sm),
+                horizontalArrangement = Arrangement.spacedBy(TsuyomiSpacing.Sm),
+                verticalAlignment = Alignment.CenterVertically,
             ) {
+                Icon(
+                    imageVector = TsuyomiIcons.Verify,
+                    contentDescription = null,
+                    modifier = Modifier.size(18.dp),
+                )
                 Text(
-                    text = stringResource(R.string.verification_navigation_blocked),
-                    modifier = Modifier.padding(TsuyomiSpacing.Md),
-                    style = MaterialTheme.typography.bodyMedium,
+                    text = stringResource(R.string.verification_host_identity, sourceName),
+                    style = MaterialTheme.typography.labelLarge,
                 )
             }
         }
-        if (snapshotFailure != VerifiedPageFailure.NONE) {
+
+        if (blockedNavigation || snapshotFailure != VerifiedPageFailure.NONE) {
             Surface(
-                modifier = Modifier.fillMaxWidth().padding(
-                    horizontal = TsuyomiSpacing.Md,
-                    vertical = TsuyomiSpacing.Sm,
-                ),
-                color = MaterialTheme.colorScheme.errorContainer,
-                shape = MaterialTheme.shapes.small,
-            ) {
-                Column {
-                    Text(
-                        text = when (snapshotFailure) {
-                            VerifiedPageFailure.UNBOUND -> verifiedPageUnboundMessage
-                            VerifiedPageFailure.REJECTED -> stringResource(R.string.verification_snapshot_rejected)
-                            VerifiedPageFailure.NONE -> error("Snapshot failure is absent")
-                        },
-                        modifier = Modifier.padding(TsuyomiSpacing.Md),
-                        style = MaterialTheme.typography.bodyMedium,
+                modifier = Modifier
+                    .align(Alignment.TopCenter)
+                    .windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Top))
+                    .padding(
+                        start = TsuyomiSpacing.Md,
+                        end = TsuyomiSpacing.Md,
+                        top = VerificationFeedbackTopOffset,
                     )
-                    if (snapshotDiagnostic != null) {
+                    .widthIn(max = VerificationFeedbackMaxWidth)
+                    .testTag("verification-feedback")
+                    .zIndex(2f),
+                color = MaterialTheme.colorScheme.errorContainer,
+                shape = MaterialTheme.shapes.medium,
+                shadowElevation = 2.dp,
+            ) {
+                Column(Modifier.padding(TsuyomiSpacing.Md)) {
+                    if (blockedNavigation) {
                         Text(
-                            text = stringResource(
-                                R.string.verification_snapshot_diagnostic,
-                                snapshotDiagnostic.stage,
-                                snapshotDiagnostic.safeCode,
-                            ),
-                            modifier = Modifier.padding(
-                                start = TsuyomiSpacing.Md,
-                                end = TsuyomiSpacing.Md,
-                                bottom = TsuyomiSpacing.Md,
-                            ),
-                            style = MaterialTheme.typography.labelMedium,
+                            text = stringResource(R.string.verification_navigation_blocked),
+                            style = MaterialTheme.typography.bodyMedium,
                         )
+                    }
+                    if (snapshotFailure != VerifiedPageFailure.NONE) {
+                        Text(
+                            text = when (snapshotFailure) {
+                                VerifiedPageFailure.UNBOUND -> verifiedPageUnboundMessage
+                                VerifiedPageFailure.REJECTED -> stringResource(R.string.verification_snapshot_rejected)
+                                VerifiedPageFailure.NONE -> error("Snapshot failure is absent")
+                            },
+                            modifier = Modifier.padding(top = if (blockedNavigation) TsuyomiSpacing.Sm else 0.dp),
+                            style = MaterialTheme.typography.bodyMedium,
+                        )
+                        if (snapshotDiagnostic != null) {
+                            Text(
+                                text = stringResource(
+                                    R.string.verification_snapshot_diagnostic,
+                                    snapshotDiagnostic.stage,
+                                    snapshotDiagnostic.safeCode,
+                                ),
+                                modifier = Modifier.padding(top = TsuyomiSpacing.Sm),
+                                style = MaterialTheme.typography.labelMedium,
+                            )
+                        }
                     }
                 }
             }
         }
-        Surface(
-            modifier = Modifier
-                .weight(1f)
-                .fillMaxWidth()
-                .padding(horizontal = TsuyomiSpacing.Md, vertical = TsuyomiSpacing.Sm),
-            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline),
-        ) {
-            AndroidView(
-                factory = { webView },
-                modifier = Modifier.fillMaxSize(),
-            )
-        }
-        Row(
-            modifier = Modifier.fillMaxWidth().padding(horizontal = TsuyomiSpacing.Md),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Icon(
-                imageVector = TsuyomiIcons.Verify,
-                contentDescription = null,
-                modifier = Modifier.size(24.dp),
-            )
-            Text(
-                stringResource(R.string.verification_webview_caption),
-                modifier = Modifier.padding(start = TsuyomiSpacing.Sm),
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-        }
-        if (onOpenRequestedPage != null) {
-            TsuyomiButton(
-                text = verifiedPageOpenLabel,
-                onClick = onOpenRequestedPage,
-                enabled = !snapshotWorking,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(start = TsuyomiSpacing.Md, end = TsuyomiSpacing.Md, top = TsuyomiSpacing.Lg),
-                style = TsuyomiButtonStyle.SECONDARY,
-            )
-        }
-        if (onUseCurrentPage != null) {
-            TsuyomiButton(
-                text = stringResource(R.string.verification_use_current_page),
-                onClick = onUseCurrentPage,
-                enabled = !snapshotWorking,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(
-                        start = TsuyomiSpacing.Md,
-                        end = TsuyomiSpacing.Md,
-                        top = if (onOpenRequestedPage == null) TsuyomiSpacing.Lg else TsuyomiSpacing.Sm,
-                    ),
-            )
-        }
-        TsuyomiButton(
-            text = stringResource(R.string.verification_complete_action),
-            onClick = onComplete,
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(start = TsuyomiSpacing.Md, end = TsuyomiSpacing.Md, top = TsuyomiSpacing.Lg),
-            style = if (snapshotActionAvailable) TsuyomiButtonStyle.SECONDARY else TsuyomiButtonStyle.PRIMARY,
-        )
-        TsuyomiButton(
-            text = stringResource(R.string.verification_cancel_action),
-            onClick = onCancel,
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = TsuyomiSpacing.Md, vertical = TsuyomiSpacing.Sm),
-            style = TsuyomiButtonStyle.SECONDARY,
-        )
     }
 }
 
@@ -436,5 +444,10 @@ private fun FrozenEInkVerificationContent(
         }
     }
 }
+
+private val VerificationButtonPadding = PaddingValues(horizontal = 12.dp)
+private val VerificationToolbarMaxWidth = 560.dp
+private val VerificationFeedbackMaxWidth = 560.dp
+private val VerificationFeedbackTopOffset = 56.dp
 
 private const val MAX_VERIFIED_PAGE_BYTES = 2 * 1024 * 1024

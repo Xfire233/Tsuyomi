@@ -1,9 +1,6 @@
 <!-- SPDX-FileCopyrightText: 2026 Tsuyomi Contributors -->
 <!-- SPDX-License-Identifier: Apache-2.0 -->
 <resources>
-    <string name="settings_more_section_settings">设置</string>
-    <string name="settings_more_section_data">数据</string>
-    <string name="settings_more_section_support">支持</string>
     <string name="settings_more_display_title">显示</string>
     <string name="settings_more_display_summary">显示模式、主题与动态颜色</string>
     <string name="settings_more_reader_title">阅读</string>
@@ -43,13 +40,6 @@
     <string name="settings_write_failure_message">更改未能写入存储。可以重试，或忽略此次更改。</string>
     <string name="settings_write_failure_acknowledge">知道了</string>
 
-    <string name="settings_display_section_reset">重置</string>
-    <string name="settings_display_reset_title">重置界面设置</string>
-    <string name="settings_display_reset_summary">恢复显示、阅读、书架布局和功能说明默认值；不会删除书籍、进度、帐号、来源或缓存</string>
-    <string name="settings_display_reset_dialog_title">重置界面设置？</string>
-    <string name="settings_display_reset_dialog_message">仅清除界面偏好并恢复当前宪章默认值。书籍、收藏夹、进度、历史、来源包、登录凭据、网站镜像和缓存均不会改动。</string>
-    <string name="settings_display_reset_confirm">确认重置</string>
-    <string name="settings_display_reset_cancel">取消</string>
 
     <string name="settings_reader_section_typography">排版</string>
     <string name="settings_reader_font_size">字号</string>
@@ -84,8 +74,6 @@
     <string name="settings_help_reset_seen">重置功能说明已读版本</string>
     <string name="settings_help_reset_seen_summary">下次进入对应功能时再次显示</string>
     <string name="settings_help_seen">已读；点击重播</string>
-    <string name="settings_help_interface_section">界面设置</string>
-    <string name="settings_help_display_reset_summary">前往“显示”中的唯一界面重置入口</string>
     <string name="settings_help_introduction_authority_notice">关闭或标记已读只控制说明内容，不会授权来源能力、启动网络请求或修改网站。</string>
     <string name="settings_help_acknowledge">知道了</string>
     <string name="settings_help_later">稍后再看</string>
@@ -101,10 +89,10 @@
     <string name="settings_help_intro_mirror_summary">在书架中查看已显式同步的网站收藏。</string>
     <string name="settings_help_intro_mirror_point_1">镜像默认按来源显示为一个网站收藏；分组需要逐来源开启。</string>
     <string name="settings_help_intro_mirror_point_2">复制到本地不会修改网站；拖入网站目标属于明确的网站写入。</string>
-    <string name="settings_help_intro_updates_title">追更</string>
-    <string name="settings_help_intro_updates_summary">查看书架中有新内容的书籍。</string>
-    <string name="settings_help_intro_updates_point_1">检查更新是显式操作，不会因打开页面自动批量请求来源。</string>
-    <string name="settings_help_intro_updates_point_2">失败与未确认结果会保持可见，不会伪装成成功。</string>
+    <string name="settings_help_intro_updates_title">书架更新</string>
+    <string name="settings_help_intro_updates_summary">在书架根页检查并筛选有新章节的书籍。</string>
+    <string name="settings_help_intro_updates_point_1">下拉刷新或刷新操作会检查全部符合条件的书籍；打开书架不会自动请求来源。</string>
+    <string name="settings_help_intro_updates_point_2">新章节会以精确数量显示；读完本批全部新章或忽略当前批次后才会消失。</string>
     <string name="settings_help_intro_smart_title">智能收藏夹</string>
     <string name="settings_help_intro_smart_summary">用本地规则组织已经进入书架的数据。</string>
     <string name="settings_help_intro_smart_point_1">规则只读取本地书架字段，不运行来源代码或网络请求。</string>

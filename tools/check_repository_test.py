@@ -14,21 +14,19 @@ class RepositoryPolicyTest(unittest.TestCase):
         paths = [
             Path("tsuyomi-android/app/src/main/kotlin/App.kt"),
             Path("tsuyomi-protocol/schemas/host-api.json"),
-            Path("tsuyomi-extensions/src/wenku8.ts"),
             Path("README.md"),
         ]
 
         self.assertEqual([paths[0]], check_repository.paths_in_scope(paths, "android"))
         self.assertEqual([paths[1]], check_repository.paths_in_scope(paths, "protocol"))
-        self.assertEqual([paths[2]], check_repository.paths_in_scope(paths, "extensions"))
         self.assertEqual(paths, check_repository.paths_in_scope(paths, "all"))
 
     def test_only_the_public_wenku8_hxp_fixture_is_allowed(self) -> None:
         self.assertFalse(
-            check_repository.violates_policy(Path("tsuyomi-extensions/fixtures/wenku8/signed-fixture.hxp"))
+            check_repository.violates_policy(Path("tsuyomi-android/source/extension-testkit/fixtures/wenku8/wenku8-fixture.hxp"))
         )
-        self.assertTrue(check_repository.violates_policy(Path("tsuyomi-extensions/dist/private.hxp")))
-        self.assertTrue(check_repository.violates_policy(Path("tsuyomi-extensions/fixtures/other/private.hxp")))
+        self.assertTrue(check_repository.violates_policy(Path("tsuyomi-android/source/extension-testkit/fixtures/wenku8/private.hxp")))
+        self.assertTrue(check_repository.violates_policy(Path("tsuyomi-android/source/extension-testkit/fixtures/other/wenku8-fixture.hxp")))
 
     def test_versioned_project_skills_are_the_only_agents_exception(self) -> None:
         self.assertFalse(
@@ -43,13 +41,13 @@ class RepositoryPolicyTest(unittest.TestCase):
         rejected = [
             Path("tsuyomi-android/.local/report.json"),
             Path("tsuyomi-protocol/AGENTS.md"),
-            Path("tsuyomi-extensions/.env.production"),
+            Path("tsuyomi-protocol/.env.production"),
             Path("tsuyomi-android/release.jks"),
             Path("session.transcript.json"),
         ]
 
         self.assertTrue(all(check_repository.violates_policy(path) for path in rejected))
-        self.assertFalse(check_repository.violates_policy(Path("tsuyomi-extensions/.env.example")))
+        self.assertFalse(check_repository.violates_policy(Path("tsuyomi-protocol/.env.example")))
 
     def test_retired_android_prototype_is_rejected(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -152,11 +150,12 @@ class ToolingGovernanceTest(unittest.TestCase):
                 (
                     sections[0], markers[0], markers[1], markers[2],
                     sections[1],
-                    sections[2], markers[3], *scope_rows,
-                    sections[3], markers[4], *native_rows,
-                    sections[4], markers[5], *skill_rows,
-                    sections[5], markers[6], *mcp_rows,
-                    sections[6], sections[7],
+                    sections[2],
+                    sections[3], markers[3], *scope_rows,
+                    sections[4], markers[4], *native_rows,
+                    sections[5], markers[5], *skill_rows,
+                    sections[6], markers[6], *mcp_rows,
+                    sections[7], sections[8],
                     ".agents/skills/example",
                 )
             ),
@@ -192,6 +191,10 @@ class ToolingGovernanceTest(unittest.TestCase):
             ),
             encoding="utf-8",
         )
+        for relative_runner_path, required_markers in check_repository.GRADLE_RESOURCE_RUNNERS:
+            resource_runner = root / relative_runner_path
+            resource_runner.parent.mkdir(parents=True, exist_ok=True)
+            resource_runner.write_text("\n".join(required_markers), encoding="utf-8")
         return skill
 
     def test_valid_project_skill_registry_passes(self) -> None:
@@ -199,6 +202,19 @@ class ToolingGovernanceTest(unittest.TestCase):
             root = Path(directory)
             self.create_valid_registry(root)
             self.assertEqual([], check_repository.tooling_governance_violations(root))
+
+    def test_gradle_resource_runner_requires_both_modes(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            self.create_valid_registry(root)
+            high_runner_path, _ = check_repository.GRADLE_RESOURCE_RUNNERS[1]
+            runner = root / high_runner_path
+            runner.write_text(
+                runner.read_text(encoding="utf-8").replace("--parallel", ""),
+                encoding="utf-8",
+            )
+            violations = check_repository.tooling_governance_violations(root)
+            self.assertTrue(any("missing required resource mode marker" in violation for violation in violations))
 
     def test_every_tool_requires_scope_and_completion(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

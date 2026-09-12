@@ -45,7 +45,11 @@ class AndroidCiPlanTest(unittest.TestCase):
         )
 
         self.assertEqual(
-            {":app:assembleDebug", ":app:testDebugUnitTest", ":feature:book:lintDebug"},
+            {
+                ":app:assembleDebug",
+                ":app:testDebugUnitTest",
+                ":feature:book:lintDebug",
+            },
             set(plan.build_tasks),
         )
         self.assertEqual(

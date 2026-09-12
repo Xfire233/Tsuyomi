@@ -172,8 +172,6 @@ class RoomRemoteLibraryInstrumentedTest {
                 authors = setOf("作者甲", "作者乙"),
                 status = "ongoing",
                 remoteTags = setOf("奇幻"),
-                sourceUpdateKey = "chapter-20",
-                hasUnreadUpdate = true,
             ),
         )
         val initialTargets = listOf(
@@ -197,8 +195,6 @@ class RoomRemoteLibraryInstrumentedTest {
         assertEquals(setOf("作者甲", "作者乙"), preserved.authors)
         assertEquals("ongoing", preserved.status)
         assertEquals(setOf("奇幻"), preserved.remoteTags)
-        assertEquals("chapter-20", preserved.sourceUpdateKey)
-        assertTrue(preserved.hasUnreadUpdate)
 
         assertTrue(repository.updateRemoteMirrorBookTarget(first.identity, "0", Instant.ofEpochSecond(20)))
         assertTrue(repository.removeRemoteMirrorBook(second.identity))

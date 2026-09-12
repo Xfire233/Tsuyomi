@@ -36,8 +36,6 @@ internal class RoomLibraryCatalogStore(
                 canonicalUrl = entity.canonicalUrl,
                 status = entity.status,
                 remoteTagsJson = entity.remoteTagsJson,
-                sourceUpdateKey = entity.sourceUpdateKey,
-                hasUnreadUpdate = entity.hasUnreadUpdate,
                 metadataUpdatedAtEpochSecond = entity.metadataUpdatedAtEpochSecond,
                 metadataUpdatedAtNano = entity.metadataUpdatedAtNano,
             )
@@ -50,6 +48,11 @@ internal class RoomLibraryCatalogStore(
     suspend fun libraryEntries(): List<LibraryEntry> = entriesFor(
         dao.libraryBooks().map { BookIdentityRow(it.sourceId, it.remoteBookId) },
     )
+
+    suspend fun readLaterEntries(): List<LibraryEntry> = entriesFor(
+        dao.readLaterBooks().map { BookIdentityRow(it.sourceId, it.remoteBookId) },
+    )
+
     suspend fun libraryEntry(identity: BookIdentity): LibraryEntry? = entriesFor(
         listOf(BookIdentityRow(identity.sourceId, identity.remoteBookId)),
     ).singleOrNull()
@@ -75,6 +78,7 @@ internal class RoomLibraryCatalogStore(
             sourceAvailable = availability,
             reconciliation = reconciliation,
             reconciliationOperation = reconciliationOperation,
+            localMembership = entry.locallyPinned,
         )
     }
 
@@ -82,22 +86,29 @@ internal class RoomLibraryCatalogStore(
         saveBook(book)
         dao.insertLibraryEntry(
             LibraryEntryEntity(
-                book.identity.sourceId,
-                book.identity.remoteBookId,
-                book.addedAt.epochSecond,
-                book.addedAt.nano,
-                null,
-                false,
+                sourceId = book.identity.sourceId,
+                remoteBookId = book.identity.remoteBookId,
+                addedAtEpochSecond = book.addedAt.epochSecond,
+                addedAtNano = book.addedAt.nano,
+                rating = null,
             ),
-        ) != -1L
+        ) != -1L || dao.pinLibraryEntry(book.identity.sourceId, book.identity.remoteBookId) != 0
     }
 
-    suspend fun removeFromLibrary(identity: BookIdentity): Boolean =
-        dao.deleteLibraryEntry(identity.sourceId, identity.remoteBookId) != 0
+    suspend fun removeFromLibrary(identity: BookIdentity): Boolean = database.withTransaction {
+        if (dao.unpinLibraryEntry(identity.sourceId, identity.remoteBookId) == 0) return@withTransaction false
+        dao.deleteManualMembershipsForLibraryEntry(identity.sourceId, identity.remoteBookId)
+        true
+    }
 
     suspend fun removeFromLibrary(identities: Set<BookIdentity>): Int = database.withTransaction {
         identities.count { identity ->
-            dao.deleteLibraryEntry(identity.sourceId, identity.remoteBookId) != 0
+            if (dao.unpinLibraryEntry(identity.sourceId, identity.remoteBookId) == 0) {
+                false
+            } else {
+                dao.deleteManualMembershipsForLibraryEntry(identity.sourceId, identity.remoteBookId)
+                true
+            }
         }
     }
 
@@ -151,8 +162,8 @@ private fun LibraryBook.toEntity(): BookEntity {
         canonicalUrl = canonicalUrl,
         status = status,
         remoteTagsJson = encodeStringSet(canonicalStringSet(remoteTags)),
-        sourceUpdateKey = sourceUpdateKey,
-        hasUnreadUpdate = hasUnreadUpdate,
+        legacySourceUpdateKey = null,
+        legacyHasUnreadUpdate = false,
         addedAtEpochSecond = addedAt.epochSecond,
         addedAtNano = addedAt.nano,
         metadataUpdatedAtEpochSecond = metadataUpdatedAt.epochSecond,
@@ -171,8 +182,6 @@ internal fun BookEntity.toDomain(): LibraryBook {
         canonicalUrl = canonicalUrl,
         status = status,
         remoteTags = decodeStringSet(remoteTagsJson),
-        sourceUpdateKey = sourceUpdateKey,
-        hasUnreadUpdate = hasUnreadUpdate,
         addedAt = Instant.ofEpochSecond(addedAtEpochSecond, addedAtNano.toLong()),
         metadataUpdatedAt = Instant.ofEpochSecond(metadataUpdatedAtEpochSecond, metadataUpdatedAtNano.toLong()),
     )

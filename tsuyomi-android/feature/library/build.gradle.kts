@@ -19,6 +19,7 @@ dependencies {
     implementation(project(":shared:model"))
     implementation(project(":shared:source-contract"))
     implementation(project(":shared:locator"))
+    implementation(project(":shared:library-domain"))
     implementation(libs.androidx.compose.foundation)
     implementation(libs.androidx.compose.material3)
     implementation(libs.androidx.compose.ui)

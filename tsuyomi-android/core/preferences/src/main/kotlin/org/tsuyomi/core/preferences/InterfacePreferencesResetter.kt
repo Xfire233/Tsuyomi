@@ -31,12 +31,16 @@ class InterfacePreferencesResetter(
             stringPreferencesKey("color_scheme_preference"),
             stringPreferencesKey("library_shortcut_order"),
             stringPreferencesKey("library_website_grouping"),
+            stringPreferencesKey("library_root_nodes_v1"),
+            stringPreferencesKey("library_tab_presentations_v1"),
             stringPreferencesKey("reader_flow"),
             stringPreferencesKey("reader_theme"),
         )
         val BooleanKeys = setOf(
             booleanPreferencesKey("dynamic_color_enabled"),
             booleanPreferencesKey("library_shortcut_locked"),
+            booleanPreferencesKey("library_root_v1_migrated"),
+            booleanPreferencesKey("library_show_updates_only"),
             booleanPreferencesKey("feature_introductions_enabled"),
             booleanPreferencesKey("reader_lock_portrait"),
             booleanPreferencesKey("reader_progress_visible"),

@@ -8,6 +8,12 @@ import android.net.Uri
 import androidx.room.Room
 import androidx.test.platform.app.InstrumentationRegistry
 import java.io.File
+import java.util.Base64
+import java.security.MessageDigest
+import java.util.zip.ZipEntry
+import java.util.zip.ZipInputStream
+import java.util.zip.ZipOutputStream
+import org.json.JSONObject
 import java.time.Instant
 import org.junit.After
 import org.junit.Before
@@ -97,6 +103,23 @@ internal abstract class SourceFlowInstrumentedTestFixture {
         return requireNotNull(install.activePackage)
     }
 
+    protected suspend fun installSignedSwitchOverlay(
+        installer: SourceInstallController,
+        overlayName: String,
+    ): VerifiedHxpPackage {
+        val archive = assembleSignedSwitchOverlay(overlayName)
+        try {
+            installer.prepare(Uri.fromFile(archive), context.contentResolver)
+            check(installer.state is BrowseUiState.Approval) {
+                "Signed source-switch overlay was not prepared: ${installer.state}"
+            }
+            installer.approve(allowDowngrade = false)
+            return requireNotNull(installer.activePackage) { "Signed source-switch overlay was not activated" }
+        } finally {
+            archive.delete()
+        }
+    }
+
     protected fun reconciliationState(id: String): String =
         database.openHelper.readableDatabase.query(
             "SELECT state FROM remote_library_reconciliation WHERE id = ?",
@@ -125,9 +148,107 @@ internal abstract class SourceFlowInstrumentedTestFixture {
         manifest = manifest,
         packageSha256 = value,
         publisherFingerprint = publisherFingerprint,
+        publisherTrust = publisherTrust,
         archiveBytes = archiveBytes,
         entryModuleBytes = readVerifiedEntryModule(),
     )
+
+    protected fun assembleSignedSwitchOverlay(overlayName: String): File {
+        require(overlayName in setOf("source-switch-home", "source-switch-search", "source-user-consent"))
+        val overlay = JSONObject(
+            InstrumentationRegistry.getInstrumentation().context.assets
+                .open("repository/$overlayName.json")
+                .bufferedReader()
+                .use { it.readText() },
+        )
+        check(overlay.getString("format") == "tsuyomi-test-source-switch-overlay")
+        check(overlay.getBoolean("testOnly"))
+        val manifest = overlay.getJSONObject("manifest")
+        val replacement = overlay.getJSONObject("entrySourceIdReplacement")
+        val fromSourceId = replacement.getString("from")
+        val toSourceId = replacement.getString("to")
+        check(toSourceId == overlay.getString("sourceId"))
+        check(toSourceId == manifest.getString("id"))
+        check(overlay.getString("displayName") == manifest.getJSONObject("display").getString("name"))
+        val declaredHome = manifest.getJSONObject("capabilities").optJSONObject("home")
+            ?.optBoolean("enabled", false) ?: false
+        check(overlay.getBoolean("homeAvailable") == declaredHome)
+        val expectedEntrySha256 = overlay.getJSONObject("provenance")
+            .getJSONObject("entryReplacement")
+            .getString("sha256")
+        val entryPath = manifest.getString("entry")
+        val archive = File(context.cacheDir, "$overlayName-assembled.hxp")
+        ZipInputStream(context.assets.open("wenku8-fixture.hxp")).use { input ->
+            ZipOutputStream(archive.outputStream()).use { output ->
+                while (true) {
+                    val entry = input.nextEntry ?: break
+                    val bytes = when (entry.name) {
+                        "manifest.json" -> manifest.toString().toByteArray(Charsets.UTF_8)
+                        "signature.ed25519" -> Base64.getDecoder().decode(overlay.getString("signature"))
+                        entryPath -> replaceEntrySourceId(
+                            entry = input.readBytes(),
+                            fromSourceId = fromSourceId,
+                            toSourceId = toSourceId,
+                            expectedSha256 = expectedEntrySha256,
+                        )
+                        else -> input.readBytes()
+                    }
+                    output.putNextEntry(ZipEntry(entry.name))
+                    output.write(bytes)
+                    output.closeEntry()
+                }
+            }
+        }
+        return archive
+    }
+
+    protected fun assemblePendingSourceApproval(): File {
+        val candidate = JSONObject(
+            InstrumentationRegistry.getInstrumentation().context.assets
+                .open("repository/replacement-candidate.json")
+                .bufferedReader()
+                .use { it.readText() },
+        )
+        val archive = File(context.cacheDir, "source-switch-pending-approval.hxp")
+        ZipInputStream(context.assets.open("wenku8-fixture.hxp")).use { input ->
+            ZipOutputStream(archive.outputStream()).use { output ->
+                while (true) {
+                    val entry = input.nextEntry ?: break
+                    val bytes = when (entry.name) {
+                        "manifest.json" -> candidate.getJSONObject("manifest").toString().toByteArray(Charsets.UTF_8)
+                        "signature.ed25519" -> Base64.getDecoder().decode(candidate.getString("signature"))
+                        else -> input.readBytes()
+                    }
+                    output.putNextEntry(ZipEntry(entry.name))
+                    output.write(bytes)
+                    output.closeEntry()
+                }
+            }
+        }
+        return archive
+    }
+
+    private fun replaceEntrySourceId(
+        entry: ByteArray,
+        fromSourceId: String,
+        toSourceId: String,
+        expectedSha256: String,
+    ): ByteArray {
+        val source = entry.toString(Charsets.UTF_8)
+        val expected = "const SOURCE_ID = '$fromSourceId';"
+        val index = source.indexOf(expected)
+        check(index >= 0 && source.indexOf(expected, index + expected.length) < 0) {
+            "Pinned entry must contain exactly one source identity declaration"
+        }
+        return source.replaceRange(index, index + expected.length, "const SOURCE_ID = '$toSourceId';")
+            .toByteArray(Charsets.UTF_8)
+            .also { replaced ->
+                val actualSha256 = MessageDigest.getInstance("SHA-256").digest(replaced)
+                    .joinToString("") { "%02x".format(it.toInt() and 0xff) }
+                check(actualSha256 == expectedSha256) { "Overlay entry replacement digest mismatch" }
+            }
+    }
+
 
     protected fun alternateSha(current: String): String = when (current.first()) {
         'a' -> "b" + current.drop(1)
@@ -220,7 +341,20 @@ internal abstract class SourceFlowInstrumentedTestFixture {
         File(context.cacheDir, "hxp-staging").deleteRecursively()
         File(context.cacheDir, "source-network-cache").deleteRecursively()
         File(context.noBackupFilesDir, "source-credentials").deleteRecursively()
-        File(context.noBackupFilesDir, "normalized-source-content").deleteRecursively()
+        val application = context.applicationContext as TsuyomiApplication
+        File(context.noBackupFilesDir, "package-trust").resetDirectory()
+        File(context.noBackupFilesDir, "repository-subscriptions").resetDirectory()
+        application.packageTrust.reload()
+        application.repositorySubscriptions.reload()
+        File(context.cacheDir, "source-switch-home-assembled.hxp").delete()
+        File(context.cacheDir, "source-switch-search-assembled.hxp").delete()
+        File(context.cacheDir, "source-switch-pending-approval.hxp").delete()
+        File(context.cacheDir, "source-user-consent-assembled.hxp").delete()
         File(context.cacheDir, "wenku8-fixture.hxp").delete()
+    }
+
+    private fun File.resetDirectory() {
+        deleteRecursively()
+        check(mkdirs() || isDirectory) { "Cannot reset fixture directory: $name" }
     }
 }

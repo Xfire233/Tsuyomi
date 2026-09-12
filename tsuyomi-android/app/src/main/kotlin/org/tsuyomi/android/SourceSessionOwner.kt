@@ -163,12 +163,24 @@ internal enum class SourceSessionOpenResult {
     ALREADY_OPEN,
     OPENED,
     PACKAGE_CHANGED,
+    UNAVAILABLE,
+}
+
+internal class PreparedSourceSession internal constructor(
+    internal val owner: SourceSessionOwner,
+    internal val packageInfo: VerifiedHxpPackage,
+    internal val expectedPackageSha256: String?,
+    internal val expectedGeneration: Long,
+    internal val client: SourceFlowSession,
+) {
+    internal var consumed = false
 }
 
 
 internal class SourceSessionOwner(
     val directActionTokens: DirectActionTokenRegistry,
     private val openSession: suspend (VerifiedHxpPackage) -> SourceFlowSession,
+    private val isPackageTrusted: (VerifiedHxpPackage) -> Boolean,
 ) : Closeable {
     private val lock = Any()
     private var client: SourceFlowSession? = null
@@ -181,6 +193,10 @@ internal class SourceSessionOwner(
         packageInfo: VerifiedHxpPackage,
         onPackageChanged: () -> Unit = {},
     ): SourceSessionOpenResult {
+        if (!isPackageTrusted(packageInfo)) {
+            closeActiveClient()
+            return SourceSessionOpenResult.UNAVAILABLE
+        }
         val (previousClient, operationGeneration, packageChanged) = synchronized(lock) {
             checkOpen()
             if (activePackage?.packageSha256 == packageInfo.packageSha256 && client != null) {
@@ -199,7 +215,7 @@ internal class SourceSessionOwner(
 
         val openedClient = openSession(packageInfo)
         val retained = synchronized(lock) {
-            if (closed || openGeneration != operationGeneration) {
+            if (closed || openGeneration != operationGeneration || !isPackageTrusted(packageInfo)) {
                 false
             } else {
                 client = openedClient
@@ -210,24 +226,86 @@ internal class SourceSessionOwner(
         if (!retained) {
             openedClient.close()
             synchronized(lock) { checkOpen() }
+            if (!isPackageTrusted(packageInfo)) return SourceSessionOpenResult.UNAVAILABLE
             return SourceSessionOpenResult.ALREADY_OPEN
         }
         return if (packageChanged) SourceSessionOpenResult.PACKAGE_CHANGED else SourceSessionOpenResult.OPENED
     }
 
-    fun active(): ActiveSourceSession? = synchronized(lock) {
-        checkOpen()
-        activePackage?.let { ActiveSourceSession(it, openGeneration) }
+    suspend fun prepare(packageInfo: VerifiedHxpPackage): PreparedSourceSession? {
+        if (!isPackageTrusted(packageInfo)) return null
+        val (expectedPackageSha256, expectedGeneration) = synchronized(lock) {
+            checkOpen()
+            activePackage?.packageSha256 to openGeneration
+        }
+        val preparedClient = openSession(packageInfo)
+        val retained = synchronized(lock) { !closed && isPackageTrusted(packageInfo) }
+        if (!retained) {
+            preparedClient.close()
+            synchronized(lock) { checkOpen() }
+            return null
+        }
+        return PreparedSourceSession(
+            owner = this,
+            packageInfo = packageInfo,
+            expectedPackageSha256 = expectedPackageSha256,
+            expectedGeneration = expectedGeneration,
+            client = preparedClient,
+        )
     }
 
-    fun requireClient(): SourceFlowSession = synchronized(lock) {
-        checkOpen()
-        checkNotNull(client) { "Source is not open" }
+    fun commitPrepared(prepared: PreparedSourceSession): Boolean {
+        val committed: Pair<SourceFlowSession?, Boolean>? = synchronized(lock) {
+            check(prepared.owner === this) { "Prepared session belongs to another owner" }
+            checkOpen()
+            if (
+                prepared.consumed ||
+                !isPackageTrusted(prepared.packageInfo) ||
+                activePackage?.packageSha256 != prepared.expectedPackageSha256 ||
+                openGeneration != prepared.expectedGeneration
+            ) {
+                null
+            } else {
+                prepared.consumed = true
+                openGeneration += 1
+                val previous = client
+                client = prepared.client
+                activePackage = prepared.packageInfo
+                val changed = statePackageSha256 != prepared.packageInfo.packageSha256
+                statePackageSha256 = prepared.packageInfo.packageSha256
+                previous to changed
+            }
+        }
+        val (previousClient, _) = committed ?: return false
+        previousClient?.close()
+        return true
     }
+
+    fun discardPrepared(prepared: PreparedSourceSession) {
+        val client = synchronized(lock) {
+            check(prepared.owner === this) { "Prepared session belongs to another owner" }
+            if (prepared.consumed) null else {
+                prepared.consumed = true
+                prepared.client
+            }
+        }
+        client?.close()
+    }
+
+    fun active(): ActiveSourceSession? = synchronized(lock) {
+        checkOpen()
+        activePackage?.takeIf(isPackageTrusted)?.let { ActiveSourceSession(it, openGeneration) }
+    }
+
+
+    fun requireClient(): SourceFlowSession = requireClientOrNull() ?: throw SourceException(
+        code = SourceErrorCode.EXTENSION_RUNTIME_FAILURE,
+        diagnostic = SourceDiagnostic("source-unavailable", "source-session", "source-untrusted-or-closed"),
+    )
 
     fun requireClientOrNull(): SourceFlowSession? = synchronized(lock) {
         checkOpen()
-        client
+        client.takeIf { activePackage?.let(isPackageTrusted) == true }
     }
 
     suspend fun reopen(): SourceSessionOpenResult? {
@@ -237,6 +315,22 @@ internal class SourceSessionOwner(
         } ?: return null
         closeActiveClient()
         return open(packageInfo)
+    }
+
+    /** Invalidates pending preparations without permanently closing the reusable session owner. */
+    fun removeSource(sourceId: String): Boolean {
+        val removed = synchronized(lock) {
+            checkOpen()
+            openGeneration += 1
+            if (activePackage?.manifest?.sourceId?.value != sourceId) return false
+            val previous = client
+            client = null
+            activePackage = null
+            statePackageSha256 = null
+            previous
+        }
+        removed?.close()
+        return true
     }
 
     private fun closeActiveClient() {
@@ -273,11 +367,9 @@ internal class SourceSessionOwner(
             context: android.content.Context,
             directActionTokens: DirectActionTokenRegistry,
         ): suspend (VerifiedHxpPackage) -> SourceFlowSession = { packageInfo ->
+            val (native, verifiedGet) = Phase2SourceGateway.createSession(context, packageInfo, directActionTokens)
             ExtensionSourceFlowSession(
-                delegate = SourceExtensionClient.open(
-                    packageInfo,
-                    Phase2SourceGateway.create(context, packageInfo, directActionTokens),
-                ),
+                delegate = SourceExtensionClient.open(packageInfo, native, verifiedGet),
                 verifiedPageClient = { snapshot ->
                     SourceExtensionClient.open(
                         packageInfo,

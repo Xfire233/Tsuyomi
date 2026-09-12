@@ -96,6 +96,40 @@
             "enabled": { "type": "boolean" }
           }
         },
+        "updateCheck": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["version", "origin", "method", "path", "parameters"],
+          "properties": {
+            "version": { "const": 2 },
+            "origin": { "$ref": "#/$defs/httpsOrigin" },
+            "method": { "const": "GET" },
+            "path": { "type": "string", "pattern": "^/[^?#]{0,1023}$" },
+            "referrerPath": { "type": "string", "pattern": "^/[^?#]{0,1023}$" },
+            "parameters": {
+              "type": "object",
+              "minProperties": 1,
+              "maxProperties": 16,
+              "propertyNames": { "type": "string", "minLength": 1, "maxLength": 256, "pattern": "\\S" },
+              "additionalProperties": {
+                "oneOf": [
+                  {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": ["kind", "value"],
+                    "properties": { "kind": { "const": "fixed" }, "value": { "type": "string", "maxLength": 8192 } }
+                  },
+                  {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": ["kind"],
+                    "properties": { "kind": { "const": "remoteBookId" } }
+                  }
+                ]
+              }
+            }
+          }
+        },
         "remoteLibrary": {
           "type": "object",
           "additionalProperties": false,

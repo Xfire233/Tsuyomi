@@ -114,6 +114,7 @@ fun RemoteMirrorBookSurface(
                 LibraryDropDestination.RemoteRemove,
                 LibraryDropDestination.Remove,
                 -> onRemoveFromWebsite(dragged)
+                LibraryDropDestination.CreateCollection,
                 is LibraryDropDestination.Book,
                 is LibraryDropDestination.Collection,
                 is LibraryDropDestination.Library,
@@ -163,7 +164,6 @@ fun RemoteMirrorBookSurface(
         LibraryDragVisualOverlay(
             coordinator = coordinator,
             entries = entries,
-            shortcuts = emptyList(),
             layout = layout,
             showRemoveTarget = false,
             coverState = { entry ->

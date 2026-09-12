@@ -26,8 +26,8 @@ This file records direct runtime/build/test dependencies and the public projects
 | actions/checkout | 4.2.2 (`11bd71901bbe5b1630ceea73d27597364c9af683`) | MIT | GitHub Actions checkout |
 | REUSE Tool | 6.2.0 | GPL-3.0-or-later | Local/CI license validation; not distributed |
 | Kotlinx Serialization JSON | 1.11.0 | Apache-2.0 | HXP manifest parsing |
-| Bouncy Castle Provider | 1.85.2 | MIT | Ed25519 package-signature verification on API 29+ |
-| java-json-canonicalization | 1.1 | Apache-2.0 | RFC 8785 HXP signing canonicalization |
+| Bouncy Castle Provider | 1.85.2 | MIT | Ed25519 package-signature verification on API 29+; existing pinned library also signs deterministic test-only repository envelopes in Android instrumentation |
+| java-json-canonicalization | 1.1 | Apache-2.0 | RFC 8785 HXP/catalog signing canonicalization, including deterministic Android instrumentation envelopes |
 | Apache Commons Compress | 1.28.0 | Apache-2.0 | Bounded HXP ZIP archive inspection |
 | TypeScript | 7.0.2 | Apache-2.0 | Wenku8 fixture extension build tooling; not shipped |
 | [QuickJS-ng](https://github.com/quickjs-ng/quickjs) | v0.16.1 | MIT | Vendored native JavaScript runtime; source archive SHA-256 `4b3c11f37dab2c58bdeccbaeb23b923fa4a9798a45e50be6af55f3e75b616ea0` |

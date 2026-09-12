@@ -96,7 +96,7 @@ internal class RoomCollectionStore(
         database.withTransaction {
             createCollection(collection)
             identities.forEachIndexed { index, identity ->
-                val entry = requireNotNull(dao.libraryEntry(identity.sourceId, identity.remoteBookId)) {
+                val entry = requireNotNull(dao.libraryEntry(identity.sourceId, identity.remoteBookId)?.takeIf { it.locallyPinned }) {
                     "Book is not in library"
                 }
                 check(
@@ -124,7 +124,7 @@ internal class RoomCollectionStore(
             require(collection.kind == CollectionKind.MANUAL) { "Only manual collections have stored membership" }
             var nextOrder = dao.nextManualMembershipOrder(collectionId)
             identities.count { identity ->
-                val entry = requireNotNull(dao.libraryEntry(identity.sourceId, identity.remoteBookId)) {
+                val entry = requireNotNull(dao.libraryEntry(identity.sourceId, identity.remoteBookId)?.takeIf { it.locallyPinned }) {
                     "Book is not in library"
                 }
                 val inserted = dao.insertManualMembership(
@@ -188,7 +188,7 @@ internal class RoomCollectionStore(
     suspend fun addManualMembership(collectionId: String, identity: BookIdentity): Boolean = database.withTransaction {
         val collection = requireNotNull(dao.collection(collectionId)) { "Unknown collection" }
         require(collection.kind == CollectionKind.MANUAL) { "Only manual collections have stored membership" }
-        val entry = requireNotNull(dao.libraryEntry(identity.sourceId, identity.remoteBookId)) {
+        val entry = requireNotNull(dao.libraryEntry(identity.sourceId, identity.remoteBookId)?.takeIf { it.locallyPinned }) {
             "Book is not in library"
         }
         dao.insertManualMembership(

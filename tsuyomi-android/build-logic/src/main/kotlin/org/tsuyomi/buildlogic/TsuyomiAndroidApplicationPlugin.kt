@@ -8,17 +8,14 @@ import org.gradle.api.JavaVersion
 import org.gradle.api.Plugin
 import org.gradle.api.Project
 import org.gradle.api.tasks.testing.Test
-import org.jetbrains.kotlin.gradle.tasks.KotlinCompile
-import org.jetbrains.kotlin.gradle.dsl.JvmTarget
 
 class TsuyomiAndroidApplicationPlugin : Plugin<Project> {
     override fun apply(target: Project) {
         with(target) {
         pluginManager.apply("com.android.application")
-        pluginManager.apply("org.jetbrains.kotlin.android")
 
         extensions.configure(ApplicationExtension::class.java) {
-            compileSdk = 36
+            compileSdk = 37
 
             defaultConfig {
                 minSdk = 29
@@ -47,9 +44,6 @@ class TsuyomiAndroidApplicationPlugin : Plugin<Project> {
             }
         }
 
-        tasks.withType(KotlinCompile::class.java).configureEach {
-            compilerOptions.jvmTarget.set(JvmTarget.JVM_17)
-        }
         tasks.withType(Test::class.java).configureEach {
             useJUnit()
         }

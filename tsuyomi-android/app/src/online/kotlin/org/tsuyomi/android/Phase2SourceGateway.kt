@@ -9,6 +9,7 @@ import org.tsuyomi.core.network.DirectActionTokenRegistry
 import org.tsuyomi.core.network.HostNetworkGateway
 import org.tsuyomi.core.network.UrlConnectionHostHttpTransport
 import org.tsuyomi.core.webview.CapturedVerifiedPage
+import org.tsuyomi.core.webview.VerifiedBrowserGetTransport
 import org.tsuyomi.source.extensionmanager.VerifiedHxpPackage
 
 /** Debuggable production-like build: every source request uses the real network transport. */
@@ -17,8 +18,27 @@ internal object Phase2SourceGateway {
         context: Context,
         packageInfo: VerifiedHxpPackage,
         directActionTokens: DirectActionTokenRegistry,
-    ): HostNetworkGateway =
-        SourceGatewayFactory.create(context, packageInfo, UrlConnectionHostHttpTransport(), directActionTokens)
+    ): HostNetworkGateway = createSession(context, packageInfo, directActionTokens).first
+
+    fun createSession(
+        context: Context,
+        packageInfo: VerifiedHxpPackage,
+        directActionTokens: DirectActionTokenRegistry,
+    ): Pair<HostNetworkGateway, HostNetworkGateway?> {
+        val origins = packageInfo.manifest.capabilities.webLogin.origins
+            .ifEmpty { packageInfo.manifest.capabilities.cookies.origins }
+        return SourceGatewayFactory.createSessionGateways(
+            context = context,
+            packageInfo = packageInfo,
+            nativeTransport = UrlConnectionHostHttpTransport(),
+            verifiedGetTransport = VerifiedBrowserGetTransport(
+                context = context,
+                sourceId = packageInfo.manifest.sourceId.value,
+                allowedOrigins = origins,
+            ),
+            directActionTokens = directActionTokens,
+        )
+    }
 
     fun createVerifiedPage(
         context: Context,

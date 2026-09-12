@@ -43,8 +43,9 @@ internal class SourceFlowController(
     directActionTokens: DirectActionTokenRegistry = DirectActionTokenRegistry(),
     openSession: suspend (VerifiedHxpPackage) -> SourceFlowSession =
         SourceSessionOwner.extensionClientFactory(context, directActionTokens),
+    isPackageTrusted: (VerifiedHxpPackage) -> Boolean = OfficialRepositoryConfiguration.admission(context),
 ) : Closeable {
-    private val sessionOwner = SourceSessionOwner(directActionTokens, openSession)
+    private val sessionOwner = SourceSessionOwner(directActionTokens, openSession, isPackageTrusted)
 
     val remoteLibrary = SourceRemoteLibraryCoordinator(context, library, sessionOwner)
     val home = SourceHomeController()
@@ -106,18 +107,43 @@ internal class SourceFlowController(
         preparedResumeLoad.also { preparedResumeLoad = null }
 
 
-    suspend fun open(packageInfo: VerifiedHxpPackage) {
+    suspend fun open(packageInfo: VerifiedHxpPackage): SourceSessionOpenResult {
         val result = sessionOwner.open(packageInfo) {
             resetReadingState()
             remoteLibrary.reset()
         }
         when (result) {
-            SourceSessionOpenResult.ALREADY_OPEN -> return
-            SourceSessionOpenResult.OPENED -> searchState = SearchResultState.Idle
-            SourceSessionOpenResult.PACKAGE_CHANGED -> {
+            SourceSessionOpenResult.ALREADY_OPEN -> {
+                commitHomeSource(packageInfo)
+                return result
+            }
+            SourceSessionOpenResult.UNAVAILABLE -> sourceBecameUnavailable()
+            SourceSessionOpenResult.OPENED, SourceSessionOpenResult.PACKAGE_CHANGED -> {
+                commitHomeSource(packageInfo)
                 searchState = SearchResultState.Idle
             }
         }
+        return result
+    }
+
+    fun commitHomeSource(packageInfo: VerifiedHxpPackage) {
+        home.bindSource(packageInfo.manifest.sourceId.value)
+    }
+
+    fun commitSourceSwitch(packageInfo: VerifiedHxpPackage) {
+        resetReadingState()
+        remoteLibrary.reset()
+        commitHomeSource(packageInfo)
+    }
+
+    suspend fun prepareSourceSession(packageInfo: VerifiedHxpPackage): PreparedSourceSession? =
+        sessionOwner.prepare(packageInfo)
+
+    fun commitPreparedSourceSession(prepared: PreparedSourceSession): Boolean =
+        sessionOwner.commitPrepared(prepared)
+
+    fun discardPreparedSourceSession(prepared: PreparedSourceSession) {
+        sessionOwner.discardPrepared(prepared)
     }
     suspend fun pullRemoteLibrary(packageInfo: VerifiedHxpPackage): RemoteLibraryPullResult {
         open(packageInfo)
@@ -211,6 +237,7 @@ internal class SourceFlowController(
                 searchState = SearchResultState.Idle
             }
             SourceSessionOpenResult.ALREADY_OPEN, null -> Unit
+            SourceSessionOpenResult.UNAVAILABLE -> sourceBecameUnavailable()
         }
     }
 
@@ -223,6 +250,7 @@ internal class SourceFlowController(
                 remoteLibrary.reset()
             }
             SourceSessionOpenResult.ALREADY_OPEN, null -> Unit
+            SourceSessionOpenResult.UNAVAILABLE -> sourceBecameUnavailable()
         }
     }
 
@@ -548,7 +576,7 @@ internal class SourceFlowController(
 
     suspend fun setSelectedRating(rating: Int?) {
         val book = requireNotNull(selectedBook) { "Book is not selected" }
-        check(remoteLibrary.selectedLibraryEntry != null) { "Book is not in library" }
+        check(remoteLibrary.selectedLibraryEntry?.localMembership == true) { "Book is not in library" }
         library.setRating(book.identity, rating)
         remoteLibrary.refreshSelection(book)
     }
@@ -556,6 +584,7 @@ internal class SourceFlowController(
     suspend fun addSelectedLocalTag(tag: String) {
         val book = requireNotNull(selectedBook) { "Book is not selected" }
         val entry = requireNotNull(remoteLibrary.selectedLibraryEntry) { "Book is not in library" }
+        check(entry.localMembership) { "Book is not in library" }
         library.setLocalTags(book.identity, entry.localTags + tag)
         remoteLibrary.refreshSelection(book)
     }
@@ -681,6 +710,22 @@ internal class SourceFlowController(
             safeCode = "$stage-miss",
         ),
     )
+
+    private fun sourceBecameUnavailable() {
+        resetReadingState()
+        remoteLibrary.reset()
+        home.reset()
+        searchState = searchFailure(SourceErrorCode.EXTENSION_RUNTIME_FAILURE, "source-session", "source-untrusted")
+    }
+
+    suspend fun removeSource(sourceId: String) {
+        if (sessionOwner.removeSource(sourceId) || selectedBook?.identity?.sourceId == sourceId) {
+            resetReadingState()
+            remoteLibrary.reset()
+            home.reset()
+        }
+        snapshotStore.removeSource(sourceId)
+    }
 
     private fun resetReadingState() {
         query = ""
