@@ -650,3 +650,29 @@ The immutable artifact record for this publication — APK SHA-256, byte count, 
 The signed APK and `release.json` remain local under `.local/release/0.3.0-beta.4/`; `.local` and `.apk` are both forbidden under version control, so this table is the versioned evidence and the published release body is the machine-verifiable copy.
 
 Recorded honestly: the first release-event verification run `35195549992` failed with "published artifact is not signed by the pinned release identity". The cause was in the verifier, not the artifact — it matched one exact `apksigner` signer label, while the CI toolchain labels the signer differently; the identical file and the pinned fingerprint satisfy the corrected assertion. Neither the tag nor the uploaded asset was moved, re-signed or replaced. The correction is `e808ea65abe7ce6bb98cbbc9bc6bc48a56bbeaa2`.
+## Source pagination bounds removed (2026-09-17)
+
+The user authorized removing the fixed host-side pagination ceilings and making the effective bound
+the source's own, read from the page the source serves.
+
+- **Contract**: `SourceHomeSection.items`, `SourceHomePage.sections`/total items and
+  `RemoteLibraryPage.items` no longer carry count ceilings. The fixed bounds contradicted the contract
+  they lived in: appending source-home pages past `items.size <= 100` built a page whose own `init`
+  rejected it, and the append coroutine ran uncaught on the main dispatcher, so
+  `java.lang.IllegalArgumentException: Invalid home section items` ended the process mid-scroll. The
+  crash buffer held four identical occurrences at `SourceHomeController.kt:543` on the physical device
+  (vivo V2425A, Android 16, SDK 36); the regression is locked by
+  `app/src/test/kotlin/org/tsuyomi/android/SourceHomeMergeTest.kt`.
+- **Host**: `MAX_REMOTE_LIBRARY_PAGES = 100` is gone. `SourceRemoteLibraryCoordinator` pulls until the
+  source declares `complete`, and a page that adds no new book stops with `no-progress` so a source
+  emitting endless fresh cursors over empty pages cannot spin. The aggregate-byte and record guards
+  remain.
+- **Extension** (`tsuyomi-extensions`): the Wenku8 bound is read from the served page
+  (`sitePageCeiling`, following hikari's `Parser.getMaxNum`) and used as the source's own ceiling,
+  replacing the fixed `page > 999`, the three-digit cursor and link widths, the `page > 100` search
+  ceiling, and a `page-[2-9][0-9]{0,2}` remote cursor grammar that also rejected pages 10-19 and
+  100-199. Host API compatibility remains `[1.2.0, 2.0.0)`, so no version bump is implied: the change
+  only widens what the host admits, and no source depends on being rejected.
+
+`mergeHomePages` is `internal` rather than `private` so the unit test can exercise the accumulation
+directly; its behaviour is unchanged.

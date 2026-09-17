@@ -146,7 +146,7 @@ internal class SourceRemoteLibraryCoordinator(
         val summaries = linkedMapOf<BookIdentity, SourceBookSummary>()
         var cursor: String? = null
         var aggregateBytes = 0L
-        repeat(MAX_REMOTE_LIBRARY_PAGES) { pageIndex ->
+        while (true) {
             val page = try {
                 sessionOwner.requireClient().listRemoteLibrary(cursor)
             } catch (error: SourceException) {
@@ -157,6 +157,7 @@ internal class SourceRemoteLibraryCoordinator(
                     else -> RemoteLibraryPullResult.Failure(error.diagnostic.safeCode)
                 }
             }
+            val known = summaries.size
             page.items.forEach { item ->
                 if (item.identity.sourceId != sourceId) return RemoteLibraryPullResult.Failure("source-identity-mismatch")
                 aggregateBytes += normalizedSize(item)
@@ -173,12 +174,11 @@ internal class SourceRemoteLibraryCoordinator(
                 if (!leaseStillValid(sourceId, lease)) return RemoteLibraryPullResult.Failure("source-changed")
                 return RemoteLibraryPullResult.Success(summaries.values.toList())
             }
+            if (summaries.size == known) return RemoteLibraryPullResult.Failure("no-progress")
             val next = page.nextCursor ?: return RemoteLibraryPullResult.Failure("incomplete-page")
             if (!seenCursors.add(next)) return RemoteLibraryPullResult.Failure("duplicate-cursor")
             cursor = next
-            if (pageIndex == MAX_REMOTE_LIBRARY_PAGES - 1) return RemoteLibraryPullResult.Failure("page-limit")
         }
-        return RemoteLibraryPullResult.Failure("page-limit")
     }
 
     suspend fun copyToLocal(
@@ -1120,7 +1120,6 @@ internal class SourceRemoteLibraryCoordinator(
     )
 
     private companion object {
-        const val MAX_REMOTE_LIBRARY_PAGES = 100
         const val MAX_REMOTE_LIBRARY_AGGREGATE_BYTES = 8L * 1024 * 1024
         const val MAX_REMOTE_LIBRARY_RECORDS = 5_000
         val BLOCKING_RECONCILIATION_STATES = setOf(
