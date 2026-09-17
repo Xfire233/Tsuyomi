@@ -82,10 +82,6 @@ internal object SourceGatewayFactory {
                 }.encodeToByteArray(),
             )
         }
-        android.util.Log.i(
-            "TsuyomiCache",
-            "partition=${cachePartition.take(12)} snapshots=${credentialSnapshots.size}",
-        )
         val gateway = HostNetworkGateway(
             transport = sessionTransport,
             cache = cache ?: FileHostNetworkCache(
