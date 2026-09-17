@@ -625,4 +625,28 @@ Outstanding and deliberately not satisfied by this publication:
 - independent off-machine recovery custody for the release-signing key, since a Windows-user-bound DPAPI backup is same-machine recovery only;
 - human review and golden approval; the Standard profile remains the only blocking profile and EINK stays frozen.
 
-The immutable artifact record for this publication — APK SHA-256, byte count, signer certificate, signature schemes, tag and source revision — is recorded in the `release.json` receipt produced by `tools/Publish-AndroidRelease.ps1`, in the published release body, and in the verification workflow result. The concrete digest values are entered below once the artifact exists, per `G6`.
+The immutable artifact record for this publication — APK SHA-256, byte count, signer certificate, signature schemes, tag and source revision — is recorded in the `release.json` receipt produced by `tools/Publish-AndroidRelease.ps1`, in the published release body, and in the verification workflow result.
+
+#### Published artifact record — 2026-09-17
+
+| Field | Value |
+|---|---|
+| Tag | `android-v0.3.0-beta.4` (annotated) |
+| Source revision | `4ab67a6098630bb5f66fc1cb158a719ab538b7f4` |
+| Source tree | `78aa0e6ff0aeb938695462007f2a63db8fdbe20b` |
+| Host version | `0.3.0-beta.4` (`versionCode 6`, minSdk 29, targetSdk 36) |
+| Release | GitHub pre-release, published 2026-09-17T07:38:31Z, not draft |
+| Asset | `Tsuyomi-0.3.0-beta.4.apk` |
+| Artifact SHA-256 | `71bc913d8bad28e14315f375b3b0d1eb962d6bd57b0ca1bf26208d5f5da060e3` |
+| Artifact bytes | 70933114 |
+| Unsigned inner APK SHA-256 | `284fb6d1d1944e814e4910347322e84d8008aa5b81fced740cf1181f21395046` |
+| Signer certificate SHA-256 | `0be46968ea9f184b8a5857334d4e4d46eb67ea14b0601c07a5fa3b07f00a7bb7` |
+| Signature schemes | v1 false, v2 false, v3 true, v4 false |
+| Alignment | 16 KiB verified |
+| Android build-tools | 36.0.0 |
+| Signing | `tools/Publish-AndroidRelease.ps1`, outside Gradle |
+| Publication verification | run `35195835579` (`android-release`, success) |
+
+The signed APK and `release.json` remain local under `.local/release/0.3.0-beta.4/`; `.local` and `.apk` are both forbidden under version control, so this table is the versioned evidence and the published release body is the machine-verifiable copy.
+
+Recorded honestly: the first release-event verification run `35195549992` failed with "published artifact is not signed by the pinned release identity". The cause was in the verifier, not the artifact — it matched one exact `apksigner` signer label, while the CI toolchain labels the signer differently; the identical file and the pinned fingerprint satisfy the corrected assertion. Neither the tag nor the uploaded asset was moved, re-signed or replaced. The correction is `e808ea65abe7ce6bb98cbbc9bc6bc48a56bbeaa2`.
