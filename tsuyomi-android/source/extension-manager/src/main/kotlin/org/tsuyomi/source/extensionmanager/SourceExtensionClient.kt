@@ -543,6 +543,7 @@ class SourceExtensionClient private constructor(
         try {
             classify(response, classifyStage, operation, remoteBookId, chapterId)
             if (!offlineOnly) gateway.rememberLastGood(grant, request, response)
+            Log.i("TsuyomiCache", "read stage=$classifyStage state=${response.cacheState} mode=${request.cache}")
             return response
         } catch (error: SourceException) {
             if (
