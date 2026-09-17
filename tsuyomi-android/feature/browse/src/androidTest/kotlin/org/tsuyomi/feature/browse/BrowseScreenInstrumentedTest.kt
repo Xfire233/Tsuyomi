@@ -16,14 +16,20 @@ import androidx.compose.ui.test.assertHasClickAction
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsEnabled
 import androidx.compose.ui.test.assertIsNotEnabled
+import androidx.compose.ui.test.assertIsFocused
 import androidx.compose.ui.test.assertTextContains
 import androidx.compose.ui.test.performScrollTo
+import androidx.compose.ui.test.performKeyInput
+import androidx.compose.ui.test.pressKey
+import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.dp
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.ui.test.junit4.v2.createComposeRule
 import androidx.compose.ui.test.junit4.StateRestorationTester
 import androidx.compose.ui.test.SemanticsMatcher
+import androidx.compose.ui.test.hasSetTextAction
+import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.onNodeWithContentDescription
@@ -43,8 +49,8 @@ import org.junit.Test
 import org.tsuyomi.core.display.DisplayDecisionReason
 import org.tsuyomi.core.display.DisplayEnvironment
 import org.tsuyomi.core.display.DisplayEnvironmentProvider
-import org.tsuyomi.core.display.DisplayPreference
-import org.tsuyomi.core.display.DisplayPreferences
+import org.tsuyomi.core.preferences.DisplayPreference
+import org.tsuyomi.core.preferences.DisplayPreferences
 import org.tsuyomi.core.display.DisplayProfile
 import org.tsuyomi.core.display.MotionPolicy
 import org.tsuyomi.core.ui.theme.TsuyomiTheme
@@ -124,6 +130,7 @@ class BrowseScreenInstrumentedTest {
 
         composeRule.onNodeWithText("可安装").performClick()
         composeRule.onNodeWithText("无法更新官方来源目录").assertIsDisplayed()
+        composeRule.onNodeWithText("网络不可用").assertDoesNotExist()
         composeRule.onNodeWithText("安装").assertIsNotEnabled()
         composeRule.onNodeWithTag("browse-catalog-search").performTextInput("不存在")
         composeRule.onNodeWithText("没有匹配的来源。").assertIsDisplayed()
@@ -526,7 +533,7 @@ class BrowseScreenInstrumentedTest {
         }
 
         composeRule.onNodeWithTag("browse-publisher-key-verify").assertIsNotEnabled()
-        composeRule.onNodeWithTag("browse-publisher-public-key").performTextInput(rawPublicKey)
+        composeRule.onNode(hasSetTextAction()).performTextInput(rawPublicKey)
         composeRule.onNodeWithTag("browse-publisher-key-verify").assertIsEnabled().performClick()
         assertEquals(listOf(rawPublicKey), providedKeys)
         assertEquals(emptyList<Triple<Boolean, Boolean, Boolean>>(), approvals)
@@ -689,6 +696,68 @@ class BrowseScreenInstrumentedTest {
             ),
             actions,
         )
+    }
+
+    @Test
+    fun repository_removal_uses_one_modal_and_returns_to_manager_after_each_outcome() {
+        val actions = mutableListOf<BrowseCatalogAction>()
+        var catalog by mutableStateOf(
+            BrowseCatalogState(
+                status = BrowseCatalogStatus.READY,
+                repositories = listOf(
+                    BrowseRepository(
+                        id = "third-party",
+                        name = "测试仓库",
+                        indexUrl = "https://example.invalid/index.json",
+                        rootFingerprint = "ab".repeat(32),
+                        official = false,
+                        enabled = true,
+                    ),
+                ),
+            ),
+        )
+        composeRule.setContent {
+            DisplayEnvironmentProvider(standardEnvironment) {
+                TsuyomiTheme {
+                    BrowseScreen(
+                        state = BrowseUiState.Empty,
+                        installedSources = emptyList(),
+                        catalog = catalog,
+                        onRequestImport = {},
+                        onApproveInstall = { _, _, _ -> },
+                        onDismissApproval = {},
+                        onDismissFailure = {},
+                        onCatalogAction = { action ->
+                            actions += action
+                            if (action is BrowseCatalogAction.RemoveSubscription) {
+                                catalog = catalog.copy(
+                                    repositories = catalog.repositories.filterNot { it.id == action.repositoryId },
+                                )
+                            }
+                        },
+                        onSourceAction = {},
+                    )
+                }
+            }
+        }
+        composeRule.onNodeWithText("测试仓库").assertDoesNotExist()
+        composeRule.onNodeWithText("可安装").performClick()
+        composeRule.onNodeWithTag("browse-repository-manage").performClick()
+        composeRule.onNodeWithTag("browse-repository-remove-third-party").performClick()
+        composeRule.onNodeWithText("测试仓库").assertDoesNotExist()
+        composeRule.waitUntil(5_000) {
+            composeRule.onAllNodesWithText("取消").fetchSemanticsNodes().any { node ->
+                SemanticsProperties.Focused in node.config && node.config[SemanticsProperties.Focused]
+            }
+        }
+        composeRule.onNodeWithText("取消").assertIsFocused()
+        composeRule.onNodeWithText("取消").performKeyInput { pressKey(Key.Enter) }
+        composeRule.onNodeWithText("测试仓库").assertIsDisplayed()
+
+        composeRule.onNodeWithTag("browse-repository-remove-third-party").performClick()
+        composeRule.onNodeWithText("移除仓库").performClick()
+        composeRule.onNodeWithText("关闭").assertIsDisplayed()
+        assertEquals(listOf(BrowseCatalogAction.RemoveSubscription("third-party")), actions)
     }
 
     private companion object {

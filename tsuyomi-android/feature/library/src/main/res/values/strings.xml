@@ -42,7 +42,6 @@
     <string name="library_count">%1$d 本</string>
     <string name="library_filter_all">全部</string>
     <string name="library_filter_continue">继续阅读</string>
-    <string name="library_node_system">系统书架</string>
     <string name="library_node_manual_collection">手动收藏夹</string>
     <string name="library_node_smart_collection">智能收藏夹</string>
     <string name="library_node_mirror">订阅镜像</string>

@@ -5,8 +5,12 @@
 package org.tsuyomi.feature.book
 
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.testTag
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.lightColorScheme
+import org.tsuyomi.core.ui.components.TsuyomiDropdownMenu
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -18,8 +22,10 @@ import androidx.compose.ui.input.InputModeManager
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.toPixelMap
 import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.semantics.SemanticsProperties
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.TextLayoutResult
 import androidx.compose.ui.text.LinkAnnotation
 import androidx.compose.ui.test.DeviceConfigurationOverride
@@ -28,22 +34,33 @@ import androidx.compose.ui.test.FontScale
 import androidx.compose.ui.test.ForcedSize
 import androidx.compose.ui.unit.DpSize
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.state.ToggleableState
 import androidx.compose.ui.test.assert
+import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsEnabled
+import androidx.compose.ui.test.assertIsOff
+import androidx.compose.ui.test.assertIsOn
 import androidx.compose.ui.test.assertIsFocused
 import androidx.compose.ui.test.assertIsNotSelected
 import androidx.compose.ui.test.assertIsSelected
 import androidx.compose.ui.test.junit4.v2.createComposeRule
+import androidx.compose.ui.test.captureToImage
 import androidx.compose.ui.test.hasStateDescription
+import androidx.compose.ui.test.hasClickAction
+import androidx.compose.ui.test.hasContentDescription
+import androidx.compose.ui.test.filterToOne
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onAllNodesWithTag
+import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performSemanticsAction
 import androidx.compose.ui.test.performScrollToIndex
 import androidx.compose.ui.test.performTouchInput
+import androidx.compose.ui.test.SemanticsMatcher
+import androidx.compose.ui.test.performTextInput
 import androidx.compose.ui.test.performKeyInput
 import androidx.compose.ui.test.pressKey
 import androidx.compose.ui.test.click
@@ -57,8 +74,8 @@ import org.junit.runner.RunWith
 import org.tsuyomi.core.display.DisplayDecisionReason
 import org.tsuyomi.core.display.DisplayEnvironment
 import org.tsuyomi.core.display.DisplayEnvironmentProvider
-import org.tsuyomi.core.display.DisplayPreference
-import org.tsuyomi.core.display.DisplayPreferences
+import org.tsuyomi.core.preferences.DisplayPreference
+import org.tsuyomi.core.preferences.DisplayPreferences
 import org.tsuyomi.core.display.DisplayProfile
 import org.tsuyomi.core.display.MotionPolicy
 import org.tsuyomi.core.media.api.CoverUiState
@@ -78,6 +95,60 @@ class BookDetailInstrumentedTest {
     @get:Rule
     val compose = createComposeRule()
 
+    @OptIn(ExperimentalTestApi::class)
+    @Test
+    fun directoryFilterAndOrderingRemainReachableAtNarrowLargeFontWidths() {
+        var fontScale by mutableStateOf(1f)
+        var unreadOnly by mutableStateOf(false)
+        var descending by mutableStateOf(false)
+        var density = 1f
+        val context = InstrumentationRegistry.getInstrumentation().targetContext
+        compose.setContent {
+            DeviceConfigurationOverride(DeviceConfigurationOverride.ForcedSize(DpSize(320.dp, 640.dp))) {
+                DeviceConfigurationOverride(DeviceConfigurationOverride.FontScale(fontScale)) {
+                    density = LocalDensity.current.density
+                    DisplayEnvironmentProvider(standardTestEnvironment) {
+                        MaterialTheme {
+                            Column(Modifier.fillMaxWidth().testTag("directory-controls-viewport")) {
+                                DetailDirectoryHeader(
+                                    totalChapters = 213,
+                                    unreadOnly = unreadOnly,
+                                    unreadFilterAvailable = true,
+                                    descending = descending,
+                                    onToggleUnreadOnly = { unreadOnly = !unreadOnly },
+                                    onToggleOrder = { descending = !descending },
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        for (scale in listOf(1f, 2f)) {
+            compose.runOnIdle {
+                fontScale = scale
+                unreadOnly = false
+                descending = false
+            }
+            val viewport = compose.onNodeWithTag("directory-controls-viewport")
+                .fetchSemanticsNode().boundsInRoot
+            val filter = compose.onNodeWithTag("detail-unread-filter")
+            val order = compose.onNodeWithContentDescription(context.getString(R.string.book_order_ascending))
+            for (control in listOf(filter, order)) {
+                control.assertIsDisplayed()
+                val bounds = control.fetchSemanticsNode().touchBoundsInRoot
+                assertTrue("control clipped at fontScale=$scale: $bounds vs $viewport",
+                    bounds.left >= viewport.left - 1f && bounds.right <= viewport.right + 1f)
+                assertTrue(bounds.width >= 48f * density - 1f && bounds.height >= 48f * density - 1f)
+            }
+            filter.performTouchInput { click() }
+            filter.assertIsSelected()
+            order.performTouchInput { click() }
+            compose.onNodeWithContentDescription(context.getString(R.string.book_order_descending)).assertIsDisplayed()
+            compose.runOnIdle { assertTrue(descending && unreadOnly) }
+        }
+    }
+
     @Test
     fun directoryGroupsChaptersByVolumeAndDefaultsToCurrentVolume() {
         val book = sourceBook()
@@ -89,35 +160,39 @@ class BookDetailInstrumentedTest {
             chapter("v3-c1", "第三卷 第一章", "第三卷"),
         )
         compose.setContent {
+            DisplayEnvironmentProvider(standardTestEnvironment) {
             var unreadOnly by remember { mutableStateOf(false) }
             MaterialTheme {
-                StandardBookDetailScreen(
-                    state = SourceBookState.Content(SourceBookDetail(book, "简介", emptyList(), "连载")),
-                    directoryState = SourceBookState.Content(SourceDirectory(book.identity, chapters)),
-                    localState = DetailLocalState(
-                        inLibrary = true,
-                        progressChapterId = "v2-c1",
-                        progressChapterFraction = 0.4,
-                        completedChapterIds = setOf("v1-c1", "v1-c2"),
-                    ),
-                    mutation = null,
-                    coverState = CoverUiState.Fallback(FallbackSpec(book.title, null)),
-                    unreadOnly = unreadOnly,
-                    descending = false,
-                    selectedChapterId = null,
-                    onSetRating = {},
-                    onSearchAuthor = {},
-                    onAddTag = {},
-                    onToggleUnreadOnly = { unreadOnly = !unreadOnly },
-                    onToggleOrder = {},
-                    onSelectChapter = {},
-                    onContinueReading = {},
-                    onAddToLibrary = {},
-                    onRequestRemoveFromLibrary = {},
-                    onRetry = {},
-                    onUseOfflineCache = {},
-                    onOpenVerification = {},
+                StandardBookDetailScreen(state = SourceBookState.Content(SourceBookDetail(book, "简介", emptyList(), "连载")),
+                directoryState = SourceBookState.Content(SourceDirectory(book.identity, chapters)),
+                localState = DetailLocalState(
+                    inLibrary = true,
+                    progressChapterId = "v2-c1",
+                    progressChapterFraction = 0.4,
+                    completedChapterIds = setOf("v1-c1", "v1-c2"),
+                ),
+                mutation = null,
+                coverState = CoverUiState.Fallback(FallbackSpec(book.title, null)),
+                unreadOnly = unreadOnly,
+                descending = false,
+                selectedChapterId = null,
+                cacheState = DetailCacheState(),
+                onCacheAction = {},
+                onSetRating = {},
+                onSearchAuthor = {},
+                onConfirmTag = {},
+                onToggleUnreadOnly = { unreadOnly = !unreadOnly },
+                onToggleOrder = {},
+                onSelectChapter = {},
+                onContinueReading = {},
+                onAddToLibrary = {},
+                onRequestRemoveFromLibrary = {},
+                onRetry = {},
+                onUseOfflineCache = {},
+                onOpenVerification = {},
+                onKeepDefaultLibrary = {},
                 )
+            }
             }
         }
 
@@ -147,34 +222,38 @@ class BookDetailInstrumentedTest {
         )
         var focusHandled = 0
         compose.setContent {
+            DisplayEnvironmentProvider(standardTestEnvironment) {
             MaterialTheme {
-                StandardBookDetailScreen(
-                    state = SourceBookState.Content(SourceBookDetail(book, "简介", emptyList(), "连载")),
-                    directoryState = SourceBookState.Content(SourceDirectory(book.identity, chapters)),
-                    localState = DetailLocalState(
-                        inLibrary = true,
-                        progressChapterId = "v1-c1",
-                    ),
-                    mutation = null,
-                    coverState = CoverUiState.Fallback(FallbackSpec(book.title, null)),
-                    unreadOnly = false,
-                    descending = false,
-                    selectedChapterId = null,
-                    onSetRating = {},
-                    onSearchAuthor = {},
-                    onAddTag = {},
-                    onToggleUnreadOnly = {},
-                    onToggleOrder = {},
-                    onSelectChapter = {},
-                    onContinueReading = {},
-                    onAddToLibrary = {},
-                    onRequestRemoveFromLibrary = {},
-                    onRetry = {},
-                    onUseOfflineCache = {},
-                    onOpenVerification = {},
-                    focusChapterId = "v3-c1",
-                    onFocusHandled = { focusHandled++ },
+                StandardBookDetailScreen(state = SourceBookState.Content(SourceBookDetail(book, "简介", emptyList(), "连载")),
+                directoryState = SourceBookState.Content(SourceDirectory(book.identity, chapters)),
+                localState = DetailLocalState(
+                    inLibrary = true,
+                    progressChapterId = "v1-c1",
+                ),
+                mutation = null,
+                coverState = CoverUiState.Fallback(FallbackSpec(book.title, null)),
+                unreadOnly = false,
+                descending = false,
+                selectedChapterId = null,
+                cacheState = DetailCacheState(),
+                onCacheAction = {},
+                onSetRating = {},
+                onSearchAuthor = {},
+                onConfirmTag = {},
+                onToggleUnreadOnly = {},
+                onToggleOrder = {},
+                onSelectChapter = {},
+                onContinueReading = {},
+                onAddToLibrary = {},
+                onRequestRemoveFromLibrary = {},
+                onRetry = {},
+                onUseOfflineCache = {},
+                onOpenVerification = {},
+                onKeepDefaultLibrary = {},
+                focusChapterId = "v3-c1",
+                onFocusHandled = { focusHandled++ },
                 )
+            }
             }
         }
 
@@ -190,30 +269,32 @@ class BookDetailInstrumentedTest {
         compose.setContent {
             DisplayEnvironmentProvider(standardTestEnvironment) {
                 MaterialTheme {
-                    StandardBookDetailScreen(
-                        state = SourceBookState.Content(SourceBookDetail(book, "简介", emptyList(), "连载")),
-                        directoryState = SourceBookState.Loading,
-                        localState = DetailLocalState(
-                            reconciliationOperation = operation,
-                            reconciliation = "UNRESOLVED",
-                        ),
-                        mutation = null,
-                        coverState = CoverUiState.Fallback(FallbackSpec(book.title, null)),
-                        unreadOnly = false,
-                        descending = false,
-                        selectedChapterId = null,
-                        onSetRating = {},
-                        onSearchAuthor = {},
-                        onAddTag = {},
-                        onToggleUnreadOnly = {},
-                        onToggleOrder = {},
-                        onSelectChapter = {},
-                        onContinueReading = {},
-                        onAddToLibrary = {},
-                        onRequestRemoveFromLibrary = {},
-                        onRetry = {},
-                        onUseOfflineCache = {},
-                        onOpenVerification = {},
+                    StandardBookDetailScreen(state = SourceBookState.Content(SourceBookDetail(book, "简介", emptyList(), "连载")),
+                    directoryState = SourceBookState.Loading,
+                    localState = DetailLocalState(
+                        reconciliationOperation = operation,
+                        reconciliation = "UNRESOLVED",
+                    ),
+                    mutation = null,
+                    coverState = CoverUiState.Fallback(FallbackSpec(book.title, null)),
+                    unreadOnly = false,
+                    descending = false,
+                    selectedChapterId = null,
+                    cacheState = DetailCacheState(),
+                    onCacheAction = {},
+                    onSetRating = {},
+                    onSearchAuthor = {},
+                    onConfirmTag = {},
+                    onToggleUnreadOnly = {},
+                    onToggleOrder = {},
+                    onSelectChapter = {},
+                    onContinueReading = {},
+                    onAddToLibrary = {},
+                    onRequestRemoveFromLibrary = {},
+                    onRetry = {},
+                    onUseOfflineCache = {},
+                    onOpenVerification = {},
+                    onKeepDefaultLibrary = {},
                     )
                 }
             }
@@ -239,6 +320,7 @@ class BookDetailInstrumentedTest {
         var lastUpdatedDate by mutableStateOf<String?>("2026-02-03")
         var localState by mutableStateOf(DetailLocalState(inLibrary = true))
         compose.setContent {
+            DisplayEnvironmentProvider(standardTestEnvironment) {
             DeviceConfigurationOverride(DeviceConfigurationOverride.ForcedSize(DpSize(viewportWidth, 1000.dp))) {
                 DeviceConfigurationOverride(DeviceConfigurationOverride.FontScale(fontScale)) {
                     density = LocalDensity.current.density
@@ -263,11 +345,17 @@ class BookDetailInstrumentedTest {
                             DetailTagActionsModule(
                                 tags = listOf("奇幻"),
                                 enabled = localState.inLibrary,
-                                onAddTag = {},
+                                tagEditorOpen = false,
+                                tagDraft = "",
+                                onOpenTagEditor = {},
+                                onTagDraftChange = {},
+                                onDismissTagEditor = {},
+                                onConfirmTag = {},
                             )
                         }
                     }
                 }
+            }
             }
         }
         fun bounds(tag: String) = compose.onNodeWithTag(tag, useUnmergedTree = true).fetchSemanticsNode().boundsInRoot
@@ -345,6 +433,28 @@ class BookDetailInstrumentedTest {
         }
 
         compose.waitForIdle()
+        val baselineTag = bounds("detail-tag-label")
+        assertTrue(abs(baselineTag.height - 40f * density) <= 1f)
+        val addTagTarget = compose.onNodeWithTag("detail-add-tag", useUnmergedTree = true)
+            .fetchSemanticsNode().touchBoundsInRoot
+        assertTrue(addTagTarget.width >= 48f * density - 1f && addTagTarget.height >= 48f * density - 1f)
+        val tagRegion = bounds("detail-tag-region")
+        val tagFlow = bounds("detail-tag-module")
+        val addTagBounds = bounds("detail-add-tag")
+        val addTagGapBounds = bounds("detail-add-tag-gap")
+        val addTagGlyphBounds = bounds("detail-add-tag-glyph")
+        val tagTitleBounds = bounds("detail-tag-title")
+        assertTrue(abs(addTagBounds.center.y - tagRegion.top) <= 1f)
+        assertTrue(abs(addTagGapBounds.center.y - tagRegion.top) <= 1f)
+        assertTrue(abs(tagTitleBounds.center.y - tagRegion.top) <= 1f)
+        assertTrue("Legend text must align with the first tag's text, not its chip frame", abs(tagTitleBounds.left - (baselineTag.left + 8f * density)) <= 1f)
+        val legendToTagGap = baselineTag.top - tagTitleBounds.bottom
+        assertTrue("Visible legend-to-tag gap must stay within 8dp: $legendToTagGap", legendToTagGap in 0f..8f * density)
+        assertTrue(abs(addTagGlyphBounds.width - 16f * density) <= 1f)
+        assertTrue(abs(addTagGlyphBounds.height - 16f * density) <= 1f)
+        assertTrue(addTagGapBounds.width <= 24f * density + 1f)
+        assertTrue(addTagGapBounds.height <= 20f * density + 1f)
+        assertTrue(tagFlow.left >= tagRegion.left && tagFlow.right <= tagRegion.right)
         assertDistributedCoverColumn(expectedTitleLines = 1)
         compose.onNodeWithTag("detail-title-overflow").assertDoesNotExist()
 
@@ -433,7 +543,13 @@ class BookDetailInstrumentedTest {
             assertTrue(glyph.left >= 0f && glyph.right <= statusLayout.size.width + 1f)
             assertTrue(glyph.top >= 0f && glyph.bottom <= statusLayout.size.height + 1f)
         }
-        assertTrue(bounds("detail-rating-star-3-glyph").height <= 20f * density + 1f)
+        val largeFontTag = bounds("detail-tag-label")
+        val largeFontTagText = compose.onNodeWithText("奇幻", useUnmergedTree = true)
+            .fetchSemanticsNode().boundsInRoot
+        assertTrue(largeFontTag.height >= 40f * density - 1f)
+        assertTrue(largeFontTag.height <= 48f * density + 1f)
+        assertTrue(largeFontTagText.top >= largeFontTag.top && largeFontTagText.bottom <= largeFontTag.bottom)
+        assertTrue(abs(bounds("detail-rating-star-3-glyph").height - 20f * density) <= 1f)
         repeat(5) { index ->
             val target = compose.onNodeWithTag("detail-rating-star-${index + 1}-touch")
                 .fetchSemanticsNode().touchBoundsInRoot
@@ -445,40 +561,47 @@ class BookDetailInstrumentedTest {
     @Test
     fun destinationOutcomeRemainsVisibleAfterMenuDismissal() {
         var retryCount = 0
+        var keepDefaultCount = 0
         compose.setContent {
-            MaterialTheme(typography = TsuyomiTypography) {
-                StandardBookDetailScreen(
-                    state = SourceBookState.Content(SourceBookDetail(sourceBook(), "简介", emptyList(), null, null)),
-                    directoryState = SourceBookState.Content(
-                        SourceDirectory(sourceBook().identity, listOf(chapter("c1", "第一章", "第一卷"))),
-                    ),
-                    localState = DetailLocalState(),
-                    mutation = null,
-                    coverState = CoverUiState.Fallback(FallbackSpec("测试", null)),
-                    unreadOnly = false,
-                    descending = false,
-                    selectedChapterId = null,
-                    onSetRating = {},
-                    onSearchAuthor = {},
-                    onAddTag = {},
-                    onToggleUnreadOnly = {},
-                    onToggleOrder = {},
-                    onSelectChapter = {},
-                    onContinueReading = {},
-                    onAddToLibrary = {},
-                    onRequestRemoveFromLibrary = {},
-                    onRetry = {},
-                    onUseOfflineCache = {},
-                    onOpenVerification = {},
-                    destinationMenuExpanded = false,
-                    destinationMessage = "已加入默认书架，目标移动尚未完成",
-                    partialMoveTargetName = "特别收藏",
-                    onRetryMoveOnly = { retryCount += 1 },
+            DisplayEnvironmentProvider(standardTestEnvironment) {
+                MaterialTheme(typography = TsuyomiTypography) {
+                StandardBookDetailScreen(state = SourceBookState.Content(SourceBookDetail(sourceBook(), "简介", emptyList(), null, null)),
+                directoryState = SourceBookState.Content(
+                    SourceDirectory(sourceBook().identity, listOf(chapter("c1", "第一章", "第一卷"))),
+                ),
+                localState = DetailLocalState(),
+                mutation = null,
+                coverState = CoverUiState.Fallback(FallbackSpec("测试", null)),
+                unreadOnly = false,
+                descending = false,
+                selectedChapterId = null,
+                cacheState = DetailCacheState(),
+                onCacheAction = {},
+                onSetRating = {},
+                onSearchAuthor = {},
+                onConfirmTag = {},
+                onToggleUnreadOnly = {},
+                onToggleOrder = {},
+                onSelectChapter = {},
+                onContinueReading = {},
+                onAddToLibrary = {},
+                onRequestRemoveFromLibrary = {},
+                onRetry = {},
+                onUseOfflineCache = {},
+                onOpenVerification = {},
+                onKeepDefaultLibrary = { keepDefaultCount += 1 },
+                destinationMenuExpanded = false,
+                destinationMessage = "已加入默认书架，目标移动尚未完成",
+                partialMoveTargetName = "特别收藏",
+                onRetryMoveOnly = { retryCount += 1 },
                 )
+            }
             }
         }
 
         compose.onNodeWithText("已加入默认书架，目标移动尚未完成").assertIsDisplayed()
+        compose.onNodeWithText("保留在默认书架").performClick()
+        compose.runOnIdle { assertTrue(keepDefaultCount == 1) }
         compose.onNodeWithText("继续移至特别收藏").performClick()
         compose.runOnIdle { assertTrue(retryCount == 1) }
     }
@@ -496,56 +619,60 @@ class BookDetailInstrumentedTest {
         compose.setContent {
             var menuExpanded by remember { mutableStateOf(false) }
             var localState by remember { mutableStateOf(DetailLocalState()) }
+            DisplayEnvironmentProvider(standardTestEnvironment) {
             MaterialTheme(typography = TsuyomiTypography) {
-                StandardBookDetailScreen(
-                    state = SourceBookState.Content(SourceBookDetail(book, description, emptyList(), "已完结", "2026-09-04")),
-                    directoryState = SourceBookState.Content(
-                        SourceDirectory(book.identity, listOf(chapter("c1", "第一章", "第一卷"))),
-                    ),
-                    coverState = CoverUiState.Fallback(FallbackSpec(book.title, book.identity.sourceId)),
-                    localState = localState,
-                    mutation = mutation,
-                    unreadOnly = false,
-                    descending = false,
-                    selectedChapterId = null,
-                    onSetRating = { localState = localState.copy(rating = it) },
-                    onSearchAuthor = { searchedAuthor = it; authorSearchCount++ },
-                    onAddTag = {},
-                    onToggleUnreadOnly = {},
-                    onToggleOrder = {},
-                    onSelectChapter = {},
-                    onContinueReading = {},
-                    onAddToLibrary = { localState = localState.copy(inLibrary = true) },
-                    onRequestRemoveFromLibrary = {
-                        removeRequests++
-                        confirmRemoval = { localState = localState.copy(inLibrary = false) }
-                    },
-                    onOpenDestinations = { destinationsOpened = true },
-                    destinationMenuExpanded = menuExpanded,
-                    onDestinationMenuExpandedChange = { menuExpanded = it },
-                    destinationMenuContent = { dismissMenu ->
-                        BookDestinationMenu(
-                            readLater = localState.readLater,
-                            collections = emptyList(),
-                            remoteTargets = emptyList(),
-                            selectedRemoteTargetId = null,
-                            loadingRemoteTargets = false,
-                            websiteGroupingEnabled = false,
-                            onToggleReadLater = {
-                                localState = localState.copy(
-                                    inLibrary = true,
-                                    readLater = !localState.readLater,
-                                )
-                            },
-                            onToggleCollection = {},
-                            onApplyWebsite = {},
-                            onDismiss = dismissMenu,
-                        )
-                    },
-                    onRetry = {},
-                    onUseOfflineCache = {},
-                    onOpenVerification = {},
+                StandardBookDetailScreen(state = SourceBookState.Content(SourceBookDetail(book, description, listOf("奇幻"), "已完结", "2026-09-04")),
+                directoryState = SourceBookState.Content(
+                    SourceDirectory(book.identity, listOf(chapter("c1", "第一章", "第一卷"))),
+                ),
+                coverState = CoverUiState.Fallback(FallbackSpec(book.title, book.identity.sourceId)),
+                localState = localState,
+                mutation = mutation,
+                unreadOnly = false,
+                descending = false,
+                selectedChapterId = null,
+                cacheState = DetailCacheState(),
+                onCacheAction = {},
+                onSetRating = { localState = localState.copy(rating = it) },
+                onSearchAuthor = { searchedAuthor = it; authorSearchCount++ },
+                onConfirmTag = {},
+                onToggleUnreadOnly = {},
+                onToggleOrder = {},
+                onSelectChapter = {},
+                onContinueReading = {},
+                onAddToLibrary = { localState = localState.copy(inLibrary = true) },
+                onRequestRemoveFromLibrary = {
+                    removeRequests++
+                    confirmRemoval = { localState = localState.copy(inLibrary = false) }
+                },
+                onOpenDestinations = { destinationsOpened = true },
+                destinationMenuExpanded = menuExpanded,
+                onDestinationMenuExpandedChange = { menuExpanded = it },
+                destinationMenuContent = { dismissMenu ->
+                    BookDestinationMenu(
+                        readLater = localState.readLater,
+                        collections = emptyList(),
+                        remoteTargets = emptyList(),
+                        selectedRemoteTargetId = null,
+                        loadingRemoteTargets = false,
+                        websiteGroupingEnabled = false,
+                        onToggleReadLater = {
+                            localState = localState.copy(
+                                inLibrary = true,
+                                readLater = !localState.readLater,
+                            )
+                        },
+                        onToggleCollection = {},
+                        onApplyWebsite = {},
+                        onDismiss = dismissMenu,
+                    )
+                },
+                onRetry = {},
+                onUseOfflineCache = {},
+                onOpenVerification = {},
+                onKeepDefaultLibrary = {},
                 )
+            }
             }
         }
 
@@ -556,8 +683,6 @@ class BookDetailInstrumentedTest {
         val authorLink = authorText.getLinkAnnotations(0, authorText.length).single().item as LinkAnnotation.Clickable
         assertTrue(authorLink.styles?.style?.color == Color(0xFF4A6E8A))
         assertTrue(authorLink.styles?.style?.textDecoration == null)
-        compose.onNodeWithText("尚未开始").assertDoesNotExist()
-        compose.onNodeWithText("已有阅读进度").assertDoesNotExist()
         assertTrue(authorSearchCount == 0)
         compose.onNodeWithTag("detail-author").performClick()
         compose.waitForIdle()
@@ -566,7 +691,13 @@ class BookDetailInstrumentedTest {
         val density = InstrumentationRegistry.getInstrumentation().targetContext.resources.displayMetrics.density
         val coverBounds = compose.onNodeWithTag("detail-cover").fetchSemanticsNode().boundsInRoot
         assertTrue(kotlin.math.abs(coverBounds.width - 135f * density) <= 1f)
-        assertTrue(kotlin.math.abs(coverBounds.height - 180f * density) <= 1f)
+        assertTrue(kotlin.math.abs(coverBounds.height - 189f * density) <= 1f)
+        val tagVisualBounds = compose.onNodeWithTag("detail-tag-label", useUnmergedTree = true)
+            .fetchSemanticsNode().boundsInRoot
+        assertTrue(kotlin.math.abs(tagVisualBounds.height - 40f * density) <= 1f)
+        val unreadFilterTarget = compose.onNodeWithTag("detail-unread-filter", useUnmergedTree = true)
+            .fetchSemanticsNode().touchBoundsInRoot
+        assertTrue(unreadFilterTarget.height >= 48f * density - 1f)
 
         val statusBounds = compose.onNodeWithTag("detail-publication-status", useUnmergedTree = true)
             .fetchSemanticsNode().boundsInRoot
@@ -685,37 +816,40 @@ class BookDetailInstrumentedTest {
     fun twoLineTitleUsesDedicatedAuthorAndStatusRowsAcrossCoverHeight() {
         val book = sourceBook().copy(title = "落第贤者的学院无双～二度转生的最强贤者～")
         compose.setContent {
+            DisplayEnvironmentProvider(standardTestEnvironment) {
             MaterialTheme(typography = TsuyomiTypography) {
-                StandardBookDetailScreen(
-                    state = SourceBookState.Content(SourceBookDetail(book, "简介", emptyList(), "已完结")),
-                    directoryState = SourceBookState.Content(
-                        SourceDirectory(book.identity, listOf(chapter("c1", "第一章", "第一卷"))),
-                    ),
-                    localState = DetailLocalState(),
-                    mutation = null,
-                    coverState = CoverUiState.Fallback(FallbackSpec(book.title, null)),
-                    unreadOnly = false,
-                    descending = false,
-                    selectedChapterId = null,
-                    onSetRating = {},
-                    onSearchAuthor = {},
-                    onAddTag = {},
-                    onToggleUnreadOnly = {},
-                    onToggleOrder = {},
-                    onSelectChapter = {},
-                    onContinueReading = {},
-                    onAddToLibrary = {},
-                    onRequestRemoveFromLibrary = {},
-                    onRetry = {},
-                    onUseOfflineCache = {},
-                    onOpenVerification = {},
+                StandardBookDetailScreen(state = SourceBookState.Content(SourceBookDetail(book, "简介", emptyList(), "已完结")),
+                directoryState = SourceBookState.Content(
+                    SourceDirectory(book.identity, listOf(chapter("c1", "第一章", "第一卷"))),
+                ),
+                localState = DetailLocalState(),
+                mutation = null,
+                coverState = CoverUiState.Fallback(FallbackSpec(book.title, null)),
+                unreadOnly = false,
+                descending = false,
+                selectedChapterId = null,
+                cacheState = DetailCacheState(),
+                onCacheAction = {},
+                onSetRating = {},
+                onSearchAuthor = {},
+                onConfirmTag = {},
+                onToggleUnreadOnly = {},
+                onToggleOrder = {},
+                onSelectChapter = {},
+                onContinueReading = {},
+                onAddToLibrary = {},
+                onRequestRemoveFromLibrary = {},
+                onRetry = {},
+                onUseOfflineCache = {},
+                onOpenVerification = {},
+                onKeepDefaultLibrary = {},
                 )
+            }
             }
         }
 
         compose.waitForIdle()
         compose.onNodeWithTag("detail-last-updated").assertDoesNotExist()
-        compose.onNodeWithText("尚未开始").assertDoesNotExist()
         val layouts = mutableListOf<TextLayoutResult>()
         compose.onNodeWithTag("detail-title-flow", useUnmergedTree = true)
             .performSemanticsAction(SemanticsActions.GetTextLayoutResult) { it(layouts) }
@@ -748,12 +882,77 @@ class BookDetailInstrumentedTest {
         assertTrue(distributedGaps.max() - distributedGaps.min() <= 1f)
     }
 
+    @OptIn(ExperimentalTestApi::class)
+    @Test
+    fun defaultFontLongTitleKeepsCompactCoverRightActionsUntilExpanded() {
+        val book = sourceBook().copy(title = "在默认系统字体下仍应保持紧凑详情头部布局的超长书名".repeat(6))
+        var viewportWidth by mutableStateOf(411.dp)
+        compose.setContent {
+            DisplayEnvironmentProvider(standardTestEnvironment) {
+                DeviceConfigurationOverride(DeviceConfigurationOverride.ForcedSize(DpSize(viewportWidth, 640.dp))) {
+                    MaterialTheme(typography = TsuyomiTypography) {
+                        DetailIdentityModule(
+                            detail = SourceBookDetail(book, "简介", emptyList(), "连载中", "2026-09-14"),
+                            coverState = CoverUiState.Fallback(FallbackSpec(book.title, null)),
+                            localState = DetailLocalState(inLibrary = true),
+                            onSetRating = {},
+                            onSearchAuthor = {},
+                            onAddToLibrary = {},
+                            onRequestRemoveFromLibrary = {},
+                            primaryActionEnabled = true,
+                            onOpenDestinations = {},
+                            destinationMenuExpanded = false,
+                            onDestinationMenuExpandedChange = {},
+                            destinationMenuContent = {},
+                        )
+                    }
+                }
+            }
+        }
+
+        fun titleLines(): Int {
+            val layouts = mutableListOf<TextLayoutResult>()
+            compose.onNodeWithTag("detail-title-flow", useUnmergedTree = true)
+                .performSemanticsAction(SemanticsActions.GetTextLayoutResult) { it(layouts) }
+            return layouts.single().lineCount
+        }
+
+        val density = InstrumentationRegistry.getInstrumentation().targetContext.resources.displayMetrics.density
+        val cover = compose.onNodeWithTag("detail-cover").fetchSemanticsNode().boundsInRoot
+        val title = compose.onNodeWithTag("detail-title-block").fetchSemanticsNode().boundsInRoot
+        val author = compose.onNodeWithTag("detail-author-row").fetchSemanticsNode().boundsInRoot
+        val metadata = compose.onNodeWithTag("detail-metadata-row").fetchSemanticsNode().boundsInRoot
+        val rating = compose.onNodeWithTag("detail-rating-row").fetchSemanticsNode().boundsInRoot
+        val libraryAction = compose.onNodeWithTag("detail-library-action").fetchSemanticsNode().boundsInRoot
+        assertTrue(abs(cover.width - 135f * density) <= 1f && abs(cover.height - 189f * density) <= 1f)
+        assertTrue(titleLines() == 2)
+        compose.onNodeWithTag("detail-title-overflow").assertIsDisplayed()
+        listOf(author, metadata, rating, libraryAction).forEach { block ->
+            assertTrue(block.left >= cover.right && block.bottom <= cover.bottom + 1f)
+        }
+
+        compose.runOnIdle { viewportWidth = 360.dp }
+        val narrowCover = compose.onNodeWithTag("detail-cover").fetchSemanticsNode().boundsInRoot
+        listOf("detail-rating-row", "detail-library-action").forEach { tag ->
+            val block = compose.onNodeWithTag(tag).fetchSemanticsNode().boundsInRoot
+            assertTrue("Collapsed title must retain the right column at regular phone width", block.left >= narrowCover.right)
+        }
+        assertTrue(titleLines() == 2)
+        compose.runOnIdle { viewportWidth = 411.dp }
+
+        compose.onNodeWithTag("detail-title-overflow").performClick()
+        assertTrue(titleLines() > 2)
+        val expandedCover = compose.onNodeWithTag("detail-cover").fetchSemanticsNode().boundsInRoot
+        val expandedLibraryAction = compose.onNodeWithTag("detail-library-action").fetchSemanticsNode().boundsInRoot
+        assertTrue(expandedLibraryAction.top >= expandedCover.bottom)
+    }
+
     @Test
     fun simpleWebsiteDestinationShowsOneAggregateTarget() {
         var appliedTargetId: String? = null
         compose.setContent {
             MaterialTheme {
-                DropdownMenu(expanded = true, onDismissRequest = {}) {
+                TsuyomiDropdownMenu(expanded = true, onDismissRequest = {}) {
                     BookDestinationMenu(
                         readLater = false,
                         collections = List(30) { index ->
@@ -784,33 +983,101 @@ class BookDetailInstrumentedTest {
     }
 
     @Test
+    fun readingFabStartsWithoutProgressAndResumesOnlyAValidSavedChapter() {
+        val book = sourceBook()
+        val chapters = listOf(
+            chapter("c1", "第一章", "第一卷"),
+            chapter("c2", "第二章", "第一卷"),
+        )
+        var localState by mutableStateOf(DetailLocalState(inLibrary = true))
+        val openedChapterIds = mutableListOf<String>()
+        val context = InstrumentationRegistry.getInstrumentation().targetContext
+        compose.setContent {
+            DisplayEnvironmentProvider(standardTestEnvironment) {
+                MaterialTheme {
+                    StandardBookDetailScreen(
+                        state = SourceBookState.Content(SourceBookDetail(book, "简介", emptyList(), "连载")),
+                        directoryState = SourceBookState.Content(SourceDirectory(book.identity, chapters)),
+                        localState = localState,
+                        mutation = null,
+                        coverState = CoverUiState.Fallback(FallbackSpec(book.title, null)),
+                        unreadOnly = false,
+                        descending = false,
+                        selectedChapterId = null,
+                        cacheState = DetailCacheState(),
+                        onCacheAction = {},
+                        onSetRating = {},
+                        onSearchAuthor = {},
+                        onConfirmTag = {},
+                        onToggleUnreadOnly = {},
+                        onToggleOrder = {},
+                        onSelectChapter = {},
+                        onContinueReading = { openedChapterIds += it.chapterId },
+                        onAddToLibrary = {},
+                        onRequestRemoveFromLibrary = {},
+                        onRetry = {},
+                        onUseOfflineCache = {},
+                        onOpenVerification = {},
+                        onKeepDefaultLibrary = {},
+                    )
+                }
+            }
+        }
+
+        compose.onNodeWithTag("detail-reading-fab").assertIsDisplayed()
+            .assert(hasContentDescription(context.getString(R.string.book_start_reading)))
+        compose.onNodeWithTag("detail-reading-fab").performClick()
+        compose.runOnIdle { assertTrue(openedChapterIds.lastOrNull() == "c1") }
+
+        compose.runOnIdle {
+            localState = localState.copy(progressChapterId = "missing", progressChapterFraction = 0.4)
+        }
+        compose.onNodeWithTag("detail-reading-fab").assertIsDisplayed()
+            .assert(hasContentDescription(context.getString(R.string.book_start_reading)))
+        compose.onNodeWithTag("detail-reading-fab").performClick()
+        compose.runOnIdle { assertTrue(openedChapterIds.lastOrNull() == "c1") }
+
+        compose.runOnIdle {
+            localState = localState.copy(progressChapterId = "c2", progressChapterFraction = 0.4)
+        }
+        compose.onNodeWithTag("detail-reading-fab").assertIsDisplayed()
+            .assert(hasContentDescription(context.getString(R.string.book_continue_reading)))
+        compose.onNodeWithTag("detail-reading-fab").performClick()
+        compose.runOnIdle { assertTrue(openedChapterIds.lastOrNull() == "c2") }
+    }
+
+    @Test
     fun directoryFabHidesDuringScrollAndReturnsWhenScrollStops() {
         val book = sourceBook()
         val chapters = (1..80).map { chapter("c$it", "第 $it 章", "第一卷") }
         compose.setContent {
+            DisplayEnvironmentProvider(standardTestEnvironment) {
             MaterialTheme {
-                StandardBookDetailScreen(
-                    state = SourceBookState.Content(SourceBookDetail(book, "简介", emptyList(), "连载")),
-                    directoryState = SourceBookState.Content(SourceDirectory(book.identity, chapters)),
-                    localState = DetailLocalState(inLibrary = true, progressChapterId = "c1"),
-                    mutation = null,
-                    coverState = CoverUiState.Fallback(FallbackSpec(book.title, null)),
-                    unreadOnly = false,
-                    descending = false,
-                    selectedChapterId = null,
-                    onSetRating = {},
-                    onSearchAuthor = {},
-                    onAddTag = {},
-                    onToggleUnreadOnly = {},
-                    onToggleOrder = {},
-                    onSelectChapter = {},
-                    onContinueReading = {},
-                    onAddToLibrary = {},
-                    onRequestRemoveFromLibrary = {},
-                    onRetry = {},
-                    onUseOfflineCache = {},
-                    onOpenVerification = {},
+                StandardBookDetailScreen(state = SourceBookState.Content(SourceBookDetail(book, "简介", emptyList(), "连载")),
+                directoryState = SourceBookState.Content(SourceDirectory(book.identity, chapters)),
+                localState = DetailLocalState(inLibrary = true, progressChapterId = "c1"),
+                mutation = null,
+                coverState = CoverUiState.Fallback(FallbackSpec(book.title, null)),
+                unreadOnly = false,
+                descending = false,
+                selectedChapterId = null,
+                cacheState = DetailCacheState(),
+                onCacheAction = {},
+                onSetRating = {},
+                onSearchAuthor = {},
+                onConfirmTag = {},
+                onToggleUnreadOnly = {},
+                onToggleOrder = {},
+                onSelectChapter = {},
+                onContinueReading = {},
+                onAddToLibrary = {},
+                onRequestRemoveFromLibrary = {},
+                onRetry = {},
+                onUseOfflineCache = {},
+                onOpenVerification = {},
+                onKeepDefaultLibrary = {},
                 )
+            }
             }
         }
 
@@ -828,6 +1095,584 @@ class BookDetailInstrumentedTest {
         compose.waitUntil(5_000) {
             compose.onAllNodesWithTag("adaptive-list-fab").fetchSemanticsNodes().isNotEmpty()
         }
+    }
+
+    @Test
+    fun cacheSelectionTogglesChaptersWithoutOpeningReaderAndOnlyCancelsWhileWorking() {
+        val book = sourceBook()
+        val chapters = listOf(
+            chapter("c1", "第一章", "第一卷"),
+            chapter("c2", "第二章", "第一卷"),
+        )
+        var cacheState by mutableStateOf(DetailCacheState(selecting = true))
+        var unreadOnly by mutableStateOf(false)
+        var completedChapterIds by mutableStateOf(emptySet<String>())
+        val context = InstrumentationRegistry.getInstrumentation().targetContext
+        val cacheActions = mutableListOf<DetailCacheAction>()
+        var openedChapterCount = 0
+        compose.setContent {
+            DisplayEnvironmentProvider(standardTestEnvironment) {
+            DeviceConfigurationOverride(DeviceConfigurationOverride.FontScale(2f)) {
+            MaterialTheme {
+                StandardBookDetailScreen(
+                    state = SourceBookState.Content(SourceBookDetail(book, "简介", emptyList(), "连载")),
+                    directoryState = SourceBookState.Content(SourceDirectory(book.identity, chapters)),
+                    localState = DetailLocalState(completedChapterIds = completedChapterIds),
+                    mutation = null,
+                    coverState = CoverUiState.Fallback(FallbackSpec(book.title, null)),
+                    unreadOnly = unreadOnly,
+                    descending = false,
+                    selectedChapterId = null,
+                    cacheState = cacheState,
+                    onCacheAction = { action ->
+                        cacheActions += action
+                        when (action) {
+                            is DetailCacheAction.Toggle -> {
+                                cacheState = cacheState.copy(
+                                    selectedChapterIds = cacheState.selectedChapterIds.let { selected ->
+                                        if (action.chapterId in selected) selected - action.chapterId else selected + action.chapterId
+                                    },
+                                )
+                            }
+                            is DetailCacheAction.ToggleAll -> {
+                                val scopedChapterIds = action.chapterIds
+                                cacheState = cacheState.copy(
+                                    selectedChapterIds = if (cacheState.selectedChapterIds.containsAll(scopedChapterIds)) {
+                                        cacheState.selectedChapterIds - scopedChapterIds
+                                    } else {
+                                        cacheState.selectedChapterIds + scopedChapterIds
+                                    },
+                                )
+                            }
+                            else -> Unit
+                        }
+                    },
+                    onSetRating = {},
+                    onSearchAuthor = {},
+                    onConfirmTag = {},
+                    onToggleUnreadOnly = { unreadOnly = !unreadOnly },
+                    onToggleOrder = {},
+                    onSelectChapter = { openedChapterCount++ },
+                    onContinueReading = {},
+                    onAddToLibrary = {},
+                    onRequestRemoveFromLibrary = {},
+                    onRetry = {},
+                    onUseOfflineCache = {},
+                    onOpenVerification = {},
+                    onKeepDefaultLibrary = {},
+                )
+            }
+            }
+            }
+        }
+        val cacheSelectAll = compose.onNodeWithTag("detail-cache-toggle-all")
+        cacheSelectAll.assertIsFocused().assertIsOff()
+        cacheSelectAll.assert(SemanticsMatcher.expectValue(SemanticsProperties.Role, Role.Checkbox))
+        compose.onNodeWithText(context.getString(R.string.book_cache_start_selected, 0), useUnmergedTree = true).assertIsDisplayed()
+        val startBounds = compose.onNodeWithTag("detail-cache-start").fetchSemanticsNode().boundsInRoot
+        val viewportBounds = compose.onNodeWithTag("book-detail-scroll").fetchSemanticsNode().boundsInRoot
+        assertTrue("Cache action must retain intrinsic width", startBounds.width < viewportBounds.width)
+
+        cacheSelectAll.performClick().assertIsOn()
+        compose.runOnIdle {
+            assertTrue(cacheActions.last() == DetailCacheAction.ToggleAll(setOf("c1", "c2")))
+        }
+        compose.onNodeWithTag("detail-cache-chapter-c1").assertIsOn()
+        compose.onNodeWithTag("detail-cache-chapter-c2").assertIsOn()
+        compose.runOnIdle {
+            completedChapterIds = setOf("c1")
+            unreadOnly = true
+        }
+        compose.onNodeWithTag("detail-cache-chapter-c1").assertDoesNotExist()
+        compose.onNodeWithText(context.getString(R.string.book_cache_start_selected, 2), useUnmergedTree = true).assertIsDisplayed()
+        cacheSelectAll.performClick().assertIsOff()
+        compose.onNodeWithText(context.getString(R.string.book_cache_start_selected, 1), useUnmergedTree = true).assertIsDisplayed()
+        compose.onNodeWithTag("detail-cache-start").assertIsEnabled()
+        compose.runOnIdle {
+            unreadOnly = false
+            completedChapterIds = emptySet()
+            cacheState = cacheState.copy(selectedChapterIds = setOf("c1", "c2"))
+        }
+        cacheSelectAll.performClick().assertIsOff()
+
+        compose.onNodeWithTag("detail-cache-start").assertIsNotEnabled()
+        compose.onNodeWithTag("detail-cache-chapter-c1").performClick()
+        compose.onNodeWithTag("detail-cache-toggle-all").assert(
+            SemanticsMatcher.expectValue(SemanticsProperties.ToggleableState, ToggleableState.Indeterminate),
+        )
+        compose.runOnIdle {
+            assertTrue(cacheActions.last() == DetailCacheAction.Toggle("c1"))
+            assertTrue(openedChapterCount == 0)
+        }
+        compose.onNodeWithTag("detail-cache-start").assertIsEnabled().performClick()
+        compose.runOnIdle { assertTrue(cacheActions.last() == DetailCacheAction.Start) }
+        compose.onNodeWithContentDescription("关闭章节缓存选择").performClick()
+        compose.runOnIdle { assertTrue(cacheActions.last() == DetailCacheAction.Close) }
+        compose.runOnIdle {
+            cacheState = DetailCacheState(
+                selecting = true,
+                chapters = mapOf("c2" to DetailChapterCachePhase.CACHED),
+            )
+        }
+        compose.onNodeWithTag("detail-cache-chapter-c2").assertIsNotEnabled()
+        compose.onNodeWithTag("detail-cache-toggle-all").assertIsOff().performClick().assertIsOn()
+        compose.runOnIdle {
+            assertTrue(cacheActions.last() == DetailCacheAction.ToggleAll(setOf("c1")))
+        }
+
+        compose.runOnIdle {
+            cacheState = cacheState.copy(chapters = mapOf("c1" to DetailChapterCachePhase.CACHING))
+        }
+        compose.onNodeWithTag("detail-cache-chapter-c1").assertIsNotEnabled()
+        compose.onNodeWithTag("detail-cache-start").assertDoesNotExist()
+        compose.onNodeWithTag("detail-cache-cancel").assertIsEnabled().performClick()
+        compose.runOnIdle { assertTrue(cacheActions.last() == DetailCacheAction.Cancel) }
+        compose.runOnIdle {
+            cacheState = DetailCacheState(chapters = mapOf("c1" to DetailChapterCachePhase.CACHED))
+        }
+        compose.onNodeWithTag("detail-chapter-c1").assert(hasStateDescription("未读，已下载"))
+    }
+
+    @OptIn(ExperimentalTestApi::class)
+    @Test
+    fun addTagTouchTargetActivatesOnceAcrossWrappedAndLargeFontFlows() {
+        var tags by mutableStateOf(listOf("奇幻"))
+        var fontScale by mutableStateOf(1f)
+        var mutation by mutableStateOf<DetailMutationStatus?>(null)
+        var tagEditorOpen by mutableStateOf(false)
+        var tagDraft by mutableStateOf("")
+        val submittedTags = mutableListOf<String>()
+        var density = 1f
+        val actionColor = Color(0xFFB000FF)
+        val outlineColor = Color(0xFF007A35)
+        val pageBackground = Color(0xFFF8F4F8)
+        compose.setContent {
+            DisplayEnvironmentProvider(standardTestEnvironment) {
+                DeviceConfigurationOverride(DeviceConfigurationOverride.ForcedSize(DpSize(240.dp, 1000.dp))) {
+                    DeviceConfigurationOverride(DeviceConfigurationOverride.FontScale(fontScale)) {
+                        density = LocalDensity.current.density
+                        MaterialTheme(
+                            colorScheme = lightColorScheme(
+                                primary = actionColor,
+                                outlineVariant = outlineColor,
+                                background = pageBackground,
+                            ),
+                            typography = TsuyomiTypography,
+                        ) {
+                            DetailTagActionsModule(
+                                tags = tags,
+                                enabled = true,
+                                mutation = mutation,
+                                tagEditorOpen = tagEditorOpen,
+                                tagDraft = tagDraft,
+                                onOpenTagEditor = { tagEditorOpen = true },
+                                onTagDraftChange = { tagDraft = it },
+                                onDismissTagEditor = { tagEditorOpen = false },
+                                onConfirmTag = {
+                                    submittedTags += tagDraft
+                                    mutation = DetailMutationStatus(
+                                        DetailMutationOperation.ADD_TAG,
+                                        DetailMutationPhase.WORKING,
+                                    )
+                                },
+                            )
+                        }
+                    }
+                }
+            }
+        }
+
+        fun mostDistinctPixel(tag: String): Color {
+            val pixels = compose.onNodeWithTag(tag, useUnmergedTree = true).captureToImage().toPixelMap()
+            var distinct = pixels[0, 0]
+            var distance = -1f
+            for (y in 0 until pixels.height) {
+                for (x in 0 until pixels.width) {
+                    val candidate = pixels[x, y]
+                    val candidateDistance =
+                        (candidate.red - pageBackground.red) * (candidate.red - pageBackground.red) +
+                            (candidate.green - pageBackground.green) * (candidate.green - pageBackground.green) +
+                            (candidate.blue - pageBackground.blue) * (candidate.blue - pageBackground.blue)
+                    if (candidateDistance > distance) {
+                        distinct = candidate
+                        distance = candidateDistance
+                    }
+                }
+            }
+            return distinct
+        }
+
+        fun assertColorNear(expected: Color, actual: Color, label: String) {
+            assertTrue(
+                "$label must use its Material theme role: expected=$expected actual=$actual",
+                abs(expected.red - actual.red) <= 0.03f &&
+                    abs(expected.green - actual.green) <= 0.03f &&
+                    abs(expected.blue - actual.blue) <= 0.03f,
+            )
+        }
+
+        assertColorNear(outlineColor, mostDistinctPixel("detail-tag-title"), "Tag legend")
+        assertColorNear(actionColor, mostDistinctPixel("detail-add-tag-glyph"), "Add-tag action")
+
+        fun submitFrom(offset: Offset, tag: String, outcome: DetailMutationPhase = DetailMutationPhase.SUCCESS) {
+            compose.onNodeWithTag("detail-add-tag").performTouchInput { click(offset) }
+            compose.onNodeWithTag("detail-add-tag-input").assertIsDisplayed().performTextInput(tag)
+            compose.onAllNodesWithText("添加").filterToOne(hasClickAction()).performClick()
+            compose.runOnIdle {
+                assertTrue(submittedTags.lastOrNull() == tag)
+                assertTrue(submittedTags.count { it == tag } == 1)
+            }
+            compose.onNodeWithTag("detail-add-tag-input").assertIsNotEnabled()
+            compose.runOnIdle {
+                if (outcome == DetailMutationPhase.SUCCESS) {
+                    tags = tags + tag
+                    tagDraft = ""
+                    tagEditorOpen = false
+                }
+                mutation = DetailMutationStatus(DetailMutationOperation.ADD_TAG, outcome)
+            }
+            if (outcome == DetailMutationPhase.SUCCESS) {
+                compose.waitUntil(5_000) {
+                    compose.onAllNodesWithTag("detail-add-tag-input").fetchSemanticsNodes().isEmpty()
+                }
+            } else {
+                compose.onNodeWithTag("detail-add-tag-input").assertIsEnabled()
+                compose.onNodeWithText(tag).assertIsDisplayed()
+                compose.onAllNodesWithText("取消").filterToOne(hasClickAction()).performClick()
+            }
+            compose.runOnIdle { mutation = null }
+        }
+
+        submitFrom(compose.onNodeWithTag("detail-add-tag").fetchSemanticsNode().size.let { size ->
+            Offset(size.width / 2f, size.height / 2f)
+        }, "中心")
+
+        compose.runOnIdle {
+            tags = listOf("第一标签", "第二标签", "第三标签", "第四标签", "第五标签")
+        }
+        compose.waitForIdle()
+        val wrappedLabels = compose.onAllNodesWithTag("detail-tag-label", useUnmergedTree = true)
+            .fetchSemanticsNodes()
+        val wrappedLabelBounds = wrappedLabels.map { it.boundsInRoot }
+        val wrappedFlow = compose.onNodeWithTag("detail-tag-module", useUnmergedTree = true)
+            .fetchSemanticsNode().boundsInRoot
+        val wrappedRegion = compose.onNodeWithTag("detail-tag-region", useUnmergedTree = true)
+            .fetchSemanticsNode().boundsInRoot
+        val wrappedAddTarget = compose.onNodeWithTag("detail-add-tag", useUnmergedTree = true)
+            .fetchSemanticsNode().touchBoundsInRoot
+        assertTrue("Every tag must remain in the wrapping tag flow", wrappedLabels.size == tags.size)
+        assertTrue("Tags must wrap within the full-width tag flow", wrappedLabelBounds.any { it.top > wrappedLabelBounds.first().top })
+        val wrappedTitle = compose.onNodeWithTag("detail-tag-title", useUnmergedTree = true)
+            .fetchSemanticsNode().boundsInRoot
+        val wrappedAddGlyph = compose.onNodeWithTag("detail-add-tag-glyph", useUnmergedTree = true)
+            .fetchSemanticsNode().boundsInRoot
+        val wrappedAddGap = compose.onNodeWithTag("detail-add-tag-gap", useUnmergedTree = true)
+            .fetchSemanticsNode().boundsInRoot
+        assertTrue("Add action must be centred directly on the outlined top edge",
+            abs((wrappedAddTarget.top + wrappedAddTarget.bottom) / 2f - wrappedRegion.top) <= 1f)
+        assertTrue("Compact add-action outline gap must be centred on the outlined top edge",
+            abs(wrappedAddGap.center.y - wrappedRegion.top) <= 1f)
+        assertTrue("Tag label must be centred directly on the outlined top edge",
+            abs((wrappedTitle.top + wrappedTitle.bottom) / 2f - wrappedRegion.top) <= 1f)
+        val wrappedFirstTagText = compose.onNodeWithText(tags.first(), useUnmergedTree = true)
+            .fetchSemanticsNode().boundsInRoot
+        assertTrue(
+            "Visible tag title must align with the first tag's visible text, not its chip frame",
+            abs(wrappedTitle.left - wrappedFirstTagText.left) <= 1f,
+        )
+        val wrappedLegendToTagGap = wrappedLabelBounds.first().top - wrappedTitle.bottom
+        assertTrue(
+            "Visible legend-to-tag gap must stay within 8dp: $wrappedLegendToTagGap",
+            wrappedLegendToTagGap in 0f..8f * density,
+        )
+        assertTrue("Tag flow must receive the complete consistently inset region width",
+            wrappedFlow.left >= wrappedRegion.left && wrappedFlow.right <= wrappedRegion.right)
+        assertTrue(abs(wrappedAddGlyph.width - 16f * density) <= 1f)
+        assertTrue(abs(wrappedAddGlyph.height - 16f * density) <= 1f)
+        assertTrue(wrappedAddGap.width <= 24f * density + 1f)
+        assertTrue(wrappedAddGap.height <= 20f * density + 1f)
+        assertTrue(wrappedAddTarget.width >= 48f * density - 1f && wrappedAddTarget.height >= 48f * density - 1f)
+        submitFrom(Offset(2f, 2f), "边缘")
+
+        compose.runOnIdle {
+            tags = listOf("大型字体标签", "第二个标签")
+            fontScale = 2f
+        }
+        compose.waitForIdle()
+        val largeFontRegion = compose.onNodeWithTag("detail-tag-region", useUnmergedTree = true)
+            .fetchSemanticsNode().boundsInRoot
+        val largeFontAdd = compose.onNodeWithTag("detail-add-tag", useUnmergedTree = true).fetchSemanticsNode().touchBoundsInRoot
+        assertTrue(abs((largeFontAdd.top + largeFontAdd.bottom) / 2f - largeFontRegion.top) <= 1f)
+        submitFrom(compose.onNodeWithTag("detail-add-tag").fetchSemanticsNode().size.let { size ->
+            Offset(size.width - 2f, size.height - 2f)
+        }, "大字边缘")
+        submitFrom(compose.onNodeWithTag("detail-add-tag").fetchSemanticsNode().size.let { size ->
+            Offset(size.width / 2f, size.height / 2f)
+        }, "失败后保留", DetailMutationPhase.ERROR)
+
+        val submittedBeforeTagTouch = submittedTags.size
+        compose.onNodeWithText("大型字体标签", useUnmergedTree = true).performTouchInput { click(center) }
+        compose.onAllNodesWithTag("detail-add-tag-input").assertCountEquals(0)
+        compose.runOnIdle { assertTrue(submittedTags.size == submittedBeforeTagTouch) }
+    }
+
+    @OptIn(ExperimentalTestApi::class)
+    @Test
+    fun fullTagRowsShareOneJustifiedGapWhileSparseRowsStayCompact() {
+        var tags by mutableStateOf(listOf("奇幻"))
+        var density = 1f
+        val viewportWidth = 320.dp
+        compose.setContent {
+            DisplayEnvironmentProvider(standardTestEnvironment) {
+                DeviceConfigurationOverride(DeviceConfigurationOverride.ForcedSize(DpSize(viewportWidth, 1000.dp))) {
+                    MaterialTheme(typography = TsuyomiTypography) {
+                        density = LocalDensity.current.density
+                        DetailTagActionsModule(
+                            tags = tags,
+                            enabled = true,
+                            tagEditorOpen = false,
+                            tagDraft = "",
+                            onOpenTagEditor = {},
+                            onTagDraftChange = {},
+                            onDismissTagEditor = {},
+                            onConfirmTag = {},
+                        )
+                    }
+                }
+            }
+        }
+        compose.waitForIdle()
+
+        fun rowBounds(): List<Pair<Float, List<androidx.compose.ui.geometry.Rect>>> {
+            val labels = compose.onAllNodesWithTag("detail-tag-label", useUnmergedTree = true)
+                .fetchSemanticsNodes()
+                .map { it.boundsInRoot }
+            val grouped = sortedMapOf<Float, MutableList<androidx.compose.ui.geometry.Rect>>()
+            labels.forEach { grouped.getOrPut(it.top) { mutableListOf() } += it }
+            return grouped.map { (top, rects) -> top to rects.sortedBy { it.left } }
+        }
+
+        fun gaps(row: List<androidx.compose.ui.geometry.Rect>): List<Float> =
+            (1 until row.size).map { row[it].left - row[it - 1].right }
+
+        val flow = compose.onNodeWithTag("detail-tag-module", useUnmergedTree = true)
+            .fetchSemanticsNode().boundsInRoot
+        val region = compose.onNodeWithTag("detail-tag-region", useUnmergedTree = true)
+            .fetchSemanticsNode().boundsInRoot
+
+        // Mixed widths. The packer only starts a new row when the next tag no longer fits,
+        // so every row but the last is full by construction and must share one justified
+        // gap. Per-row gaps are the reported defect: rows that share a leading edge drift
+        // apart by the gap difference at every tag, visible by the fourth tag.
+        compose.runOnIdle {
+            tags = listOf(
+                "奇幻冒险异世界", "热血穿越系统", "日常魔法机甲", "末世甜宠悬疑",
+                "奇幻", "冒险", "异世", "热血", "穿越", "系统",
+                "日常", "魔法", "机甲", "末世", "甜宠", "悬疑",
+                "奇幻", "冒险", "异世", "热血",
+            )
+        }
+        compose.waitForIdle()
+        val mixedRows = rowBounds()
+        assertTrue("Expected at least three rows, found ${mixedRows.size}", mixedRows.size >= 3)
+        val mixedGaps = mixedRows.map { gaps(it.second) }
+        val fullRowGaps = mixedGaps.dropLast(1).flatten().distinct()
+        assertTrue(
+            "Every full row must share one justified gap, found $mixedGaps",
+            fullRowGaps.size == 1,
+        )
+
+        mixedRows.forEachIndexed { index, (_, row) ->
+            assertTrue(
+                "Row $index must start at the flow's leading edge: ${row.first().left} vs ${flow.left}",
+                abs(row.first().left - flow.left) <= 1f,
+            )
+            assertTrue(
+                "Row $index must stay inside the outlined region",
+                row.first().left >= region.left && row.last().right <= region.right,
+            )
+        }
+
+        // Identical tags wrap into rows of equal content width, so the shared gap fills
+        // each full row to the trailing edge: justified and column-aligned together.
+        compose.runOnIdle {
+            tags = listOf(
+                "奇幻", "冒险", "异世", "热血", "穿越", "系统", "日常",
+                "魔法", "机甲", "末世", "甜宠", "悬疑", "金丹", "剑修",
+            )
+        }
+        compose.waitForIdle()
+        val uniformRows = rowBounds()
+        assertTrue("Expected two or more rows, found ${uniformRows.size}", uniformRows.size >= 2)
+        val uniformGaps = uniformRows.map { gaps(it.second) }.flatten().distinct()
+        assertTrue("Identical tags must share one gap, found $uniformGaps", uniformGaps.size == 1)
+        uniformRows.dropLast(1).forEachIndexed { index, (_, row) ->
+            assertTrue(
+                "A full row of identical tags must reach the trailing edge, row $index ends at ${row.last().right} vs ${flow.right}",
+                abs(row.last().right - flow.right) <= 1f,
+            )
+        }
+
+        // Two tags leave most of the row empty, so the row is not full. It keeps the
+        // minimum gap on the leading edge; stretching it to both edges is not alignment,
+        // and a wider default here would cost row capacity.
+        compose.runOnIdle { tags = listOf("奇幻", "冒险") }
+        compose.waitForIdle()
+        val sparse = rowBounds().single().second
+        val sparseGap = gaps(sparse).single()
+        assertTrue(
+            "A sparse row must use the minimum gap, found ${sparseGap / density}dp",
+            abs(sparseGap / density - 4f) <= 1.5f,
+        )
+        assertTrue(
+            "A sparse row must not be stretched to the trailing edge: ${sparse.last().right} vs ${flow.right}",
+            sparse.last().right < flow.right - 1f,
+        )
+
+        // A single tag cannot be justified: it keeps the region's leading edge.
+        compose.runOnIdle { tags = listOf("奇幻") }
+        compose.waitForIdle()
+        val single = rowBounds().single().second
+        assertTrue("A single tag row must start at the flow's leading edge", abs(single.single().left - flow.left) <= 1f)
+        assertTrue("A single tag must not be stretched", single.single().right < flow.right - 1f)
+    }
+
+
+    // Packing and placement must use the same gap. Packing at a smaller gap than the one
+    // actually placed lets a row that only just fitted overflow once the wider gap is
+    // applied, and since the wrap decision was already taken the row never wraps - the
+    // tags run past the region edge. That regression shipped once; this sweep is the
+    // guard, because a single fixture at one width does not reach the boundary.
+    @OptIn(ExperimentalTestApi::class)
+    @Test
+    fun tagRowsNeverOverflowTheOutlinedRegionAcrossWidthsAndCounts() {
+        var tags by mutableStateOf(listOf("奇幻"))
+        var viewportWidthDp by mutableStateOf(320)
+        compose.setContent {
+            DisplayEnvironmentProvider(standardTestEnvironment) {
+                DeviceConfigurationOverride(
+                    DeviceConfigurationOverride.ForcedSize(DpSize(viewportWidthDp.dp, 1400.dp)),
+                ) {
+                    MaterialTheme(typography = TsuyomiTypography) {
+                        DetailTagActionsModule(
+                            tags = tags,
+                            enabled = true,
+                            tagEditorOpen = false,
+                            tagDraft = "",
+                            onOpenTagEditor = {},
+                            onTagDraftChange = {},
+                            onDismissTagEditor = {},
+                            onConfirmTag = {},
+                        )
+                    }
+                }
+            }
+        }
+        compose.waitForIdle()
+
+        val pool = listOf(
+            "奇幻", "冒险", "异世", "热血", "穿越", "系统", "日常", "魔法",
+            "机甲", "末世", "甜宠", "悬疑", "金丹", "剑修",
+            "奇幻冒险异世界", "热血穿越系统流", "日常魔法机甲师",
+        )
+        var worst = 0f
+        var worstCase = ""
+        var worstPremature = 0f
+        var worstPrematureCase = ""
+        val minGapPx = org.tsuyomi.core.ui.theme.TsuyomiSpacing.Xs.value *
+            InstrumentationRegistry.getInstrumentation().targetContext.resources.displayMetrics.density
+        for (width in 300..430 step 5) {
+            for (count in 2..14) {
+                compose.runOnIdle { viewportWidthDp = width; tags = pool.take(count) }
+                compose.waitForIdle()
+                val flow = compose.onNodeWithTag("detail-tag-module", useUnmergedTree = true)
+                    .fetchSemanticsNode().boundsInRoot
+                val region = compose.onNodeWithTag("detail-tag-region", useUnmergedTree = true)
+                    .fetchSemanticsNode().boundsInRoot
+                val labels = compose.onAllNodesWithTag("detail-tag-label", useUnmergedTree = true)
+                    .fetchSemanticsNodes().map { it.boundsInRoot }
+                val grouped = sortedMapOf<Float, MutableList<androidx.compose.ui.geometry.Rect>>()
+                labels.forEach { grouped.getOrPut(it.top) { mutableListOf() } += it }
+                val rows = grouped.values.map { it.sortedBy { rect -> rect.left } }
+                rows.forEachIndexed { index, row ->
+                    val pastFlow = row.last().right - flow.right
+                    val pastRegion = row.last().right - region.right
+                    if (pastFlow > 1f || pastRegion > 1f) {
+                        val over = maxOf(pastFlow, pastRegion)
+                        if (over > worst) {
+                            worst = over
+                            worstCase = "width=${width}dp count=$count row=$index members=${row.size}"
+                        }
+                    }
+                }
+                // A row may only be broken when its successor genuinely cannot fit at the
+                // packing gap. Breaking a row while the next tag would still have fitted
+                // costs capacity: a six-tag row wraps with a visible hole beside it.
+                rows.dropLast(1).forEachIndexed { index, row ->
+                    val content: Float = row.fold(0f) { acc, rect -> acc + rect.width }
+                    val packingWidth: Float = content + minGapPx * (row.size - 1).toFloat()
+                    val needed: Float = packingWidth + minGapPx + rows[index + 1].first().width
+                    val slack: Float = flow.width - needed
+                    if (slack > 1f && slack > worstPremature) {
+                        worstPremature = slack
+                        worstPrematureCase =
+                            "width=${width}dp count=$count row=$index members=${row.size} slack=${slack}px"
+                    }
+                }
+            }
+        }
+        assertTrue(
+            "Tag rows must not overflow the flow or the outlined region, worst ${worst}px at $worstCase",
+            worst <= 1f,
+        )
+        assertTrue(
+            "A row must not wrap while its successor still fits: $worstPrematureCase",
+            worstPremature <= 1f,
+        )
+    }
+
+    @Test
+    fun tagEditingIsAvailableForAnAdmittedDetailWithoutLibraryMembership() {
+        val book = sourceBook()
+        var localState by mutableStateOf(DetailLocalState())
+        compose.setContent {
+            DisplayEnvironmentProvider(standardTestEnvironment) {
+                MaterialTheme {
+                    StandardBookDetailScreen(
+                        state = SourceBookState.Content(SourceBookDetail(book, "简介", emptyList(), "连载")),
+                        directoryState = SourceBookState.Loading,
+                        localState = localState,
+                        mutation = null,
+                        coverState = CoverUiState.Fallback(FallbackSpec(book.title, null)),
+                        unreadOnly = false,
+                        descending = false,
+                        selectedChapterId = null,
+                        cacheState = DetailCacheState(),
+                        onCacheAction = {},
+                        onSetRating = {},
+                        onSearchAuthor = {},
+                        onConfirmTag = {},
+                        onToggleUnreadOnly = {},
+                        onToggleOrder = {},
+                        onSelectChapter = {},
+                        onContinueReading = {},
+                        onAddToLibrary = {},
+                        onRequestRemoveFromLibrary = {},
+                        onRetry = {},
+                        onUseOfflineCache = {},
+                        onOpenVerification = {},
+                        onKeepDefaultLibrary = {},
+                    )
+                }
+            }
+        }
+
+        compose.onNodeWithTag("detail-add-tag").assertIsNotEnabled()
+        compose.runOnIdle {
+            assertTrue(!localState.inLibrary)
+            localState = localState.copy(localTagsEditable = true)
+        }
+        compose.onNodeWithTag("detail-add-tag").assertIsEnabled()
     }
 
     @Test

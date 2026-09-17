@@ -4,6 +4,9 @@
  */
 package org.tsuyomi.core.database
 
+import org.tsuyomi.shared.librarydomain.LibraryBook
+import org.tsuyomi.shared.librarydomain.LibraryCollection
+import org.tsuyomi.shared.librarydomain.CollectionKind
 import androidx.room.Room
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry

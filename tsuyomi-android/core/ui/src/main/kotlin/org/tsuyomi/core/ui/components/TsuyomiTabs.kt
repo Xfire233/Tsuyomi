@@ -4,6 +4,9 @@
  */
 package org.tsuyomi.core.ui.components
 
+import androidx.compose.foundation.gestures.TargetedFlingBehavior
+import androidx.compose.foundation.pager.PagerDefaults
+import androidx.compose.foundation.pager.PagerState
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.layout.Row
@@ -35,6 +38,22 @@ data class TsuyomiTabOption(
     val key: String,
     val label: String,
 )
+
+private const val TEXT_TAB_PAGER_SNAP_POSITIONAL_THRESHOLD = 0.25f
+
+/**
+ * Native fling policy shared by bounded text-tab Pagers.
+ *
+ * It commits a deliberate drag earlier than Compose's default half-page threshold while retaining
+ * [PagerDefaults]' velocity handling and continuous spring settling.
+ */
+object TsuyomiTextTabPagerDefaults {
+    @Composable
+    fun flingBehavior(state: PagerState): TargetedFlingBehavior = PagerDefaults.flingBehavior(
+        state = state,
+        snapPositionalThreshold = TEXT_TAB_PAGER_SNAP_POSITIONAL_THRESHOLD,
+    )
+}
 
 @Composable
 fun TsuyomiTabRow(
@@ -79,7 +98,7 @@ fun TsuyomiTabRow(
 }
 
 @Composable
-fun TsuyomiLibraryTabRow(
+fun TsuyomiTextTabRow(
     options: List<TsuyomiTabOption>,
     selectedKey: String?,
     onSelect: (String) -> Unit,

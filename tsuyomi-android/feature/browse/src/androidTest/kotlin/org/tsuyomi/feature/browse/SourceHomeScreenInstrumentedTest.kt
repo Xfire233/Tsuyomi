@@ -8,7 +8,9 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.assertIsSelected
 import androidx.compose.ui.test.hasClickAction
 import androidx.compose.ui.test.hasStateDescription
 import androidx.compose.ui.test.junit4.createComposeRule
@@ -20,7 +22,9 @@ import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollToIndex
 import androidx.compose.ui.test.performTouchInput
+import androidx.compose.ui.test.swipe
 import androidx.compose.ui.test.swipeUp
+import androidx.compose.ui.unit.dp
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import java.util.concurrent.atomic.AtomicInteger
 import org.junit.Assert.assertEquals
@@ -33,14 +37,17 @@ import org.junit.runner.RunWith
 import org.tsuyomi.core.display.DisplayDecisionReason
 import org.tsuyomi.core.display.DisplayEnvironment
 import org.tsuyomi.core.display.DisplayEnvironmentProvider
-import org.tsuyomi.core.display.DisplayPreference
-import org.tsuyomi.core.display.DisplayPreferences
+import org.tsuyomi.core.preferences.DisplayPreference
+import org.tsuyomi.core.preferences.DisplayPreferences
 import org.tsuyomi.core.display.DisplayProfile
 import org.tsuyomi.core.display.MotionPolicy
-import org.tsuyomi.core.display.ColorSchemePreference
+import org.tsuyomi.core.preferences.ColorSchemePreference
 import org.tsuyomi.core.media.api.CoverUiState
 import org.tsuyomi.core.media.api.FallbackSpec
 import org.tsuyomi.core.ui.theme.TsuyomiTheme
+import org.tsuyomi.core.ui.components.CoverCardPresentationProvider
+import org.tsuyomi.shared.model.CoverCardPresentation
+
 import org.tsuyomi.shared.model.BookIdentity
 import org.tsuyomi.shared.sourcecontract.SourceBookSummary
 import org.tsuyomi.shared.sourcecontract.SourceHomeFilter
@@ -84,6 +91,8 @@ class SourceHomeScreenInstrumentedTest {
             }
         }
 
+        composeRule.onNodeWithText("verification-required").assertDoesNotExist()
+        composeRule.onNodeWithText("本地书架未改动。请稍后重试，或使用已缓存内容。").assertIsDisplayed()
         composeRule.onNodeWithText("使用已缓存内容").assertIsDisplayed().performClick()
         composeRule.runOnIdle { assertTrue(cacheRequested) }
     }
@@ -132,7 +141,9 @@ class SourceHomeScreenInstrumentedTest {
         val submitted = mutableStateOf<Map<String, String>?>(null)
         val filterRequests = AtomicInteger()
         val appendRequests = AtomicInteger()
+        val appending = mutableStateOf(false)
         val outerGridIndex = AtomicInteger()
+        var openedBook: SourceBookSummary? = null
         val outerGridOffset = AtomicInteger()
 
         composeRule.setContent {
@@ -149,6 +160,7 @@ class SourceHomeScreenInstrumentedTest {
                                     queryKey = "revision|sort=0&tag=school&view=category",
                                     selectedFilters = selected,
                                     page = page,
+                                    appending = appending.value,
                                 ),
                             ),
                         ),
@@ -160,12 +172,15 @@ class SourceHomeScreenInstrumentedTest {
                             filterRequests.incrementAndGet()
                         },
                         onRefresh = {},
-                        onLoadMore = { appendRequests.incrementAndGet() },
+                        onLoadMore = {
+                            appendRequests.incrementAndGet()
+                            appending.value = true
+                        },
                         onRetryReplacement = {},
                         onUseOfflineCache = {},
                         onSearch = {},
                         onOpenRemoteLibrary = {},
-                        onOpenBook = {},
+                        onOpenBook = { openedBook = it },
                         onOpenFeature = {},
                         onOpenVerification = {},
                         onScrollPositionChanged = { _, _, index, offset ->
@@ -188,8 +203,15 @@ class SourceHomeScreenInstrumentedTest {
         val tabRow = composeRule.onNodeWithTag("source-home-primary-tabs").fetchSemanticsNode().boundsInRoot
         val firstTab = composeRule.onNodeWithTag("tsuyomi-tab-recommend").fetchSemanticsNode().boundsInRoot
         val lastTab = composeRule.onNodeWithTag("tsuyomi-tab-completed").fetchSemanticsNode().boundsInRoot
-        assertTrue(abs((firstTab.left - tabRow.left) - (tabRow.right - lastTab.right)) < 1f)
-        assertTrue(abs(firstTab.width - lastTab.width) < 1f)
+        val recommendLabel = composeRule.onNodeWithText("推荐", useUnmergedTree = true).fetchSemanticsNode().boundsInRoot
+        val categoryLabel = composeRule.onNodeWithText("分类", useUnmergedTree = true).fetchSemanticsNode().boundsInRoot
+        val labelPadding = with(composeRule.density) { 8.dp.toPx() }
+        val expectedLabelGap = with(composeRule.density) { 24.dp.toPx() }
+        val visibleLabelGap = categoryLabel.left - recommendLabel.right
+        assertTrue(abs((firstTab.left - tabRow.left) - labelPadding) <= 1f)
+        assertEquals("Visible text-label gap", expectedLabelGap, visibleLabelGap, 1f)
+        assertTrue(lastTab.width > firstTab.width)
+        assertTrue(lastTab.right < tabRow.right)
 
         val grid = composeRule.onNodeWithTag("source-home-book-grid-category").fetchSemanticsNode().boundsInRoot
         val filterRow = composeRule.onNodeWithTag("source-home-filter-row").fetchSemanticsNode().boundsInRoot
@@ -204,6 +226,17 @@ class SourceHomeScreenInstrumentedTest {
         assertTrue(abs(heading.right - filterRow.right) < 1f)
         assertTrue(abs(firstCard.left - filterRow.left) < 1f)
         assertTrue(abs(thirdCard.right - filterRow.right) < 1f)
+        assertTrue(abs(firstCard.top - thirdCard.top) < 1f)
+        val titleBounds = composeRule.onNodeWithText("轻小说 1", useUnmergedTree = true)
+            .fetchSemanticsNode().boundsInRoot
+        val authorBounds = composeRule.onNodeWithText("作者 1", useUnmergedTree = true)
+            .fetchSemanticsNode().boundsInRoot
+        assertTrue(abs(firstCard.width / firstCard.height - 5f / 7f) < 0.02f)
+        assertTrue(firstCard.top <= titleBounds.top)
+        assertTrue(titleBounds.bottom <= authorBounds.top)
+        assertTrue(authorBounds.bottom <= firstCard.bottom)
+        composeRule.onNodeWithTag("source-home-book-1").performClick()
+        composeRule.runOnIdle { assertEquals("1", openedBook?.identity?.remoteBookId) }
         composeRule.mainClock.autoAdvance = false
         composeRule.onNodeWithContentDescription("题材，展开选项").performClick()
         composeRule.mainClock.advanceTimeBy(100)
@@ -264,7 +297,65 @@ class SourceHomeScreenInstrumentedTest {
         composeRule.onNodeWithTag("source-home-filter-sheet").assertDoesNotExist()
 
         composeRule.onNodeWithTag("source-home-book-grid-category").performScrollToIndex(16)
-        composeRule.waitUntil(timeoutMillis = 5_000) { appendRequests.get() == 1 }
+        composeRule.waitUntil(timeoutMillis = 5_000) { appendRequests.get() >= 1 }
+        composeRule.runOnIdle { assertEquals("Append request count after scrolling", 1, appendRequests.get()) }
+    }
+
+    @Test
+    fun wideSourceHomeCardsKeepThreeColumnsAndASeparatePortraitArtworkLane() {
+        val books = (1..3).map(::book)
+        composeRule.setContent {
+            DisplayEnvironmentProvider(standardEnvironment) {
+                CoverCardPresentationProvider(CoverCardPresentation.WIDE) {
+                    TsuyomiTheme(environment = standardEnvironment) {
+                        SourceHomeScreen(
+                            sourceName = "Wenku8",
+                            state = SourceHomeViewState.Content(
+                                title = "Wenku8 书库",
+                                primaryFilter = null,
+                                selectedPrimary = "home",
+                                pages = mapOf(
+                                    "home" to SourceHomePageViewState(
+                                        queryKey = "wide-home",
+                                        selectedFilters = emptyMap(),
+                                        page = page(
+                                            filters = emptyList(),
+                                            selectedFilters = emptyMap(),
+                                            books = books,
+                                            sectionTitle = "宽屏推荐",
+                                        ),
+                                    ),
+                                ),
+                            ),
+                            remoteLibraryAvailable = false,
+                            verificationAvailable = false,
+                            onSelectPrimary = {},
+                            onSelectFilters = {},
+                            onRefresh = {},
+                            onLoadMore = {},
+                            onRetryReplacement = {},
+                            onUseOfflineCache = {},
+                            onSearch = {},
+                            onOpenRemoteLibrary = {},
+                            onOpenBook = {},
+                            onOpenFeature = {},
+                            onOpenVerification = {},
+                            onScrollPositionChanged = { _, _, _, _ -> },
+                            coverState = { summary ->
+                                CoverUiState.Fallback(FallbackSpec(summary.title, "Wenku8"))
+                            },
+                        )
+                    }
+                }
+            }
+        }
+
+        val first = composeRule.onNodeWithTag("source-home-book-1").fetchSemanticsNode().boundsInRoot
+        val third = composeRule.onNodeWithTag("source-home-book-3").fetchSemanticsNode().boundsInRoot
+
+        assertTrue(abs(first.width / first.height - 16f / 9f) < 0.02f)
+        assertTrue(abs(first.top - third.top) < 1f)
+        assertTrue(third.right > first.right)
     }
 
     @Test
@@ -367,6 +458,153 @@ class SourceHomeScreenInstrumentedTest {
     }
 
     @Test
+    fun primaryPagerShortCommitReturnFlingAndReversalSettleWithAlignedSelection() {
+        val primary = primaryFilter()
+        val selectedFilters = primary.options.associate { option -> option.value to mapOf("view" to option.value) }
+        val labels = mapOf(
+            "recommend" to "推荐",
+            "category" to "分类",
+            "ranking" to "排行",
+            "completed" to "完结作品",
+        )
+        val pages = primary.options.mapIndexed { index, option ->
+            val selection = selectedFilters.getValue(option.value)
+            option.value to SourceHomePageViewState(
+                queryKey = "pager-${option.value}",
+                selectedFilters = selection,
+                page = page(
+                    filters = listOf(primary),
+                    selectedFilters = selection,
+                    books = listOf(book(index + 1, labels.getValue(option.value))),
+                    sectionTitle = "${labels.getValue(option.value)}栏目",
+                ),
+            )
+        }.toMap()
+        var selectedPrimary by mutableStateOf("recommend")
+
+        composeRule.setContent {
+            DisplayEnvironmentProvider(standardEnvironment) {
+                TsuyomiTheme(environment = standardEnvironment) {
+                    SourceHomeScreen(
+                        sourceName = "Wenku8",
+                        state = SourceHomeViewState.Content(
+                            title = "Wenku8 书库",
+                            primaryFilter = primary,
+                            selectedPrimary = selectedPrimary,
+                            pages = pages,
+                        ),
+                        remoteLibraryAvailable = true,
+                        verificationAvailable = true,
+                        onSelectPrimary = { selectedPrimary = it },
+                        onSelectFilters = {},
+                        onRefresh = {},
+                        onLoadMore = {},
+                        onRetryReplacement = {},
+                        onUseOfflineCache = {},
+                        onSearch = {},
+                        onOpenRemoteLibrary = {},
+                        onOpenBook = {},
+                        onOpenFeature = {},
+                        onOpenVerification = {},
+                        onScrollPositionChanged = { _, _, _, _ -> },
+                        coverState = { summary -> CoverUiState.Fallback(FallbackSpec(summary.title, "Wenku8")) },
+                    )
+                }
+            }
+        }
+
+        composeRule.waitForIdle()
+        val pager = composeRule.onNodeWithTag("source-home-pager")
+        val pagerBounds = pager.fetchSemanticsNode().boundsInRoot
+        fun assertSelectedContent(label: String) {
+            composeRule.onNodeWithTag("tsuyomi-tab-$selectedPrimary").assertIsSelected()
+            val contentBounds = composeRule.onNodeWithText(label, useUnmergedTree = true)
+                .assertIsDisplayed()
+                .fetchSemanticsNode().boundsInRoot
+            assertTrue("$label is outside $pagerBounds: $contentBounds", contentBounds.left >= pagerBounds.left)
+            assertTrue("$label is outside $pagerBounds: $contentBounds", contentBounds.right <= pagerBounds.right)
+            val pageBounds = composeRule.onNodeWithTag("source-home-book-grid-$selectedPrimary")
+                .fetchSemanticsNode().boundsInRoot
+            assertEquals("Selected page is horizontally displaced: $pageBounds in $pagerBounds", pagerBounds.left, pageBounds.left, 1f)
+            assertEquals("Selected page does not fill the viewport: $pageBounds in $pagerBounds", pagerBounds.right, pageBounds.right, 1f)
+        }
+
+        composeRule.mainClock.autoAdvance = false
+        try {
+            pager.performTouchInput {
+                down(center)
+                moveBy(Offset(-center.x * 0.4f, 0f), delayMillis = 240)
+            }
+            val draggedPageBounds = composeRule.onNodeWithTag("source-home-book-grid-recommend")
+                .fetchSemanticsNode().boundsInRoot
+            pager.performTouchInput { up() }
+            composeRule.mainClock.advanceTimeBy(180)
+            val returningPageBounds = composeRule.onNodeWithTag("source-home-book-grid-recommend")
+                .fetchSemanticsNode().boundsInRoot
+            assertTrue(
+                "Sub-threshold return did not continue toward rest: $draggedPageBounds to $returningPageBounds",
+                returningPageBounds.right > draggedPageBounds.right,
+            )
+            assertTrue(
+                "Sub-threshold return jumped instead of settling: $returningPageBounds in $pagerBounds",
+                returningPageBounds.right > pagerBounds.left && returningPageBounds.right < pagerBounds.right,
+            )
+            composeRule.mainClock.advanceTimeBy(500)
+            composeRule.runOnIdle { assertEquals("recommend", selectedPrimary) }
+            assertSelectedContent("推荐 1")
+
+            pager.performTouchInput {
+                down(Offset(width * 0.85f, center.y))
+                moveBy(Offset(-width * 0.7f, 0f), delayMillis = 600)
+            }
+            composeRule.mainClock.advanceTimeByFrame()
+            pager.performTouchInput {
+                up()
+            }
+            composeRule.mainClock.advanceTimeBy(500)
+            composeRule.runOnIdle { assertEquals("category", selectedPrimary) }
+            assertSelectedContent("分类 2")
+
+            pager.performTouchInput {
+                swipe(start = center, end = Offset(center.x - width * 0.15f, center.y), durationMillis = 60)
+            }
+            composeRule.mainClock.advanceTimeBy(500)
+            composeRule.runOnIdle { assertEquals("ranking", selectedPrimary) }
+            assertSelectedContent("排行 3")
+
+            pager.performTouchInput {
+                down(center)
+                moveBy(Offset(-center.x * 0.7f, 0f), delayMillis = 160)
+                moveBy(Offset(center.x * 0.45f, 0f), delayMillis = 160)
+                up()
+            }
+            composeRule.mainClock.advanceTimeBy(500)
+            composeRule.runOnIdle { assertEquals("ranking", selectedPrimary) }
+            assertSelectedContent("排行 3")
+
+            pager.performTouchInput {
+                down(center)
+                moveBy(Offset(-center.x * 0.6f, 0f), delayMillis = 240)
+                up()
+            }
+            composeRule.mainClock.advanceTimeBy(500)
+            composeRule.runOnIdle { assertEquals("completed", selectedPrimary) }
+            assertSelectedContent("完结作品 4")
+
+            pager.performTouchInput {
+                down(center)
+                moveBy(Offset(center.x * 0.6f, 0f), delayMillis = 240)
+                up()
+            }
+            composeRule.mainClock.advanceTimeBy(500)
+            composeRule.runOnIdle { assertEquals("ranking", selectedPrimary) }
+            assertSelectedContent("排行 3")
+        } finally {
+            composeRule.mainClock.autoAdvance = true
+        }
+    }
+
+    @Test
     fun feature_card_opens_dedicated_page_without_primary_tabs() {
         val primary = primaryFilter()
         val feature = SourceHomeFeature(
@@ -455,8 +693,8 @@ class SourceHomeScreenInstrumentedTest {
     private fun primaryFilter() = SourceHomeFilter(
         id = "view",
         label = "栏目",
-        options = listOf("recommend" to "推荐", "category" to "分类", "ranking" to "排行", "completed" to "完结")
-            .map { (value, label) -> SourceHomeFilterOption(value, label) },
+        options = listOf("recommend" to "推荐", "category" to "分类", "ranking" to "排行", "completed" to "完结作品")
+            .map { (value, label) -> SourceHomeFilterOption(value, label) }
     )
 
     private fun page(

@@ -5,6 +5,14 @@
 
 ## Unreleased
 
+- Added identity-keyed portable chapter bookmarks with Room11/transfer v4 compatibility, transactional capacity limits, and independent requested Reader flow; bookmarks do not implicitly pin books or mutate website collections.
+- Restored mounted Reader seek cancellation and adaptive DUAL presentation, connected persisted typography/reset updates to the live viewport, and completed readable Reader theme rendering and native control semantics.
+- Corrected source header/cookie handling, malformed-output and cancellation boundaries, export-preflight recovery, transient catalog recovery, legacy preference migration, and the reachable QuickJS Unicode allocation-failure cleanup.
+- Corrected caller-owned navigation, credential-keyed cover refresh, modal restoration, live Library drag-target disposal, wide grid sizing, and typography-derived Search row geometry. Remediation acceptance, hosted checks and human review remain separate from implementation.
+- Unified Standard Library and Source Home 3:4 covers with the existing bounded dark-gradient in-cover title renderer; both consumers of the shared left-aligned text-tab family now support activation and horizontal paging with independent state and owned-drag arbitration. EINK remains frozen and static.
+- Prepared the first private `0.3.0-beta.1` candidate with an independent long-term Android release-signing identity and explicit artifact-bound physical-phone acceptance before commit or submission; this does not authorize public release or certify phone acceptance.
+- Aligned main-repository admission with the single-maintainer model: zero formal approvals and no last-push/additional unattributed-change approval, while retaining mandatory PRs, five strict required checks, resolved review discussions, administrator-enforced branch protection, and explicitly authorized squash/rebase merges without auto-merge.
+- Removed automatic post-merge Android matrix duplication while retaining PR-required checks and manual full verification; lightweight main checks remain, and Actions run titles distinguish PR admission, main health, and manual verification. Merge procedure pins the verified head and reports admission separately from merge and main health.
 - Added a repository-owned context-router Skill with bounded trigger/bypass rules, existing-authority routing, versioned cross-session discovery fallback, and adoption gated on preserved answer quality plus measured time and token savings.
 - Split maintained source extensions into the public `Chachaanteng/tsuyomi-extensions` repository under AGPL-3.0-only with retained Apache provenance and notices; the Android/protocol monorepo remains Apache-2.0 and builds against pinned historical replay inputs without a sibling checkout.
 - Preserved independent component versions and path-scoped quality workflows.
@@ -14,7 +22,7 @@
 - Added the Phase 3 local-first library, explicit bounded transfer migration, smart collections, and signed add-only remote favourites with credential-gated retries and exact redirect policy.
 - Superseded numbered delivery `Gate` scopes with `Phase 0–5`; future baselines use `phase-N-baseline`, while published `gate-1-baseline` and `gate-2-baseline` tags remain immutable historical facts.
 - Added Phase 4A Standard Library cutover from UI Atlas: stationary long-press selection across Grid/List/Compact, SelectionAppBar, drag-and-drop book/collection/shelf management, locked/unlocked shortcut shelf with hover expansion, one-hold pickup, and Room v4 custom order persistence.
-- Added Source Home Wenku8 recommendation sections, “这本轻小说真厉害！” feature destination, symmetrical tab layout, centered tags panel, and directional FAB.
+- Added Standard Source Home Wenku8 recommendation sections, “这本轻小说真厉害！” feature destination, shared left-aligned text tabs with tap/Pager activation, centered tags panel, and directional FAB.
 - Aligned Book Detail and Reader chrome with UI Atlas visual specifications and interaction models.
 - Added the Phase 4B website-library mirror: durable Room v6 mirror bindings/targets/items, a first-class mirror-root shortcut, optional per-source remote-folder navigation and pins, frozen missing-target restoration, shared Library-native grid/list/compact pages, and explicit foreground refresh only.
 - Added single-book cross-boundary Library operations with operation-specific `ADD`/`MOVE` authorization receipts, per-invocation destructive `REMOVE` confirmation, fresh direct-action admission, immediate mirror projection updates, and retry-only `MOVE` recovery after a confirmed `ADD`.

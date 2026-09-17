@@ -10,14 +10,17 @@ import android.net.Uri
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
+import androidx.datastore.preferences.core.edit
+import androidx.datastore.preferences.core.stringPreferencesKey
 import java.io.File
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.withContext
 import org.tsuyomi.core.database.RoomLibraryRepository
-import org.tsuyomi.core.database.SourceRemotePolicy
+import org.tsuyomi.shared.librarydomain.SourceRemotePolicy
 import org.tsuyomi.core.files.QuotaFileStore
 import org.tsuyomi.core.files.StorageQuota
 import org.tsuyomi.core.files.StorageRoot
@@ -61,6 +64,7 @@ class SourceInstallController(
     private val credentialStore = VerifiedBrowserSessionStore(context)
     private val stagingDirectory = File(context.cacheDir, "hxp-staging")
     private val mutationMutex = (context.applicationContext as TsuyomiApplication).extensionMutationMutex
+    private val preferencesDataStore = (context.applicationContext as TsuyomiApplication).preferencesDataStore
     private val publisherKeys = org.tsuyomi.source.extensionmanager.CompositePublisherKeyResolver(
         listOf(OfficialRepositoryConfiguration.publisherKeys(repositoryClient), subscriptions.publisherKeys, packageTrust.publisherKeys),
     )
@@ -120,6 +124,7 @@ class SourceInstallController(
                 null
             } ?: return null
             activePackage = restored
+            persistActiveSource(restored.manifest.sourceId.value)
             showInstalled(restored)
             return restored
         } finally {
@@ -219,7 +224,10 @@ class SourceInstallController(
                     throw error
                 }
                 installedPackages = installedPackages.filterNot { it.manifest.sourceId == id }
-                if (selectedPackage?.manifest?.sourceId == id) selectedPackage = null
+                if (selectedPackage?.manifest?.sourceId == id) {
+                    selectedPackage = null
+                    persistActiveSource(null)
+                }
                 installedLoaded = true
                 catalog.onInstalledPackagesChanged()
                 resetToInstalledOrEmpty()
@@ -394,6 +402,7 @@ class SourceInstallController(
                     installer.activate(candidate, ExtensionInstallApproval.approve(candidate, allowDowngrade, allowLegacyMigration))
                 }
                 activePackage = candidate.candidate
+                persistActiveSource(candidate.candidate.manifest.sourceId.value)
                 synchronizeVerifiedPackage(candidate.candidate, preserveWriteback = !candidate.isDowngrade)
                 installedPackages = (installedPackages.filterNot {
                     it.manifest.sourceId == candidate.candidate.manifest.sourceId
@@ -426,7 +435,7 @@ class SourceInstallController(
 
     private suspend fun loadInstalledPackages() {
         catalog.restoreCache()
-        val previousId = activePackage?.manifest?.sourceId
+        val previousId = activePackage?.manifest?.sourceId ?: persistedActiveSourceId()
         val sourceIds = withContext(Dispatchers.IO) { store.installedSourceIds() }
         libraryRepository.markMissingSourcesUnavailable(sourceIds.map { it.value })
         val packages = mutableListOf<VerifiedHxpPackage>()
@@ -449,10 +458,26 @@ class SourceInstallController(
         }
         installedPackages = packages.sortedBy { it.manifest.displayName }
         activePackage = packages.firstOrNull { it.manifest.sourceId == previousId } ?: packages.firstOrNull()
+        persistActiveSource(activePackage?.manifest?.sourceId?.value)
         installedLoaded = true
         catalog.onInstalledPackagesChanged()
         if (invalid) resetToFailure(BrowseInstallFailure.VERIFICATION) else resetToInstalledOrEmpty()
     }
+
+    private suspend fun persistedActiveSourceId(): org.tsuyomi.shared.sourcecontract.SourceId? =
+        preferencesDataStore.data.first()[ActiveSourceIdKey]
+            ?.let { runCatching { org.tsuyomi.shared.sourcecontract.SourceId(it) }.getOrNull() }
+
+    private suspend fun persistActiveSource(sourceId: String?) {
+        preferencesDataStore.edit { preferences ->
+            if (sourceId == null) {
+                preferences.remove(ActiveSourceIdKey)
+            } else {
+                preferences[ActiveSourceIdKey] = sourceId
+            }
+        }
+    }
+
 
     fun dismissApproval() {
         if (mutationMutex.isLocked) return
@@ -626,6 +651,7 @@ class SourceInstallController(
 
     private companion object {
         const val MAX_ARCHIVE_BYTES = 16L * 1024 * 1024
+        val ActiveSourceIdKey = stringPreferencesKey("source.active-id")
     }
 }
 

@@ -9,6 +9,9 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import org.tsuyomi.core.preferences.ColorSchemePreference
+import org.tsuyomi.core.preferences.DisplayPreference
+import org.tsuyomi.core.preferences.DisplayPreferences
 
 class DisplayEnvironmentResolverTest {
     private val resolver = DisplayEnvironmentResolver()

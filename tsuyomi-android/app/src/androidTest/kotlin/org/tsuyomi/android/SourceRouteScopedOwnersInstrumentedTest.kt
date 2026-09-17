@@ -9,12 +9,16 @@ import androidx.test.ext.junit.runners.AndroidJUnit4
 import java.time.Instant
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.async
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.withTimeout
 import kotlinx.coroutines.yield
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Assert.assertNull
 import org.junit.Test
@@ -23,8 +27,8 @@ import org.tsuyomi.core.media.api.CoverFailureReason
 import org.tsuyomi.core.media.api.CoverRepository
 import org.tsuyomi.core.media.api.CoverRequest
 import org.tsuyomi.core.media.api.CoverUiState
-import org.tsuyomi.core.database.LibraryBook
-import org.tsuyomi.core.database.ReadingProgress
+import org.tsuyomi.shared.librarydomain.LibraryBook
+import org.tsuyomi.shared.librarydomain.ReadingProgress
 import org.tsuyomi.shared.sourcecontract.RemoteLibraryPage
 import org.tsuyomi.shared.sourcecontract.RemoteLibraryTargetsResult
 import org.tsuyomi.shared.sourcecontract.RemoteTarget
@@ -33,12 +37,17 @@ import org.tsuyomi.shared.sourcecontract.SourceErrorCode
 import org.tsuyomi.core.webview.CapturedVerifiedPage
 import org.tsuyomi.shared.sourcecontract.SourceException
 import org.tsuyomi.feature.book.SourceBookState
+import org.tsuyomi.feature.book.DetailMutationOperation
+import org.tsuyomi.feature.book.DetailMutationPhase
 import org.tsuyomi.feature.search.SearchResultState
+import org.tsuyomi.feature.book.DetailCacheAction
+import org.tsuyomi.feature.book.DetailChapterCachePhase
 import org.tsuyomi.feature.search.SearchLayout
 import org.tsuyomi.feature.library.remoteLibrarySelectionId
 import org.tsuyomi.shared.locator.DocumentIdentity
 import org.tsuyomi.shared.locator.LocatorPrecision
 import org.tsuyomi.shared.locator.ReaderLocator
+import org.tsuyomi.shared.locator.namesSameBookmarkPositionAs
 import org.tsuyomi.shared.sourcecontract.SourceBookDetail
 import org.tsuyomi.shared.sourcecontract.ReaderBlock
 import org.tsuyomi.shared.sourcecontract.ReaderDocument
@@ -77,6 +86,68 @@ internal class SourceRouteScopedOwnersInstrumentedTest : SourceFlowInstrumentedT
             assertEquals(SearchLayout.LIST, owner.layout.value)
             owner.cycleLayout()
             assertEquals(SearchLayout.COMPACT, SourceSearchRouteOwner(flow, savedState).layout.value)
+        }
+    }
+    @Test
+    fun repeated_submit_while_search_is_running_issues_one_source_request() = runBlocking {
+        val packageInfo = installFixture()
+        val entered = CompletableDeferred<Unit>()
+        val release = CompletableDeferred<Unit>()
+        var requests = 0
+        controller {
+            FakeSession(searchResult = { _, _ ->
+                requests++
+                entered.complete(Unit)
+                release.await()
+                listOf(summary(SOURCE_FLOW_TEST_SOURCE_ID, "one", "唯一结果"))
+            })
+        }.use { flow ->
+            flow.open(packageInfo)
+            val owner = SourceSearchRouteOwner(flow, SavedStateHandle())
+            owner.updateQuery("同一次搜索")
+
+            val first = async { owner.submit() }
+            entered.await()
+            val repeated = async { owner.submit() }
+            repeated.await()
+
+            assertEquals(1, requests)
+            assertEquals(SearchResultState.Loading, owner.state)
+            release.complete(Unit)
+            first.await()
+            assertEquals("one", (owner.state as SearchResultState.Results).items.single().identity.remoteBookId)
+        }
+    }
+
+    @Test
+    fun cancelled_route_search_settles_failure_without_replaying_on_restore() = runBlocking {
+        val packageInfo = installFixture()
+        val entered = CompletableDeferred<Unit>()
+        var requests = 0
+        controller {
+            FakeSession(searchResult = { _, _ ->
+                requests++
+                if (requests == 1) {
+                    entered.complete(Unit)
+                    CompletableDeferred<Unit>().await()
+                }
+                listOf(summary(SOURCE_FLOW_TEST_SOURCE_ID, "retry", "显式重试结果"))
+            })
+        }.use { flow ->
+            flow.open(packageInfo)
+            val owner = SourceSearchRouteOwner(flow, SavedStateHandle())
+            owner.updateQuery("query")
+            val pending = async { owner.submit() }
+            entered.await()
+            pending.cancel()
+            pending.join()
+            assertTrue(owner.state is SearchResultState.Failure)
+            owner.restore(packageInfo)
+            assertEquals(1, requests)
+            assertTrue(owner.state is SearchResultState.Failure)
+            owner.submit()
+            assertEquals(2, requests)
+            assertEquals("retry", (owner.state as SearchResultState.Results).items.single().identity.remoteBookId)
         }
     }
 
@@ -273,7 +344,7 @@ internal class SourceRouteScopedOwnersInstrumentedTest : SourceFlowInstrumentedT
             flow.open(packageInfo)
             flow.prepareBook(book)
             val savedState = SavedStateHandle()
-            val owner = SourceDetailRouteOwner(flow, savedState)
+            val owner = SourceDetailRouteOwner(flow, savedState) {}
 
             owner.loadAll()
 
@@ -284,13 +355,14 @@ internal class SourceRouteScopedOwnersInstrumentedTest : SourceFlowInstrumentedT
             assertEquals(false, owner.descending.value)
             owner.toggleUnreadOnly()
             owner.toggleOrder()
-            val restored = SourceDetailRouteOwner(flow, savedState)
+            val restored = SourceDetailRouteOwner(flow, savedState) {}
             assertEquals(true, restored.unreadOnly.value)
             assertEquals(true, restored.descending.value)
 
             owner.execute(SourceDetailRouteOwner.Command.ADD_TO_LIBRARY.name)
             assertTrue(owner.localState.inLibrary)
             assertEquals(detailCover, library.libraryEntry(book.identity)?.book?.coverUrl)
+            assertEquals(setOf("来源标签"), library.libraryEntry(book.identity)?.book?.remoteTags)
             owner.setRating(4)
             owner.addTag("本地标签")
             owner.toggleReadLater()
@@ -319,18 +391,155 @@ internal class SourceRouteScopedOwnersInstrumentedTest : SourceFlowInstrumentedT
             owner.toggleReadLater()
             assertEquals(false, owner.localState.readLater)
             assertEquals(false, owner.localState.inLibrary)
+            owner.addTag("取消固定后标签")
+            assertTrue(owner.localState.localTags.containsAll(setOf("本地标签", "取消固定后标签")))
+            assertTrue(library.libraryEntries().none { it.book.identity == book.identity })
             owner.execute(SourceDetailRouteOwner.Command.ADD_TO_LIBRARY.name)
             assertTrue(owner.localState.inLibrary)
             assertEquals(4, owner.localState.rating)
-            assertEquals(listOf("本地标签"), owner.localState.localTags)
+            assertEquals(setOf("本地标签", "取消固定后标签"), owner.localState.localTags.toSet())
             assertEquals("1", owner.localState.progressChapterId)
         }
     }
     @Test
-    fun cached_detail_opens_without_network_and_refresh_failure_keeps_content() = runBlocking {
+    fun tag_editor_draft_restores_and_failure_preserves_it_without_pinning() = runBlocking {
         val packageInfo = installFixture()
-        val book = summary(SOURCE_FLOW_TEST_SOURCE_ID, "cached-detail", "缓存详情")
-        val chapters = listOf(SourceChapter("cached-1", "缓存章节", "https://www.wenku8.net/novel/2/200/cached-1.htm"))
+        val book = summary(SOURCE_FLOW_TEST_SOURCE_ID, "tag-editor", "标签编辑")
+        val chapter = SourceChapter("1", "第一章", "https://www.wenku8.net/novel/2/200/1.htm")
+        controller {
+            FakeSession(
+                detail = { summary -> SourceBookDetail(summary, "简介", listOf("来源标签"), "连载") },
+                directoryResult = { SourceDirectory(book.identity, listOf(chapter)) },
+            )
+        }.use { flow ->
+            flow.open(packageInfo)
+            flow.prepareBook(book)
+            val savedState = SavedStateHandle()
+            val owner = SourceDetailRouteOwner(flow, savedState) {}
+            owner.loadAll()
+            assertTrue(owner.localState.localTagsEditable)
+
+            owner.openTagEditor()
+            owner.updateTagDraft("待恢复标签")
+            val restored = SourceDetailRouteOwner(flow, savedState) {}
+            assertTrue(restored.tagEditorOpen.value)
+            assertEquals("待恢复标签", restored.tagDraft.value)
+            restored.loadAll(offlineOnly = true)
+            restored.dismissTagEditor()
+            assertFalse(restored.tagEditorOpen.value)
+            assertEquals("", restored.tagDraft.value)
+
+            restored.openTagEditor()
+            restored.updateTagDraft("首次标签")
+            restored.confirmTagEditor()
+            assertFalse(restored.tagEditorOpen.value)
+            restored.openTagEditor()
+            restored.updateTagDraft(" 首次标签 ")
+            restored.confirmTagEditor()
+            assertEquals(setOf("首次标签"), library.libraryEntry(book.identity)?.localTags)
+            assertEquals("", restored.tagDraft.value)
+            assertFalse(restored.localState.inLibrary)
+
+            library.setLocalTags(book.identity, (1..64).map { "tag-$it" })
+            flow.remoteLibrary.refreshSelection(book)
+            restored.openTagEditor()
+            restored.updateTagDraft("超出上限")
+            restored.confirmTagEditor()
+
+            assertTrue(restored.tagEditorOpen.value)
+            assertEquals("超出上限", restored.tagDraft.value)
+            assertEquals(DetailMutationPhase.ERROR, restored.mutation?.phase)
+            assertEquals(64, library.libraryEntry(book.identity)?.localTags?.size)
+            assertFalse(restored.localState.inLibrary)
+        }
+    }
+
+    @Test
+    fun cache_detail_selects_without_fetching_then_persists_only_explicit_chapters() = runBlocking {
+        val packageInfo = installFixture()
+        val book = summary(SOURCE_FLOW_TEST_SOURCE_ID, "cache-selected", "选择缓存")
+        val first = SourceChapter("cache-1", "第一章", "https://www.wenku8.net/novel/2/200/cache-1.htm")
+        val second = SourceChapter("cache-2", "第二章", "https://www.wenku8.net/novel/2/200/cache-2.htm")
+        val chapterRequests = mutableListOf<String>()
+        var detailRequests = 0
+        var directoryRequests = 0
+        controller {
+            FakeSession(
+                detail = { summary ->
+                    detailRequests++
+                    SourceBookDetail(summary, "缓存简介", emptyList(), "连载")
+                },
+                directoryResult = {
+                    directoryRequests++
+                    SourceDirectory(book.identity, listOf(first, second))
+                },
+                chapterResult = { chapter, remoteBookId ->
+                    chapterRequests += chapter.chapterId
+                    readerDocument(remoteBookId, chapter)
+                },
+            )
+        }.use { flow ->
+            flow.open(packageInfo)
+            flow.prepareBook(book)
+            val owner = SourceDetailRouteOwner(flow, SavedStateHandle()) {}
+            owner.loadAll()
+            flow.prepareChapter(second)
+            flow.saveProgress(
+                ReaderLocator(
+                    document = DocumentIdentity(book.identity.sourceId, book.identity.remoteBookId, second.chapterId),
+                    blockId = "p-${second.chapterId}",
+                    characterOffset = 3,
+                    chapterProgress = 0.3,
+                    capturedAt = SOURCE_FLOW_TEST_TIME,
+                ),
+                LocatorPrecision.EXACT,
+            )
+
+            owner.execute(SourceDetailRouteOwner.Command.CACHE_DETAIL.name)
+
+            assertTrue(owner.cacheState.selecting)
+            assertEquals(1, detailRequests)
+            assertEquals(1, directoryRequests)
+            assertEquals(emptyList<String>(), chapterRequests)
+            owner.handleCacheAction(DetailCacheAction.Cancel)
+            assertEquals(1, detailRequests)
+            assertEquals(1, directoryRequests)
+            assertEquals(emptyList<String>(), chapterRequests)
+            owner.handleCacheAction(DetailCacheAction.Toggle(first.chapterId))
+            owner.handleCacheAction(DetailCacheAction.ToggleAll(setOf(second.chapterId, "outside-directory")))
+            assertEquals(setOf(first.chapterId, second.chapterId), owner.cacheState.selectedChapterIds)
+            owner.handleCacheAction(DetailCacheAction.ToggleAll(setOf(second.chapterId)))
+            assertEquals(setOf(first.chapterId), owner.cacheState.selectedChapterIds)
+            owner.handleCacheAction(DetailCacheAction.Start)
+
+            assertEquals(listOf(first.chapterId), chapterRequests)
+            assertEquals(DetailChapterCachePhase.CACHED, owner.cacheState.chapters[first.chapterId])
+            assertEquals(emptySet<String>(), owner.cacheState.selectedChapterIds)
+            owner.handleCacheAction(DetailCacheAction.ToggleAll(setOf(first.chapterId, second.chapterId)))
+            assertEquals(setOf(second.chapterId), owner.cacheState.selectedChapterIds)
+            val restoredOwner = SourceDetailRouteOwner(flow, SavedStateHandle()) {}
+            restoredOwner.refreshCachedChapterStatuses()
+            assertEquals(DetailChapterCachePhase.CACHED, restoredOwner.cacheState.chapters[first.chapterId])
+            assertEquals(null, restoredOwner.cacheState.chapters[second.chapterId])
+            assertEquals(null, owner.cacheState.chapters[second.chapterId])
+            assertEquals(second, owner.selectedChapter)
+            assertEquals(second.chapterId, library.progress(book.identity)?.locator?.document?.contentId)
+            assertEquals(
+                first.chapterId,
+                flow.requestChapter(book, first, offlineOnly = true).document?.contentId,
+            )
+            assertEquals(
+                SourceErrorCode.NETWORK_OFFLINE,
+                flow.requestChapter(book, second, offlineOnly = true).failure?.code,
+            )
+        }
+    }
+
+    @Test
+    fun refresh_detail_fetches_metadata_and_retains_last_good_content_after_failure() = runBlocking {
+        val packageInfo = installFixture()
+        val book = summary(SOURCE_FLOW_TEST_SOURCE_ID, "refresh-detail", "刷新详情")
+        val chapter = SourceChapter("refresh-1", "第一章", "https://www.wenku8.net/novel/2/200/refresh-1.htm")
         var detailRequests = 0
         var directoryRequests = 0
         var failRequests = false
@@ -340,7 +549,7 @@ internal class SourceRouteScopedOwnersInstrumentedTest : SourceFlowInstrumentedT
                     detailRequests++
                     if (failRequests) throw SourceException(
                         SourceErrorCode.VERIFICATION_REQUIRED,
-                        SourceDiagnostic("cached-detail", "detail", safeCode = "verification-required"),
+                        SourceDiagnostic("refresh-detail", "detail", safeCode = "verification-required"),
                     )
                     SourceBookDetail(summary, "缓存简介", emptyList(), "连载")
                 },
@@ -348,27 +557,28 @@ internal class SourceRouteScopedOwnersInstrumentedTest : SourceFlowInstrumentedT
                     directoryRequests++
                     if (failRequests) throw SourceException(
                         SourceErrorCode.VERIFICATION_REQUIRED,
-                        SourceDiagnostic("cached-directory", "directory", safeCode = "verification-required"),
+                        SourceDiagnostic("refresh-directory", "directory", safeCode = "verification-required"),
                     )
-                    SourceDirectory(book.identity, chapters)
+                    SourceDirectory(book.identity, listOf(chapter))
                 },
             )
         }.use { flow ->
             flow.open(packageInfo)
             flow.prepareLocalDetail(book)
-            val owner = SourceDetailRouteOwner(flow, SavedStateHandle())
-
-            assertEquals(0, detailRequests)
-            assertEquals(0, directoryRequests)
-            assertNull((owner.state as SourceBookState.Content).value.description)
-            assertTrue(owner.directoryState is SourceBookState.Loading)
+            val owner = SourceDetailRouteOwner(flow, SavedStateHandle()) {}
 
             owner.execute(SourceDetailRouteOwner.Command.CACHE_DETAIL.name)
+
+            assertTrue(owner.cacheState.selecting)
+            assertEquals(0, detailRequests)
+            assertEquals(0, directoryRequests)
+            owner.handleCacheAction(DetailCacheAction.Close)
+            owner.execute(SourceDetailRouteOwner.Command.REFRESH_DETAIL.name)
 
             assertEquals(1, detailRequests)
             assertEquals(1, directoryRequests)
             assertEquals("缓存简介", (owner.state as SourceBookState.Content).value.description)
-            assertEquals("缓存章节", (owner.directoryState as SourceBookState.Content).value.chapters.single().title)
+            assertEquals(chapter, (owner.directoryState as SourceBookState.Content).value.chapters.single())
 
             failRequests = true
             owner.execute(SourceDetailRouteOwner.Command.REFRESH_DETAIL.name)
@@ -376,8 +586,77 @@ internal class SourceRouteScopedOwnersInstrumentedTest : SourceFlowInstrumentedT
             assertEquals(2, detailRequests)
             assertEquals(2, directoryRequests)
             assertEquals("缓存简介", (owner.state as SourceBookState.Content).value.description)
-            assertEquals("缓存章节", (owner.directoryState as SourceBookState.Content).value.chapters.single().title)
+            assertEquals(chapter, (owner.directoryState as SourceBookState.Content).value.chapters.single())
             assertEquals("source-read-failed", owner.mutation?.safeCode)
+        }
+    }
+
+    @Test
+    fun failed_or_cancelled_chapter_cache_never_claims_a_durable_download() = runBlocking {
+        val packageInfo = installFixture()
+        val book = summary(SOURCE_FLOW_TEST_SOURCE_ID, "cache-interrupt", "中断缓存")
+        val first = SourceChapter("interrupt-1", "第一章", "https://www.wenku8.net/novel/2/200/interrupt-1.htm")
+        val second = SourceChapter("interrupt-2", "第二章", "https://www.wenku8.net/novel/2/200/interrupt-2.htm")
+        val third = SourceChapter("interrupt-3", "第三章", "https://www.wenku8.net/novel/2/200/interrupt-3.htm")
+        val secondEntered = CompletableDeferred<Unit>()
+        var failRetriedRequests = false
+        controller {
+            FakeSession(
+                detail = { summary -> SourceBookDetail(summary, "缓存简介", emptyList(), "连载") },
+                directoryResult = { SourceDirectory(book.identity, listOf(first, second, third)) },
+                chapterResult = { chapter, remoteBookId ->
+                    when (chapter.chapterId) {
+                        first.chapterId -> readerDocument(remoteBookId, chapter)
+                        second.chapterId -> if (failRetriedRequests) {
+                            throw SourceException(
+                                SourceErrorCode.NETWORK_TIMEOUT,
+                                SourceDiagnostic("cache-retry", "chapter", safeCode = "network-timeout"),
+                            )
+                        } else {
+                            secondEntered.complete(Unit)
+                            CompletableDeferred<Unit>().await()
+                            error("Cancelled chapter request resumed")
+                        }
+                        else -> {
+                            check(failRetriedRequests) { "Queued chapter must not start after cancellation" }
+                            throw SourceException(
+                                SourceErrorCode.NETWORK_TIMEOUT,
+                                SourceDiagnostic("cache-retry", "chapter", safeCode = "network-timeout"),
+                            )
+                        }
+                    }
+                },
+            )
+        }.use { flow ->
+            flow.open(packageInfo)
+            flow.prepareBook(book)
+            val owner = SourceDetailRouteOwner(flow, SavedStateHandle()) {}
+            owner.loadAll()
+            owner.execute(SourceDetailRouteOwner.Command.CACHE_DETAIL.name)
+            owner.handleCacheAction(DetailCacheAction.ToggleAll(setOf(first.chapterId, second.chapterId, third.chapterId)))
+
+            val caching = async { owner.handleCacheAction(DetailCacheAction.Start) }
+            secondEntered.await()
+            owner.handleCacheAction(DetailCacheAction.Cancel)
+            try {
+                caching.await()
+                error("Expected cache cancellation")
+            } catch (_: CancellationException) {
+                // Cancellation stops the active request and leaves no false cached status.
+            }
+
+            assertEquals(DetailChapterCachePhase.CACHED, owner.cacheState.chapters[first.chapterId])
+            assertEquals(DetailChapterCachePhase.CANCELLED, owner.cacheState.chapters[second.chapterId])
+            assertEquals(DetailChapterCachePhase.CANCELLED, owner.cacheState.chapters[third.chapterId])
+            assertEquals(first.chapterId, flow.requestChapter(book, first, offlineOnly = true).document?.contentId)
+            assertEquals(SourceErrorCode.NETWORK_OFFLINE, flow.requestChapter(book, second, offlineOnly = true).failure?.code)
+            assertEquals(SourceErrorCode.NETWORK_OFFLINE, flow.requestChapter(book, third, offlineOnly = true).failure?.code)
+
+            failRetriedRequests = true
+            owner.handleCacheAction(DetailCacheAction.Start)
+
+            assertEquals(DetailChapterCachePhase.FAILED, owner.cacheState.chapters[second.chapterId])
+            assertEquals(DetailChapterCachePhase.FAILED, owner.cacheState.chapters[third.chapterId])
         }
     }
 
@@ -443,7 +722,7 @@ internal class SourceRouteScopedOwnersInstrumentedTest : SourceFlowInstrumentedT
             assertEquals(null, remote.books.single().coverUrl)
 
             flow.prepareBook(remote.books.single())
-            SourceDetailRouteOwner(flow, SavedStateHandle()).loadAll()
+            SourceDetailRouteOwner(flow, SavedStateHandle()) {}.loadAll()
 
             val restored = SourceRemoteLibraryRouteOwner(flow, { packageInfo }, SavedStateHandle())
             restored.restore(sourceId)
@@ -479,7 +758,7 @@ internal class SourceRouteScopedOwnersInstrumentedTest : SourceFlowInstrumentedT
             flow.prepareBook(firstBook)
             flow.requestDirectory(firstBook)
             flow.prepareBook(secondBook)
-            val owner = SourceDetailRouteOwner(flow, SavedStateHandle())
+            val owner = SourceDetailRouteOwner(flow, SavedStateHandle()) {}
 
             owner.acceptVerifiedDirectoryResult()
 
@@ -525,7 +804,7 @@ internal class SourceRouteScopedOwnersInstrumentedTest : SourceFlowInstrumentedT
         }.use { flow ->
             flow.open(packageInfo)
             flow.prepareBook(firstBook)
-            val owner = SourceDetailRouteOwner(flow, SavedStateHandle())
+            val owner = SourceDetailRouteOwner(flow, SavedStateHandle()) {}
             val stale = async { owner.loadAll() }
             firstEntered.await()
 
@@ -536,6 +815,75 @@ internal class SourceRouteScopedOwnersInstrumentedTest : SourceFlowInstrumentedT
 
             assertEquals("新详情", (owner.state as SourceBookState.Content).value.summary.title)
             assertEquals(secondBook.identity, owner.selectedBook?.identity)
+        }
+    }
+
+    @Test
+    fun replacement_load_retires_only_its_own_working_mutation() = runBlocking {
+        val packageInfo = installFixture()
+        val book = summary(SOURCE_FLOW_TEST_SOURCE_ID, "working-cleanup", "加载清理")
+        val firstDetailEntered = CompletableDeferred<Unit>()
+        val releaseFirstDetail = CompletableDeferred<Unit>()
+        var detailRequests = 0
+        controller {
+            FakeSession(
+                detail = { summary ->
+                    detailRequests++
+                    if (detailRequests == 1) {
+                        firstDetailEntered.complete(Unit)
+                        withContext(NonCancellable) { releaseFirstDetail.await() }
+                    }
+                    SourceBookDetail(summary, "简介", emptyList(), "连载")
+                },
+                directoryResult = {
+                    SourceDirectory(
+                        book.identity,
+                        listOf(SourceChapter("1", "第一章", "https://www.wenku8.net/novel/working-cleanup/1.htm")),
+                    )
+                },
+            )
+        }.use { flow ->
+            flow.open(packageInfo)
+            flow.prepareBook(book)
+            val owner = SourceDetailRouteOwner(flow, SavedStateHandle()) {}
+            val stale = async { owner.loadAll(operation = DetailMutationOperation.REFRESH_DETAIL) }
+            firstDetailEntered.await()
+
+            owner.loadAll()
+            assertNull(owner.mutation)
+            owner.execute(SourceDetailRouteOwner.Command.ADD_TO_LIBRARY.name)
+            assertEquals(DetailMutationOperation.ADD_TO_LIBRARY, owner.mutation?.operation)
+            assertEquals(DetailMutationPhase.SUCCESS, owner.mutation?.phase)
+
+            releaseFirstDetail.complete(Unit)
+            stale.await()
+            assertTrue(owner.localState.inLibrary)
+            assertEquals(DetailMutationOperation.ADD_TO_LIBRARY, owner.mutation?.operation)
+        }
+    }
+
+    @Test
+    fun cancelled_detail_load_releases_only_its_own_working_mutation() = runBlocking {
+        val packageInfo = installFixture()
+        val book = summary(SOURCE_FLOW_TEST_SOURCE_ID, "cancelled-load", "取消加载")
+        controller {
+            FakeSession(
+                detail = { throw CancellationException("native request cancelled") },
+            )
+        }.use { flow ->
+            flow.open(packageInfo)
+            flow.prepareBook(book)
+            val owner = SourceDetailRouteOwner(flow, SavedStateHandle()) {}
+
+            try {
+                owner.loadAll(operation = DetailMutationOperation.REFRESH_DETAIL)
+                error("Expected structured cancellation")
+            } catch (_: CancellationException) {
+                // Native cancellation is control flow, not an error state.
+            }
+
+            assertNull(owner.mutation)
+            assertTrue(owner.state !is SourceBookState.Failure)
         }
     }
 
@@ -554,7 +902,7 @@ internal class SourceRouteScopedOwnersInstrumentedTest : SourceFlowInstrumentedT
             flow.open(packageInfo)
             flow.prepareBook(book)
             flow.prepareChapter(first)
-            val owner = SourceReaderRouteOwner(flow)
+            val owner = SourceReaderRouteOwner(flow, SavedStateHandle())
 
             owner.load()
 
@@ -563,6 +911,160 @@ internal class SourceRouteScopedOwnersInstrumentedTest : SourceFlowInstrumentedT
             assertEquals(first.chapterId, owner.document?.contentId)
             assertEquals(false, owner.loading)
             assertNull(owner.failure)
+        }
+    }
+
+    @Test
+    fun reader_bookmark_retry_restores_exact_target_and_same_chapter_jumps_without_refetching() = runBlocking {
+        val packageInfo = installFixture()
+        val book = summary(SOURCE_FLOW_TEST_SOURCE_ID, "305", "语义书签")
+        val first = SourceChapter("30501", "第一章", "https://www.wenku8.net/novel/3/305/30501.htm")
+        val second = SourceChapter("30502", "第二章", "https://www.wenku8.net/novel/3/305/30502.htm")
+        val previous = ReaderLocator(
+            document = DocumentIdentity(book.identity.sourceId, book.identity.remoteBookId, first.chapterId),
+            blockId = "p-${first.chapterId}",
+            characterOffset = 2,
+            capturedAt = SOURCE_FLOW_TEST_TIME,
+        )
+        val target = previous.copy(
+            document = previous.document.copy(contentId = second.chapterId),
+            blockId = "p-${second.chapterId}",
+            characterOffset = 3,
+        )
+        val earlier = target.copy(characterOffset = 1)
+        val requested = mutableListOf<String>()
+        var failSecond = true
+        controller {
+            FakeSession(
+                directoryResult = { SourceDirectory(book.identity, listOf(first, second)) },
+                chapterResult = { chapter, remoteBookId ->
+                    requested += chapter.chapterId
+                    if (chapter == second && failSecond) {
+                        failSecond = false
+                        throw SourceException(
+                            SourceErrorCode.NETWORK_TIMEOUT,
+                            SourceDiagnostic("bookmark-retry-fixture", "chapter", "timeout"),
+                        )
+                    }
+                    readerDocument(remoteBookId, chapter)
+                },
+            )
+        }.use { flow ->
+            flow.open(packageInfo)
+            flow.prepareBook(book)
+            flow.prepareChapter(first)
+            flow.saveProgress(previous, LocatorPrecision.EXACT)
+            flow.toggleBookmark(target)
+            flow.toggleBookmark(earlier)
+            val savedState = SavedStateHandle()
+            val owner = SourceReaderRouteOwner(flow, savedState)
+            owner.load()
+            owner.selectBookmark(target)
+            assertEquals(SourceErrorCode.NETWORK_TIMEOUT, owner.failure?.code)
+            owner.dispose()
+
+            val restored = SourceReaderRouteOwner(flow, SavedStateHandle(
+                savedState.keys().associateWith { savedState.get<Any?>(it) },
+            ))
+            restored.load()
+            assertEquals(second.chapterId, restored.document?.contentId)
+            assertEquals(target, restored.restoredLocator)
+            assertEquals(previous, library.progress(book.identity)?.locator)
+            restored.selectBookmark(earlier)
+            assertEquals(earlier, restored.restoredLocator)
+            restored.selectBookmark(target)
+            assertEquals(target, restored.restoredLocator)
+            assertEquals(listOf(first.chapterId, second.chapterId, second.chapterId), requested)
+            assertEquals(previous, library.progress(book.identity)?.locator)
+            restored.dispose()
+        }
+    }
+
+    @Test
+    fun reader_cross_chapter_session_return_does_not_require_origin_bookmark() = runBlocking {
+        val packageInfo = installFixture()
+        val book = summary(SOURCE_FLOW_TEST_SOURCE_ID, "305-return", "跨章返回")
+        val first = SourceChapter("305r01", "第一章", "https://www.wenku8.net/novel/3/305/305r01.htm")
+        val second = SourceChapter("305r02", "第二章", "https://www.wenku8.net/novel/3/305/305r02.htm")
+        val origin = ReaderLocator(
+            document = DocumentIdentity(book.identity.sourceId, book.identity.remoteBookId, first.chapterId),
+            blockId = "p-${first.chapterId}",
+            characterOffset = 4,
+            capturedAt = SOURCE_FLOW_TEST_TIME,
+        )
+        val bookmark = origin.copy(
+            document = origin.document.copy(contentId = second.chapterId),
+            blockId = "p-${second.chapterId}",
+            characterOffset = 9,
+        )
+        val requested = mutableListOf<String>()
+        controller {
+            FakeSession(
+                directoryResult = { SourceDirectory(book.identity, listOf(first, second)) },
+                chapterResult = { chapter, remoteBookId ->
+                    requested += chapter.chapterId
+                    readerDocument(remoteBookId, chapter)
+                },
+            )
+        }.use { flow ->
+            flow.open(packageInfo)
+            flow.prepareBook(book)
+            flow.prepareChapter(first)
+            flow.toggleBookmark(bookmark)
+            val owner = SourceReaderRouteOwner(flow, SavedStateHandle())
+            owner.load()
+
+            owner.selectBookmark(bookmark)
+            assertEquals(second.chapterId, owner.document?.contentId)
+            assertEquals(bookmark, owner.restoredLocator)
+            assertTrue(flow.bookmarks(book.identity).none { it.namesSameBookmarkPositionAs(origin) })
+
+            owner.selectLocator(origin)
+
+            assertEquals(first.chapterId, owner.document?.contentId)
+            assertEquals(origin, owner.restoredLocator)
+            assertNull(owner.failure)
+            assertEquals(listOf(first.chapterId, second.chapterId), requested)
+            owner.dispose()
+        }
+    }
+
+    @Test
+    fun sameChapterBookmarkRestorationRejectsStaleProgressCallbackUntilTheNewGenerationCommits() = runBlocking {
+        val packageInfo = installFixture()
+        val book = summary(SOURCE_FLOW_TEST_SOURCE_ID, "306", "书签回调围栏")
+        val chapter = SourceChapter("30601", "第一章", "https://www.wenku8.net/novel/3/306/30601.htm")
+        val oldLocator = ReaderLocator(
+            document = DocumentIdentity(book.identity.sourceId, book.identity.remoteBookId, chapter.chapterId),
+            blockId = "p-${chapter.chapterId}",
+            characterOffset = 1,
+            capturedAt = SOURCE_FLOW_TEST_TIME,
+        )
+        val bookmark = oldLocator.copy(characterOffset = 7)
+        controller {
+            FakeSession(
+                directoryResult = { SourceDirectory(book.identity, listOf(chapter)) },
+                chapterResult = { requested, remoteBookId -> readerDocument(remoteBookId, requested) },
+            )
+        }.use { flow ->
+            flow.open(packageInfo)
+            flow.prepareBook(book)
+            flow.prepareChapter(chapter)
+            flow.toggleBookmark(bookmark)
+            val owner = SourceReaderRouteOwner(flow, SavedStateHandle())
+            owner.load()
+            val oldDocumentGeneration = owner.documentGeneration
+
+            owner.selectBookmark(bookmark)
+
+            assertEquals(bookmark, owner.restoredLocator)
+            assertNull(library.progress(book.identity))
+            owner.saveProgress(oldLocator, LocatorPrecision.EXACT, oldDocumentGeneration)
+            assertNull(library.progress(book.identity))
+
+            owner.saveProgress(bookmark, LocatorPrecision.EXACT, owner.documentGeneration)
+            assertEquals(bookmark, library.progress(book.identity)?.locator)
+            owner.dispose()
         }
     }
 
@@ -588,6 +1090,7 @@ internal class SourceRouteScopedOwnersInstrumentedTest : SourceFlowInstrumentedT
         )
         val requests = mutableListOf<CoverRequest>()
         val repository = object : CoverRepository {
+            override fun cached(request: CoverRequest): CoverUiState.Ready? = null
             override fun observe(request: CoverRequest): Flow<CoverUiState> = flow {
                 requests += request
                 emit(CoverUiState.Failed(CoverFailureReason.NETWORK, request.fallback))
@@ -602,7 +1105,7 @@ internal class SourceRouteScopedOwnersInstrumentedTest : SourceFlowInstrumentedT
             flow.open(packageInfo)
             flow.prepareBook(book)
             flow.prepareChapter(chapter)
-            val owner = SourceReaderRouteOwner(flow)
+            val owner = SourceReaderRouteOwner(flow, SavedStateHandle())
             owner.load()
 
             owner.loadImage(image, repository, "package-revision", "credential-revision", this)
@@ -622,6 +1125,169 @@ internal class SourceRouteScopedOwnersInstrumentedTest : SourceFlowInstrumentedT
                 while (requests.size < 2) yield()
             }
             assertEquals(2, requests.size)
+            owner.dispose()
+        }
+    }
+
+    @Test
+    fun reader_preloads_one_adjacent_chapter_and_two_images_then_consumes_memory_cache() = runBlocking {
+        val packageInfo = installFixture()
+        val book = summary(SOURCE_FLOW_TEST_SOURCE_ID, "preload-1", "预加载")
+        val first = SourceChapter("preload-101", "第一章", "https://example.test/preload-101")
+        val second = SourceChapter("preload-102", "第二章", "https://example.test/preload-102")
+        val images = (1..3).map { index ->
+            ReaderBlock.Image(
+                blockId = "preload-image-$index",
+                url = "https://pic.example.test/preload-$index.webp",
+                altText = "插图$index",
+                width = 900,
+                height = 1200,
+            )
+        }
+        val requestedChapters = mutableListOf<String>()
+        val mediaRequests = mutableListOf<CoverRequest>()
+        val repository = object : CoverRepository {
+            override fun cached(request: CoverRequest): CoverUiState.Ready? = null
+            override fun observe(request: CoverRequest): Flow<CoverUiState> = flow {
+                mediaRequests += request
+                emit(CoverUiState.Failed(CoverFailureReason.NETWORK, request.fallback))
+            }
+        }
+        controller {
+            FakeSession(
+                directoryResult = { SourceDirectory(book.identity, listOf(first, second)) },
+                chapterResult = { requested, remoteBookId ->
+                    requestedChapters += requested.chapterId
+                    readerDocument(remoteBookId, requested).let { document ->
+                        if (requested == first) document.copy(blocks = document.blocks + images) else document
+                    }
+                },
+            )
+        }.use { flow ->
+            flow.open(packageInfo)
+            flow.prepareBook(book)
+            flow.prepareChapter(first)
+            val owner = SourceReaderRouteOwner(flow, SavedStateHandle())
+
+            owner.load()
+            assertEquals(listOf(first.chapterId), requestedChapters)
+            owner.preloadAdjacent(
+                scope = this,
+                enabled = true,
+                repository = repository,
+                packageRevision = packageInfo.packageSha256,
+                credentialRevision = "credential-revision",
+                settleDelayMillis = 0L,
+            )
+            withTimeout(1_000) {
+                while (requestedChapters.count { it == second.chapterId } < 1 || mediaRequests.size < 2) yield()
+            }
+
+            assertEquals(first.chapterId, owner.document?.contentId)
+            assertEquals(1, requestedChapters.count { it == second.chapterId })
+            assertEquals(images.take(2).map { it.url }, mediaRequests.map { it.transportUrl })
+            assertTrue(owner.imageStates.values.none { it is CoverUiState.Failed })
+            assertNull(library.progress(book.identity))
+
+            owner.selectChapter(second)
+            owner.load()
+
+            assertEquals(second.chapterId, owner.document?.contentId)
+            assertEquals(1, requestedChapters.count { it == second.chapterId })
+            assertNull(library.progress(book.identity))
+            owner.dispose()
+        }
+    }
+
+    @Test
+    fun reader_preload_failure_is_silent_until_foreground_navigation() = runBlocking {
+        val packageInfo = installFixture()
+        val book = summary(SOURCE_FLOW_TEST_SOURCE_ID, "preload-2", "预加载失败")
+        val first = SourceChapter("preload-201", "第一章", "https://example.test/preload-201")
+        val second = SourceChapter("preload-202", "第二章", "https://example.test/preload-202")
+        val requestedChapters = mutableListOf<String>()
+        controller {
+            FakeSession(
+                directoryResult = { SourceDirectory(book.identity, listOf(first, second)) },
+                chapterResult = { requested, remoteBookId ->
+                    requestedChapters += requested.chapterId
+                    if (requested == second) {
+                        throw SourceException(
+                            SourceErrorCode.VERIFICATION_REQUIRED,
+                            SourceDiagnostic("preload-verification", "reader-preload", "verification-required"),
+                        )
+                    }
+                    readerDocument(remoteBookId, requested)
+                },
+            )
+        }.use { flow ->
+            flow.open(packageInfo)
+            flow.prepareBook(book)
+            flow.prepareChapter(first)
+            val owner = SourceReaderRouteOwner(flow, SavedStateHandle())
+
+            owner.load()
+            owner.preloadAdjacent(this, true, null, null, null, settleDelayMillis = 0L)
+            withTimeout(1_000) {
+                while (requestedChapters.count { it == second.chapterId } < 1) yield()
+            }
+
+            assertEquals(first.chapterId, owner.document?.contentId)
+            assertNull(owner.failure)
+            assertNull(library.progress(book.identity))
+
+            owner.selectChapter(second)
+            owner.load()
+
+            assertNull(owner.document)
+            assertEquals(SourceErrorCode.VERIFICATION_REQUIRED, owner.failure?.code)
+            assertEquals(2, requestedChapters.count { it == second.chapterId })
+            owner.dispose()
+        }
+    }
+
+    @Test
+    fun cancelled_reader_preload_cannot_publish_a_late_adjacent_document() = runBlocking {
+        val packageInfo = installFixture()
+        val book = summary(SOURCE_FLOW_TEST_SOURCE_ID, "preload-3", "预加载取消")
+        val first = SourceChapter("preload-301", "第一章", "https://example.test/preload-301")
+        val second = SourceChapter("preload-302", "第二章", "https://example.test/preload-302")
+        val third = SourceChapter("preload-303", "第三章", "https://example.test/preload-303")
+        val adjacentEntered = CompletableDeferred<Unit>()
+        val releaseAdjacent = CompletableDeferred<Unit>()
+        val requestedChapters = mutableListOf<String>()
+        controller {
+            FakeSession(
+                directoryResult = { SourceDirectory(book.identity, listOf(first, second, third)) },
+                chapterResult = { requested, remoteBookId ->
+                    requestedChapters += requested.chapterId
+                    if (requested == second && requestedChapters.count { it == second.chapterId } == 1) {
+                        adjacentEntered.complete(Unit)
+                        withContext(NonCancellable) { releaseAdjacent.await() }
+                    }
+                    readerDocument(remoteBookId, requested)
+                },
+            )
+        }.use { flow ->
+            flow.open(packageInfo)
+            flow.prepareBook(book)
+            flow.prepareChapter(first)
+            val owner = SourceReaderRouteOwner(flow, SavedStateHandle())
+
+            owner.load()
+            owner.preloadAdjacent(this, true, null, null, null, settleDelayMillis = 0L)
+            adjacentEntered.await()
+            owner.selectChapter(third)
+            releaseAdjacent.complete(Unit)
+            yield()
+            owner.load()
+
+            assertEquals(third.chapterId, owner.document?.contentId)
+            owner.selectChapter(second)
+            owner.load()
+
+            assertEquals(second.chapterId, owner.document?.contentId)
+            assertEquals(2, requestedChapters.count { it == second.chapterId })
             owner.dispose()
         }
     }
@@ -649,7 +1315,7 @@ internal class SourceRouteScopedOwnersInstrumentedTest : SourceFlowInstrumentedT
             flow.open(packageInfo)
             flow.prepareBook(book)
             flow.prepareChapter(first)
-            val owner = SourceReaderRouteOwner(flow)
+            val owner = SourceReaderRouteOwner(flow, SavedStateHandle())
             val stale = async { owner.load() }
             firstEntered.await()
 
@@ -684,7 +1350,7 @@ internal class SourceRouteScopedOwnersInstrumentedTest : SourceFlowInstrumentedT
             flow.open(packageInfo)
             flow.prepareBook(book)
             flow.prepareChapter(chapter)
-            val owner = SourceReaderRouteOwner(flow)
+            val owner = SourceReaderRouteOwner(flow, SavedStateHandle())
             val inFlight = async { owner.load() }
             chapterEntered.await()
 

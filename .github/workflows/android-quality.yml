@@ -2,11 +2,11 @@
 # SPDX-License-Identifier: Apache-2.0
 
 name: android-quality
+run-name: >-
+  ${{ github.event_name == 'pull_request' && format('Android PR #{0} admission | {1}', github.event.pull_request.number, github.event.pull_request.head.sha) || format('Android manual verification | {0}', github.ref_name) }}
 
 on:
   pull_request:
-  push:
-    branches: [main]
   workflow_dispatch:
     inputs:
       managed_device_pilot:
@@ -43,7 +43,7 @@ jobs:
           if [ "${{ github.event_name }}" = "pull_request" ]; then
             base="${{ github.event.pull_request.base.sha }}"
           else
-            base="${{ github.event.before }}"
+            base=""
           fi
           python "$GITHUB_WORKSPACE/tools/android_ci_plan.py" \
             --repo-root "$GITHUB_WORKSPACE" \
@@ -79,7 +79,7 @@ jobs:
           if [ "${{ github.event_name }}" = "pull_request" ]; then
             base="${{ github.event.pull_request.base.sha }}"
           else
-            base="${{ github.event.before }}"
+            base=""
           fi
           python "$GITHUB_WORKSPACE/tools/android_ci_plan.py" \
             --repo-root "$GITHUB_WORKSPACE" \
@@ -103,7 +103,7 @@ jobs:
       - name: Run shared API 29 verification
         if: steps.plan.outputs.device_needed == 'true'
         env:
-          CI_BASE: ${{ github.event.pull_request.base.sha || github.event.before }}
+          CI_BASE: ${{ github.event.pull_request.base.sha }}
         run: >-
           python ../tools/android_api29.py --repo-root "$GITHUB_WORKSPACE"
           --mode ci --base "$CI_BASE" --head "$GITHUB_SHA"

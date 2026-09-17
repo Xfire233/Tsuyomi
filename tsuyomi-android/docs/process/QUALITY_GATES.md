@@ -90,6 +90,10 @@ Implementation/merge authorization result
 
 PR 创建后及最终功能变更后，Adviser 必须对 PR head 再审阅一次；新 finding 必须按严重度关闭，head 变化会使受影响审阅失效。所有 required checks 成功后仍必须等待用户人工确认才可合并。Designer/Adviser `approve`、CI success 和无人值守实施授权都不等同于 GitHub review 或合并许可。
 
+合并操作先记录最新 PR head、目标 base 与对应 PR CI run；确认五项 required checks 在当前候选输入上全部成功，并核对 planner 选中的关键步骤确实执行。没有受影响任务的检查只能记录为 planner no-op，不能称为测试执行通过。常规使用 `gh pr merge <PR> --squash --match-head-commit <verified-head>`，由 strict branch protection 拒绝过期 base 或未完成检查；不得常规使用 `--admin`、自动合并或放宽保护。管理员例外必须有当前用户的单独明确授权，不能沿用历史例外。
+
+合并后读取 PR 的 `MERGED` 回执、merge commit 和远端 `main`，分别汇报“PR 准入通过”“已合并”和“主分支健康检查状态”，每项附对应 SHA/run。Squash 产生的新 SHA 不等于 PR 未经验证；主分支健康检查也不能冒充合并前准入或 Phase 关闭结论。
+
 ### G5. Verification
 
 验证分三层。三层复用同一 Change Packet、Git 边界和 affected-path 计划；Android Studio/Android CLI 只缩短反馈，不建立第二套 proof system。
@@ -121,7 +125,9 @@ PR 创建后及最终功能变更后，Adviser 必须对 PR head 再审阅一次
 
 #### Tier 3 — CI admission
 
-- `.github/workflows/android-quality.yml` 使用同一 planner 选择 bounded production tasks；documentation-only changes 不启动 Android jobs，known module changes 只跑 owning tasks，invalid/missing base 使用 conservative full plan。
+- `.github/workflows/android-quality.yml` 使用同一 planner 选择 bounded production tasks；documentation-only changes 保留 required check job，但跳过 Android 构建与设备任务，明确记为 planner no-op；known module changes 只跑 owning tasks，invalid/missing base 使用 conservative full plan。
+- Android 重型验证只由 `pull_request` 和显式 `workflow_dispatch` 触发，不在 `push → main` 后自动重复。所有 PR 均创建两个原名 required Android checks，由 planner 在 job 内选择任务；不得用 workflow-level path filter 令 required check 永久缺席。main 保留 repository/protocol/extension-baseline 轻量健康检查，它们不是新增的合并前审批轮次。手动 Android 复验没有 PR base 时采用现有 conservative full plan；它保留故障调查入口，不作为日常重复验收。
+- Actions run-name 明确标识 `PR #N admission`、`main health` 或 `manual verification`，workflow/job 的 required-check 标识保持不变。取消合并后的自动 Android 重跑以 strict required checks、管理员受保护及禁止直接推送 main 为前提；若这些前提改变，先重新评估此策略。
 - Local and hosted API 29 automation use `tools/android_api29.py` and `tools/android_api29_profile.json`; the runner creates a disposable automation-only AVD, never canonical or human-review state. Preserve actual SDK image revision, emulator/WebView versions, fingerprint, display/animation settings and logs. Shared inputs establish configuration parity, not identical Windows/Linux execution. After local success but hosted failure, compare those artifacts and first align reproducible inputs and synchronization on native Windows. WSL2 is a last resort only after evidence shows native remedies cannot resolve a material host discrepancy and usable acceleration is available.
 - A CI-only repeated failure must preserve failure-state evidence. In `HIGH`, reproduce it locally with the shared profile before pushing a speculative fix; in `LOW`, use hosted diagnostics or wait for explicit `HIGH` authorization, never silently launch local CI. Local `tools/android_api29.py` requires `--mode high`; `--mode ci` is reserved for GitHub Actions. `--build` includes planner-selected build checks; focused `--task`/`--test-class` runs are diagnostic evidence, not full preflight admission. Compare performance using the same task scope and recorded phase times; a focused test cannot establish a full-gate speedup.
 - 每个 PR/ref 只有一个 active `android-quality` run；required Android jobs 有 18 分钟 hard deadline。Instrumentation APK 可并行编译，device execution 串行。

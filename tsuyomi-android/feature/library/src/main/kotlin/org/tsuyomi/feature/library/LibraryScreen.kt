@@ -21,23 +21,22 @@ import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material3.Card
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Icon
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
-import androidx.compose.material3.OutlinedTextField
 import org.tsuyomi.core.media.api.CoverUiState
 import org.tsuyomi.core.media.api.FallbackSpec
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
-import org.tsuyomi.core.database.CollectionKind
+import kotlinx.coroutines.launch
+import org.tsuyomi.shared.librarydomain.CollectionKind
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalWindowInfo
@@ -49,19 +48,35 @@ import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
-import org.tsuyomi.core.database.LibraryEntry
-import org.tsuyomi.core.database.LibraryCollection
+import org.tsuyomi.shared.librarydomain.LibraryEntry
+import org.tsuyomi.shared.librarydomain.LibraryCollection
 import org.tsuyomi.core.display.DisplayProfile
 import org.tsuyomi.core.display.LocalDisplayEnvironment
 import org.tsuyomi.core.ui.components.PaginationBar
 import org.tsuyomi.core.ui.components.StateView
-import org.tsuyomi.core.database.RemoteReconciliationState
+import org.tsuyomi.core.ui.components.TsuyomiButton
+import org.tsuyomi.core.ui.components.TsuyomiButtonStyle
+import org.tsuyomi.core.ui.components.TsuyomiDialog
+import org.tsuyomi.core.ui.components.TsuyomiTextField
+import org.tsuyomi.core.ui.components.TsuyomiTabOption
+import org.tsuyomi.core.ui.components.TsuyomiTextTabRow
+import org.tsuyomi.shared.librarydomain.RemoteReconciliationState
 import org.tsuyomi.shared.model.BookIdentity
 import org.tsuyomi.core.ui.components.TsuyomiButton
 import org.tsuyomi.core.ui.components.TsuyomiStateKind
 import org.tsuyomi.core.ui.icons.TsuyomiIcons
 
-enum class SystemLibraryFilter { ALL, CONTINUE, READ_LATER, UNREAD, DORMANT }
+enum class SystemLibraryFilter {
+    ALL,
+    CONTINUE,
+    READ_LATER,
+    UNREAD,
+    DORMANT;
+
+    companion object {
+        val primaryTabs = listOf(ALL, CONTINUE, READ_LATER)
+    }
+}
 
 enum class LibraryUpdateFilter { ALL, UPDATES_ONLY }
 
@@ -128,7 +143,7 @@ fun LibraryUiState.projectedEntries(): List<LibraryEntry> {
     return when (sortMode) {
         LibrarySortMode.SMART -> if (isRootProjection) smartOrder(filtered, updates) else filtered
         LibrarySortMode.CUSTOM -> when (filter) {
-            SystemLibraryFilter.CONTINUE -> filtered.sortedByDescending { it.progress?.updatedAt }
+            SystemLibraryFilter.CONTINUE -> filtered.sortedByDescending(LibraryEntry::readerActivityAt)
             SystemLibraryFilter.UNREAD -> filtered.sortedByDescending { it.book.metadataUpdatedAt }
             SystemLibraryFilter.ALL,
             SystemLibraryFilter.READ_LATER,
@@ -138,9 +153,9 @@ fun LibraryUiState.projectedEntries(): List<LibraryEntry> {
         LibrarySortMode.TITLE -> filtered.sortedBy { it.book.title }.let { if (sortDescending) it.asReversed() else it }
         LibrarySortMode.ADDED -> filtered.sortedBy { it.libraryAddedAt }.let { if (sortDescending) it.asReversed() else it }
         LibrarySortMode.RECENT -> {
-            val withHistory = filtered.filter { it.progress != null }.sortedBy { it.progress?.updatedAt }
+            val withHistory = filtered.filter { it.readerActivityAt() != null }.sortedBy(LibraryEntry::readerActivityAt)
             val orderedHistory = if (sortDescending) withHistory.asReversed() else withHistory
-            orderedHistory + filtered.filter { it.progress == null }
+            orderedHistory + filtered.filter { it.readerActivityAt() == null }
         }
     }
 }
@@ -164,11 +179,13 @@ private fun smartOrder(
 
 private fun SystemLibraryFilter.accepts(entry: LibraryEntry): Boolean = when (this) {
     SystemLibraryFilter.ALL -> true
-    SystemLibraryFilter.CONTINUE -> entry.progress?.locator?.bookProgress?.let { it < 1.0 } ?: (entry.progress != null)
+    SystemLibraryFilter.CONTINUE -> entry.readerVisitedAt != null
     SystemLibraryFilter.READ_LATER -> entry.readLater
     SystemLibraryFilter.UNREAD -> false
     SystemLibraryFilter.DORMANT -> !entry.sourceAvailable
 }
+
+private fun LibraryEntry.readerActivityAt() = readerVisitedAt ?: progress?.updatedAt
 
 
 @Composable
@@ -176,9 +193,9 @@ fun LibraryScreen(
     state: LibraryUiState,
     collections: List<LibraryCollection>,
     showNavigationNodes: Boolean,
-    onOpenSystemNode: (SystemLibraryFilter) -> Unit,
     modifier: Modifier = Modifier,
-    onSelectTab: (SystemLibraryFilter) -> Unit = onOpenSystemNode,
+    primaryTabStates: Map<SystemLibraryFilter, LibraryUiState> = emptyMap(),
+    onSelectTab: suspend (SystemLibraryFilter) -> Unit = {},
     onOpenCollection: (LibraryCollection) -> Unit,
     onOpenBook: (LibraryEntry) -> Unit,
     onOpenMirror: (LibraryMirrorShortcut) -> Unit = {},
@@ -222,16 +239,16 @@ fun LibraryScreen(
             state = state,
             collections = collections,
             showNavigationNodes = showNavigationNodes,
-            onOpenSystemNode = onOpenSystemNode,
+            onSelectTab = onSelectTab,
             onOpenCollection = onOpenCollection,
             onOpenBook = onOpenBook,
             modifier = modifier.fillMaxSize(),
         )
         else -> LibraryPresentation(
             state = state,
+            primaryTabStates = primaryTabStates,
             collections = collections,
             showNavigationNodes = showNavigationNodes,
-            onOpenSystemNode = onOpenSystemNode,
             onOpenCollection = onOpenCollection,
             onSelectTab = onSelectTab,
             onOpenBook = onOpenBook,
@@ -279,69 +296,61 @@ private fun LibrarySelectionDialogs(
     when (state.selectionDialog) {
         LibrarySelectionDialog.CREATE_COLLECTION -> {
             var name by rememberSaveable { mutableStateOf("") }
-            AlertDialog(
+            TsuyomiDialog(
                 onDismissRequest = onDismiss,
-                title = { Text("用所选书籍新建收藏夹") },
-                text = {
-                    OutlinedTextField(
+                title = "用所选书籍新建收藏夹",
+                body = {
+                    TsuyomiTextField(
                         value = name,
                         onValueChange = { name = it },
-                        label = { Text("收藏夹名称") },
+                        label = "收藏夹名称",
                         singleLine = true,
                     )
                 },
-                confirmButton = {
-                    TextButton(
-                        onClick = { onCreateCollection(name.trim()) },
-                        enabled = name.isNotBlank(),
-                    ) { Text("创建") }
-                },
-                dismissButton = { TextButton(onClick = onDismiss) { Text("取消") } },
+                confirmLabel = "创建",
+                onConfirm = { onCreateCollection(name.trim()) },
+                confirmEnabled = name.isNotBlank(),
+                dismissLabel = "取消",
             )
         }
         LibrarySelectionDialog.ADD_TO_COLLECTION -> {
             val manualCollections = collections.filter {
                 it.kind == CollectionKind.MANUAL && it.collectionId !in state.selectedCollectionIds
             }
-            AlertDialog(
+            TsuyomiDialog(
                 onDismissRequest = onDismiss,
-                title = {
-                    Text(if (state.selectionKind == LibrarySelectionKind.BOOK) "加入收藏夹" else "移入收藏夹")
-                },
-                text = {
+                title = if (state.selectionKind == LibrarySelectionKind.BOOK) "加入收藏夹" else "移入收藏夹",
+                body = {
                     if (manualCollections.isEmpty()) {
                         Text("没有可用的目标收藏夹。")
                     } else {
-                        Column {
-                            manualCollections.forEach { collection ->
-                                TextButton(
-                                    onClick = { onAddToCollection(collection.collectionId) },
-                                    modifier = Modifier.fillMaxWidth(),
-                                ) { Text(collection.title) }
-                            }
+                        manualCollections.forEach { collection ->
+                            TsuyomiButton(
+                                text = collection.title,
+                                onClick = { onAddToCollection(collection.collectionId) },
+                                modifier = Modifier.fillMaxWidth(),
+                                style = TsuyomiButtonStyle.TEXT,
+                            )
                         }
                     }
                 },
-                confirmButton = {},
-                dismissButton = { TextButton(onClick = onDismiss) { Text("取消") } },
+                dismissLabel = "取消",
             )
         }
         LibrarySelectionDialog.CONFIRM_REMOVE -> {
             val selectingCollections = state.selectionKind == LibrarySelectionKind.COLLECTION
-            AlertDialog(
+            TsuyomiDialog(
                 onDismissRequest = onDismiss,
-                title = { Text(if (selectingCollections) "删除所选收藏夹？" else "移除所选书籍？") },
-                text = {
-                    Text(
-                        if (selectingCollections) {
-                            "将删除 ${state.selectedCollectionIds.size} 个本地收藏夹。收藏夹内书籍仍保留在书架。"
-                        } else {
-                            "将处理 ${state.selectedBookIds.size} 本书。网站书架不会被修改。"
-                        },
-                    )
+                title = if (selectingCollections) "删除所选收藏夹？" else "移除所选书籍？",
+                text = if (selectingCollections) {
+                    "将删除 ${state.selectedCollectionIds.size} 个本地收藏夹。收藏夹内书籍仍保留在书架。"
+                } else {
+                    "将处理 ${state.selectedBookIds.size} 本书。网站书架不会被修改。"
                 },
-                confirmButton = { TextButton(onClick = onRemove) { Text(if (selectingCollections) "删除" else "移除") } },
-                dismissButton = { TextButton(onClick = onDismiss) { Text("取消") } },
+                confirmLabel = if (selectingCollections) "删除" else "移除",
+                onConfirm = onRemove,
+                dismissLabel = "取消",
+                destructive = selectingCollections,
             )
         }
         null -> Unit
@@ -361,7 +370,7 @@ private fun FrozenEInkLibraryContent(
     state: LibraryUiState,
     collections: List<LibraryCollection>,
     showNavigationNodes: Boolean,
-    onOpenSystemNode: (SystemLibraryFilter) -> Unit,
+    onSelectTab: suspend (SystemLibraryFilter) -> Unit,
     onOpenCollection: (LibraryCollection) -> Unit,
     onOpenBook: (LibraryEntry) -> Unit,
     modifier: Modifier,
@@ -375,49 +384,42 @@ private fun FrozenEInkLibraryContent(
     val pageCount = ((filtered.size + pageSize - 1) / pageSize).coerceAtLeast(1)
     var page by rememberSaveable(state.filter, filtered.size) { mutableIntStateOf(1) }
     val visible = filtered.drop((page - 1) * pageSize).take(pageSize)
+    val scope = rememberCoroutineScope()
+    val selectedTab = state.filter.takeIf { it in SystemLibraryFilter.primaryTabs } ?: SystemLibraryFilter.ALL
     val nodes = if (showNavigationNodes) {
-        buildList {
-            listOf(
-                SystemLibraryFilter.CONTINUE,
-                SystemLibraryFilter.READ_LATER,
-                SystemLibraryFilter.DORMANT,
-            ).forEach { filter ->
-                add(
-                    LibraryNode(
-                        key = "system:${filter.name}",
-                        title = stringResource(filter.label()),
-                        kind = stringResource(R.string.library_node_system),
-                        icon = when (filter) {
-                            SystemLibraryFilter.CONTINUE -> TsuyomiIcons.ContinueReading
-                            SystemLibraryFilter.READ_LATER -> TsuyomiIcons.Bookmark
-                            SystemLibraryFilter.DORMANT -> TsuyomiIcons.Dormant
-                            SystemLibraryFilter.ALL, SystemLibraryFilter.UNREAD -> TsuyomiIcons.Shelf
-                        },
-                        onClick = { onOpenSystemNode(filter) },
-                    ),
-                )
-            }
-            collections.forEach { collection ->
-                add(
-                    LibraryNode(
-                        key = "collection:${collection.collectionId}",
-                        title = collection.title,
-                        kind = stringResource(collection.kind.nodeKindLabel()),
-                        icon = when (collection.kind) {
-                            CollectionKind.MANUAL -> TsuyomiIcons.Folder
-                            CollectionKind.SMART -> TsuyomiIcons.SmartCollection
-                            CollectionKind.SUBSCRIPTION -> TsuyomiIcons.Mirror
-                        },
-                        onClick = { onOpenCollection(collection) },
-                    ),
-                )
-            }
+        collections.map { collection ->
+            LibraryNode(
+                key = "collection:${collection.collectionId}",
+                title = collection.title,
+                kind = stringResource(collection.kind.nodeKindLabel()),
+                icon = when (collection.kind) {
+                    CollectionKind.MANUAL -> TsuyomiIcons.Folder
+                    CollectionKind.SMART -> TsuyomiIcons.SmartCollection
+                    CollectionKind.SUBSCRIPTION -> TsuyomiIcons.Mirror
+                },
+                onClick = { onOpenCollection(collection) },
+            )
         }
     } else {
         emptyList()
     }
 
     Column(modifier.fillMaxSize().padding(horizontal = 16.dp)) {
+        if (showNavigationNodes) {
+            TsuyomiTextTabRow(
+                options = listOf(
+                    TsuyomiTabOption(SystemLibraryFilter.ALL.name, "书架"),
+                    TsuyomiTabOption(SystemLibraryFilter.CONTINUE.name, "继续阅读"),
+                    TsuyomiTabOption(SystemLibraryFilter.READ_LATER.name, "稍后再读"),
+                ),
+                selectedKey = selectedTab.name,
+                onSelect = { key ->
+                    SystemLibraryFilter.primaryTabs.firstOrNull { it.name == key }?.let { tab ->
+                        if (tab != selectedTab) scope.launch { onSelectTab(tab) }
+                    }
+                },
+            )
+        }
         state.refreshFailure?.let { message ->
             Text(
                 text = message,

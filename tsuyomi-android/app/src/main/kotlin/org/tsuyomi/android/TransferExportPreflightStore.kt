@@ -26,12 +26,15 @@ internal class TransferExportPreflightStore(
     private val metadataFile = File(directory, "active.properties")
     private var lastGeneration = 0L
 
+    @Synchronized
     fun prepare(bytes: ByteArray): PreparedExport {
         require(bytes.size <= MAX_TRANSFER_BYTES)
         require(directory.isDirectory || directory.mkdirs())
         val previous = currentOwnership()
         previous?.let(::clearOwned)
-        val ownerGeneration = maxOf(lastGeneration, previous?.ownerGeneration ?: 0L) + 1L
+        val baseGeneration = maxOf(lastGeneration, previous?.ownerGeneration ?: 0L)
+        require(baseGeneration < Long.MAX_VALUE)
+        val ownerGeneration = baseGeneration + 1L
         val canonicalDigest = TransferCodec.digest(bytes)
         val fileName = fileName(ownerGeneration, canonicalDigest)
         val target = checkedPath(fileName)
@@ -44,9 +47,17 @@ internal class TransferExportPreflightStore(
         val ownership = ExportPreflightOwnership(ownerGeneration, canonicalDigest)
         writeMetadata(ownership)
         lastGeneration = ownerGeneration
-        return PreparedExport("tsuyomi-${FILE_DATE.format(Instant.now())}.json", ownerGeneration, canonicalDigest)
+        return prepared(ownership)
     }
 
+    @Synchronized
+    fun restore(ownership: ExportPreflightOwnership): PreparedExport? {
+        if (!ownership.isValid()) return null
+        lastGeneration = maxOf(lastGeneration, ownership.ownerGeneration)
+        return verifiedFile(ownership)?.let { prepared(ownership) }
+    }
+
+    @Synchronized
     fun verifiedFile(ownership: ExportPreflightOwnership): File? {
         if (currentOwnership() != ownership) return null
         val file = checkedPath(fileName(ownership.ownerGeneration, ownership.canonicalDigest))
@@ -54,9 +65,21 @@ internal class TransferExportPreflightStore(
         return file.takeIf { TransferCodec.digest(it.readBytes()) == ownership.canonicalDigest }
     }
 
+    @Synchronized
+    fun consumeVerifiedFile(ownership: ExportPreflightOwnership, write: (File) -> Boolean): Boolean? {
+        val source = verifiedFile(ownership) ?: return null
+        return try {
+            write(source)
+        } finally {
+            clearOwned(ownership)
+        }
+    }
+
+    @Synchronized
     fun clearIfOwned(ownership: ExportPreflightOwnership): Boolean =
         (currentOwnership() == ownership).also { if (it) clearOwned(ownership) }
 
+    @Synchronized
     fun sweepOrphans() {
         if (!directory.isDirectory) return
         val active = currentOwnership()
@@ -75,7 +98,7 @@ internal class TransferExportPreflightStore(
     private fun currentOwnership(): ExportPreflightOwnership? = runCatching {
         if (!metadataFile.isFile) return@runCatching null
         val properties = Properties().apply { FileInputStream(metadataFile).use { input -> load(input) } }
-        val ownerGeneration = properties.getProperty("ownerGeneration")?.toLongOrNull()?.takeIf { it > 0L }
+        val ownerGeneration = properties.getProperty("ownerGeneration")?.toLongOrNull()?.takeIf { it in 1 until Long.MAX_VALUE }
             ?: return@runCatching null
         val canonicalDigest = properties.getProperty("canonicalDigest")?.takeIf { DIGEST.matches(it) }
             ?: return@runCatching null
@@ -111,9 +134,18 @@ internal class TransferExportPreflightStore(
     private fun clearOwned(ownership: ExportPreflightOwnership) {
         if (currentOwnership() != ownership) return
         val file = checkedPath(fileName(ownership.ownerGeneration, ownership.canonicalDigest))
-        if (file.exists() && verifiedFile(ownership) != null) file.delete()
-        if (!file.exists()) metadataFile.delete()
+        if (file.isFile) file.delete()
+        metadataFile.delete()
     }
+
+    private fun prepared(ownership: ExportPreflightOwnership): PreparedExport = PreparedExport(
+        suggestedFileName = "tsuyomi-${FILE_DATE.format(Instant.now())}.json",
+        ownerGeneration = ownership.ownerGeneration,
+        canonicalDigest = ownership.canonicalDigest,
+    )
+
+    private fun ExportPreflightOwnership.isValid(): Boolean =
+        ownerGeneration in 1 until Long.MAX_VALUE && DIGEST.matches(canonicalDigest)
 
     private fun fileName(ownerGeneration: Long, canonicalDigest: String): String =
         "preflight-$ownerGeneration-$canonicalDigest.json"

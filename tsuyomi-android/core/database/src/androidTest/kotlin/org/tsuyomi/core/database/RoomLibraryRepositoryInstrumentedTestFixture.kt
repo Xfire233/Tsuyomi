@@ -4,6 +4,7 @@
  */
 package org.tsuyomi.core.database
 
+import org.tsuyomi.shared.librarydomain.ReadingProgress
 import androidx.room.Room
 import androidx.test.platform.app.InstrumentationRegistry
 import java.time.Instant

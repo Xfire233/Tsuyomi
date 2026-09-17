@@ -21,6 +21,7 @@ dependencies {
     implementation(libs.androidx.compose.material3)
     implementation(libs.androidx.compose.ui)
     androidTestImplementation(platform(libs.androidx.compose.bom))
+    androidTestImplementation(project(":core:preferences"))
     androidTestImplementation(libs.androidx.compose.ui.test.junit4)
     debugImplementation(libs.androidx.compose.ui.test.manifest)
 }

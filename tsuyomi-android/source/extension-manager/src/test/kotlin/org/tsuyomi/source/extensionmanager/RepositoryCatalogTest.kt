@@ -65,6 +65,33 @@ class RepositoryCatalogTest {
     }
 
     @Test
+    fun storageFailureRetriesTheEntireDurableCatalogTransactionAfterRecovery() {
+        val root = repositoryRoot()
+        val extension = signedFixture(version = "1.0.0")
+        val storage = Files.createTempDirectory("repository-storage-retry").toFile()
+        val fetcher = FixtureRepositoryFetcher(
+            mapOf(
+                INDEX_URL to signedCatalog(root, sequence = 1, entries = listOf(CatalogEntry(extension))),
+                DOWNLOAD_URL to extension.bytes,
+            ),
+        )
+        val client = repositoryClient(root, storage, fetcher)
+        assertEquals(1L, client.refresh().sequence)
+        val lock = File(storage, "repository-catalog-v1.lock")
+        assertTrue(lock.delete())
+        assertTrue(lock.mkdir())
+
+        val unavailable = assertThrows(RepositoryCatalogException::class.java) { client.cached() }
+        assertEquals(RepositoryCatalogError.STORAGE_UNAVAILABLE, unavailable.error)
+
+        assertTrue(lock.delete())
+        fetcher.replace(INDEX_URL, signedCatalog(root, sequence = 2, entries = listOf(CatalogEntry(extension))))
+
+        assertEquals(2L, client.refresh().sequence)
+        assertEquals(2L, client.cached()?.sequence)
+    }
+
+    @Test
     fun sequenceRollbackAndEqualSequenceEquivocationAreRejected() {
         val root = repositoryRoot()
         val extension = signedFixture(version = "1.0.0")

@@ -4,10 +4,6 @@
  */
 package org.tsuyomi.feature.browse
 
-import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.animation.core.tween
-import androidx.compose.animation.expandVertically
-import androidx.compose.animation.fadeIn
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -32,7 +28,6 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -44,6 +39,8 @@ import androidx.compose.runtime.setValue
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.Role
@@ -69,6 +66,9 @@ import org.tsuyomi.core.ui.components.TsuyomiTopBar
 import org.tsuyomi.core.ui.components.TsuyomiSplitButton
 import org.tsuyomi.core.ui.components.TsuyomiTabOption
 import org.tsuyomi.core.ui.components.TsuyomiTabRow
+import org.tsuyomi.core.ui.components.TsuyomiTextField
+import org.tsuyomi.core.ui.components.TsuyomiVisibility
+import org.tsuyomi.core.ui.components.TsuyomiVisibilityEdge
 import org.tsuyomi.core.ui.components.TsuyomiTopBarAction
 import org.tsuyomi.core.ui.icons.TsuyomiIcons
 import org.tsuyomi.core.ui.theme.TsuyomiSpacing
@@ -308,6 +308,8 @@ private fun BrowseScreenContent(
     var detailsSourceId by rememberSaveable { mutableStateOf<String?>(null) }
     var uninstallSourceId by rememberSaveable { mutableStateOf<String?>(null) }
     var repositoryManagerVisible by rememberSaveable { mutableStateOf(false) }
+    var pendingRemovalRepositoryId by rememberSaveable { mutableStateOf<String?>(null) }
+    val repositoryManagerFocusRequester = remember { FocusRequester() }
     LaunchedEffect(selectedSection) {
         if (
             selectedSection == BrowseSection.AVAILABLE &&
@@ -364,6 +366,7 @@ private fun BrowseScreenContent(
                             state !is BrowseUiState.Preparing,
                     onCatalogAction = onCatalogAction,
                     onManageRepositories = { repositoryManagerVisible = true },
+                    repositoryManagerFocusRequester = repositoryManagerFocusRequester,
                     modifier = Modifier.weight(1f),
                     scrollState = catalogScrollState,
                     catalogQuery = catalogQuery,
@@ -384,14 +387,45 @@ private fun BrowseScreenContent(
             onDismiss = { uninstallSourceId = null },
         )
     }
-    if (repositoryManagerVisible) {
+    pendingRemovalRepositoryId?.let { repositoryId ->
+        val repository = catalog.repositories.firstOrNull { it.id == repositoryId }
+        if (repository == null) {
+            LaunchedEffect(repositoryId) {
+                pendingRemovalRepositoryId = null
+                repositoryManagerVisible = true
+            }
+        } else {
+            TsuyomiDialog(
+                onDismissRequest = {
+                    pendingRemovalRepositoryId = null
+                    repositoryManagerVisible = true
+                },
+                title = stringResource(R.string.browse_repository_remove_title, repository.name),
+                text = stringResource(R.string.browse_repository_remove_message),
+                confirmLabel = stringResource(R.string.browse_repository_remove_action),
+                onConfirm = {
+                    onCatalogAction(BrowseCatalogAction.RemoveSubscription(repository.id))
+                    pendingRemovalRepositoryId = null
+                    repositoryManagerVisible = true
+                },
+                dismissLabel = stringResource(R.string.browse_cancel_action),
+                destructive = true,
+            )
+        }
+    }
+    if (repositoryManagerVisible && pendingRemovalRepositoryId == null) {
         RepositoryManagementDialog(
             catalog = catalog,
             onCatalogAction = onCatalogAction,
+            onRequestRemove = { repositoryId ->
+                repositoryManagerVisible = false
+                pendingRemovalRepositoryId = repositoryId
+            },
             onDismiss = {
                 if (catalog.subscription != null) onCatalogAction(BrowseCatalogAction.CancelSubscription)
                 repositoryManagerVisible = false
             },
+            restoreFocusTo = repositoryManagerFocusRequester,
         )
     }
 }
@@ -649,6 +683,7 @@ private fun BrowseCatalogContent(
     installationAllowed: Boolean,
     refreshAllowed: Boolean,
     onCatalogAction: (BrowseCatalogAction) -> Unit,
+    repositoryManagerFocusRequester: FocusRequester,
     onManageRepositories: () -> Unit,
     scrollState: LazyListState,
     catalogQuery: String,
@@ -659,7 +694,7 @@ private fun BrowseCatalogContent(
 ) {
     if (catalog.items.isEmpty()) {
         Column(modifier) {
-            RepositoryManagementAction(onManageRepositories)
+            RepositoryManagementAction(onManageRepositories, repositoryManagerFocusRequester)
             CatalogEmptyState(
                 catalog = catalog,
                 refreshAllowed = refreshAllowed,
@@ -687,18 +722,18 @@ private fun BrowseCatalogContent(
         contentPadding = PaddingValues(bottom = TsuyomiSpacing.Lg),
     ) {
         item(key = "catalog-repositories", contentType = "repository-action") {
-            RepositoryManagementAction(onManageRepositories)
+            RepositoryManagementAction(onManageRepositories, repositoryManagerFocusRequester)
         }
         item(key = "catalog-search", contentType = "search") {
             Row(
                 modifier = Modifier.fillMaxWidth().padding(TsuyomiSpacing.Md),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                OutlinedTextField(
+                TsuyomiTextField(
                     value = catalogQuery,
                     onValueChange = onCatalogQueryChange,
+                    label = stringResource(R.string.browse_catalog_search_label),
                     modifier = Modifier.weight(1f).testTag("browse-catalog-search"),
-                    label = { Text(stringResource(R.string.browse_catalog_search_label)) },
                     singleLine = true,
                 )
                 if (catalog.status == BrowseCatalogStatus.READY || catalog.status == BrowseCatalogStatus.IDLE) {
@@ -749,14 +784,130 @@ private fun BrowseCatalogContent(
 }
 
 @Composable
-private fun RepositoryManagementAction(onClick: () -> Unit) {
+private fun RepositoryManagementAction(onClick: () -> Unit, focusRequester: FocusRequester) {
     TsuyomiButton(
         text = stringResource(R.string.browse_repository_manage_action),
         onClick = onClick,
         modifier = Modifier
+            .focusRequester(focusRequester)
             .padding(horizontal = TsuyomiSpacing.Md, vertical = TsuyomiSpacing.Sm)
             .testTag("browse-repository-manage"),
         style = TsuyomiButtonStyle.TEXT,
+    )
+}
+@Composable
+private fun RepositoryManagementDialog(
+    catalog: BrowseCatalogState,
+    onCatalogAction: (BrowseCatalogAction) -> Unit,
+    onRequestRemove: (String) -> Unit,
+    onDismiss: () -> Unit,
+    restoreFocusTo: FocusRequester,
+) {
+    val subscription = catalog.subscription
+    var subscriptionLink by rememberSaveable { mutableStateOf(subscription?.link.orEmpty()) }
+    LaunchedEffect(subscription?.link) {
+        subscription?.link?.let { subscriptionLink = it }
+    }
+
+    TsuyomiDialog(
+        onDismissRequest = onDismiss,
+        title = stringResource(R.string.browse_repository_manage_title),
+        dismissLabel = stringResource(R.string.browse_close_action),
+        restoreFocusTo = restoreFocusTo,
+        body = {
+            val focusManager = LocalFocusManager.current
+            Text(
+                stringResource(R.string.browse_repository_manage_message),
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            catalog.repositories.forEach { repository ->
+                RepositoryRegistryRow(
+                    repository = repository,
+                    onSetEnabled = { enabled ->
+                        onCatalogAction(BrowseCatalogAction.SetSubscriptionEnabled(repository.id, enabled))
+                    },
+                    onRequestRemove = { onRequestRemove(repository.id) },
+                )
+            }
+            HorizontalDivider(Modifier.padding(vertical = TsuyomiSpacing.Md))
+            Text(
+                stringResource(R.string.browse_repository_add_title),
+                style = MaterialTheme.typography.titleSmall,
+            )
+            TsuyomiTextField(
+                value = subscriptionLink,
+                onValueChange = { subscriptionLink = it },
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(top = TsuyomiSpacing.Sm)
+                    .testTag("browse-subscription-link"),
+                label = stringResource(R.string.browse_repository_link_label),
+                singleLine = true,
+            )
+            TsuyomiButton(
+                text = stringResource(R.string.browse_repository_inspect_action),
+                onClick = {
+                    focusManager.clearFocus()
+                    onCatalogAction(BrowseCatalogAction.InspectSubscription(subscriptionLink))
+                },
+                enabled = subscriptionLink.isNotBlank() && subscription?.busy != true,
+                modifier = Modifier
+                    .padding(top = TsuyomiSpacing.Sm)
+                    .testTag("browse-subscription-inspect"),
+                style = TsuyomiButtonStyle.SECONDARY,
+            )
+            if (subscription?.problem != null) {
+                Text(
+                    stringResource(R.string.browse_repository_inspect_error),
+                    modifier = Modifier.padding(top = TsuyomiSpacing.Sm),
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.error,
+                )
+            }
+            if (subscription?.busy == true) {
+                InlineStatus(stringResource(R.string.browse_repository_inspecting))
+            }
+            subscription?.rootFingerprint?.let { rootFingerprint ->
+                val indexUrl = subscription.indexUrl ?: return@let
+                HorizontalDivider(Modifier.padding(vertical = TsuyomiSpacing.Md))
+                Text(
+                    stringResource(R.string.browse_repository_confirm_title),
+                    style = MaterialTheme.typography.titleSmall,
+                )
+                CatalogDetailField(
+                    stringResource(R.string.browse_repository_confirm_index_url),
+                    indexUrl,
+                )
+                CatalogDetailField(
+                    stringResource(R.string.browse_repository_confirm_root_fingerprint),
+                    rootFingerprint,
+                )
+                Text(
+                    stringResource(R.string.browse_repository_confirm_message),
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                TsuyomiButton(
+                    text = stringResource(R.string.browse_repository_confirm_action),
+                    onClick = { onCatalogAction(BrowseCatalogAction.ConfirmSubscription) },
+                    enabled = subscription.busy != true,
+                    modifier = Modifier
+                        .padding(top = TsuyomiSpacing.Sm)
+                        .testTag("browse-subscription-confirm"),
+                    style = TsuyomiButtonStyle.PRIMARY,
+                )
+                TsuyomiButton(
+                    text = stringResource(R.string.browse_repository_cancel_subscription_action),
+                    onClick = { onCatalogAction(BrowseCatalogAction.CancelSubscription) },
+                    enabled = subscription.busy != true,
+                    modifier = Modifier
+                        .padding(top = TsuyomiSpacing.Sm)
+                        .testTag("browse-subscription-cancel"),
+                    style = TsuyomiButtonStyle.TEXT,
+                )
+            }
+        },
     )
 }
 
@@ -778,14 +929,12 @@ private fun CatalogEmptyState(
         BrowseCatalogStatus.UNAVAILABLE -> StateView(
             kind = TsuyomiStateKind.ERROR,
             title = stringResource(R.string.browse_catalog_unavailable_title),
-            message = catalog.problem ?: stringResource(R.string.browse_catalog_unavailable_message),
-            modifier = modifier,
+            message = stringResource(R.string.browse_catalog_unavailable_message),
         )
         BrowseCatalogStatus.ERROR -> StateView(
             kind = TsuyomiStateKind.ERROR,
             title = stringResource(R.string.browse_catalog_error_title),
-            message = catalog.problem ?: stringResource(R.string.browse_catalog_error_message),
-            actionLabel = if (refreshAllowed) stringResource(R.string.browse_catalog_refresh_action) else null,
+            message = stringResource(R.string.browse_catalog_error_message),
             onAction = if (refreshAllowed) {
                 { onCatalogAction(BrowseCatalogAction.Refresh) }
             } else {
@@ -819,7 +968,7 @@ private fun CatalogStatusNotice(
         BrowseCatalogStatus.LOADING -> InlineStatus(stringResource(R.string.browse_catalog_loading))
         BrowseCatalogStatus.ERROR -> InfoBanner(
             title = stringResource(R.string.browse_catalog_error_title),
-            message = catalog.problem ?: stringResource(R.string.browse_catalog_error_message),
+            message = stringResource(R.string.browse_catalog_error_message),
             primaryActionLabel = if (refreshAllowed) stringResource(R.string.browse_catalog_refresh_action) else null,
             onPrimaryAction = if (refreshAllowed) {
                 { onCatalogAction(BrowseCatalogAction.Refresh) }
@@ -829,7 +978,7 @@ private fun CatalogStatusNotice(
         )
         BrowseCatalogStatus.UNAVAILABLE -> InfoBanner(
             title = stringResource(R.string.browse_catalog_unavailable_title),
-            message = catalog.problem ?: stringResource(R.string.browse_catalog_unavailable_message),
+            message = stringResource(R.string.browse_catalog_unavailable_message),
         )
         BrowseCatalogStatus.IDLE,
         BrowseCatalogStatus.READY -> Unit
@@ -1001,133 +1150,6 @@ private fun InstalledSourceUninstallDialog(
     )
 }
 
-@Composable
-private fun RepositoryManagementDialog(
-    catalog: BrowseCatalogState,
-    onCatalogAction: (BrowseCatalogAction) -> Unit,
-    onDismiss: () -> Unit,
-) {
-    val subscription = catalog.subscription
-    var subscriptionLink by rememberSaveable { mutableStateOf(subscription?.link.orEmpty()) }
-    var pendingRemovalRepositoryId by rememberSaveable { mutableStateOf<String?>(null) }
-    LaunchedEffect(subscription?.link) {
-        subscription?.link?.let { subscriptionLink = it }
-    }
-
-    TsuyomiDialog(
-        onDismissRequest = onDismiss,
-        title = stringResource(R.string.browse_repository_manage_title),
-        dismissLabel = stringResource(R.string.browse_close_action),
-        body = {
-            val focusManager = LocalFocusManager.current
-            Text(
-                stringResource(R.string.browse_repository_manage_message),
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-            catalog.repositories.forEach { repository ->
-                RepositoryRegistryRow(
-                    repository = repository,
-                    onSetEnabled = { enabled ->
-                        onCatalogAction(BrowseCatalogAction.SetSubscriptionEnabled(repository.id, enabled))
-                    },
-                    onRequestRemove = { pendingRemovalRepositoryId = repository.id },
-                )
-            }
-            HorizontalDivider(Modifier.padding(vertical = TsuyomiSpacing.Md))
-            Text(
-                stringResource(R.string.browse_repository_add_title),
-                style = MaterialTheme.typography.titleSmall,
-            )
-            OutlinedTextField(
-                value = subscriptionLink,
-                onValueChange = { subscriptionLink = it },
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(top = TsuyomiSpacing.Sm)
-                    .testTag("browse-subscription-link"),
-                label = { Text(stringResource(R.string.browse_repository_link_label)) },
-                singleLine = true,
-            )
-            TsuyomiButton(
-                text = stringResource(R.string.browse_repository_inspect_action),
-                onClick = {
-                    focusManager.clearFocus()
-                    onCatalogAction(BrowseCatalogAction.InspectSubscription(subscriptionLink))
-                },
-                enabled = subscriptionLink.isNotBlank() && subscription?.busy != true,
-                modifier = Modifier
-                    .padding(top = TsuyomiSpacing.Sm)
-                    .testTag("browse-subscription-inspect"),
-                style = TsuyomiButtonStyle.SECONDARY,
-            )
-            subscription?.problem?.let { problem ->
-                Text(
-                    problem,
-                    modifier = Modifier.padding(top = TsuyomiSpacing.Sm),
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.error,
-                )
-            }
-            if (subscription?.busy == true) {
-                InlineStatus(stringResource(R.string.browse_repository_inspecting))
-            }
-            subscription?.rootFingerprint?.let { rootFingerprint ->
-                HorizontalDivider(Modifier.padding(vertical = TsuyomiSpacing.Md))
-                Text(
-                    stringResource(R.string.browse_repository_confirm_title),
-                    style = MaterialTheme.typography.titleSmall,
-                )
-                CatalogDetailField(
-                    stringResource(R.string.browse_repository_confirm_index_url),
-                    subscription?.indexUrl.orEmpty(),
-                )
-                CatalogDetailField(
-                    stringResource(R.string.browse_repository_confirm_root_fingerprint),
-                    rootFingerprint,
-                )
-                Text(
-                    stringResource(R.string.browse_repository_confirm_message),
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-                TsuyomiButton(
-                    text = stringResource(R.string.browse_repository_confirm_action),
-                    onClick = { onCatalogAction(BrowseCatalogAction.ConfirmSubscription) },
-                    enabled = subscription?.busy != true,
-                    modifier = Modifier
-                        .padding(top = TsuyomiSpacing.Sm)
-                        .testTag("browse-subscription-confirm"),
-                    style = TsuyomiButtonStyle.PRIMARY,
-                )
-                TsuyomiButton(
-                    text = stringResource(R.string.browse_repository_cancel_subscription_action),
-                    onClick = { onCatalogAction(BrowseCatalogAction.CancelSubscription) },
-                    enabled = subscription?.busy != true,
-                    modifier = Modifier
-                        .padding(top = TsuyomiSpacing.Sm)
-                        .testTag("browse-subscription-cancel"),
-                    style = TsuyomiButtonStyle.TEXT,
-                )
-            }
-        },
-    )
-    pendingRemovalRepositoryId?.let { repositoryId ->
-        val repository = catalog.repositories.firstOrNull { it.id == repositoryId } ?: return@let
-        TsuyomiDialog(
-            onDismissRequest = { pendingRemovalRepositoryId = null },
-            title = stringResource(R.string.browse_repository_remove_title, repository.name),
-            text = stringResource(R.string.browse_repository_remove_message),
-            confirmLabel = stringResource(R.string.browse_repository_remove_action),
-            onConfirm = {
-                onCatalogAction(BrowseCatalogAction.RemoveSubscription(repository.id))
-                pendingRemovalRepositoryId = null
-            },
-            dismissLabel = stringResource(R.string.browse_cancel_action),
-            destructive = true,
-        )
-    }
-}
 
 @Composable
 private fun RepositoryRegistryRow(
@@ -1203,15 +1225,12 @@ private fun PublisherKeyRequiredCard(
                 color = MaterialTheme.colorScheme.error,
             )
         }
-        OutlinedTextField(
+        TsuyomiTextField(
             value = publicKey,
             onValueChange = { publicKey = it },
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(top = TsuyomiSpacing.Sm)
-                .testTag("browse-publisher-public-key"),
-            label = { Text(stringResource(R.string.browse_publisher_key_input_label)) },
-            minLines = 3,
+            modifier = Modifier.fillMaxWidth(),
+            label = stringResource(R.string.browse_publisher_key_input_label),
+            singleLine = true,
         )
         TsuyomiButton(
             text = stringResource(R.string.browse_publisher_key_verify_action),
@@ -1278,9 +1297,9 @@ private fun ApprovalSourceCard(
                     style = MaterialTheme.typography.labelLarge,
                 )
             }
-            AnimatedVisibility(
+            TsuyomiVisibility(
                 visible = expanded,
-                enter = expandVertically(tween(180)) + fadeIn(tween(120)),
+                enterFrom = TsuyomiVisibilityEdge.BOTTOM,
             ) {
                 Column {
                     Text(

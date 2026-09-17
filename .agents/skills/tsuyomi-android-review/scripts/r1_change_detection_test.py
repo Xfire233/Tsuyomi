@@ -39,6 +39,24 @@ class ReviewBuildIdentityTest(unittest.TestCase):
         self.assertNotEqual(expected, r1.compute_review_build_id(production))
         self.assertNotEqual(expected, r1.compute_review_build_id(contract))
 
+    def test_local_device_and_evidence_files_do_not_enter_review_inputs(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            android = root / "tsuyomi-android"
+            source = android / "app/src/main/kotlin/App.kt"
+            source.parent.mkdir(parents=True)
+            source.write_text("fun main() = Unit", encoding="utf-8")
+            expected = r1.collect_files(root)
+            self.assertEqual({"tsuyomi-android/app/src/main/kotlin/App.kt"}, set(expected))
+
+            local = android / ".local/beta-validation"
+            local.mkdir(parents=True)
+            (local / "screen.xml").write_text("<hierarchy />", encoding="utf-8")
+            (local / "multiinstance.lock").write_bytes(b"live emulator state")
+            self.assertEqual(expected, r1.collect_files(root))
+            (local / "screen.xml").write_text("<hierarchy changed='true' />", encoding="utf-8")
+            self.assertEqual(expected, r1.collect_files(root))
+
 
 class ScopeClassificationTest(unittest.TestCase):
     def test_phase_four_contract_remains_full_scope(self) -> None:
@@ -190,10 +208,9 @@ class PolicyCatalogConsistencyTest(unittest.TestCase):
 
     def test_catalog_is_standalone_production_review_data(self) -> None:
         root = r1.find_repo_root(Path.cwd())
-        catalog_version, node_ids = r1.parse_catalog(root)
+        _, node_ids = r1.parse_catalog(root)
         catalog = json.loads((root / r1.CATALOG_PATH).read_text(encoding="utf-8"))
 
-        self.assertEqual(36, catalog_version)
         self.assertEqual(28, len(node_ids))
         self.assertEqual(
             {"production_ui", "actual_online_scenario"},

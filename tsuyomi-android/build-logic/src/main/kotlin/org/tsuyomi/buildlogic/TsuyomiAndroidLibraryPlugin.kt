@@ -12,6 +12,7 @@ import org.gradle.api.tasks.testing.Test
 class TsuyomiAndroidLibraryPlugin : Plugin<Project> {
     override fun apply(target: Project) {
         with(target) {
+        TsuyomiArchitectureVerification.install(this)
         pluginManager.apply("com.android.library")
 
         extensions.configure(LibraryExtension::class.java) {

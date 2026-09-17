@@ -11,14 +11,11 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
+import org.tsuyomi.core.ui.components.TsuyomiTextField
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
@@ -29,6 +26,7 @@ import org.tsuyomi.core.ui.components.SettingsSectionHeader
 import org.tsuyomi.core.ui.components.SettingsSwitchRow
 import org.tsuyomi.core.ui.theme.TsuyomiSpacing
 
+import org.tsuyomi.core.ui.components.TsuyomiDialog
 data class FeatureIntroductionDefinition(
     val id: String,
     val version: Int,
@@ -42,13 +40,15 @@ fun HelpScreen(
     introductionsEnabled: Boolean,
     seenVersions: Set<String>,
     onIntroductionsEnabledChanged: (Boolean) -> Unit,
+    selectedIntroductionId: String?,
+    onIntroductionSelected: (String?) -> Unit,
     onIntroductionSeen: (String, Int) -> Unit,
     onResetSeenVersions: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     var query by rememberSaveable { mutableStateOf("") }
     var expandedQuestion by rememberSaveable { mutableStateOf<String?>(null) }
-    var selectedIntroduction by remember { mutableStateOf<FeatureIntroductionDefinition?>(null) }
+    val selectedIntroduction = selectedIntroductionId?.let { featureIntroductionDefinition(it) }
     val introductions = featureIntroductionDefinitions()
     val questions = helpQuestions().filter { (question, answer) ->
         query.isBlank() || question.contains(query, ignoreCase = true) || answer.contains(query, ignoreCase = true)
@@ -56,10 +56,10 @@ fun HelpScreen(
 
     CenteredSettingsColumn(modifier) {
         SettingsSectionHeader(stringResource(R.string.settings_help_search_section))
-        OutlinedTextField(
+        TsuyomiTextField(
             value = query,
             onValueChange = { query = it.take(100) },
-            label = { Text(stringResource(R.string.settings_help_search_label)) },
+            label = stringResource(R.string.settings_help_search_label),
             singleLine = true,
             modifier = Modifier.fillMaxWidth().padding(horizontal = TsuyomiSpacing.Md),
         )
@@ -102,7 +102,7 @@ fun HelpScreen(
                     } else {
                         introduction.summary
                     },
-                    onClick = { selectedIntroduction = introduction },
+                    onClick = { onIntroductionSelected(introduction.id) },
                 )
             }
         }
@@ -114,9 +114,9 @@ fun HelpScreen(
             introduction = introduction,
             onAcknowledged = {
                 onIntroductionSeen(introduction.id, introduction.version)
-                selectedIntroduction = null
+                onIntroductionSelected(null)
             },
-            onDismiss = { selectedIntroduction = null },
+            onDismiss = { onIntroductionSelected(null) },
         )
     }
 }
@@ -185,29 +185,20 @@ fun FeatureIntroductionDialog(
     onAcknowledged: () -> Unit,
     onDismiss: () -> Unit,
 ) {
-    AlertDialog(
+    TsuyomiDialog(
         onDismissRequest = onDismiss,
-        title = { Text(introduction.title) },
-        text = {
-            Column {
-                Text(introduction.summary)
-                introduction.points.forEach { Text("• $it", modifier = Modifier.padding(top = TsuyomiSpacing.Sm)) }
-                Text(
-                    stringResource(R.string.settings_help_introduction_authority_notice),
-                    modifier = Modifier.padding(top = TsuyomiSpacing.Md),
-                )
-            }
+        title = introduction.title,
+        body = {
+            Text(introduction.summary)
+            introduction.points.forEach { Text("• $it", modifier = Modifier.padding(top = TsuyomiSpacing.Sm)) }
+            Text(
+                stringResource(R.string.settings_help_introduction_authority_notice),
+                modifier = Modifier.padding(top = TsuyomiSpacing.Md),
+            )
         },
-        confirmButton = {
-            TextButton(onClick = onAcknowledged) {
-                Text(stringResource(R.string.settings_help_acknowledge))
-            }
-        },
-        dismissButton = {
-            TextButton(onClick = onDismiss) {
-                Text(stringResource(R.string.settings_help_later))
-            }
-        },
+        confirmLabel = stringResource(R.string.settings_help_acknowledge),
+        onConfirm = onAcknowledged,
+        dismissLabel = stringResource(R.string.settings_help_later),
     )
 }
 

@@ -2,6 +2,8 @@
 # SPDX-License-Identifier: Apache-2.0
 
 name: extensions-quality
+run-name: >-
+  ${{ github.event_name == 'pull_request' && format('Extension baseline PR #{0} admission', github.event.pull_request.number) || 'Extension baseline main health' }}
 
 on:
   pull_request:

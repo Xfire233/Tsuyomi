@@ -23,6 +23,9 @@ import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
+import org.tsuyomi.core.display.DisplayProfile
+import org.tsuyomi.core.display.LocalDisplayEnvironment
+
 import org.tsuyomi.core.media.api.CoverUiState
 import org.tsuyomi.core.media.api.FallbackSpec
 
@@ -43,6 +46,12 @@ fun CoverImage(
         is CoverUiState.StaleReady -> state.bitmap
         else -> null
     }
+    val contentScale = if (LocalDisplayEnvironment.current.effectiveProfile == DisplayProfile.EINK) {
+        ContentScale.Crop
+    } else {
+        ContentScale.Fit
+    }
+
     Surface(modifier = modifier, shape = MaterialTheme.shapes.small) {
         Box(modifier = Modifier.fillMaxSize()) {
             if (bitmap != null) {
@@ -50,7 +59,7 @@ fun CoverImage(
                     bitmap = bitmap.asImageBitmap(),
                     contentDescription = null,
                     modifier = Modifier.fillMaxSize(),
-                    contentScale = ContentScale.Crop,
+                    contentScale = contentScale,
                 )
             } else {
                 FallbackCover(state.fallbackSpec(), Modifier.fillMaxSize())

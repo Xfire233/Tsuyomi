@@ -23,7 +23,7 @@ import org.junit.Test
 import org.junit.runner.RunWith
 import org.tsuyomi.core.database.RoomUpdateStore
 import org.tsuyomi.core.database.TsuyomiDatabase
-import org.tsuyomi.core.database.LibraryBook
+import org.tsuyomi.shared.librarydomain.LibraryBook
 import org.tsuyomi.core.database.RoomLibraryRepository
 import org.tsuyomi.core.library.UpdateCoordinator
 import org.tsuyomi.shared.librarydomain.UpdateCandidate

@@ -8,12 +8,17 @@ import android.content.Context
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.withContext
 import java.io.Closeable
 import java.time.Instant
-import org.tsuyomi.core.database.LibraryBook
-import org.tsuyomi.core.database.LibraryEntry
-import org.tsuyomi.core.database.ReadingProgress
+import org.tsuyomi.shared.librarydomain.LibraryBook
+import org.tsuyomi.shared.librarydomain.LibraryEntry
+import org.tsuyomi.shared.librarydomain.ReadingProgress
 import org.tsuyomi.core.database.RoomLibraryRepository
+import org.tsuyomi.core.files.StorageException
 import org.tsuyomi.core.network.DirectActionTokenRegistry
 import org.tsuyomi.core.webview.CapturedVerifiedPage
 import org.tsuyomi.feature.book.SourceBookState
@@ -33,6 +38,7 @@ import org.tsuyomi.shared.sourcecontract.SourceDiagnostic
 import org.tsuyomi.shared.sourcecontract.SourceDirectory
 import org.tsuyomi.shared.sourcecontract.SourceErrorCode
 import org.tsuyomi.shared.sourcecontract.SourceException
+import org.tsuyomi.source.extensionmanager.RemoteOperation
 import org.tsuyomi.source.extensionmanager.VerifiedHxpPackage
 
 internal class SourceFlowController(
@@ -71,12 +77,14 @@ internal class SourceFlowController(
     private var verifiedChapterLoad: SourceReaderLoad? = null
     private var preparedResumeLoad: SourceReaderLoad? = null
 
+    private var selectionGeneration = 0L
+
     private var searchInvocation = 0L
     suspend fun chapterVerifiedPageRequestUrl(): String? {
         val source = sessionOwner.requireClientOrNull() ?: return null
         val book = selectedBook ?: return null
         val chapter = selectedChapter ?: return null
-        return runCatching { source.chapterRequestUrl(chapter, book.identity.remoteBookId) }.getOrNull()
+        return sourceOrNull { source.chapterRequestUrl(chapter, book.identity.remoteBookId) }
     }
 
     suspend fun chapterVerifiedPage(snapshot: CapturedVerifiedPage): Boolean {
@@ -88,7 +96,7 @@ internal class SourceFlowController(
         verifiedChapterLoad = try {
             SourceReaderLoad(
                 document = source.chapterVerifiedPage(chapter, book.identity.remoteBookId, snapshot).also { document ->
-                    runCatching { normalizedStore.writeDocument(book.identity, document) }
+                    writeNormalized { normalizedStore.writeDocument(book.identity, document) }
                 },
                 restoredLocator = restored,
             )
@@ -127,7 +135,7 @@ internal class SourceFlowController(
     }
 
     fun commitHomeSource(packageInfo: VerifiedHxpPackage) {
-        home.bindSource(packageInfo.manifest.sourceId.value)
+        home.bindSource(packageInfo.manifest.sourceId.value, packageInfo.packageSha256)
     }
 
     fun commitSourceSwitch(packageInfo: VerifiedHxpPackage) {
@@ -170,8 +178,24 @@ internal class SourceFlowController(
             library.dismissFirstRemoteImportPrompt(sourceId, policy.capabilitySetFingerprint)
     }
 
-    suspend fun addSelectedBook(importedAt: Instant = Instant.now()): RemoteAddUiResult =
-        remoteLibrary.addLocalBook(selectedBook, importedAt)
+    suspend fun addSelectedBook(detail: SourceBookDetail?, importedAt: Instant = Instant.now()): RemoteAddUiResult {
+        val result = remoteLibrary.addLocalBook(selectedBook, importedAt)
+        if (result == RemoteAddUiResult.LocalOnly && detail != null && detail.summary.identity == selectedBook?.identity) {
+            val existing = library.book(detail.summary.identity)
+            if (existing != null) {
+                val merged = mergeLibraryBook(
+                    existing = existing,
+                    summary = detail.summary,
+                    updatedAt = importedAt,
+                    detailAuthoritative = true,
+                    sourceTags = detail.tags,
+                )
+                if (merged != existing) library.saveBook(merged)
+                remoteLibrary.refreshSelection(detail.summary)
+            }
+        }
+        return result
+    }
 
     suspend fun addSelectedBookToWebsite(importedAt: Instant = Instant.now()): RemoteAddUiResult =
         remoteLibrary.addBookToWebsite(selectedBook, importedAt)
@@ -213,8 +237,12 @@ internal class SourceFlowController(
         defaultTargetId: String,
     ) = remoteLibrary.addBookToWebsiteTarget(book, targetId, targetName, defaultTargetId)
 
-    suspend fun retryRemoteMutation(book: SourceBookSummary? = selectedBook, importedAt: Instant = Instant.now()): RemoteMutationUiResult =
-        remoteLibrary.retryRemoteMutation(book ?: selectedBook, importedAt)
+    suspend fun retryRemoteMutation(
+        book: SourceBookSummary? = selectedBook,
+        importedAt: Instant = Instant.now(),
+        expectedOperation: RemoteOperation? = null,
+    ): RemoteMutationUiResult =
+        remoteLibrary.retryRemoteMutation(book ?: selectedBook, importedAt, expectedOperation)
 
     suspend fun acknowledgeUnresolved(identity: BookIdentity): Boolean =
         remoteLibrary.acknowledgeUnresolved(identity)
@@ -230,8 +258,12 @@ internal class SourceFlowController(
 
     suspend fun reopenWithStoredCredentials() {
         when (sessionOwner.reopen()) {
-            SourceSessionOpenResult.OPENED -> searchState = SearchResultState.Idle
+            SourceSessionOpenResult.OPENED -> {
+                home.invalidateSession()
+                searchState = SearchResultState.Idle
+            }
             SourceSessionOpenResult.PACKAGE_CHANGED -> {
+                home.invalidateSession()
                 resetReadingState()
                 remoteLibrary.reset()
                 searchState = SearchResultState.Idle
@@ -241,11 +273,15 @@ internal class SourceFlowController(
         }
     }
 
-    suspend fun reopenAfterVerifiedPage() {
+    suspend fun reopenAfterVerifiedPage(retainVerifiedHome: Boolean) {
         val parsedSearchState = searchState
         when (sessionOwner.reopen()) {
-            SourceSessionOpenResult.OPENED -> searchState = parsedSearchState
+            SourceSessionOpenResult.OPENED -> {
+                if (retainVerifiedHome) home.retainVerifiedPageAfterSessionRenewal() else home.invalidateSession()
+                searchState = parsedSearchState
+            }
             SourceSessionOpenResult.PACKAGE_CHANGED -> {
+                home.invalidateSession()
                 resetReadingState()
                 remoteLibrary.reset()
             }
@@ -263,6 +299,7 @@ internal class SourceFlowController(
             SourceRestorationTarget.DETAIL -> if (selectedBook == null) prepareBook(snapshot.book)
             SourceRestorationTarget.DIRECTORY -> if (selectedBook == null) prepareBook(snapshot.book)
             SourceRestorationTarget.READER -> if (selectedBook == null || selectedChapter == null) {
+                if (selectedBook?.identity != snapshot.book.identity) selectionGeneration += 1
                 selectedBook = snapshot.book
                 remoteLibrary.beginSelection(snapshot.book.identity)
                 remoteLibrary.refreshSelection(snapshot.book)
@@ -293,12 +330,16 @@ internal class SourceFlowController(
     ): Result<SourceHomePage> {
         val source = sessionOwner.requireClientOrNull()
             ?: return Result.failure(IllegalStateException("source-not-open"))
-        return runCatching { source.home(selectedFilters, cursor, offlineOnly) }
+        return try {
+            Result.success(source.home(selectedFilters, cursor, offlineOnly))
+        } catch (error: SourceException) {
+            Result.failure(error)
+        }
     }
 
     suspend fun homeVerifiedPageRequestUrl(): String? {
         val source = sessionOwner.requireClientOrNull() ?: return null
-        return runCatching { source.homeRequestUrl(home.selectedFilters, cursor = null) }.getOrNull()
+        return sourceOrNull { source.homeRequestUrl(home.selectedFilters, cursor = null) }
     }
 
     suspend fun homeVerifiedPage(snapshot: CapturedVerifiedPage): Boolean {
@@ -403,7 +444,7 @@ internal class SourceFlowController(
     suspend fun detailVerifiedPageRequestUrl(): String? {
         val source = sessionOwner.requireClientOrNull() ?: return null
         val book = selectedBook ?: return null
-        return runCatching { source.detailRequestUrl(book.identity.remoteBookId) }.getOrNull()
+        return sourceOrNull { source.detailRequestUrl(book.identity.remoteBookId) }
     }
 
     suspend fun detailVerifiedPage(snapshot: CapturedVerifiedPage): Boolean {
@@ -412,7 +453,7 @@ internal class SourceFlowController(
         detailState = SourceBookState.Loading
         detailState = try {
             val detail = source.detailVerifiedPage(book.identity.remoteBookId, snapshot).also { value ->
-                runCatching { normalizedStore.writeDetail(value) }
+                writeNormalized { normalizedStore.writeDetail(value) }
             }
             adoptDetail(detail)
             SourceBookState.Content(detail)
@@ -425,7 +466,7 @@ internal class SourceFlowController(
     suspend fun directoryVerifiedPageRequestUrl(): String? {
         val source = sessionOwner.requireClientOrNull() ?: return null
         val book = selectedBook ?: return null
-        return runCatching { source.directoryRequestUrl(book.identity.remoteBookId) }.getOrNull()
+        return sourceOrNull { source.directoryRequestUrl(book.identity.remoteBookId) }
     }
 
     suspend fun directoryVerifiedPage(snapshot: CapturedVerifiedPage): Boolean {
@@ -435,7 +476,7 @@ internal class SourceFlowController(
         directoryState = try {
             SourceBookState.Content(
                 source.directoryVerifiedPage(book.identity.remoteBookId, snapshot).also { directory ->
-                    runCatching { normalizedStore.writeDirectory(directory) }
+                    writeNormalized { normalizedStore.writeDirectory(directory) }
                 },
             )
         } catch (error: SourceException) {
@@ -447,6 +488,7 @@ internal class SourceFlowController(
 
     suspend fun prepareBook(book: SourceBookSummary) {
         if (selectedBook?.identity != book.identity) {
+            selectionGeneration += 1
             detailState = SourceBookState.Loading
             directoryState = SourceBookState.Loading
             selectedChapter = null
@@ -522,7 +564,7 @@ internal class SourceFlowController(
     }
 
     suspend fun prepareResume(identity: BookIdentity): Boolean {
-        val entry = library.libraryEntries().firstOrNull { it.book.identity == identity } ?: return false
+        val entry = library.readerHistoryEntry(identity) ?: return false
         return prepareResume(entry)
     }
 
@@ -530,21 +572,26 @@ internal class SourceFlowController(
         val identity = entry.book.identity
         val detail = normalizedStore.readDetail(identity) ?: return false
         val directory = normalizedStore.readDirectory(identity) ?: return false
-        val locator = entry.progress?.locator ?: return false
-        val chapter = directory.chapters.firstOrNull { it.chapterId == locator.document.contentId } ?: return false
+        val restoredLocator = entry.progress?.locator
+        val chapter = restoredLocator
+            ?.let { locator -> directory.chapters.firstOrNull { it.chapterId == locator.document.contentId } }
+            ?: restoredLocator?.let { return false }
+            ?: directory.chapters.firstOrNull()
+            ?: return false
         val document = normalizedStore.readDocument(identity, chapter.chapterId) ?: return false
         if (detail.summary.identity != identity || directory.bookIdentity != identity) return false
         if (document.sourceId != identity.sourceId || document.remoteBookId != identity.remoteBookId ||
             document.contentId != chapter.chapterId
         ) return false
 
+        if (selectedBook?.identity != identity) selectionGeneration += 1
         selectedBook = detail.summary
         detailState = SourceBookState.Content(detail)
         directoryState = SourceBookState.Content(directory)
         remoteLibrary.beginSelection(identity)
         remoteLibrary.refreshSelection(detail.summary)
         prepareChapter(chapter)
-        preparedResumeLoad = SourceReaderLoad(document = document, restoredLocator = locator)
+        preparedResumeLoad = SourceReaderLoad(document = document, restoredLocator = restoredLocator)
         return true
     }
 
@@ -553,21 +600,121 @@ internal class SourceFlowController(
         snapshotStore.saveChapter(chapter)
     }
 
+    /**
+     * Finds exact durable document snapshots without bringing their bodies onto the UI thread.
+     */
+    internal suspend fun cachedChapterIds(identity: BookIdentity, chapterIds: Collection<String>): Set<String> =
+        withContext(Dispatchers.IO) {
+            normalizedStore.cachedDocumentIds(identity, chapterIds)
+        }
+
+    /**
+     * Caches one exact chapter through the active trusted source session. A successful source read
+     * is not reported as cached unless normalized storage can be read back immediately.
+     */
+    internal suspend fun cacheChapter(
+        book: SourceBookSummary,
+        chapter: SourceChapter,
+    ): ChapterCacheResult {
+        val requestGeneration = selectionGeneration
+        if (!matchesSelection(book, requestGeneration)) return ChapterCacheResult.CANCELLED
+        val document = try {
+            sessionOwner.requireClient().chapter(chapter, book.identity.remoteBookId, offlineOnly = false)
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (_: SourceException) {
+            return ChapterCacheResult.FAILED
+        }
+        if (!matchesSelection(book, requestGeneration)) return ChapterCacheResult.CANCELLED
+        if (
+            document.sourceId != book.identity.sourceId ||
+                document.remoteBookId != book.identity.remoteBookId ||
+                document.contentId != chapter.chapterId
+        ) {
+            return ChapterCacheResult.FAILED
+        }
+        val persisted = try {
+            withContext(Dispatchers.IO) {
+                normalizedStore.writeAndVerifyDocument(book.identity, chapter.chapterId, document)
+            }
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (_: Exception) {
+            false
+        }
+        return when {
+            !matchesSelection(book, requestGeneration) -> ChapterCacheResult.CANCELLED
+            persisted -> ChapterCacheResult.CACHED
+            else -> ChapterCacheResult.FAILED
+        }
+    }
+
     suspend fun requestChapter(
         book: SourceBookSummary = requireNotNull(selectedBook) { "Book is not selected" },
         chapter: SourceChapter = requireNotNull(selectedChapter) { "Chapter is not selected" },
         offlineOnly: Boolean = false,
+        prefetchedDocument: ReaderDocument? = null,
     ): SourceReaderLoad {
         val restored = library.progress(book.identity)?.locator
             ?.takeIf { it.document.contentId == chapter.chapterId }
+        val exactPrefetch = prefetchedDocument?.takeIf { document ->
+            document.sourceId == book.identity.sourceId &&
+                document.remoteBookId == book.identity.remoteBookId &&
+                document.contentId == chapter.chapterId
+        }
         return try {
             SourceReaderLoad(
-                document = loadDocument(book, chapter, offlineOnly),
+                document = exactPrefetch ?: loadDocument(book, chapter, offlineOnly),
                 restoredLocator = restored,
             )
         } catch (error: SourceException) {
             SourceReaderLoad(failure = error, restoredLocator = restored)
         }
+    }
+
+    /**
+     * Resolves one adjacent chapter for the active Reader session without changing foreground
+     * selection or persisting an explicit offline/downloaded chapter. Failures remain silent until
+     * the same chapter is requested in the foreground.
+     */
+    internal suspend fun prefetchChapter(
+        book: SourceBookSummary,
+        chapter: SourceChapter,
+    ): ReaderDocument? {
+        val generation = selectionGeneration
+        if (!matchesSelection(book, generation)) return null
+        val document = try {
+            sessionOwner.requireClient().chapter(chapter, book.identity.remoteBookId, offlineOnly = false)
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (_: SourceException) {
+            return null
+        } catch (_: Exception) {
+            return null
+        }
+        if (!matchesSelection(book, generation)) return null
+        return document.takeIf {
+            it.sourceId == book.identity.sourceId &&
+                it.remoteBookId == book.identity.remoteBookId &&
+                it.contentId == chapter.chapterId
+        }
+    }
+
+    /**
+     * Records only a Reader document that the mounted Reader has admitted. Browsing, Detail,
+     * prefetch, and source caches never call this boundary.
+     */
+    suspend fun recordReaderVisit(identity: BookIdentity, visitedAt: Instant = Instant.now()): Boolean {
+        val book = selectedBook?.takeIf { it.identity == identity } ?: return false
+        library.saveBook(
+            mergeLibraryBook(
+                existing = library.book(identity),
+                summary = book,
+                updatedAt = visitedAt,
+            ),
+        )
+        library.recordReaderVisit(identity, visitedAt)
+        return true
     }
 
     suspend fun reloadDetail(offlineOnly: Boolean) {
@@ -581,17 +728,49 @@ internal class SourceFlowController(
         remoteLibrary.refreshSelection(book)
     }
 
-    suspend fun addSelectedLocalTag(tag: String) {
+    suspend fun addSelectedLocalTag(detail: SourceBookDetail, tag: String) {
         val book = requireNotNull(selectedBook) { "Book is not selected" }
-        val entry = requireNotNull(remoteLibrary.selectedLibraryEntry) { "Book is not in library" }
-        check(entry.localMembership) { "Book is not in library" }
+        check(detail.summary.identity == book.identity) { "Book detail is not available for local tags" }
+        if (remoteLibrary.selectedLibraryEntry == null) {
+            library.ensureRetainedLibraryEntry(
+                mergeLibraryBook(
+                    existing = library.book(book.identity),
+                    summary = detail.summary,
+                    updatedAt = Instant.now(),
+                    detailAuthoritative = true,
+                    sourceTags = detail.tags,
+                ),
+            )
+            remoteLibrary.refreshSelection(detail.summary)
+        }
+        val entry = requireNotNull(remoteLibrary.selectedLibraryEntry) { "Retained local entry was not created" }
         library.setLocalTags(book.identity, entry.localTags + tag)
-        remoteLibrary.refreshSelection(book)
+        remoteLibrary.refreshSelection(detail.summary)
     }
 
     suspend fun toggleSelectedReadLater() {
         val book = requireNotNull(selectedBook) { "Book is not selected" }
         remoteLibrary.toggleReadLater(book)
+    }
+
+    fun observeBookmarks(identity: BookIdentity): Flow<List<ReaderLocator>> =
+        library.observeBookmarks(identity)
+
+    suspend fun bookmarks(identity: BookIdentity): List<ReaderLocator> = library.bookmarks(identity)
+
+    suspend fun removeBookmark(locator: ReaderLocator): Boolean {
+        if (selectedBook?.identity != locator.document.book) return false
+        return library.removeBookmark(locator)
+    }
+
+    suspend fun toggleBookmark(locator: ReaderLocator): Boolean {
+        val identity = locator.document.book
+        val summary = selectedBook?.takeIf { it.identity == identity }
+            ?: return false
+        if (library.book(identity) == null) {
+            library.saveBook(mergeLibraryBook(existing = null, summary = summary, updatedAt = Instant.now()))
+        }
+        return library.toggleBookmark(locator)
     }
 
 
@@ -630,7 +809,13 @@ internal class SourceFlowController(
         snapshotStore.saveBook(summary)
         val existing = library.book(summary.identity)
         if (existing != null) {
-            val merged = mergeLibraryBook(existing, summary, Instant.now())
+            val merged = mergeLibraryBook(
+                existing = existing,
+                summary = summary,
+                updatedAt = Instant.now(),
+                detailAuthoritative = true,
+                sourceTags = detail.tags,
+            )
             if (merged != existing) library.saveBook(merged)
         }
         remoteLibrary.refreshSelection(summary)
@@ -640,6 +825,8 @@ internal class SourceFlowController(
         existing: LibraryBook?,
         summary: SourceBookSummary,
         updatedAt: Instant,
+        detailAuthoritative: Boolean = false,
+        sourceTags: Collection<String>? = null,
     ): LibraryBook {
         val base = existing ?: LibraryBook(
             identity = summary.identity,
@@ -650,12 +837,25 @@ internal class SourceFlowController(
             addedAt = updatedAt,
             metadataUpdatedAt = updatedAt,
         )
+        val summaryAuthor = summary.author
+        val authors = when {
+            detailAuthoritative -> summaryAuthor?.let(::setOf).orEmpty()
+            summaryAuthor == null -> base.authors
+            base.authors.isEmpty() || base.authors == setOf(base.author) -> setOf(summaryAuthor)
+            else -> base.authors
+        }
+        val author = when {
+            detailAuthoritative -> summaryAuthor
+            summaryAuthor != null && summaryAuthor in authors -> summaryAuthor
+            else -> base.author?.takeIf { it in authors } ?: authors.firstOrNull()
+        }
         val merged = base.copy(
             title = summary.title,
-            author = summary.author ?: base.author,
-            authors = summary.author?.let(::setOf) ?: base.authors,
+            author = author,
+            authors = authors,
             coverUrl = summary.coverUrl ?: base.coverUrl,
             canonicalUrl = summary.canonicalUrl.takeIf(String::isNotBlank) ?: base.canonicalUrl,
+            remoteTags = sourceTags?.toSet() ?: base.remoteTags,
         )
         return if (merged == base) base else merged.copy(metadataUpdatedAt = updatedAt)
     }
@@ -664,7 +864,7 @@ internal class SourceFlowController(
         if (offlineOnly) return normalizedStore.readDetail(book.identity) ?: throw normalizedCacheMiss("detail")
         return try {
             sessionOwner.requireClient().detail(book.identity.remoteBookId, offlineOnly = false).also { detail ->
-                runCatching { normalizedStore.writeDetail(detail) }
+                writeNormalized { normalizedStore.writeDetail(detail) }
             }
         } catch (error: SourceException) {
             if (error.code != SourceErrorCode.NETWORK_OFFLINE) throw error
@@ -676,7 +876,7 @@ internal class SourceFlowController(
         if (offlineOnly) return normalizedStore.readDirectory(book.identity) ?: throw normalizedCacheMiss("directory")
         return try {
             sessionOwner.requireClient().directory(book.identity.remoteBookId, offlineOnly = false).also { directory ->
-                runCatching { normalizedStore.writeDirectory(directory) }
+                writeNormalized { normalizedStore.writeDirectory(directory) }
             }
         } catch (error: SourceException) {
             if (error.code != SourceErrorCode.NETWORK_OFFLINE) throw error
@@ -694,13 +894,16 @@ internal class SourceFlowController(
         }
         return try {
             sessionOwner.requireClient().chapter(chapter, book.identity.remoteBookId, offlineOnly = false).also { document ->
-                runCatching { normalizedStore.writeDocument(book.identity, document) }
+                writeNormalized { normalizedStore.writeDocument(book.identity, document) }
             }
         } catch (error: SourceException) {
             if (error.code != SourceErrorCode.NETWORK_OFFLINE) throw error
             normalizedStore.readDocument(book.identity, chapter.chapterId) ?: throw error
         }
     }
+
+    private fun matchesSelection(book: SourceBookSummary, generation: Long): Boolean =
+        selectionGeneration == generation && selectedBook?.identity == book.identity
 
     private fun normalizedCacheMiss(stage: String): SourceException = SourceException(
         code = SourceErrorCode.NETWORK_OFFLINE,
@@ -711,11 +914,35 @@ internal class SourceFlowController(
         ),
     )
 
-    private fun sourceBecameUnavailable() {
+    fun sourceBecameUnavailable() {
+        sessionOwner.closeActiveClient()
         resetReadingState()
         remoteLibrary.reset()
         home.reset()
         searchState = searchFailure(SourceErrorCode.EXTENSION_RUNTIME_FAILURE, "source-session", "source-untrusted")
+    }
+
+    fun revalidateSourceAuthority() {
+        if (sessionOwner.hasUntrustedActivePackage()) sourceBecameUnavailable()
+    }
+
+    private suspend fun <T> sourceOrNull(block: suspend () -> T): T? = try {
+        block()
+    } catch (_: SourceException) {
+        null
+    }
+
+    /**
+     * Persists a normalized snapshot without blocking the caller. The encode plus the durable write
+     * (temp file, fsync, rename) must never run on the UI thread: callers reach this from a
+     * LaunchedEffect, so the write would otherwise stall the frame between parse and render.
+     */
+    private suspend fun writeNormalized(block: () -> Unit) {
+        try {
+            withContext(Dispatchers.IO) { block() }
+        } catch (_: StorageException) {
+            // Normalized replay is optional; source results remain valid without a local snapshot.
+        }
     }
 
     suspend fun removeSource(sourceId: String) {
@@ -728,6 +955,7 @@ internal class SourceFlowController(
     }
 
     private fun resetReadingState() {
+        selectionGeneration += 1
         query = ""
         authorSearch = false
         searchInvocation += 1
@@ -773,5 +1001,7 @@ internal class SourceFlowController(
     }
 
 }
+
+internal enum class ChapterCacheResult { CACHED, FAILED, CANCELLED }
 
 enum class SourceRestorationTarget { SEARCH, DETAIL, DIRECTORY, READER }

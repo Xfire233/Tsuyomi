@@ -7,6 +7,7 @@ package org.tsuyomi.core.database
 import androidx.sqlite.db.SimpleSQLiteQuery
 import androidx.sqlite.db.SupportSQLiteQuery
 import java.time.Instant
+import kotlinx.serialization.json.JsonPrimitive
 import org.tsuyomi.shared.smartshelf.MatchMode
 import org.tsuyomi.shared.smartshelf.ProgressState
 import org.tsuyomi.shared.smartshelf.SmartPredicate
@@ -140,7 +141,8 @@ internal object SmartShelfQueryCompiler {
     private fun remoteTagClause(tag: String, arguments: MutableList<Any>): String = jsonArrayValueClause("b.remote_tags_json", tag, arguments)
 
     private fun jsonArrayValueClause(column: String, value: String, arguments: MutableList<Any>): String {
-        arguments += "%\"${escapeLike(value).replace("\"", "\\\"")}\"%"
+        val jsonNeedle = JsonPrimitive(value).toString()
+        arguments += "%${escapeLike(jsonNeedle)}%"
         return "$column LIKE ? ESCAPE '\\'"
     }
 

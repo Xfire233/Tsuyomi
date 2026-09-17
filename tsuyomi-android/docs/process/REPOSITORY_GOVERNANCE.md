@@ -25,6 +25,9 @@
 - 进入实现前，Planner 计划必须先获 Adviser 审阅；若含 UI/交互/golden 变更，还必须先获 Designer 审阅。
 - 默认等待用户确认实施；只有当前请求明确声明无人值守/自主执行时才可在已审阅范围内自行开始。
 - 每个 PR 的最终 head 必须再获 Adviser 审阅并通过 required checks；合并仍等待用户的独立人工确认。无人值守实施授权不授予 `main` 合并权。
+- 自 2026-09-12 起，主仓库采用单维护者 GitHub 准入：必须通过 PR，正式 approving review 数为 0，不强制 CODEOWNER、最后一次推送或无法归属改动的额外审批；CODEOWNERS 继续标识所有权。这取代原来的第二账号审批要求，不取消上述 Adviser 审阅或用户合并授权。
+- 五项 required checks（`repository-policy`、`protocol-conformance`、`extensions-baseline`、`android-build-test-lint-goldens`、`android-api29-instrumentation`）必须严格通过，已有审阅讨论必须解决；管理员仍受分支保护约束，禁止直接推送、force-push 和删除 `main`。仅允许 squash/rebase，由维护者显式合并，不启用自动合并。
+- 合并前后状态及命令遵循 `QUALITY_GATES.md` G4.5/G5：锁定已验证 PR head 后正常合并，不把历史管理员例外当作常规权限；PR 准入检查与合并后的 main 健康检查分别记录。Android 重型验证不因 squash 合并再次自动运行，显式手动复验入口保留。
 
 ## 提交
 

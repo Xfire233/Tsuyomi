@@ -11,11 +11,13 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.foundation.layout.Column
 import androidx.compose.runtime.Composable
-import androidx.compose.material3.AlertDialog
+import org.tsuyomi.core.ui.components.TsuyomiDialog
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
+import org.tsuyomi.core.ui.components.TsuyomiButton
+import org.tsuyomi.core.ui.components.TsuyomiButtonStyle
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
@@ -28,11 +30,14 @@ import androidx.navigation.NavGraphBuilder
 import androidx.navigation.NavHostController
 import androidx.navigation.compose.composable
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.flow.flowOf
+import org.tsuyomi.core.preferences.RequestedReaderFlow
 import org.tsuyomi.core.media.api.CoverRepository
 import org.tsuyomi.core.media.api.CoverRequest
 import org.tsuyomi.core.media.api.CoverUiState
 import org.tsuyomi.core.media.api.FallbackSpec
-import org.tsuyomi.core.database.RemoteReconciliationState
+import org.tsuyomi.shared.librarydomain.RemoteReconciliationState
+import org.tsuyomi.source.extensionmanager.RemoteOperation
 import org.tsuyomi.feature.book.BookDetailScreen
 import org.tsuyomi.feature.book.BookDestinationMenu
 import org.tsuyomi.feature.book.DetailCollectionDestination
@@ -49,6 +54,7 @@ import org.tsuyomi.feature.reader.ReaderScreen
 import org.tsuyomi.feature.library.RemoteLibraryViewState
 import org.tsuyomi.feature.search.SearchScreen
 import org.tsuyomi.shared.model.BookIdentity
+import org.tsuyomi.shared.locator.ReaderLocator
 import org.tsuyomi.shared.backup.PortableReaderPreferences
 
 internal fun NavGraphBuilder.sourceRoutes(
@@ -57,29 +63,17 @@ internal fun NavGraphBuilder.sourceRoutes(
     libraryFlow: LibraryFlowController,
     readerPreferences: PortableReaderPreferences,
     onReaderPreferencesChanged: (PortableReaderPreferences) -> Unit,
-    coverRepository: CoverRepository?,
-    packageRevision: String?,
-    credentialRevision: String?,
     onExactChapterCompleted: suspend (BookIdentity) -> Unit,
     onRequestRemoveFromLibrary: () -> Unit,
 ) {
     browseRoute(navController, owner)
-    sourceHomeRoute(navController, owner, coverRepository, packageRevision, credentialRevision)
-    remoteLibraryRoute(navController, owner, libraryFlow, coverRepository, packageRevision, credentialRevision)
-    searchRoute(
-        navController = navController,
-        owner = owner,
-        coverRepository = coverRepository,
-        packageRevision = packageRevision,
-        credentialRevision = credentialRevision,
-    )
+    sourceHomeRoute(navController, owner)
+    remoteLibraryRoute(navController, owner, libraryFlow)
+    searchRoute(navController, owner)
     detailRoute(
         navController = navController,
         owner = owner,
         libraryFlow = libraryFlow,
-        coverRepository = coverRepository,
-        packageRevision = packageRevision,
-        credentialRevision = credentialRevision,
         onRequestRemoveFromLibrary = onRequestRemoveFromLibrary,
     )
     directoryRoute(navController, owner)
@@ -88,16 +82,13 @@ internal fun NavGraphBuilder.sourceRoutes(
         owner,
         readerPreferences,
         onReaderPreferencesChanged,
-        coverRepository,
-        packageRevision,
-        credentialRevision,
         onExactChapterCompleted,
     )
     verificationRoutes(navController, owner)
 }
 
 private fun NavGraphBuilder.browseRoute(navController: NavHostController, owner: SourceRouteOwner) {
-    composable(Routes.Browse) { entry ->
+    composable(Routes.Browse) {
         val scope = rememberCoroutineScope()
         val context = LocalContext.current
         val uriHandler = LocalUriHandler.current
@@ -107,24 +98,6 @@ private fun NavGraphBuilder.browseRoute(navController: NavHostController, owner:
             if (profile == org.tsuyomi.core.display.DisplayProfile.EINK) owner.installer.dismissRepositoryApproval()
         }
         val packageInfo = owner.installer.activePackage
-        val resumeSourceId by entry.savedStateHandle
-            .getStateFlow(ResumeSourceIdKey, "")
-            .collectAsStateWithLifecycle()
-        val resumeRemoteBookId by entry.savedStateHandle
-            .getStateFlow(ResumeRemoteBookIdKey, "")
-            .collectAsStateWithLifecycle()
-        LaunchedEffect(resumeSourceId, resumeRemoteBookId, packageInfo?.packageSha256) {
-            if (resumeSourceId.isBlank() || resumeRemoteBookId.isBlank()) return@LaunchedEffect
-            val identity = runCatching { BookIdentity(resumeSourceId, resumeRemoteBookId) }.getOrNull()
-            val resumed = identity != null && owner.prepareScheduledResume(identity)
-            entry.savedStateHandle[ResumeSourceIdKey] = ""
-            entry.savedStateHandle[ResumeRemoteBookIdKey] = ""
-            if (resumed) {
-                navController.navigate(Routes.Reader)
-            } else if (identity != null && owner.prepareScheduledDetail(identity)) {
-                navController.navigate(Routes.Detail)
-            }
-        }
         val displayedApprovalDigest = (owner.installer.state as? BrowseUiState.Approval)?.packageSha256
         BrowseScreen(
             state = owner.installer.state.takeUnless {
@@ -221,15 +194,13 @@ private fun NavGraphBuilder.browseRoute(navController: NavHostController, owner:
 private fun NavGraphBuilder.sourceHomeRoute(
     navController: NavHostController,
     owner: SourceRouteOwner,
-    coverRepository: CoverRepository?,
-    packageRevision: String?,
-    credentialRevision: String?,
 ) {
     composable(Routes.SourceHome) {
         val scope = rememberCoroutineScope()
         val flow = owner.flow
         val packageInfo = owner.installer.activePackage
         val activeRevision = packageInfo?.packageSha256
+        val coverCache = owner.coverCacheState()
         fun loader(offlineOnly: Boolean): suspend (Map<String, String>, String?) -> Result<org.tsuyomi.shared.sourcecontract.SourceHomePage> =
             { filters, cursor ->
                 if (packageInfo == null) {
@@ -241,7 +212,7 @@ private fun NavGraphBuilder.sourceHomeRoute(
         val load = loader(offlineOnly = false)
         val loadOffline = loader(offlineOnly = true)
 
-        LaunchedEffect(packageInfo?.manifest?.sourceId?.value, activeRevision) {
+        LaunchedEffect(packageInfo?.manifest?.sourceId?.value, activeRevision, coverCache.credentialRevision) {
             packageInfo?.let { selected ->
                 flow.open(selected)
                 flow.home.ensureInitial(selected.manifest.sourceId.value, activeRevision, load)
@@ -251,7 +222,7 @@ private fun NavGraphBuilder.sourceHomeRoute(
             enabled = (flow.homeState as? org.tsuyomi.feature.browse.SourceHomeViewState.Content)
                 ?.featureOpen == true,
         ) {
-            flow.home.navigateBackFromFeature()
+            owner.navigateBackFromHomeFeature()
         }
 
 
@@ -271,7 +242,7 @@ private fun NavGraphBuilder.sourceHomeRoute(
             onOpenBook = { book ->
                 scope.launch {
                     owner.flow.prepareBook(book)
-                    navController.navigate(Routes.Detail)
+                    navController.navigateToBookRoute(Routes.Detail)
                 }
             },
             onOpenFeature = { feature -> flow.home.openFeature(feature, load) },
@@ -280,9 +251,9 @@ private fun NavGraphBuilder.sourceHomeRoute(
             coverState = { book ->
                 rememberSourceCoverState(
                     book = book,
-                    repository = coverRepository,
-                    packageRevision = packageRevision,
-                    credentialRevision = credentialRevision,
+                    repository = coverCache.repository,
+                    packageRevision = coverCache.packageRevision,
+                    credentialRevision = coverCache.credentialRevision,
                 )
             },
         )
@@ -294,12 +265,10 @@ private fun NavGraphBuilder.remoteLibraryRoute(
     navController: NavHostController,
     owner: SourceRouteOwner,
     libraryFlow: LibraryFlowController,
-    coverRepository: CoverRepository?,
-    packageRevision: String?,
-    credentialRevision: String?,
 ) {
     listOf(Routes.RemoteLibrary, Routes.LibraryMirror, Routes.LibraryMirrorFolder).forEach { routePattern ->
         composable(routePattern) { entry ->
+        val coverCache = owner.coverCacheState()
         val scope = rememberCoroutineScope()
         val mirrorBindingId = entry.arguments?.getString("bindingId")
         val mirrorTargetId = entry.arguments?.getString("targetId")
@@ -387,7 +356,7 @@ private fun NavGraphBuilder.remoteLibraryRoute(
             onOpenBook = { book ->
                 scope.launch {
                     owner.flow.prepareBook(book)
-                    navController.navigate(Routes.Detail)
+                    navController.navigateToBookRoute(Routes.Detail)
                 }
             },
             onOpenTarget = { targetId ->
@@ -430,7 +399,12 @@ private fun NavGraphBuilder.remoteLibraryRoute(
             onConfirmJitPrompt = { scope.launch { remote.confirmJitPrompt() } },
             onDismissJitPrompt = remote::dismissJitPrompt,
             coverState = { book ->
-                rememberSourceCoverState(book, coverRepository, packageRevision, credentialRevision)
+                rememberSourceCoverState(
+                    book,
+                    coverCache.repository,
+                    coverCache.packageRevision,
+                    coverCache.credentialRevision,
+                )
             },
         )
         }
@@ -440,14 +414,12 @@ private fun NavGraphBuilder.remoteLibraryRoute(
 private fun NavGraphBuilder.searchRoute(
     navController: NavHostController,
     owner: SourceRouteOwner,
-    coverRepository: CoverRepository?,
-    packageRevision: String?,
-    credentialRevision: String?,
 ) {
     composable(Routes.Search) { entry ->
         val scope = rememberCoroutineScope()
         val search = rememberSourceSearchRouteOwner(entry, owner.flow)
         val packageInfo = owner.installer.activePackage
+        val coverCache = owner.coverCacheState()
         LaunchedEffect(search, packageInfo?.packageSha256) {
             packageInfo?.let { search.restore(it) }
         }
@@ -471,7 +443,7 @@ private fun NavGraphBuilder.searchRoute(
             onSelectBook = { book ->
                 scope.launch {
                     search.select(book)
-                    navController.navigate(Routes.Detail)
+                    navController.navigateToBookRoute(Routes.Detail)
                 }
             },
             onRetry = { scope.launch { search.submit() } },
@@ -480,9 +452,9 @@ private fun NavGraphBuilder.searchRoute(
             coverState = { book ->
                 rememberSourceCoverState(
                     book = book,
-                    repository = coverRepository,
-                    packageRevision = packageRevision,
-                    credentialRevision = credentialRevision,
+                    repository = coverCache.repository,
+                    packageRevision = coverCache.packageRevision,
+                    credentialRevision = coverCache.credentialRevision,
                 )
             },
         )
@@ -519,7 +491,7 @@ private fun rememberSourceCoverState(
     if (repository == null || request == null) return CoverUiState.Fallback(fallback)
     val coverFlow = remember(repository, request) { repository.observe(request) }
     val state by coverFlow.collectAsStateWithLifecycle(
-        initialValue = CoverUiState.Loading(fallback),
+        initialValue = repository.cached(request) ?: CoverUiState.Loading(fallback),
     )
     return state
 }
@@ -528,9 +500,6 @@ private fun NavGraphBuilder.detailRoute(
     navController: NavHostController,
     owner: SourceRouteOwner,
     libraryFlow: LibraryFlowController,
-    coverRepository: CoverRepository?,
-    packageRevision: String?,
-    credentialRevision: String?,
     onRequestRemoveFromLibrary: () -> Unit,
 ) {
     composable(Routes.Detail) { entry ->
@@ -538,11 +507,14 @@ private fun NavGraphBuilder.detailRoute(
         val detail = rememberSourceDetailRouteOwner(entry, owner.flow, owner)
         val unreadOnly by detail.unreadOnly.collectAsStateWithLifecycle()
         val descending by detail.descending.collectAsStateWithLifecycle()
+        val tagEditorOpen by detail.tagEditorOpen.collectAsStateWithLifecycle()
+        val tagDraft by detail.tagDraft.collectAsStateWithLifecycle()
         val commandSequenceFlow = remember(entry) {
             entry.savedStateHandle.getStateFlow(SourceDetailRouteOwner.CommandSequenceKey, 0L)
         }
         val commandSequence by commandSequenceFlow.collectAsStateWithLifecycle()
         val packageInfo = owner.installer.activePackage
+        val coverCache = owner.coverCacheState()
         val verifiedDetailSequence by entry.savedStateHandle
             .getStateFlow(VerifiedDetailResultSequenceKey, 0L)
             .collectAsStateWithLifecycle()
@@ -584,19 +556,21 @@ private fun NavGraphBuilder.detailRoute(
             entry.savedStateHandle.getStateFlow<String?>(UpdateFocusChapterIdKey, null)
         }.collectAsStateWithLifecycle()
         val summary = (detail.state as? SourceBookState.Content)?.value?.summary ?: detail.selectedBook
+        val unresolvedUpdate = summary?.identity?.let(libraryFlow.state.updates::get)
+        val updatedChapterIds = remember(unresolvedUpdate) { unresolvedUpdate?.newChapterIds?.toSet().orEmpty() }
         val websiteGroupingEnabled = summary?.identity?.sourceId?.let(libraryFlow::isWebsiteGroupingEnabled) == true
         val coverState = summary?.let {
             rememberSourceCoverState(
                 book = it,
-                repository = coverRepository,
-                packageRevision = packageRevision,
-                credentialRevision = credentialRevision,
+                repository = coverCache.repository,
+                packageRevision = coverCache.packageRevision,
+                credentialRevision = coverCache.credentialRevision,
             )
         } ?: CoverUiState.Fallback(FallbackSpec("书籍详情", "source"))
         fun openChapter(chapter: org.tsuyomi.shared.sourcecontract.SourceChapter) {
             scope.launch {
                 detail.selectChapter(chapter)
-                navController.navigate(Routes.Reader)
+                navController.navigateToBookRoute(Routes.Reader)
             }
         }
         var destinationMenuExpanded by remember { mutableStateOf(false) }
@@ -657,7 +631,7 @@ private fun NavGraphBuilder.detailRoute(
         val localDestinationFailure = stringResource(R.string.library_read_failure_safe)
         suspend fun selectedManualDestinations(identity: org.tsuyomi.shared.model.BookIdentity): Set<String> {
             val manualIds = libraryFlow.collections.asSequence()
-                .filter { it.kind == org.tsuyomi.core.database.CollectionKind.MANUAL }
+                .filter { it.kind == org.tsuyomi.shared.librarydomain.CollectionKind.MANUAL }
                 .mapTo(hashSetOf()) { it.collectionId }
             return libraryFlow.manualCollectionIds(identity).filterTo(linkedSetOf()) { it in manualIds }
         }
@@ -743,10 +717,18 @@ private fun NavGraphBuilder.detailRoute(
             loadingDestinationTargets = false
             entry.savedStateHandle[RemoteDestinationRequestKey] = 0L
         }
+        BackHandler(enabled = detail.cacheState.selecting) {
+            scope.launch {
+                detail.handleCacheAction(
+                    if (detail.cacheState.working) org.tsuyomi.feature.book.DetailCacheAction.Cancel
+                    else org.tsuyomi.feature.book.DetailCacheAction.Close,
+                )
+            }
+        }
         BookDetailScreen(
             state = detail.state,
             directoryState = detail.directoryState,
-            localState = detail.localState,
+            localState = detail.localState.copy(updatedChapterIds = updatedChapterIds),
             mutation = detail.mutation,
             coverState = coverState,
             unreadOnly = unreadOnly,
@@ -754,6 +736,8 @@ private fun NavGraphBuilder.detailRoute(
             focusChapterId = updateFocusChapterId,
             onFocusHandled = { entry.savedStateHandle[UpdateFocusChapterIdKey] = null },
             selectedChapterId = detail.selectedChapter?.chapterId,
+            cacheState = detail.cacheState,
+            onCacheAction = { action -> scope.launch { detail.handleCacheAction(action) } },
             onSetRating = { rating -> scope.launch { detail.setRating(rating) } },
             onSearchAuthor = { author ->
                 navController.navigate(Routes.Search)
@@ -762,7 +746,12 @@ private fun NavGraphBuilder.detailRoute(
                     sourceSearchRouteOwner(searchEntry, owner.flow).submitAuthor(author)
                 }
             },
-            onAddTag = { tag -> scope.launch { detail.addTag(tag) } },
+            tagEditorOpen = tagEditorOpen,
+            tagDraft = tagDraft,
+            onOpenTagEditor = detail::openTagEditor,
+            onTagDraftChange = detail::updateTagDraft,
+            onDismissTagEditor = detail::dismissTagEditor,
+            onConfirmTag = { scope.launch { detail.confirmTagEditor() } },
             onToggleUnreadOnly = detail::toggleUnreadOnly,
             onToggleOrder = detail::toggleOrder,
             onSelectChapter = ::openChapter,
@@ -785,7 +774,7 @@ private fun NavGraphBuilder.detailRoute(
                 BookDestinationMenu(
                     readLater = detail.localState.readLater,
                     collections = libraryFlow.collections
-                        .filter { it.kind == org.tsuyomi.core.database.CollectionKind.MANUAL }
+                        .filter { it.kind == org.tsuyomi.shared.librarydomain.CollectionKind.MANUAL }
                         .map {
                             DetailCollectionDestination(
                                 it.collectionId,
@@ -830,10 +819,14 @@ private fun NavGraphBuilder.detailRoute(
             },
             destinationMessage = destinationMessage,
             partialMoveTargetName = partialMoveTargetName.takeIf { websiteGroupingEnabled },
+            onKeepDefaultLibrary = {
+                destinationMessage = null
+                partialMoveTargetName = null
+            },
             onRetryMoveOnly = {
                 summary?.let { book ->
                     scope.launch {
-                        when (owner.flow.retryRemoteMutation(book)) {
+                        when (owner.flow.retryRemoteMutation(book, expectedOperation = RemoteOperation.MOVE)) {
                             RemoteMutationUiResult.Confirmed -> {
                                 destinationMessage = "已完成移动"
                                 partialMoveTargetName = null
@@ -849,7 +842,7 @@ private fun NavGraphBuilder.detailRoute(
                 scope.launch { detail.execute(SourceDetailRouteOwner.Command.REMOVE_FROM_LIBRARY.name) }
             },
             onRequestRemoveFromLibrary = onRequestRemoveFromLibrary,
-            onOpenDirectory = { navController.navigate(Routes.Directory) },
+            onOpenDirectory = { navController.navigateToBookRoute(Routes.Directory) },
             onRetry = { scope.launch { detail.loadAll() } },
             onUseOfflineCache = { scope.launch { detail.loadAll(offlineOnly = true) } },
             onOpenVerification = {
@@ -878,20 +871,17 @@ private fun NavGraphBuilder.detailRoute(
         val pendingOperation = pendingWebsiteAuthorizationOperation
         if (pendingOperation != null && summary != null) {
             val operationLabel = pendingOperation.uppercase()
-            AlertDialog(
+            TsuyomiDialog(
                 onDismissRequest = {
                     pendingWebsiteAuthorizationOperation = null
                     pendingWebsiteTargetId = null
                     pendingRemoteMoveOnly = false
                 },
-                title = { Text(if (pendingOperation == "add") "授权加入网站书架" else "授权移动网站书籍") },
-                text = {
-                    Text(
-                        "Tsuyomi 将代表您对《${summary.title}》执行 $operationLabel。此授权仅用于 $operationLabel；后续每次操作仍会重新检查来源、目标并签发单次令牌。",
-                    )
-                },
-                confirmButton = {
-                    TextButton(onClick = {
+                title = if (pendingOperation == "add") "授权加入网站书架" else "授权移动网站书籍",
+                text = "Tsuyomi 将代表您对《${summary.title}》执行 $operationLabel。此授权仅用于 $operationLabel；后续每次操作仍会重新检查来源、目标并签发单次令牌。",
+                confirmLabel = "授权",
+                dismissLabel = "取消",
+                onConfirm = {
                         pendingWebsiteAuthorizationOperation = null
                         scope.launch {
                             if (!owner.flow.authorizeWriteback(summary.identity.sourceId, pendingOperation, true)) {
@@ -918,25 +908,17 @@ private fun NavGraphBuilder.detailRoute(
                                 }
                             }
                         }
-                    }) { Text("授权") }
-                },
-                dismissButton = {
-                    TextButton(onClick = {
-                        pendingWebsiteAuthorizationOperation = null
-                        pendingWebsiteTargetId = null
-                        pendingRemoteMoveOnly = false
-                    }) { Text("取消") }
                 },
             )
         }
         if (remoteMoveTargetSelectionVisible && summary != null) {
-            AlertDialog(
+            TsuyomiDialog(
                 onDismissRequest = { remoteMoveTargetSelectionVisible = false },
-                title = { Text("移动网站收藏") },
-                text = {
+                title = "移动网站收藏",
+                body = {
                     Column {
                         destinationTargets.forEach { target ->
-                            TextButton(onClick = {
+                            TsuyomiButton(text = target.displayName, style = TsuyomiButtonStyle.TEXT, onClick = {
                                 remoteMoveTargetSelectionVisible = false
                                 pendingWebsiteTargetId = target.targetId
                                 pendingRemoteMoveOnly = true
@@ -950,23 +932,22 @@ private fun NavGraphBuilder.detailRoute(
                                         owner.notifyLibraryChanged()
                                     }
                                 }
-                            }) { Text(target.displayName) }
+                            })
                         }
                     }
                 },
-                confirmButton = {},
-                dismissButton = {
-                    TextButton(onClick = { remoteMoveTargetSelectionVisible = false }) { Text("取消") }
-                },
+                dismissLabel = "取消",
             )
         }
         if (remoteRemoveConfirmationVisible && summary != null) {
-            AlertDialog(
+            TsuyomiDialog(
                 onDismissRequest = { remoteRemoveConfirmationVisible = false },
-                title = { Text("从网站书架移除") },
-                text = { Text("将从当前网站书架移除《${summary.title}》。本地书架与本地阅读数据不会被删除。") },
-                confirmButton = {
-                    TextButton(onClick = {
+                title = "从网站书架移除",
+                text = "将从当前网站书架移除《${summary.title}》。本地书架与本地阅读数据不会被删除。",
+                confirmLabel = "确认移除",
+                dismissLabel = "取消",
+                destructive = true,
+                onConfirm = {
                         remoteRemoveConfirmationVisible = false
                         scope.launch {
                             val sourceId = summary.identity.sourceId
@@ -980,10 +961,6 @@ private fun NavGraphBuilder.detailRoute(
                                 }
                             }
                         }
-                    }) { Text("确认移除") }
-                },
-                dismissButton = {
-                    TextButton(onClick = { remoteRemoveConfirmationVisible = false }) { Text("取消") }
                 },
             )
         }
@@ -1007,7 +984,7 @@ private fun NavGraphBuilder.directoryRoute(navController: NavHostController, own
             onSelectChapter = { chapter ->
                 scope.launch {
                     detail.selectChapter(chapter)
-                    navController.navigate(Routes.Reader)
+                    navController.navigateToBookRoute(Routes.Reader)
                 }
             },
             onRetry = { scope.launch { detail.loadAll() } },
@@ -1022,9 +999,6 @@ private fun NavGraphBuilder.readerRoute(
     owner: SourceRouteOwner,
     readerPreferences: PortableReaderPreferences,
     onReaderPreferencesChanged: (PortableReaderPreferences) -> Unit,
-    coverRepository: CoverRepository?,
-    packageRevision: String?,
-    credentialRevision: String?,
     onExactChapterCompleted: suspend (BookIdentity) -> Unit,
 ) {
     composable(Routes.Reader) { entry ->
@@ -1034,6 +1008,10 @@ private fun NavGraphBuilder.readerRoute(
             .getStateFlow(VerifiedChapterResultSequenceKey, 0L)
             .collectAsStateWithLifecycle()
         val packageInfo = owner.installer.activePackage
+        val coverCache = owner.coverCacheState()
+        val adjacentPreloadEnabled =
+            org.tsuyomi.core.display.LocalDisplayEnvironment.current.effectiveProfile !=
+                org.tsuyomi.core.display.DisplayProfile.EINK
         LaunchedEffect(reader, packageInfo?.packageSha256) {
             packageInfo?.let { reader.restore(it) }
         }
@@ -1041,27 +1019,72 @@ private fun NavGraphBuilder.readerRoute(
             if (verifiedChapterSequence > 0L) {
                 reader.acceptVerifiedChapterResult()
                 entry.savedStateHandle[VerifiedChapterResultSequenceKey] = 0L
-            } else if (reader.currentChapter != null && reader.document == null && reader.failure == null) {
+            } else if (reader.currentChapter != null && reader.document == null && reader.failure == null && !reader.loading) {
                 reader.load()
             }
         }
+        val document = reader.document
+        val documentGeneration = reader.documentGeneration
+        val identity = remember(document?.sourceId, document?.remoteBookId, owner.flow.selectedBook?.identity) {
+            document?.let { BookIdentity(it.sourceId, it.remoteBookId) } ?: owner.flow.selectedBook?.identity
+        }
+        val preferencesRepository =
+            (LocalContext.current.applicationContext as TsuyomiApplication).readerPreferencesRepository
+        key(identity) {
+            val bookmarksFlow = remember(identity, owner.flow) {
+                identity?.let(owner.flow::observeBookmarks) ?: flowOf(emptyList<ReaderLocator>())
+            }
+            val bookmarks by bookmarksFlow.collectAsStateWithLifecycle(initialValue = null)
+            val flowPreference = remember(identity, preferencesRepository, readerPreferences.flow) {
+                identity?.let { preferencesRepository.requestedFlow(it, readerPreferences) }
+                    ?: flowOf(RequestedReaderFlow(readerPreferences.flow ?: "scroll", false))
+            }
+            val requestedFlow by flowPreference.collectAsStateWithLifecycle(initialValue = null)
         ReaderScreen(
+            bookIdentity = identity,
             document = reader.document,
-            loading = reader.loading,
+            loading = reader.loading ||
+                (identity != null && (bookmarks == null || requestedFlow == null)),
             failure = reader.failure,
             restoredLocator = reader.restoredLocator,
+            restorationGeneration = reader.restorationGeneration,
             chapters = reader.chapters,
             currentChapterId = reader.currentChapter?.chapterId.orEmpty(),
+            bookmarks = bookmarks.orEmpty(),
+            onToggleBookmark = { locator -> scope.launch { owner.flow.toggleBookmark(locator) } },
+            onSelectBookmark = { locator -> scope.launch { reader.selectBookmark(locator) } },
+            onReturnToOrigin = { locator -> scope.launch { reader.selectLocator(locator) } },
+            onRemoveBookmark = { locator -> scope.launch { owner.flow.removeBookmark(locator) } },
+            requestedFlow = requestedFlow?.flow ?: readerPreferences.flow ?: "scroll",
+            hasFlowOverride = requestedFlow?.overridden == true,
+            onFlowOverrideChanged = { requested ->
+                identity?.let { book -> scope.launch { preferencesRepository.setFlowOverride(book, requested) } }
+            },
             onSelectChapter = { chapter -> scope.launch { reader.selectChapter(chapter) } },
             onNavigateUp = { navController.navigateUp() },
             imageStates = reader.imageStates,
             onImageVisible = { block ->
-                reader.loadImage(block, coverRepository, packageRevision, credentialRevision, scope)
+                reader.loadImage(
+                    block,
+                    coverCache.repository,
+                    coverCache.packageRevision,
+                    coverCache.credentialRevision,
+                    scope,
+                )
             },
             onRetryImage = { block ->
-                reader.loadImage(block, coverRepository, packageRevision, credentialRevision, scope, retry = true)
+                reader.loadImage(
+                    block,
+                    coverCache.repository,
+                    coverCache.packageRevision,
+                    coverCache.credentialRevision,
+                    scope,
+                    retry = true,
+                )
             },
-            onLocatorChanged = { locator, precision -> scope.launch { reader.saveProgress(locator, precision) } },
+            onLocatorChanged = { locator, precision ->
+                scope.launch { reader.saveProgress(locator, precision, documentGeneration) }
+            },
             onChapterCompleted = { chapterId ->
                 val activeDocument = reader.document ?: return@ReaderScreen
                 val identity = BookIdentity(activeDocument.sourceId, activeDocument.remoteBookId)
@@ -1076,7 +1099,31 @@ private fun NavGraphBuilder.readerRoute(
             onUseOfflineCache = { scope.launch { reader.load(offlineOnly = true) } },
             onOpenVerification = { navController.navigate(Routes.VerifiedChapterPage) },
         )
+        LaunchedEffect(
+            reader,
+            document,
+            documentGeneration,
+            bookmarks != null,
+            requestedFlow != null,
+            reader.loading,
+            reader.failure,
+            adjacentPreloadEnabled,
+            coverCache.packageRevision,
+            coverCache.credentialRevision,
+        ) {
+            if (document != null && bookmarks != null && requestedFlow != null && !reader.loading && reader.failure == null) {
+                if (reader.recordMountedDocument(document, documentGeneration)) owner.notifyLibraryChanged()
+                reader.preloadAdjacent(
+                    scope = scope,
+                    enabled = adjacentPreloadEnabled,
+                    repository = coverCache.repository,
+                    packageRevision = coverCache.packageRevision,
+                    credentialRevision = coverCache.credentialRevision,
+                )
+            }
+        }
     }
+}
 }
 
 private enum class VerifiedPageOperation { NONE, HOME, SEARCH, DETAIL, DIRECTORY, CHAPTER }

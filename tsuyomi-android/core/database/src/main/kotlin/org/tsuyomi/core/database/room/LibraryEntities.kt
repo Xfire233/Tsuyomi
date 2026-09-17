@@ -9,7 +9,7 @@ import androidx.room.Entity
 import androidx.room.ForeignKey
 import androidx.room.Index
 import androidx.room.PrimaryKey
-import org.tsuyomi.core.database.CollectionKind
+import org.tsuyomi.shared.librarydomain.CollectionKind
 
 @Entity(
     tableName = "books",
@@ -144,6 +144,29 @@ internal data class ReadingProgressEntity(
     @ColumnInfo(name = "updated_at_nano")
     val updatedAtNano: Int,
 )
+
+/**
+ * A successful Reader admission. This is deliberately separate from browsing metadata and
+ * semantic progress: opening a completed book still matters, while Detail/cache activity does not.
+ */
+@Entity(
+    tableName = "reader_history",
+    primaryKeys = ["source_id", "remote_book_id"],
+    foreignKeys = [
+        ForeignKey(
+            entity = BookEntity::class,
+            parentColumns = ["source_id", "remote_book_id"],
+            childColumns = ["source_id", "remote_book_id"],
+            onDelete = ForeignKey.CASCADE,
+        ),
+    ],
+)
+internal data class ReaderHistoryEntity(
+    @ColumnInfo(name = "source_id") val sourceId: String,
+    @ColumnInfo(name = "remote_book_id") val remoteBookId: String,
+    @ColumnInfo(name = "last_visited_at_epoch_second") val lastVisitedAtEpochSecond: Long,
+    @ColumnInfo(name = "last_visited_at_nano") val lastVisitedAtNano: Int,
+)
 @Entity(
     tableName = "completed_chapters",
     primaryKeys = ["source_id", "remote_book_id", "chapter_id"],
@@ -162,6 +185,29 @@ internal data class CompletedChapterEntity(
     @ColumnInfo(name = "chapter_id") val chapterId: String,
     @ColumnInfo(name = "completed_at_epoch_second") val completedAtEpochSecond: Long,
     @ColumnInfo(name = "completed_at_nano") val completedAtNano: Int,
+)
+
+/**
+ * Semantic bookmarks intentionally do not reference [BookEntity]. They remain durable when a
+ * local pin is removed or a source is unavailable, and they never own reading progress.
+ */
+@Entity(
+    tableName = "reader_bookmarks",
+    primaryKeys = ["source_id", "remote_book_id", "bookmark_position_key"],
+)
+internal data class ReaderBookmarkEntity(
+    @ColumnInfo(name = "source_id") val sourceId: String,
+    @ColumnInfo(name = "remote_book_id") val remoteBookId: String,
+    @ColumnInfo(name = "bookmark_position_key") val bookmarkPositionKey: String,
+    @ColumnInfo(name = "content_id") val contentId: String,
+    val revision: String?,
+    @ColumnInfo(name = "block_id") val blockId: String?,
+    @ColumnInfo(name = "text_anchor_digest") val textAnchorDigest: String?,
+    @ColumnInfo(name = "character_offset") val characterOffset: Int?,
+    @ColumnInfo(name = "chapter_progress") val chapterProgress: Double?,
+    @ColumnInfo(name = "book_progress") val bookProgress: Double?,
+    @ColumnInfo(name = "captured_at_epoch_second") val capturedAtEpochSecond: Long,
+    @ColumnInfo(name = "captured_at_nano") val capturedAtNano: Int,
 )
 
 

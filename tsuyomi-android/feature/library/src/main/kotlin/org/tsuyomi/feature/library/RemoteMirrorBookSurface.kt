@@ -4,11 +4,6 @@
  */
 package org.tsuyomi.feature.library
 
-import androidx.compose.animation.animateColorAsState
-import androidx.compose.animation.core.animateFloatAsState
-import androidx.compose.animation.core.snap
-import androidx.compose.animation.core.spring
-import androidx.compose.animation.core.tween
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -35,14 +30,15 @@ import androidx.compose.ui.semantics.role
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.stateDescription
 import java.time.Instant
-import org.tsuyomi.core.database.LibraryBook
-import org.tsuyomi.core.database.LibraryEntry
-import org.tsuyomi.core.database.RemoteReconciliationState
+import org.tsuyomi.shared.librarydomain.LibraryBook
+import org.tsuyomi.shared.librarydomain.LibraryEntry
+import org.tsuyomi.shared.librarydomain.RemoteReconciliationState
 import org.tsuyomi.core.display.LocalDisplayEnvironment
 import org.tsuyomi.core.media.api.CoverUiState
 import org.tsuyomi.core.media.api.FallbackSpec
 import org.tsuyomi.core.ui.icons.TsuyomiIcons
-import org.tsuyomi.core.ui.theme.TsuyomiMotion
+import org.tsuyomi.core.ui.theme.tsuyomiAnimateColorAsState
+import org.tsuyomi.core.ui.theme.tsuyomiAnimateFloatAsState
 import org.tsuyomi.core.ui.theme.instantMotion
 import org.tsuyomi.shared.model.BookIdentity
 import org.tsuyomi.shared.sourcecontract.RemoteTarget
@@ -291,18 +287,18 @@ private fun RemoteDropAction(
     }
     val destructive = kind == LibraryShortcutDropKind.REMOTE_REMOVE
     val instant = LocalDisplayEnvironment.current.instantMotion
-    val scale by animateFloatAsState(
-        targetValue = if (targetActive) 1.025f else 1f,
-        animationSpec = if (instant) snap() else tween(TsuyomiMotion.SWITCH_DURATION_MS, easing = TsuyomiMotion.Easing),
+    val scale = tsuyomiAnimateFloatAsState(
+        target = if (targetActive) 1.025f else 1f,
+        instant = instant,
         label = "remoteDropTargetScale",
     )
-    val container by animateColorAsState(
-        targetValue = when {
+    val container = tsuyomiAnimateColorAsState(
+        target = when {
             destructive -> MaterialTheme.colorScheme.errorContainer
             targetActive -> MaterialTheme.colorScheme.secondaryContainer
             else -> MaterialTheme.colorScheme.surfaceContainerHigh
         },
-        animationSpec = if (instant) snap() else tween(TsuyomiMotion.SWITCH_DURATION_MS),
+        instant = instant,
         label = "remoteDropTargetContainer",
     )
     val content = if (destructive) MaterialTheme.colorScheme.onErrorContainer else MaterialTheme.colorScheme.onSurface

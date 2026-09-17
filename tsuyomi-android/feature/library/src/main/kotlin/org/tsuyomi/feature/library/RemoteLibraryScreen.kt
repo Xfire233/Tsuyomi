@@ -13,12 +13,9 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -41,6 +38,8 @@ import org.tsuyomi.core.ui.components.TsuyomiStateKind
 import org.tsuyomi.core.ui.components.TsuyomiTopBar
 import org.tsuyomi.core.ui.components.TsuyomiTopBarAction
 import org.tsuyomi.core.ui.components.TsuyomiOverflowAction
+import org.tsuyomi.core.ui.components.TsuyomiDialog
+import org.tsuyomi.core.ui.components.TsuyomiSelectableRow
 import org.tsuyomi.core.ui.icons.TsuyomiIcons
 import org.tsuyomi.feature.library.LibraryLayout
 import org.tsuyomi.feature.library.RemoteMirrorBookSurface
@@ -297,30 +296,25 @@ fun RemoteLibraryScreen(
     }
 
     if (copyConfirmationVisible) {
-        AlertDialog(
+        TsuyomiDialog(
             onDismissRequest = onDismissCopy,
-            title = { Text(stringResource(R.string.remote_library_copy_dialog_title)) },
-            text = {
-                Text(stringResource(R.string.remote_library_copy_dialog_message, if (selectedCount == 0) books.size else selectedCount))
-            },
-            confirmButton = { TextButton(onClick = onConfirmCopy) { Text(stringResource(R.string.remote_library_copy_confirm)) } },
-            dismissButton = { TextButton(onClick = onDismissCopy) { Text(stringResource(R.string.remote_library_copy_cancel)) } },
+            title = stringResource(R.string.remote_library_copy_dialog_title),
+            text = stringResource(R.string.remote_library_copy_dialog_message, if (selectedCount == 0) books.size else selectedCount),
+            confirmLabel = stringResource(R.string.remote_library_copy_confirm),
+            onConfirm = onConfirmCopy,
+            dismissLabel = stringResource(R.string.remote_library_copy_cancel),
         )
     }
 
     if (removeConfirmationBook != null) {
-        AlertDialog(
+        TsuyomiDialog(
             onDismissRequest = onDismissRemoveConfirmation,
-            title = { Text("从网站收藏移除") },
-            text = {
-                Text("确定要从网站收藏中移除《${removeConfirmationBook.title}》吗？\n此操作只修改网站收藏；本地书架、稍后再读、评分、标签和阅读进度均保留。")
-            },
-            confirmButton = {
-                TextButton(onClick = { onConfirmRemove(removeConfirmationBook) }) {
-                    Text("从网站收藏移除", color = MaterialTheme.colorScheme.error)
-                }
-            },
-            dismissButton = { TextButton(onClick = onDismissRemoveConfirmation) { Text("取消") } },
+            title = "从网站收藏移除",
+            text = "确定要从网站收藏中移除《${removeConfirmationBook.title}》吗？\n此操作只修改网站收藏；本地书架、稍后再读、评分、标签和阅读进度均保留。",
+            confirmLabel = "从网站收藏移除",
+            onConfirm = { onConfirmRemove(removeConfirmationBook) },
+            dismissLabel = "取消",
+            destructive = true,
         )
     }
 
@@ -328,35 +322,30 @@ fun RemoteLibraryScreen(
         var pickedTargetId by remember(moveTargetSelectionBook, selectedTargetId) {
             mutableStateOf(selectedTargetId ?: targets.firstOrNull()?.targetId.orEmpty())
         }
-        AlertDialog(
+        TsuyomiDialog(
             onDismissRequest = onDismissMoveSelection,
-            title = { Text("移至分类 / 目标") },
-            text = {
-                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Text("选择要移动至的目标分类：")
-                    targets.forEach { target ->
-                        Row(
-                            modifier = Modifier.fillMaxWidth().clickable { pickedTargetId = target.targetId }.padding(vertical = 4.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                        ) {
-                            RadioButton(selected = pickedTargetId == target.targetId, onClick = { pickedTargetId = target.targetId })
-                            Spacer(Modifier.width(8.dp))
-                            Text(target.displayName, style = MaterialTheme.typography.bodyLarge)
-                        }
+            title = "移至分类 / 目标",
+            body = {
+                Text("选择要移动至的目标分类：")
+                targets.forEach { target ->
+                    TsuyomiSelectableRow(
+                        selected = pickedTargetId == target.targetId,
+                        onClick = { pickedTargetId = target.targetId },
+                        onLongClick = null,
+                        modifier = Modifier.padding(vertical = 4.dp),
+                    ) {
+                        Text(target.displayName, style = MaterialTheme.typography.bodyLarge)
                     }
                 }
             },
-            confirmButton = {
-                TextButton(
-                    onClick = {
-                        targets.firstOrNull { it.targetId == pickedTargetId }?.let {
-                            onConfirmMove(moveTargetSelectionBook, it.targetId, it.displayName)
-                        }
-                    },
-                    enabled = pickedTargetId.isNotEmpty(),
-                ) { Text("确认移动") }
+            confirmLabel = "确认移动",
+            onConfirm = {
+                targets.firstOrNull { it.targetId == pickedTargetId }?.let {
+                    onConfirmMove(moveTargetSelectionBook, it.targetId, it.displayName)
+                }
             },
-            dismissButton = { TextButton(onClick = onDismissMoveSelection) { Text("取消") } },
+            confirmEnabled = pickedTargetId.isNotEmpty(),
+            dismissLabel = "取消",
         )
     }
 
@@ -366,14 +355,13 @@ fun RemoteLibraryScreen(
             "remove" -> "删除"
             else -> "移动"
         }
-        AlertDialog(
+        TsuyomiDialog(
             onDismissRequest = onDismissJitPrompt,
-            title = { Text("授权远端回写操作") },
-            text = {
-                Text("您即将对《${jitPrompt.bookTitle}》执行远端书架${opName}操作。\nTsuyomi 将代表您向「${jitPrompt.sourceName}」发送远端变更。\n是否授权并继续？")
-            },
-            confirmButton = { TextButton(onClick = onConfirmJitPrompt) { Text("授权并执行") } },
-            dismissButton = { TextButton(onClick = onDismissJitPrompt) { Text("取消") } },
+            title = "授权远端回写操作",
+            text = "您即将对《${jitPrompt.bookTitle}》执行远端书架${opName}操作。\nTsuyomi 将代表您向「${jitPrompt.sourceName}」发送远端变更。\n是否授权并继续？",
+            confirmLabel = "授权并执行",
+            onConfirm = onConfirmJitPrompt,
+            dismissLabel = "取消",
         )
     }
 }

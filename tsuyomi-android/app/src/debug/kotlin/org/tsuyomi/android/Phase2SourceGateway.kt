@@ -11,6 +11,8 @@ import java.net.URI
 import java.nio.charset.Charset
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicInteger
+import java.util.concurrent.atomic.AtomicReference
+import org.tsuyomi.core.network.HostResponseHeaders
 import org.tsuyomi.core.network.HostHttpResponse
 import org.tsuyomi.core.network.HostHttpTransport
 import org.tsuyomi.core.network.DirectActionTokenRegistry
@@ -38,6 +40,24 @@ internal object Phase2SourceGateway {
     private val websiteMutations = AtomicInteger()
     private val appendedUpdateDirectory = AtomicBoolean()
     private val shortUpdateBaselineDirectory = AtomicBoolean()
+    private val credentialCoverFixture = AtomicReference<ByteArray?>()
+    private val beforeCredentialCoverResponse = AtomicReference<(suspend () -> Unit)?>()
+    private val rejectedCredentialCovers = AtomicInteger()
+    private val acceptedCredentialCovers = AtomicInteger()
+
+    fun useCredentialCoverFixture(png: ByteArray, beforeResponse: (suspend () -> Unit)? = null) {
+        rejectedCredentialCovers.set(0)
+        acceptedCredentialCovers.set(0)
+        beforeCredentialCoverResponse.set(beforeResponse)
+        credentialCoverFixture.set(png)
+    }
+
+    fun clearCredentialCoverFixture() {
+        credentialCoverFixture.set(null)
+        beforeCredentialCoverResponse.set(null)
+    }
+    fun rejectedCredentialCoverCount(): Int = rejectedCredentialCovers.get()
+    fun acceptedCredentialCoverCount(): Int = acceptedCredentialCovers.get()
 
     fun resetOperationCounts() {
         sourceRequests.set(0)
@@ -141,6 +161,27 @@ internal object Phase2SourceGateway {
                 liveTransportRequests.incrementAndGet()
                 return@HostHttpTransport liveTransport.execute(request)
             }
+            val coverBytes = credentialCoverFixture.get()
+            if (coverBytes != null && request.url.path == "/files/article/image/12/1234/1234s.jpg") {
+                // The signed fixture's CDN has no cookie grant; authenticate only at the declared source origin.
+                if (request.url.host != "www.wenku8.net") {
+                    return@HostHttpTransport HostHttpResponse(
+                        status = 302,
+                        finalUrl = request.url,
+                        headers = HostResponseHeaders.of("location" to "https://www.wenku8.net${request.url.path}"),
+                        bytes = byteArrayOf(),
+                    )
+                }
+                val accepted = request.headers["cookie"].orEmpty().contains("fixture_session=accepted")
+                if (accepted) acceptedCredentialCovers.incrementAndGet() else rejectedCredentialCovers.incrementAndGet()
+                beforeCredentialCoverResponse.get()?.invoke()
+                return@HostHttpTransport HostHttpResponse(
+                    status = if (accepted) 200 else 401,
+                    finalUrl = request.url,
+                    headers = HostResponseHeaders.of("content-type" to "image/png"),
+                    bytes = if (accepted) coverBytes else byteArrayOf(),
+                )
+            }
             when {
                 request.url.path == "/modules/article/addbookcase.php" -> websiteMutations.incrementAndGet()
                 request.url.path == "/modules/article/bookcase.php" && request.method == NetworkMethod.POST ->
@@ -231,7 +272,7 @@ internal object Phase2SourceGateway {
         return HostHttpResponse(
             status = 200,
             finalUrl = url,
-            headers = mapOf("content-type" to "text/html; charset=gb18030"),
+            headers = org.tsuyomi.core.network.HostResponseHeaders.of("content-type" to "text/html; charset=gb18030"),
             bytes = text.toByteArray(Charset.forName("GB18030")),
         )
     }

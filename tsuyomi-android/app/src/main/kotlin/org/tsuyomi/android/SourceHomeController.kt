@@ -12,6 +12,7 @@ import java.util.LinkedHashMap
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
@@ -29,6 +30,8 @@ internal class SourceHomeController : Closeable {
         val queryKey: String,
         val selectedFilters: Map<String, String>,
         val page: SourceHomePage? = null,
+        val pageIsCurrent: Boolean = true,
+        val pageEpoch: Long = 0L,
         val replacing: Boolean = false,
         val appending: Boolean = false,
         val replacementFailure: SourceHomeFailure? = null,
@@ -45,6 +48,7 @@ internal class SourceHomeController : Closeable {
     private var packageRevision: String? = null
     private var sourceIdentity: String? = null
     private var generation = 0L
+    private var nextPageEpoch = 0L
     private var title = ""
     private var primaryFilter: SourceHomeFilter? = null
     private var activePrimary = DEFAULT_PRIMARY
@@ -65,7 +69,31 @@ internal class SourceHomeController : Closeable {
         generation += 1L
         replacementJob?.cancel()
         replacementJob = null
-        acceptReplacement(queryKey(selectedFilters), page)
+        acceptReplacement(queryKey(selectedFilters), page, isActiveRequest = true)
+    }
+
+    /** Keeps the explicitly admitted page, never pages from the previous credential partition. */
+    fun retainVerifiedPageAfterSessionRenewal() {
+        val verified = activeEntry()?.takeIf { it.page != null && it.pageIsCurrent } ?: return invalidateSession()
+        val returnEntry = featureReturnQueryKey?.let(cache::get)?.copy(
+            page = null,
+            replacing = false,
+            appending = false,
+            replacementFailure = null,
+            appendFailure = null,
+        )
+        generation += 1L
+        replacementJob?.cancel()
+        replacementJob = null
+        val appends = appendJobs.values.toList()
+        appendJobs.clear()
+        appends.forEach(Job::cancel)
+        cache.clear()
+        lastQueryByPrimary.clear()
+        returnEntry?.let { cache[it.queryKey] = it }
+        cache[verified.queryKey] = verified.copy(replacing = false, appending = false)
+        lastQueryByPrimary[activePrimary] = verified.queryKey
+        publish()
     }
 
     fun rejectVerifiedPage(failure: SourceHomeFailure) {
@@ -80,8 +108,7 @@ internal class SourceHomeController : Closeable {
         revision: String?,
         load: suspend (Map<String, String>, String?) -> Result<SourceHomePage>,
     ) {
-        bindSource(sourceId)
-        ensurePackageRevision(revision)
+        bindSource(sourceId, revision)
         if (state !is SourceHomeViewState.Idle) return
         state = SourceHomeViewState.Loading
         startReplacement(
@@ -99,17 +126,18 @@ internal class SourceHomeController : Closeable {
     ) {
         val filter = primaryFilter ?: return
         if (filter.options.none { it.value == value }) return
+        if (value == activePrimary && activeEntry()?.replacing == true) return
         activePrimary = value
         val cachedKey = lastQueryByPrimary[value]
         val cached = cachedKey?.let(cache::get)
-        if (cached?.page != null) {
+        if (cached?.page != null && cached.pageIsCurrent) {
             activeQueryKey = cachedKey
             cache[cachedKey] = cached.copy(replacing = false, replacementFailure = null)
             publish()
             return
         }
         startReplacement(
-            requestedFilters = mapOf(filter.id to value),
+            requestedFilters = cached?.selectedFilters ?: mapOf(filter.id to value),
             primary = value,
             force = false,
             initial = false,
@@ -125,7 +153,7 @@ internal class SourceHomeController : Closeable {
         val key = queryKey(filters)
         val cached = cache[key]
         activePrimary = primary
-        if (cached?.page != null) {
+        if (cached?.page != null && cached.pageIsCurrent) {
             activeQueryKey = key
             lastQueryByPrimary[primary] = key
             cache[key] = cached.copy(replacing = false, replacementFailure = null)
@@ -152,7 +180,7 @@ internal class SourceHomeController : Closeable {
         )
     }
 
-    fun navigateBackFromFeature(): Boolean {
+    fun navigateBackFromFeature(load: suspend (Map<String, String>, String?) -> Result<SourceHomePage>): Boolean {
         val returnKey = featureReturnQueryKey ?: return false
         val returnEntry = cache[returnKey] ?: return false
         generation += 1L
@@ -165,7 +193,11 @@ internal class SourceHomeController : Closeable {
         lastQueryByPrimary[activePrimary] = returnKey
         title = returnEntry.page?.title ?: title
         primaryFilter = returnEntry.page?.filters?.firstOrNull() ?: primaryFilter
-        publish()
+        if (returnEntry.page == null || !returnEntry.pageIsCurrent) {
+            startReplacement(returnEntry.selectedFilters, activePrimary, force = true, initial = true, load = load)
+        } else {
+            publish()
+        }
         return true
     }
 
@@ -184,7 +216,9 @@ internal class SourceHomeController : Closeable {
     fun retryReplacement(load: suspend (Map<String, String>, String?) -> Result<SourceHomePage>) {
         val entry = activeEntry()
         if (entry == null) {
-            sourceIdentity?.let { ensureInitial(it, packageRevision, load) }
+            if (sourceIdentity != null) {
+                startReplacement(emptyMap(), DEFAULT_PRIMARY, force = true, initial = true, load = load)
+            }
         } else {
             startReplacement(
                 requestedFilters = entry.selectedFilters,
@@ -212,39 +246,47 @@ internal class SourceHomeController : Closeable {
         val entry = cache[key] ?: return
         val page = entry.page ?: return
         val cursor = page.nextCursor ?: return
-        if (page.complete || entry.appending || appendJobs[key]?.isActive == true) return
+        if (!entry.pageIsCurrent || entry.replacing || page.complete || entry.appending || appendJobs[key]?.isActive == true) return
         cache[key] = entry.copy(appending = true, appendFailure = null)
         publish()
-        appendJobs[key] = scope.launch {
-            val result = try {
-                load(entry.selectedFilters, cursor)
-            } catch (cancelled: CancellationException) {
-                throw cancelled
-            } catch (error: Throwable) {
-                Result.failure(error)
+        val job = scope.launch(start = CoroutineStart.LAZY) {
+            try {
+                val result = try {
+                    load(entry.selectedFilters, cursor)
+                } catch (cancelled: CancellationException) {
+                    throw cancelled
+                } catch (error: Throwable) {
+                    Result.failure(error)
+                }
+                val current = cache[key] ?: return@launch
+                if (current.pageEpoch != entry.pageEpoch || appendJobs[key] !== coroutineContext[Job]) return@launch
+                cache[key] = result.fold(
+                    onSuccess = { incoming ->
+                        current.copy(
+                            page = mergeHomePages(page, incoming),
+                            appending = false,
+                            appendFailure = null,
+                            selectedFilters = normalizedEntrySelection(incoming, current.selectedFilters),
+                        )
+                    },
+                    onFailure = { error ->
+                        current.copy(appending = false, appendFailure = error.toHomeFailure())
+                    },
+                )
+                if (activeQueryKey == key) publish()
+            } finally {
+                if (appendJobs[key] === coroutineContext[Job]) {
+                    appendJobs.remove(key)
+                    val current = cache[key]
+                    if (current != null && current.pageEpoch == entry.pageEpoch && current.appending) {
+                        cache[key] = current.copy(appending = false)
+                        if (activeQueryKey == key) publish()
+                    }
+                }
             }
-            result.fold(
-                onSuccess = { incoming ->
-                    val current = cache[key] ?: return@fold
-                    cache[key] = current.copy(
-                        page = mergeHomePages(page, incoming),
-                        appending = false,
-                        appendFailure = null,
-                        selectedFilters = normalizedEntrySelection(incoming, current.selectedFilters),
-                    )
-                    if (activeQueryKey == key) publish()
-                },
-                onFailure = { error ->
-                    val current = cache[key] ?: return@fold
-                    cache[key] = current.copy(
-                        appending = false,
-                        appendFailure = error.toHomeFailure(),
-                    )
-                    if (activeQueryKey == key) publish()
-                },
-            )
-            appendJobs.remove(key)
         }
+        appendJobs[key] = job
+        job.start()
     }
 
     fun updateScrollPosition(primary: String, queryKey: String, index: Int, offset: Int) {
@@ -257,24 +299,30 @@ internal class SourceHomeController : Closeable {
         )
     }
     /**
-     * Clears route-local Home state only when a different source becomes active. Package revisions
-     * of the same source deliberately retain cache, feature history, and scroll continuity.
+     * Binds this bounded in-memory page cache to one trusted source archive. A new package may
+     * change source parsing and content semantics, so it is a real cache boundary even when the
+     * source ID is unchanged.
      */
-    fun bindSource(sourceId: String) {
-        if (sourceIdentity == sourceId) return
+    fun bindSource(sourceId: String, revision: String?) {
+        if (sourceIdentity == sourceId && packageRevision == revision) {
+            if (state is SourceHomeViewState.Content) publish()
+            return
+        }
         reset()
         sourceIdentity = sourceId
+        packageRevision = revision
     }
 
-    fun reset() {
+    /** Discards credential-bound pages while retaining the selected archive identity. */
+    fun invalidateSession() {
         generation += 1L
         replacementJob?.cancel()
         replacementJob = null
-        appendJobs.values.forEach(Job::cancel)
+        val appends = appendJobs.values.toList()
         appendJobs.clear()
+        appends.forEach(Job::cancel)
         cache.clear()
         lastQueryByPrimary.clear()
-        sourceIdentity = null
         title = ""
         primaryFilter = null
         activePrimary = DEFAULT_PRIMARY
@@ -284,9 +332,10 @@ internal class SourceHomeController : Closeable {
         state = SourceHomeViewState.Idle
     }
 
-    private fun ensurePackageRevision(revision: String?) {
-        if (packageRevision == revision) return
-        packageRevision = revision
+    fun reset() {
+        invalidateSession()
+        sourceIdentity = null
+        packageRevision = null
     }
 
     private fun startReplacement(
@@ -298,7 +347,7 @@ internal class SourceHomeController : Closeable {
     ) {
         val key = queryKey(requestedFilters)
         val cached = cache[key]
-        if (!force && cached?.page != null) {
+        if (!force && cached?.page != null && cached.pageIsCurrent) {
             activePrimary = primary
             activeQueryKey = key
             lastQueryByPrimary[primary] = key
@@ -310,10 +359,15 @@ internal class SourceHomeController : Closeable {
         val previous = previousKey?.let(cache::get)
         val seed = previous?.takeIf { primaryValue(it.selectedFilters) == primary }
         val preserveScroll = force && previousKey == key
+        appendJobs.remove(key)?.cancel()
+        generation += 1L
+        val requestGeneration = generation
         val requestEntry = CacheEntry(
             queryKey = key,
             selectedFilters = requestedFilters,
             page = seed?.page,
+            pageIsCurrent = seed?.let { it.pageIsCurrent && it.queryKey == key } == true,
+            pageEpoch = ++nextPageEpoch,
             replacing = true,
             firstVisibleItemIndex = if (preserveScroll) seed?.firstVisibleItemIndex ?: 0 else 0,
             firstVisibleItemScrollOffset = if (preserveScroll) seed?.firstVisibleItemScrollOffset ?: 0 else 0,
@@ -325,8 +379,6 @@ internal class SourceHomeController : Closeable {
         trimCache()
         if (!initial || primaryFilter != null) publish() else state = SourceHomeViewState.Loading
 
-        generation += 1L
-        val requestGeneration = generation
         replacementJob?.cancel()
         replacementJob = scope.launch {
             val result = try {
@@ -349,7 +401,11 @@ internal class SourceHomeController : Closeable {
         }
     }
 
-    private fun acceptReplacement(requestKey: String, incoming: SourceHomePage) {
+    private fun acceptReplacement(
+        requestKey: String,
+        incoming: SourceHomePage,
+        isActiveRequest: Boolean = activeQueryKey == requestKey,
+    ) {
         val incomingPrimaryFilter = incoming.filters.firstOrNull()
         val existing = cache[requestKey]
         val normalizedSelection = normalizedEntrySelection(incoming, existing?.selectedFilters.orEmpty())
@@ -357,20 +413,32 @@ internal class SourceHomeController : Closeable {
             ?.let { filter -> normalizedSelection[filter.id] }
             ?: DEFAULT_PRIMARY
         val normalizedKey = queryKey(normalizedSelection)
+        appendJobs.remove(requestKey)?.cancel()
+        if (!isActiveRequest && normalizedKey == activeQueryKey) {
+            cache.remove(requestKey)
+            publish()
+            return
+        }
+        if (normalizedKey != requestKey) appendJobs.remove(normalizedKey)?.cancel()
         if (normalizedKey != requestKey) cache.remove(requestKey)
-        title = incoming.title
-        if (featureReturnQueryKey != null) featureTitle = incoming.title
-        primaryFilter = incomingPrimaryFilter
-        activePrimary = normalizedPrimary
-        activeQueryKey = normalizedKey
+        if (isActiveRequest) {
+            title = incoming.title
+            if (featureReturnQueryKey != null) featureTitle = incoming.title
+            primaryFilter = incomingPrimaryFilter
+            activePrimary = normalizedPrimary
+            activeQueryKey = normalizedKey
+        }
         cache[normalizedKey] = CacheEntry(
             queryKey = normalizedKey,
             selectedFilters = normalizedSelection,
             page = incoming,
+            pageEpoch = ++nextPageEpoch,
             firstVisibleItemIndex = existing?.firstVisibleItemIndex ?: 0,
             firstVisibleItemScrollOffset = existing?.firstVisibleItemScrollOffset ?: 0,
         )
-        lastQueryByPrimary[normalizedPrimary] = normalizedKey
+        if (isActiveRequest || lastQueryByPrimary[normalizedPrimary] == requestKey) {
+            lastQueryByPrimary[normalizedPrimary] = normalizedKey
+        }
         trimCache()
         publish()
     }

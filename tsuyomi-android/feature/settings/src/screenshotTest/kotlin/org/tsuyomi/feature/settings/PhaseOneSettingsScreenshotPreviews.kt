@@ -13,12 +13,12 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.tooling.preview.Preview
 import com.android.tools.screenshot.PreviewTest
-import org.tsuyomi.core.display.ColorSchemePreference
+import org.tsuyomi.core.preferences.ColorSchemePreference
 import org.tsuyomi.core.display.DisplayDecisionReason
 import org.tsuyomi.core.display.DisplayEnvironment
 import org.tsuyomi.core.display.DisplayEnvironmentProvider
-import org.tsuyomi.core.display.DisplayPreference
-import org.tsuyomi.core.display.DisplayPreferences
+import org.tsuyomi.core.preferences.DisplayPreference
+import org.tsuyomi.core.preferences.DisplayPreferences
 import org.tsuyomi.core.display.DisplayProfile
 import org.tsuyomi.core.display.MotionPolicy
 import org.tsuyomi.core.ui.theme.TsuyomiDarkColorScheme
@@ -139,7 +139,13 @@ fun MoreScreenScreenshot() {
 @Composable
 fun AboutScreenScreenshot() {
     ScreenSurface(standardEnvironment()) {
-        AboutScreen(applicationName = "Tsuyomi", versionName = "0.1.0", licenseText = "Apache License 2.0")
+        AboutScreen(
+            applicationName = "Tsuyomi",
+            versionName = "0.1.0",
+            licenseText = "Apache License 2.0",
+            licenseVisible = false,
+            onLicenseVisibilityChanged = {},
+        )
     }
 }
 
@@ -225,6 +231,7 @@ private val PreviewActions = DisplaySettingsActions(
     onDisplayPreferenceChange = {},
     onColorSchemePreferenceChange = {},
     onDynamicColorEnabledChange = {},
+    onCoverCardPresentationChange = {},
     onRefreshNow = {},
     onRetryWrite = {},
     onAcknowledgeWriteFailure = {},

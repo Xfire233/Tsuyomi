@@ -5,6 +5,10 @@
 
 package org.tsuyomi.core.display
 
+import org.tsuyomi.core.preferences.ColorSchemePreference
+import org.tsuyomi.core.preferences.DisplayPreference
+import org.tsuyomi.core.preferences.DisplayPreferences
+
 /** Resolves a single immutable display environment from durable preferences and local inputs. */
 class DisplayEnvironmentResolver {
     fun resolve(

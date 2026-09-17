@@ -27,6 +27,9 @@ import org.tsuyomi.shared.backup.TransferSnapshot
 import org.tsuyomi.shared.locator.DocumentIdentity
 import org.tsuyomi.shared.locator.ReaderLocator
 import org.tsuyomi.shared.model.BookIdentity
+import org.tsuyomi.shared.librarydomain.CollectionKind
+import org.tsuyomi.shared.librarydomain.LibraryBook
+import org.tsuyomi.shared.librarydomain.ReadingProgress
 import org.tsuyomi.shared.smartshelf.SmartRuleCodec
 
 enum class ImportSessionStatus {
@@ -269,6 +272,7 @@ class RoomTransferRepository(private val database: TsuyomiDatabase) {
             incoming.completedChapterIds.sorted().forEach { chapterId ->
                 library.markChapterCompleted(incoming.identity, chapterId, plan.sourceCreatedAt)
             }
+            library.addBookmarks(incoming.identity, incoming.bookmarks)
             if (incoming.localPin) {
                 incoming.shelfIds.sorted().forEach { shelfId ->
                     if (dao.collection(shelfId)?.kind == CollectionKind.MANUAL) {
@@ -347,13 +351,15 @@ class RoomTransferRepository(private val database: TsuyomiDatabase) {
     suspend fun exportSnapshot(createdAt: Instant, readerPreferences: org.tsuyomi.shared.backup.PortableReaderPreferences?): TransferSnapshot =
         database.withTransaction {
             val books = dao.allBooks().associateBy { BookIdentity(it.sourceId, it.remoteBookId) }
+            val entries = dao.allLibraryEntries().associateBy { BookIdentity(it.sourceId, it.remoteBookId) }
             val memberships = dao.allManualMemberships().groupBy { BookIdentity(it.sourceId, it.remoteBookId) }
-            val entries = dao.allLibraryEntries().mapNotNull { entry ->
-                val identity = BookIdentity(entry.sourceId, entry.remoteBookId)
-                val book = books[identity] ?: return@mapNotNull null
-                val domain = library.book(identity) ?: return@mapNotNull null
+            val bookmarkedIdentities = dao.readerBookmarkIdentities().map { BookIdentity(it.sourceId, it.remoteBookId) }
+            val exportedIdentities = (entries.keys + bookmarkedIdentities).toSortedSet(compareBy(BookIdentity::sourceId, BookIdentity::remoteBookId))
+            val exportedBooks = exportedIdentities.mapNotNull { identity ->
+                val domain = books[identity]?.toDomain() ?: return@mapNotNull null
+                val entry = entries[identity]
                 val shelfIds = memberships[identity].orEmpty().mapTo(sortedSetOf()) { it.collectionId }
-                require(entry.locallyPinned || shelfIds.isEmpty()) {
+                require(entry?.locallyPinned != false || shelfIds.isEmpty()) {
                     "Unpinned library entries cannot have manual collection memberships"
                 }
                 TransferBook(
@@ -366,10 +372,10 @@ class RoomTransferRepository(private val database: TsuyomiDatabase) {
                     remoteTags = domain.remoteTags,
                     localTags = dao.localTags(identity.sourceId, identity.remoteBookId).mapTo(sortedSetOf()) { it.displayTag },
                     shelfIds = shelfIds,
-                    rating = entry.rating?.toDouble(),
-                    readLater = entry.readLater,
-                    localPin = entry.locallyPinned,
-                    addedAt = Instant.ofEpochSecond(entry.addedAtEpochSecond, entry.addedAtNano.toLong()),
+                    rating = entry?.rating?.toDouble(),
+                    readLater = entry?.readLater ?: false,
+                    localPin = entry?.locallyPinned ?: false,
+                    addedAt = entry?.let { Instant.ofEpochSecond(it.addedAtEpochSecond, it.addedAtNano.toLong()) } ?: domain.addedAt,
                     updatedAt = domain.metadataUpdatedAt,
                     progress = dao.progress(identity.sourceId, identity.remoteBookId)?.let { progress ->
                         TransferProgress(
@@ -382,12 +388,13 @@ class RoomTransferRepository(private val database: TsuyomiDatabase) {
                         )
                     },
                     completedChapterIds = dao.completedChapterIds(identity.sourceId, identity.remoteBookId).toSortedSet(),
+                    bookmarks = library.bookmarks(identity),
                 )
             }
             val shelves = dao.allCollections().filter { it.kind == CollectionKind.MANUAL }.map {
                 TransferShelf(it.collectionId, it.title, it.parentCollectionId, it.displayOrder.toInt())
             }
-            TransferSnapshot(createdAt, entries, shelves, readerPreferences)
+            TransferSnapshot(createdAt, exportedBooks, shelves, readerPreferences)
         }
 
     private fun parentFirst(shelves: List<TransferShelf>): List<TransferShelf> {

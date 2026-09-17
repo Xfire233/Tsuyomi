@@ -133,40 +133,60 @@ internal class HostCoverLoader(
     private val memory = object : LruCache<String, Bitmap>(32 * 1024 * 1024) {
         override fun sizeOf(key: String, value: Bitmap): Int = value.allocationByteCount
     }
-    private val concurrency = Semaphore(2)
+    /**
+     * Bounds concurrent exchanges with the source. It deliberately covers the network request only:
+     * memory hits, decoding and disk writes run outside it, so a slow decode or a cache lookup can
+     * never hold a network slot while a visible cover waits for one.
+     *
+     * The bound is paced against the reference reader's image fetcher, which runs ten concurrent
+     * cover downloads and releases its slot after the disk write. Two slots made a visible grid
+     * arrive pair by pair; on a high-latency link the last of twelve covers waited six rounds.
+     */
+    private val networkConcurrency = Semaphore(8)
 
     init {
         require(maxResponseBytes in 1..16_777_216) { "Invalid media response limit" }
     }
 
+    fun cached(url: String, targetWidthPx: Int, targetHeightPx: Int): Bitmap? {
+        require(targetWidthPx > 0 && targetHeightPx > 0)
+        val normalized = policy.requireAllowed(url)
+        return memory.get("$normalized#$targetWidthPx:$targetHeightPx")
+    }
+
     suspend fun load(url: String, targetWidthPx: Int, targetHeightPx: Int): Bitmap =
         load(url, referrerUrl = null, targetWidthPx = targetWidthPx, targetHeightPx = targetHeightPx)
 
-    suspend fun load(url: String, referrerUrl: String?, targetWidthPx: Int, targetHeightPx: Int): Bitmap = concurrency.withPermit {
-        require(targetWidthPx > 0 && targetHeightPx > 0) { "Target dimensions must be positive" }
+    suspend fun load(url: String, referrerUrl: String?, targetWidthPx: Int, targetHeightPx: Int): Bitmap {
+        require(targetWidthPx > 0 && targetHeightPx > 0)
         val normalized = policy.requireAllowed(url)
         val memoryKey = "$normalized#$targetWidthPx:$targetHeightPx"
-        memory.get(memoryKey)?.let { return@withPermit it }
+        memory.get(memoryKey)?.let { return it }
         val diskPath = "${sha256(normalized)}.image"
         val cached = runCatching { disk.read(diskPath) }.getOrNull()
         if (cached != null) {
             runCatching { decodeValidated(cached, targetWidthPx, targetHeightPx) }.getOrNull()?.let { bitmap ->
                 memory.put(memoryKey, bitmap)
-                return@withPermit bitmap
+                return bitmap
             }
             disk.delete(diskPath)
         }
-        val response = mediaFetcher?.fetch(normalized, referrerUrl)
-            ?.let { EncodedMedia(it.bytes, it.contentType) }
-            ?: transport.fetch(normalized, policy, maxResponseBytes)
+        val response = fetchBoundedToSource(normalized, referrerUrl)
         if (response.contentType !in setOf("image/jpeg", "image/png")) {
             throw MediaLoadException(MediaFailure.UNSUPPORTED_CONTENT)
         }
         val bitmap = decodeValidated(response.bytes, targetWidthPx, targetHeightPx)
         runCatching { disk.write(diskPath, response.bytes) }
         memory.put(memoryKey, bitmap)
-        bitmap
+        return bitmap
     }
+
+    private suspend fun fetchBoundedToSource(normalized: String, referrerUrl: String?): EncodedMedia =
+        networkConcurrency.withPermit {
+            mediaFetcher?.fetch(normalized, referrerUrl)
+                ?.let { EncodedMedia(it.bytes, it.contentType) }
+                ?: transport.fetch(normalized, policy, maxResponseBytes)
+        }
 
     private suspend fun decodeValidated(bytes: ByteArray, targetWidthPx: Int, targetHeightPx: Int): Bitmap =
         withContext(Dispatchers.Default) {

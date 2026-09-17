@@ -41,7 +41,6 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.launch
 import org.tsuyomi.shared.model.BookIdentity
-import kotlin.math.abs
 
 enum class LibrarySelectionKind {
     BOOK,
@@ -173,6 +172,11 @@ internal class LibraryDragCoordinator {
         sourceBounds[subjectKey] = bounds
     }
 
+    fun unregisterSource(subjectKey: String) {
+        sourceBounds.remove(subjectKey)
+        if (activeSubjectKey == subjectKey) cancel()
+    }
+
     fun allocateShelfTargetId(): Int = nextShelfTargetId++
 
     fun registerShelf(id: Int, bounds: Rect, allowsBookRoot: Boolean, onHover: (() -> Unit)?) {
@@ -192,6 +196,10 @@ internal class LibraryDragCoordinator {
 
     fun hostTopLeft(): Offset = hostBounds?.topLeft ?: Offset.Zero
 
+    fun unregisterHost() {
+        hostBounds = null
+    }
+
     fun registerShortcut(
         id: String,
         index: Int,
@@ -206,16 +214,35 @@ internal class LibraryDragCoordinator {
         updateTarget()
     }
 
+    fun unregisterShortcut(id: String) {
+        shortcutBounds.remove(id)
+        dragShortcutBounds = dragShortcutBounds - id
+        updateTarget()
+    }
+
     fun registerCollection(id: String, bounds: Rect) {
         collectionBounds[id] = LibraryCollectionTarget(id, bounds)
         updateTarget()
     }
 
+
+    fun unregisterCollection(id: String) {
+        collectionBounds.remove(id)
+        dragCollectionBounds = dragCollectionBounds - id
+        updateTarget()
+    }
     fun registerBook(identity: BookIdentity, index: Int, bounds: Rect) {
         bookBounds[identity.stableKey()] = LibraryBookTarget(identity, index, bounds)
         updateTarget()
     }
 
+
+    fun unregisterBook(identity: BookIdentity) {
+        val key = identity.stableKey()
+        bookBounds.remove(key)
+        dragBookBounds = dragBookBounds - key
+        updateTarget()
+    }
     fun registerLibrary(bounds: Rect, reorderEnabled: Boolean) {
         libraryBounds = bounds
         libraryReorderEnabled = reorderEnabled
@@ -223,8 +250,19 @@ internal class LibraryDragCoordinator {
         updateTarget()
     }
 
+    fun unregisterLibrary() {
+        libraryBounds = null
+        libraryReorderEnabled = false
+        updateTarget()
+    }
+
     fun registerDeleteTarget(bounds: Rect) {
         deleteBounds = bounds
+        updateTarget()
+    }
+
+    fun unregisterDeleteTarget() {
+        deleteBounds = null
         updateTarget()
     }
 
@@ -594,6 +632,9 @@ private fun Modifier.libraryPointerDragGestures(
     val currentOnLongPress by rememberUpdatedState(onLongPress)
     val currentStartDragOnLongPress by rememberUpdatedState(startDragOnLongPress)
     val currentPayload by rememberUpdatedState(payload)
+    DisposableEffect(coordinator, subjectKey) {
+        onDispose { coordinator.unregisterSource(subjectKey) }
+    }
     return onGloballyPositioned { coordinator.registerSource(subjectKey, it.boundsInWindow()) }
         .pointerInput(subjectKey, coordinator, dragEnabled, longPressEnabled, interactionSource, scrollOrientation) {
             coroutineScope {
@@ -655,10 +696,10 @@ private fun Modifier.libraryPointerDragGestures(
                                     startDrag()
                                     if (started) change.consume()
                                 }
-                                !longPressActivated && displacement.isDominantScrollMovement(
-                                    scrollOrientation,
-                                    viewConfiguration.touchSlop,
-                                ) -> {
+                                // A non-held cross-axis movement belongs to a parent Pager, not
+                                // to book selection or reordering. Once long press has won,
+                                // movement still starts the owned drag in either direction.
+                                !longPressActivated && preHoldDistance > viewConfiguration.touchSlop -> {
                                     scrollGestureWon = true
                                     longPressJob.cancel()
                                     if (!interactionFinished) {
@@ -716,9 +757,12 @@ internal fun Modifier.libraryShelfDropTarget(
     }
 }
 
-internal fun Modifier.libraryDragOverlayHost(coordinator: LibraryDragCoordinator): Modifier =
+internal fun Modifier.libraryDragOverlayHost(coordinator: LibraryDragCoordinator): Modifier = composed {
+    DisposableEffect(coordinator) {
+        onDispose { coordinator.unregisterHost() }
+    }
     onGloballyPositioned { coordinator.registerHost(it.boundsInWindow()) }
-
+}
 internal fun Modifier.libraryShortcutDropTarget(
     coordinator: LibraryDragCoordinator,
     id: String,
@@ -726,28 +770,52 @@ internal fun Modifier.libraryShortcutDropTarget(
     kind: LibraryShortcutDropKind,
     bookIdentity: BookIdentity?,
     mirror: LibraryMirrorShortcut?,
-): Modifier = onGloballyPositioned {
-    coordinator.registerShortcut(id, index, kind, bookIdentity, it.boundsInWindow(), mirror)
+): Modifier = composed {
+    DisposableEffect(coordinator, id) {
+        onDispose { coordinator.unregisterShortcut(id) }
+    }
+    onGloballyPositioned {
+        coordinator.registerShortcut(id, index, kind, bookIdentity, it.boundsInWindow(), mirror)
+    }
 }
 
 internal fun Modifier.libraryBookDropTarget(
     coordinator: LibraryDragCoordinator,
     identity: BookIdentity,
     index: Int,
-): Modifier = onGloballyPositioned { coordinator.registerBook(identity, index, it.boundsInWindow()) }
+): Modifier = composed {
+    DisposableEffect(coordinator, identity) {
+        onDispose { coordinator.unregisterBook(identity) }
+    }
+    onGloballyPositioned { coordinator.registerBook(identity, index, it.boundsInWindow()) }
+}
 
 internal fun Modifier.libraryCollectionDropTarget(
     coordinator: LibraryDragCoordinator,
     collectionId: String,
-): Modifier = onGloballyPositioned { coordinator.registerCollection(collectionId, it.boundsInWindow()) }
+): Modifier = composed {
+    DisposableEffect(coordinator, collectionId) {
+        onDispose { coordinator.unregisterCollection(collectionId) }
+    }
+    onGloballyPositioned { coordinator.registerCollection(collectionId, it.boundsInWindow()) }
+}
 
 internal fun Modifier.libraryContentDropTarget(
     coordinator: LibraryDragCoordinator,
     reorderEnabled: Boolean,
-): Modifier = onGloballyPositioned { coordinator.registerLibrary(it.boundsInWindow(), reorderEnabled) }
+): Modifier = composed {
+    DisposableEffect(coordinator) {
+        onDispose { coordinator.unregisterLibrary() }
+    }
+    onGloballyPositioned { coordinator.registerLibrary(it.boundsInWindow(), reorderEnabled) }
+}
 
-internal fun Modifier.libraryDeleteDropTarget(coordinator: LibraryDragCoordinator): Modifier =
+internal fun Modifier.libraryDeleteDropTarget(coordinator: LibraryDragCoordinator): Modifier = composed {
+    DisposableEffect(coordinator) {
+        onDispose { coordinator.unregisterDeleteTarget() }
+    }
     onGloballyPositioned { coordinator.registerDeleteTarget(it.boundsInWindow()) }
+}
 
 private fun BookIdentity.stableKey(): String = "$sourceId\u0000$remoteBookId"
 
@@ -762,8 +830,3 @@ private fun Rect.collectionDropBounds(): Rect {
     )
 }
 
-private fun Offset.isDominantScrollMovement(orientation: Orientation, touchSlop: Float): Boolean {
-    val primary = abs(if (orientation == Orientation.Horizontal) x else y)
-    val cross = abs(if (orientation == Orientation.Horizontal) y else x)
-    return primary > touchSlop && primary >= cross
-}

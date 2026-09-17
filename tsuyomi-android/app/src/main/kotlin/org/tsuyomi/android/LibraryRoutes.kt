@@ -18,7 +18,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.launch
-import org.tsuyomi.core.database.LibraryEntry
+import org.tsuyomi.shared.librarydomain.LibraryEntry
 import org.tsuyomi.core.media.api.CoverUiState
 import org.tsuyomi.feature.library.CollectionManagerScreen
 import org.tsuyomi.feature.library.LibraryScreen
@@ -27,6 +27,9 @@ import org.tsuyomi.feature.library.LibraryDragPayload
 import org.tsuyomi.feature.library.LibraryDropDestination
 import org.tsuyomi.feature.library.LibrarySelectionDialog
 import org.tsuyomi.feature.library.LibraryTagsScreen
+import org.tsuyomi.feature.library.LibraryTagOwnership
+import org.tsuyomi.feature.library.normalizeLocalLibraryTagName
+import org.tsuyomi.feature.library.normalizeSourceLibraryTagName
 import org.tsuyomi.feature.library.SystemLibraryFilter
 
 internal fun NavGraphBuilder.libraryRoutes(
@@ -80,18 +83,18 @@ private fun NavGraphBuilder.libraryHomeRoute(
     composable(Routes.Library) {
         val scope = rememberCoroutineScope()
         val failureMessage = stringResource(R.string.library_read_failure_safe)
-        LaunchedEffect(Unit) { controller.restoreLibraryHome() }
+        LaunchedEffect(Unit) {
+            controller.restoreLibraryHome()
+            controller.reload(failureMessage)
+        }
         LibraryScreen(
             state = controller.state,
+            primaryTabStates = controller.primaryTabStates(),
             collections = controller.collections,
             showNavigationNodes = true,
             coverState = coverState,
             onCoverVisibility = onCoverVisibility,
-            onSelectTab = { filter -> scope.launch { controller.selectTab(filter) } },
-            onOpenSystemNode = { filter -> scope.launch {
-                controller.selectTab(filter)
-                navController.navigate(Routes.Library) { launchSingleTop = true }
-            } },
+            onSelectTab = controller::selectTab,
             onOpenCollection = { collection ->
                 controller.selectCollection(collection.collectionId)
                 navController.navigate(Routes.libraryCollection(collection.collectionId))
@@ -112,7 +115,7 @@ private fun NavGraphBuilder.libraryHomeRoute(
             onOpenBook = { entry ->
                 controller.openOrToggleEntry(entry)
                 scope.launch {
-                    if (controller.state.filter == SystemLibraryFilter.CONTINUE && entry.progress != null && entry.sourceAvailable) {
+                    if (controller.state.filter == SystemLibraryFilter.CONTINUE && entry.sourceAvailable) {
                         if (!resumeReading(entry)) openBookDetail(entry)
                     } else {
                         openBookDetail(entry)
@@ -241,7 +244,6 @@ private fun NavGraphBuilder.libraryNodeRoutes(
             state = controller.state,
             collections = controller.collections,
             showNavigationNodes = false,
-            onOpenSystemNode = {},
             onOpenCollection = { collection ->
                 controller.selectCollection(collection.collectionId)
                 navController.navigate(Routes.libraryCollection(collection.collectionId))
@@ -264,7 +266,7 @@ private fun NavGraphBuilder.libraryNodeRoutes(
             reorderEnabled = controller.state.sortMode == org.tsuyomi.feature.library.LibrarySortMode.CUSTOM &&
                 controller.state.filter == SystemLibraryFilter.ALL &&
                 controller.collections.any {
-                    it.collectionId == collectionId && it.kind == org.tsuyomi.core.database.CollectionKind.MANUAL
+                    it.collectionId == collectionId && it.kind == org.tsuyomi.shared.librarydomain.CollectionKind.MANUAL
                 },
             onDismissSelectionDialog = controller::dismissSelectionDialog,
             onCreateCollectionFromSelection = { title -> scope.launch {
@@ -288,24 +290,25 @@ private fun NavGraphBuilder.libraryTagsRoutes(
 ) {
     composable(Routes.LibraryTags) {
         LibraryTagsScreen(
-            entries = controller.state.entries,
-            onOpenTag = { tag -> navController.navigate(Routes.libraryTag(tag)) },
+            entries = controller.fullLocalEntries(),
+            sourceLabels = controller.tagSourceLabels(),
+            layout = controller.tagLayout,
+            onOpenTag = { destination -> navController.navigate(Routes.libraryTag(destination)) },
         )
     }
     composable(Routes.LibraryTagBooks) { backStackEntry ->
+        val ownership = runCatching {
+            LibraryTagOwnership.valueOf(backStackEntry.arguments?.getString("ownership").orEmpty())
+        }.getOrDefault(LibraryTagOwnership.LOCAL)
+        val sourceId = backStackEntry.arguments?.getString("sourceId").orEmpty().takeUnless { it == "_" }
         val tag = backStackEntry.arguments?.getString("tag").orEmpty()
         val scope = rememberCoroutineScope()
         val failureMessage = stringResource(R.string.library_read_failure_safe)
         LibraryScreen(
-            state = controller.state.copy(
-                entries = controller.state.entries.filter { tag in it.localTags },
-                filter = SystemLibraryFilter.ALL,
-            ),
-            collections = controller.collections,
+            state = controller.tagProjection(ownership, sourceId, tag),
             coverState = coverState,
             onCoverVisibility = onCoverVisibility,
             showNavigationNodes = false,
-            onOpenSystemNode = {},
             onOpenCollection = {},
             onOpenBook = { entry ->
                 controller.openOrToggleEntry(entry)
@@ -329,9 +332,36 @@ private fun NavGraphBuilder.libraryTagsRoutes(
                 controller.addSelectionToCollection(id, failureMessage)
             } },
             onRemoveSelection = { scope.launch { controller.removeSelection(failureMessage) } },
+            collections = controller.collections,
         )
     }
 }
+
+internal fun LibraryFlowController.tagProjection(
+    ownership: LibraryTagOwnership,
+    sourceId: String?,
+    normalizedTag: String,
+) = state.copy(
+    entries = fullLocalEntries().filter { entry ->
+        when (ownership) {
+            LibraryTagOwnership.LOCAL -> entry.localTags.any { normalizeLocalLibraryTagName(it) == normalizedTag }
+            LibraryTagOwnership.SOURCE -> entry.book.identity.sourceId == sourceId &&
+                entry.book.remoteTags.any { normalizeSourceLibraryTagName(it) == normalizedTag }
+        }
+    },
+    filter = SystemLibraryFilter.ALL,
+    updateFilter = org.tsuyomi.feature.library.LibraryUpdateFilter.ALL,
+    updateOnlyEntries = emptyList(),
+    isRootProjection = false,
+)
+
+private fun LibraryFlowController.tagSourceLabels(): Map<String, String> =
+    state.mirrorShortcuts
+        .filter { it.targetId == null }
+        .associate { it.sourceId to it.label } + sourceTagLabels
+
+private fun LibraryFlowController.fullLocalEntries(): List<LibraryEntry> =
+    searchableEntries.distinctBy { it.book.identity }
 private fun handleLibraryDrop(
     controller: LibraryFlowController,
     scope: CoroutineScope,

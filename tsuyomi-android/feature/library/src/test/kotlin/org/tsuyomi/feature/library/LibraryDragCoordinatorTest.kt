@@ -90,6 +90,37 @@ class LibraryDragCoordinatorTest {
         )
     }
 
+    @Test
+    fun disposing_a_visible_target_removes_it_from_the_active_drag_snapshot() {
+        val coordinator = LibraryDragCoordinator()
+        val source = BookIdentity("source-a", "book-1")
+        val mirror = LibraryMirrorShortcut("source-a", "folder-1", "收藏", 1, false)
+        coordinator.registerSource("subject", Rect(0f, 0f, 20f, 20f))
+        coordinator.registerShelf(coordinator.allocateShelfTargetId(), Rect(0f, 0f, 120f, 100f), true, null)
+        coordinator.registerShortcut(
+            id = "target",
+            index = 0,
+            kind = LibraryShortcutDropKind.REMOTE_FOLDER,
+            bookIdentity = null,
+            bounds = Rect(40f, 0f, 100f, 80f),
+            mirror = mirror,
+        )
+        coordinator.start(
+            subjectKey = "subject",
+            localPosition = Offset(10f, 10f),
+            payload = LibraryDragPayload.Books(setOf(source)),
+            canRemove = false,
+            libraryReorderSource = false,
+        )
+        coordinator.moveBy(Offset(50f, 0f))
+        assertEquals(LibraryDropDestination.RemoteMirror("source-a", "folder-1", "收藏"), coordinator.externalDestination)
+
+        coordinator.unregisterShortcut("target")
+
+        assertNull(coordinator.externalDestination)
+    }
+
+
     private fun destinationFor(
         identities: Set<BookIdentity>,
         kind: LibraryShortcutDropKind,

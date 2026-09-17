@@ -8,6 +8,10 @@ import androidx.room.testing.MigrationTestHelper
 import androidx.sqlite.db.framework.FrameworkSQLiteOpenHelperFactory
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
+import java.time.Instant
+import org.tsuyomi.shared.locator.DocumentIdentity
+import org.tsuyomi.shared.locator.LocatorPrecision
+import org.tsuyomi.shared.locator.ReaderLocator
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Rule
@@ -352,6 +356,128 @@ class Phase3MigrationInstrumentedTest {
         }
     }
 
+
+    @Test
+    fun migration_10_to_11_adds_empty_bookmark_store_without_mutating_existing_data() {
+        helper.createDatabase(BOOKMARK_DATABASE, 10).use { db ->
+            db.execSQL(
+                "INSERT INTO books(source_id,remote_book_id,title,authors_json,remote_tags_json,has_unread_update,added_at_epoch_second,added_at_nano,metadata_updated_at_epoch_second,metadata_updated_at_nano) " +
+                    "VALUES ('fixture.source','retained-42','保留状态','[]','[]',0,10,0,20,0)",
+            )
+            db.execSQL(
+                "INSERT INTO library_entries(source_id,remote_book_id,added_at_epoch_second,added_at_nano,rating,read_later,display_order,local_pin) " +
+                    "VALUES ('fixture.source','retained-42',10,0,NULL,0,0,1)",
+            )
+            db.execSQL(
+                "INSERT INTO completed_chapters(source_id,remote_book_id,chapter_id,completed_at_epoch_second,completed_at_nano) " +
+                    "VALUES ('fixture.source','retained-42','completed',30,0)",
+            )
+        }
+
+        helper.runMigrationsAndValidate(BOOKMARK_DATABASE, 11, true, MIGRATION_10_11).use { db ->
+            db.query("SELECT COUNT(*) FROM chapter_bookmarks").use { cursor ->
+                cursor.moveToFirst()
+                assertEquals(0, cursor.getInt(0))
+            }
+            db.execSQL(
+                "INSERT INTO chapter_bookmarks(source_id,remote_book_id,chapter_id) VALUES ('fixture.source','retained-42','bookmark')",
+            )
+            db.query("SELECT title FROM books WHERE source_id='fixture.source' AND remote_book_id='retained-42'").use { cursor ->
+                cursor.moveToFirst()
+                assertEquals("保留状态", cursor.getString(0))
+            }
+            db.query("SELECT chapter_id FROM completed_chapters WHERE source_id='fixture.source' AND remote_book_id='retained-42'").use { cursor ->
+                cursor.moveToFirst()
+                assertEquals("completed", cursor.getString(0))
+            }
+            db.query("PRAGMA foreign_key_check").use { cursor -> assertEquals(0, cursor.count) }
+        }
+    }
+    @Test
+    fun migration_11_to_12_converts_chapter_marks_to_degraded_chapter_start_locators() {
+        helper.createDatabase(SEMANTIC_BOOKMARK_DATABASE, 11).use { db ->
+            db.execSQL(
+                "INSERT INTO books(source_id,remote_book_id,title,authors_json,remote_tags_json,has_unread_update,added_at_epoch_second,added_at_nano,metadata_updated_at_epoch_second,metadata_updated_at_nano) " +
+                    "VALUES ('fixture.source','retained-42','保留状态','[]','[]',0,10,0,20,0)",
+            )
+            db.execSQL(
+                "INSERT INTO chapter_bookmarks(source_id,remote_book_id,chapter_id) VALUES ('fixture.source','retained-42','bookmark')",
+            )
+        }
+
+        helper.runMigrationsAndValidate(SEMANTIC_BOOKMARK_DATABASE, 12, true, MIGRATION_11_12).use { db ->
+            db.query(
+                "SELECT content_id,revision,block_id,text_anchor_digest,character_offset,chapter_progress,book_progress,captured_at_epoch_second,captured_at_nano " +
+                    "FROM reader_bookmarks WHERE source_id='fixture.source' AND remote_book_id='retained-42'",
+            ).use { cursor ->
+                cursor.moveToFirst()
+                assertEquals("bookmark", cursor.getString(0))
+                assertTrue(cursor.isNull(1))
+                assertTrue(cursor.isNull(2))
+                assertTrue(cursor.isNull(3))
+                assertTrue(cursor.isNull(4))
+                assertEquals(0.0, cursor.getDouble(5), 0.0)
+                assertTrue(cursor.isNull(6))
+                assertEquals(0L, cursor.getLong(7))
+                assertEquals(0, cursor.getInt(8))
+                assertEquals(
+                    LocatorPrecision.DEGRADED,
+                    ReaderLocator(
+                        document = DocumentIdentity("fixture.source", "retained-42", cursor.getString(0), cursor.getString(1)),
+                        blockId = cursor.getString(2),
+                        textAnchorDigest = cursor.getString(3),
+                        characterOffset = if (cursor.isNull(4)) null else cursor.getInt(4),
+                        chapterProgress = cursor.getDouble(5),
+                        bookProgress = if (cursor.isNull(6)) null else cursor.getDouble(6),
+                        capturedAt = Instant.ofEpochSecond(cursor.getLong(7), cursor.getInt(8).toLong()),
+                    ).precision,
+                )
+            }
+            db.query("SELECT bookmark_position_key FROM reader_bookmarks WHERE source_id='fixture.source' AND remote_book_id='retained-42'").use { cursor ->
+                cursor.moveToFirst()
+                assertEquals("v1|D|666978747572652E736F75726365|72657461696E65642D3432|626F6F6B6D61726B|-|P|-|0|-", cursor.getString(0))
+            }
+
+            db.query("SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='chapter_bookmarks'").use { cursor ->
+                cursor.moveToFirst()
+                assertEquals(0, cursor.getInt(0))
+            }
+            db.query("SELECT title FROM books WHERE source_id='fixture.source' AND remote_book_id='retained-42'").use { cursor ->
+                cursor.moveToFirst()
+                assertEquals("保留状态", cursor.getString(0))
+            }
+        }
+    }
+
+    @Test
+    fun migration_12_to_13_adds_empty_reader_history_without_inventing_visits() {
+        helper.createDatabase(READER_HISTORY_DATABASE, 12).use { db ->
+            db.execSQL(
+                "INSERT INTO books(source_id,remote_book_id,title,authors_json,remote_tags_json,has_unread_update,added_at_epoch_second,added_at_nano,metadata_updated_at_epoch_second,metadata_updated_at_nano) " +
+                    "VALUES ('fixture.source','retained-42','保留进度','[]','[]',0,10,0,20,0)",
+            )
+            db.execSQL(
+                "INSERT INTO reading_progress(source_id,remote_book_id,content_id,revision,block_id,text_anchor_digest,character_offset,chapter_progress,book_progress,updated_at_epoch_second,updated_at_nano) " +
+                    "VALUES ('fixture.source','retained-42','chapter-9',NULL,'block-1',NULL,12,NULL,1.0,99,7)",
+            )
+        }
+
+        helper.runMigrationsAndValidate(READER_HISTORY_DATABASE, 13, true, MIGRATION_12_13).use { db ->
+            db.query("SELECT COUNT(*) FROM reader_history").use { cursor ->
+                cursor.moveToFirst()
+                assertEquals(0, cursor.getInt(0))
+            }
+            db.query("SELECT content_id,book_progress,updated_at_epoch_second,updated_at_nano FROM reading_progress").use { cursor ->
+                cursor.moveToFirst()
+                assertEquals("chapter-9", cursor.getString(0))
+                assertEquals(1.0, cursor.getDouble(1), 0.0)
+                assertEquals(99L, cursor.getLong(2))
+                assertEquals(7, cursor.getInt(3))
+            }
+            db.query("PRAGMA foreign_key_check").use { cursor -> assertEquals(0, cursor.count) }
+        }
+    }
+
     private companion object {
         const val DATABASE = "phase3-migration"
         const val READ_LATER_DATABASE = "phase4a-read-later-migration"
@@ -362,5 +488,8 @@ class Phase3MigrationInstrumentedTest {
         const val EXACT_CHAPTER_STATE_DATABASE = "phase4b-exact-chapter-state-migration"
         const val UPDATE_STATE_DATABASE = "phase4c-update-state"
         const val LOCAL_PIN_DATABASE = "local-pin-migration"
+        const val BOOKMARK_DATABASE = "chapter-bookmark-migration"
+        const val SEMANTIC_BOOKMARK_DATABASE = "semantic-bookmark-migration"
+        const val READER_HISTORY_DATABASE = "reader-history-migration"
     }
 }

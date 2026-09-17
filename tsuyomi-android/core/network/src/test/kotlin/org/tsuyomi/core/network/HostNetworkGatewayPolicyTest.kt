@@ -6,6 +6,7 @@ package org.tsuyomi.core.network
 
 import java.net.URI
 import java.nio.charset.Charset
+import java.util.concurrent.CancellationException
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.async
@@ -29,7 +30,7 @@ class HostNetworkGatewayPolicyTest {
         fun transport(name: String, blocked: Boolean = false) = HostHttpTransport { received ->
             calls += name
             if (blocked) release.await()
-            HostHttpResponse(200, received.url, emptyMap(), "fixture".encodeToByteArray())
+            HostHttpResponse(200, received.url, responseHeaders(), "fixture".encodeToByteArray())
         }
         val foreground = async(start = CoroutineStart.UNDISPATCHED) {
             HostNetworkGateway(transport("foreground", blocked = true)).request(grant, request())
@@ -103,12 +104,7 @@ class HostNetworkGatewayPolicyTest {
     @Test
     fun redirect_to_an_undeclared_origin_is_rejected_before_following_it() = runBlocking {
         val transport = HostHttpTransport { request ->
-            HostHttpResponse(
-                status = 302,
-                finalUrl = request.url,
-                headers = mapOf("location" to "https://outside.example/redirected"),
-                bytes = byteArrayOf(),
-            )
+            HostHttpResponse(status = 302, finalUrl = request.url, headers = responseHeaders("location" to "https://outside.example/redirected"), bytes = byteArrayOf())
         }
 
         val failure = assertHostFailure { HostNetworkGateway(transport).request(grant, request()) }
@@ -121,12 +117,7 @@ class HostNetworkGatewayPolicyTest {
         val requests = mutableListOf<HostHttpRequest>()
         val gateway = HostNetworkGateway(HostHttpTransport { received ->
             requests += received
-            HostHttpResponse(
-                status = 200,
-                finalUrl = received.url,
-                headers = mapOf("set-cookie" to "session=opaque; Path=/; Secure"),
-                bytes = "fixture".encodeToByteArray(),
-            )
+            HostHttpResponse(status = 200, finalUrl = received.url, headers = responseHeaders("set-cookie" to "session=opaque; Path=/; Secure"), bytes = "fixture".encodeToByteArray())
         })
 
         val first = gateway.request(grant, request())
@@ -143,12 +134,7 @@ class HostNetworkGatewayPolicyTest {
         val requests = mutableListOf<HostHttpRequest>()
         val gateway = HostNetworkGateway(HostHttpTransport { received ->
             requests += received
-            HostHttpResponse(
-                status = 200,
-                finalUrl = received.url,
-                headers = mapOf("set-cookie" to "server=unapproved; Path=/; Secure"),
-                bytes = "fixture".encodeToByteArray(),
-            )
+            HostHttpResponse(status = 200, finalUrl = received.url, headers = responseHeaders("set-cookie" to "server=unapproved; Path=/; Secure"), bytes = "fixture".encodeToByteArray())
         })
         val noCookieGrant = grant.copy(cookieMode = SourceCookieMode.NONE, cookieOrigins = emptySet())
         val importFailure = runCatching {
@@ -173,12 +159,7 @@ class HostNetworkGatewayPolicyTest {
         val requests = mutableListOf<HostHttpRequest>()
         val gateway = HostNetworkGateway(HostHttpTransport { received ->
             requests += received
-            HostHttpResponse(
-                status = 200,
-                finalUrl = received.url,
-                headers = mapOf("set-cookie" to "server=approved; Path=/; Secure"),
-                bytes = "fixture".encodeToByteArray(),
-            )
+            HostHttpResponse(status = 200, finalUrl = received.url, headers = responseHeaders("set-cookie" to "server=approved; Path=/; Secure"), bytes = "fixture".encodeToByteArray())
         })
 
         gateway.importSourceCookies(scopedGrant, wwwOrigin, "handoff=approved")
@@ -198,10 +179,73 @@ class HostNetworkGatewayPolicyTest {
     }
 
     @Test
+    fun auto_decode_uses_mixed_case_content_type_without_exposing_cookies() = runBlocking {
+        val encoded = "雾港".toByteArray(Charset.forName("GB18030"))
+        val gateway = HostNetworkGateway(HostHttpTransport { received ->
+            HostHttpResponse(
+                status = 200,
+                finalUrl = received.url,
+                headers = responseHeaders(
+                    "cOnTeNt-TyPe" to "text/html; charset=GB18030",
+                    "SeT-CoOkIe" to "session=opaque; Path=/; Secure",
+                ),
+                bytes = encoded,
+            )
+        })
+
+        val response = gateway.request(grant, request(decode = DecodeMode.AUTO))
+
+        assertEquals("雾港", response.text)
+        assertEquals("text/html; charset=GB18030", response.headers["content-type"])
+        assertEquals(null, response.headers["set-cookie"])
+    }
+
+    @Test
+    fun separate_set_cookie_headers_preserve_expires_updates_and_path_boundaries() = runBlocking {
+        val requests = mutableListOf<HostHttpRequest>()
+        var responseCount = 0
+        val gateway = HostNetworkGateway(HostHttpTransport { received ->
+            requests += received
+            val headers = when (responseCount++) {
+                0 -> responseHeaders(
+                    "SET-Cookie" to "session=stale; Path=/foo; Expires=Wed, 21 Oct 2037 07:28:00 GMT; Secure",
+                    "Set-Cookie" to "preference=light; Path=/foo; Secure",
+                )
+                1 -> responseHeaders(
+                    "Set-Cookie" to "session=fresh; Path=/foo; Secure",
+                    "Set-Cookie" to "preference=removed; Path=/foo; Max-Age=0; Secure",
+                )
+                else -> responseHeaders()
+            }
+            HostHttpResponse(200, received.url, headers, "fixture".encodeToByteArray())
+        })
+
+        gateway.request(grant, request(url = "https://www.wenku8.net/foo/first"))
+        gateway.request(grant, request(url = "https://www.wenku8.net/foo/second"))
+        gateway.request(grant, request(url = "https://www.wenku8.net/foo/third"))
+        gateway.request(grant, request(url = "https://www.wenku8.net/foobar"))
+
+        assertEquals("session=stale; preference=light", requests[1].headers["cookie"])
+        assertEquals("session=fresh", requests[2].headers["cookie"])
+        assertEquals(null, requests[3].headers["cookie"])
+    }
+
+    @Test
+    fun transport_cancellation_is_not_mapped_to_a_network_failure() = runBlocking {
+        val gateway = HostNetworkGateway(HostHttpTransport {
+            throw CancellationException("test cancellation")
+        })
+
+        val failure = runCatching { gateway.request(grant, request()) }.exceptionOrNull()
+
+        assertTrue(failure is CancellationException)
+    }
+
+    @Test
     fun response_limit_and_legacy_decoder_are_host_enforced() = runBlocking {
         val oversized = HostNetworkGateway(
             HostHttpTransport {
-                HostHttpResponse(200, URI("https://www.wenku8.net/book/1234.htm"), emptyMap(), ByteArray(1_025))
+                HostHttpResponse(200, URI("https://www.wenku8.net/book/1234.htm"), responseHeaders(), ByteArray(1_025))
             },
         )
         val limitFailure = assertHostFailure { oversized.request(grant, request()) }
@@ -210,7 +254,7 @@ class HostNetworkGatewayPolicyTest {
         val gb18030 = "雾港".toByteArray(Charset.forName("GB18030"))
         val legacy = HostNetworkGateway(
             HostHttpTransport {
-                HostHttpResponse(200, URI("https://www.wenku8.net/book/1234.htm"), emptyMap(), gb18030)
+                HostHttpResponse(200, URI("https://www.wenku8.net/book/1234.htm"), responseHeaders(), gb18030)
             },
         )
         assertEquals("雾港", legacy.request(grant, request(decode = DecodeMode.GB18030)).text)
@@ -265,7 +309,7 @@ class HostNetworkGatewayPolicyTest {
         val requests = mutableListOf<HostHttpRequest>()
         val gateway = HostNetworkGateway(HostHttpTransport { request ->
             requests += request
-            HostHttpResponse(200, request.url, mapOf("content-type" to "image/jpeg"), byteArrayOf(1, 2, 3))
+            HostHttpResponse(200, request.url, responseHeaders("content-type" to "image/jpeg"), byteArrayOf(1, 2, 3))
         })
         gateway.importSourceCookies(mediaGrant, sourceOrigin, "session=verified")
 

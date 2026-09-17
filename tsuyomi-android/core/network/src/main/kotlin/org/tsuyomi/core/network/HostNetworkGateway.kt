@@ -12,7 +12,9 @@ import java.nio.charset.Charset
 import java.nio.charset.CharacterCodingException
 import java.nio.charset.CodingErrorAction
 import java.nio.charset.StandardCharsets
+import java.util.Locale
 import java.util.UUID
+import java.util.concurrent.CancellationException
 import java.util.concurrent.ConcurrentHashMap
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
@@ -90,10 +92,66 @@ data class HostHttpRequest(
     val maxResponseBytes: Int,
 )
 
+/**
+ * Immutable response headers that retain each field occurrence while looking names up case-insensitively.
+ *
+ * This is deliberately transport-internal: extension-visible response headers are projected through the
+ * gateway's explicit allowlist.
+ */
+class HostResponseHeaders private constructor(
+    private val entries: List<Entry>,
+) {
+    data class Entry(val name: String, val value: String)
+
+    init {
+        entries.forEach { header ->
+            require(header.name.isNotBlank() && '\r' !in header.name && '\n' !in header.name) {
+                "Invalid response header name"
+            }
+            require('\u0000' !in header.value && '\r' !in header.value && '\n' !in header.value) {
+                "Invalid response header value"
+            }
+        }
+    }
+
+    fun first(name: String): String? = entries.firstOrNull { it.name.equals(name, ignoreCase = true) }?.value
+
+    fun forEachValue(name: String, action: (String) -> Unit) {
+        entries.forEach { header ->
+            if (header.name.equals(name, ignoreCase = true)) action(header.value)
+        }
+    }
+
+    internal fun exposedTo(allowedNames: Set<String>): Map<String, String> = buildMap {
+        this@HostResponseHeaders.entries.forEach { header ->
+            val normalized = header.name.lowercase(Locale.ROOT)
+            if (normalized in allowedNames) putIfAbsent(normalized, header.value)
+        }
+    }
+
+    companion object {
+        private val EMPTY = HostResponseHeaders(emptyList())
+
+        fun empty(): HostResponseHeaders = EMPTY
+        fun of(vararg entries: Pair<String, String>): HostResponseHeaders =
+            HostResponseHeaders(entries.map { (name, value) -> Entry(name, value) })
+
+        fun fromHeaderFields(fields: Map<String?, List<String>?>): HostResponseHeaders = HostResponseHeaders(
+            buildList {
+                fields.forEach { (name, values) ->
+                    name?.let { headerName ->
+                        values.orEmpty().forEach { value -> add(Entry(headerName, value)) }
+                    }
+                }
+            },
+        )
+    }
+}
+
 data class HostHttpResponse(
     val status: Int,
     val finalUrl: URI,
-    val headers: Map<String, String>,
+    val headers: HostResponseHeaders,
     val bytes: ByteArray,
 )
 
@@ -167,22 +225,22 @@ class HostNetworkGateway(
                 )
             } catch (error: HostNetworkException) {
                 throw error
-            } catch (_: Throwable) {
-                throw HostNetworkException(HostNetworkError.TRANSPORT)
+            } catch (error: Throwable) {
+                throwTransportFailure(error)
             }
             if (response.finalUrl != current) throw HostNetworkException(HostNetworkError.REDIRECT_DISALLOWED)
             cookieJar.store(grant, current, response.headers)
             if (response.status in 300..399) {
                 if (redirectCount == MAX_REDIRECTS) throw HostNetworkException(HostNetworkError.REDIRECT_LIMIT)
-                val location = response.headers.entries.firstOrNull { it.key.equals("location", ignoreCase = true) }?.value
+                val location = response.headers.first("location")
                     ?: throw HostNetworkException(HostNetworkError.REDIRECT_DISALLOWED)
                 current = parseAllowedUri(current.resolve(location).toString(), grant)
                 return@repeat
             }
             if (response.status !in 200..299) throw HostNetworkException(HostNetworkError.TRANSPORT)
             if (response.bytes.size > grant.maxResponseBytes) throw HostNetworkException(HostNetworkError.RESPONSE_LIMIT)
-            val contentType = response.headers.entries.firstOrNull { it.key.equals("content-type", ignoreCase = true) }
-                ?.value?.substringBefore(';')?.trim()?.lowercase().orEmpty()
+            val contentType = response.headers.first("content-type")
+                ?.substringBefore(';')?.trim()?.lowercase(Locale.ROOT).orEmpty()
             if (contentType !in setOf("image/jpeg", "image/png")) throw HostNetworkException(HostNetworkError.DECODE)
             return HostMediaResponse(response.bytes, contentType)
         }
@@ -225,11 +283,11 @@ class HostNetworkGateway(
             if (response.status !in 100..599) throw HostNetworkException(HostNetworkError.TRANSPORT)
             if (response.bytes.size > grant.maxResponseBytes) throw HostNetworkException(HostNetworkError.RESPONSE_LIMIT)
             val finalUrl = parseAllowedUri(response.finalUrl.toString(), grant)
-            val decoded = decode(response.bytes, request.decode, response.headers["content-type"])
+            val decoded = decode(response.bytes, request.decode, response.headers.first("content-type"))
             val value = SourceNetworkResponse(
                 status = response.status,
                 finalUrl = finalUrl.toString(),
-                headers = response.headers.filterKeys { it.lowercase() in EXPOSED_RESPONSE_HEADERS },
+                headers = response.headers.exposedTo(EXPOSED_RESPONSE_HEADERS),
                 text = decoded.text,
                 bytes = null,
                 decodeUsed = decoded.mode,
@@ -341,14 +399,14 @@ class HostNetworkGateway(
                 )
             } catch (error: HostNetworkException) {
                 throw error
-            } catch (_: Throwable) {
-                throw HostNetworkException(HostNetworkError.TRANSPORT)
+            } catch (error: Throwable) {
+                throwTransportFailure(error)
             }
             if (response.finalUrl != url) throw HostNetworkException(HostNetworkError.REDIRECT_DISALLOWED)
             cookieJar.store(grant, url, response.headers)
             if (response.status !in 300..399) return response
             if (response.status !in REDIRECT_STATUSES) return response
-            val location = response.headers.entries.firstOrNull { it.key.equals("location", ignoreCase = true) }?.value
+            val location = response.headers.first("location")
                 ?: return response
             if (++redirects > MAX_REDIRECTS) throw HostNetworkException(HostNetworkError.REDIRECT_LIMIT)
             url = try {
@@ -429,6 +487,11 @@ class HostNetworkGateway(
         validateProtectedSurfaces(grant, request, operationContext)
         operationContext?.validate(request)
     }
+    private fun throwTransportFailure(error: Throwable): Nothing = when (error) {
+        is CancellationException, is SecurityException, is Error -> throw error
+        else -> throw HostNetworkException(HostNetworkError.TRANSPORT)
+    }
+
 
     private fun validateProtectedSurfaces(
         grant: SourceNetworkGrant,
@@ -532,7 +595,7 @@ class HostNetworkGateway(
 
     private fun charsetFromContentType(contentType: String?): DecodeMode? = when (
         Regex("charset\\s*=\\s*['\\\"]?([A-Za-z0-9_-]+)", RegexOption.IGNORE_CASE).find(contentType.orEmpty())
-            ?.groupValues?.get(1)?.lowercase()
+            ?.groupValues?.get(1)?.lowercase(Locale.ROOT)
     ) {
         "utf-8", "utf8" -> DecodeMode.UTF8
         "gb18030", "gbk", "gb2312" -> DecodeMode.GB18030
@@ -560,7 +623,7 @@ private class SourceCookieJar {
     fun requestHeader(grant: SourceNetworkGrant, uri: URI): Map<String, String> {
         if (!grant.allowsCookies(uri.asHttpsOrigin())) return emptyMap()
         val scope = SourceScope(grant.sourceId)
-        val host = uri.host.lowercase()
+        val host = uri.host.lowercase(Locale.ROOT)
         val path = uri.path.ifBlank { "/" }
         val values = cookies[scope]?.let { entries ->
             synchronized(entries) {
@@ -575,7 +638,7 @@ private class SourceCookieJar {
         require(grant.allowsCookies(origin.asHttpsOrigin())) { "Cookie origin is not granted" }
         val scope = SourceScope(grant.sourceId)
         val entries = cookies.getOrPut(scope) { mutableListOf() }
-        val host = origin.host.lowercase()
+        val host = origin.host.lowercase(Locale.ROOT)
         rawCookie.split(';').map(String::trim).filter(String::isNotEmpty).forEach { pair ->
             val separator = pair.indexOf('=')
             if (separator <= 0) return@forEach
@@ -590,29 +653,37 @@ private class SourceCookieJar {
         }
     }
 
-    fun store(grant: SourceNetworkGrant, requestUri: URI, headers: Map<String, String>) {
+    fun store(grant: SourceNetworkGrant, requestUri: URI, headers: HostResponseHeaders) {
         if (!grant.allowsCookies(requestUri.asHttpsOrigin())) return
         val scope = SourceScope(grant.sourceId)
         val entries = cookies.getOrPut(scope) { mutableListOf() }
-        headers.filterKeys { it.equals("set-cookie", ignoreCase = true) }.values
-            .flatMap { value -> runCatching { HttpCookie.parse(value) }.getOrDefault(emptyList()) }
-            .forEach { cookie ->
-                val domain = cookie.domain?.trimStart('.')?.lowercase().orEmpty()
-                val requestHost = requestUri.host.lowercase()
-                if (domain.isNotEmpty() && requestHost != domain && !requestHost.endsWith(".$domain")) return@forEach
-                val stored = StoredCookie(
-                    cookie = cookie,
-                    domain = domain.ifEmpty { requestHost },
-                    hostOnly = domain.isEmpty(),
-                    path = cookie.path?.takeIf { it.startsWith('/') } ?: "/",
-                )
-                synchronized(entries) {
-                    entries.removeAll {
-                        it.cookie.name == stored.cookie.name && it.domain == stored.domain && it.path == stored.path
+        headers.forEachValue("set-cookie") { rawHeader ->
+            val parsed = runCatching { HttpCookie.parse(rawHeader) }.getOrDefault(emptyList())
+            parsed.forEach { cookie ->
+                val domain = cookie.domain?.trimStart('.')?.lowercase(Locale.ROOT).orEmpty()
+                val requestHost = requestUri.host.lowercase(Locale.ROOT)
+                if (domain.isEmpty() || requestHost == domain || requestHost.endsWith(".$domain")) {
+                    val stored = StoredCookie(
+                        cookie = cookie,
+                        domain = domain.ifEmpty { requestHost },
+                        hostOnly = domain.isEmpty(),
+                        path = cookie.path?.takeIf { it.startsWith('/') } ?: defaultPath(requestUri),
+                    )
+                    synchronized(entries) {
+                        entries.removeAll {
+                            it.cookie.name == stored.cookie.name && it.domain == stored.domain && it.path == stored.path
+                        }
+                        if (!cookie.hasExpired()) entries += stored
                     }
-                    if (!cookie.hasExpired()) entries += stored
                 }
             }
+        }
+    }
+
+    private fun defaultPath(uri: URI): String {
+        val requestPath = uri.path.takeIf { it.startsWith('/') && it.isNotEmpty() } ?: return "/"
+        val rightmostSlash = requestPath.lastIndexOf('/')
+        return if (rightmostSlash == 0) "/" else requestPath.substring(0, rightmostSlash)
     }
 
     private data class SourceScope(val sourceId: String)
@@ -625,7 +696,9 @@ private class SourceCookieJar {
     ) {
         fun matches(host: String, requestPath: String): Boolean {
             val domainMatches = if (hostOnly) host == domain else host == domain || host.endsWith(".$domain")
-            return domainMatches && requestPath.startsWith(path)
+            val pathMatches = requestPath == path ||
+                requestPath.startsWith(path) && (path.endsWith('/') || requestPath.getOrNull(path.length) == '/')
+            return domainMatches && pathMatches
         }
     }
 

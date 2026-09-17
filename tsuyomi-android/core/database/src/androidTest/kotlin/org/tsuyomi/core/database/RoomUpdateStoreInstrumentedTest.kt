@@ -334,7 +334,7 @@ class RoomUpdateStoreInstrumentedTest {
     }
 
     private suspend fun addLibraryBook(database: TsuyomiDatabase, candidate: UpdateCandidate) {
-        RoomLibraryRepository(database).addToLibrary(LibraryBook(
+        RoomLibraryRepository(database).addToLibrary(org.tsuyomi.shared.librarydomain.LibraryBook(
             identity = candidate.identity,
             title = candidate.title,
             addedAt = Instant.EPOCH,

@@ -13,6 +13,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.listSaver
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.collect
@@ -22,10 +23,10 @@ import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import java.time.Instant
 import java.util.UUID
-import org.tsuyomi.core.database.CollectionKind
-import org.tsuyomi.core.database.LibraryCollection
-import org.tsuyomi.core.database.LibraryEntry
-import org.tsuyomi.core.database.LibraryBook
+import org.tsuyomi.shared.librarydomain.CollectionKind
+import org.tsuyomi.shared.librarydomain.LibraryCollection
+import org.tsuyomi.shared.librarydomain.LibraryEntry
+import org.tsuyomi.shared.librarydomain.LibraryBook
 import org.tsuyomi.core.database.RoomLibraryRepository
 import org.tsuyomi.core.preferences.LibraryPreferencesRepository
 import org.tsuyomi.core.preferences.LibraryRootNodePreference
@@ -42,6 +43,7 @@ import org.tsuyomi.feature.library.LibrarySelectionDialog
 import org.tsuyomi.feature.library.LibrarySelectionKind
 import org.tsuyomi.feature.library.LibrarySortMode
 import org.tsuyomi.feature.library.LibraryMirrorShortcut
+import org.tsuyomi.feature.library.LibraryTagLayout
 import org.tsuyomi.feature.library.SmartConditionDraft
 import org.tsuyomi.feature.library.SmartField
 import org.tsuyomi.feature.library.LibraryUpdateFilter
@@ -65,6 +67,7 @@ internal class LibraryFlowController private constructor(
     private val profileName: String,
     initialCollectionId: String?,
     initialTagDraft: String,
+    initialTagLayout: LibraryTagLayout,
     initialFilter: SystemLibraryFilter,
     initialLayout: org.tsuyomi.feature.library.LibraryLayout,
     initialSortMode: LibrarySortMode,
@@ -82,6 +85,7 @@ internal class LibraryFlowController private constructor(
         profileName,
         null,
         "",
+        LibraryTagLayout.CHIPS,
         SystemLibraryFilter.ALL,
         org.tsuyomi.feature.library.LibraryLayout.GRID,
         LibrarySortMode.SMART,
@@ -112,6 +116,8 @@ internal class LibraryFlowController private constructor(
         private set
     var tagDraft by mutableStateOf(initialTagDraft)
         private set
+    var tagLayout by mutableStateOf(initialTagLayout)
+        private set
     var remoteRetryMessage by mutableStateOf<String?>(null)
         private set
     var remoteRetryEnabled by mutableStateOf(false)
@@ -122,6 +128,8 @@ internal class LibraryFlowController private constructor(
     var filterSortPanelExpanded by mutableStateOf(false)
         private set
     private var installedMirrorRootsProvider: suspend () -> List<LibraryMirrorShortcut> = { emptyList() }
+    var sourceTagLabels by mutableStateOf<Map<String, String>>(emptyMap())
+        private set
     var coverStates by mutableStateOf<Map<BookIdentity, CoverUiState>>(emptyMap())
         private set
     private var coverRepository: CoverRepository? = null
@@ -135,11 +143,16 @@ internal class LibraryFlowController private constructor(
     private val retainedCoverOrder = linkedSetOf<BookIdentity>()
     private var rootEntries: List<LibraryEntry> = emptyList()
     private var readLaterEntries: List<LibraryEntry> = emptyList()
+    private var continueEntries: List<LibraryEntry> = emptyList()
     var searchableEntries: List<LibraryEntry> = emptyList()
         private set
     var updatePresentationBooks by mutableStateOf<Map<BookIdentity, LibraryBook>>(emptyMap())
         private set
     private var rootLoaded = false
+
+    fun updateSourceTagLabels(labels: Map<String, String>) {
+        sourceTagLabels = labels
+    }
     private val collectionEntryCache = mutableMapOf<String, List<LibraryEntry>>()
 
     fun configureInstalledMirrorRoots(provider: suspend () -> List<LibraryMirrorShortcut>) {
@@ -278,6 +291,7 @@ internal class LibraryFlowController private constructor(
             tabPresentations = presentationPreferences.tabPresentations
             val nextCollections = repository.collections()
             val nextRootEntries = repository.libraryEntries()
+            val nextContinueEntries = repository.readerHistoryEntries()
             val nextReadLaterEntries = repository.readLaterEntries()
             val collectionCounts = nextCollections.associate { collection ->
                 collection.collectionId to repository.collectionEntries(collection.collectionId).size
@@ -354,10 +368,15 @@ internal class LibraryFlowController private constructor(
             val validSelectedId = selectedId?.takeIf { id -> nextCollections.any { it.collectionId == id } }
             val nextEntries = validSelectedId?.let { id ->
                 repository.collectionEntries(id).also { collectionEntryCache[id] = it }
-            } ?: if (state.filter == SystemLibraryFilter.READ_LATER) nextReadLaterEntries else nextRootEntries
+            } ?: when (state.filter) {
+                SystemLibraryFilter.CONTINUE -> nextContinueEntries
+                SystemLibraryFilter.READ_LATER -> nextReadLaterEntries
+                else -> nextRootEntries
+            }
             collections = nextCollections
             rootEntries = nextRootEntries
             readLaterEntries = nextReadLaterEntries
+            continueEntries = nextContinueEntries
             searchableEntries = nextRootEntries + nextReadLaterEntries.filterNot { it.localMembership }
             updatePresentationBooks = nextUpdatePresentationBooks
             rootLoaded = true
@@ -404,7 +423,9 @@ internal class LibraryFlowController private constructor(
                 loading = false,
                 refreshing = false,
             )
-        } catch (_: Throwable) {
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (_: Exception) {
             state.copy(
                 loading = false,
                 refreshing = false,
@@ -445,6 +466,7 @@ internal class LibraryFlowController private constructor(
         val filter = requested.takeIf {
             it == SystemLibraryFilter.ALL || it == SystemLibraryFilter.CONTINUE || it == SystemLibraryFilter.READ_LATER
         } ?: SystemLibraryFilter.ALL
+        if (selectedCollectionId == null && state.filter == filter) return
         if (selectedCollectionId == null) persistCurrentTabPresentation()
         clearSelection()
         selectedCollectionId = null
@@ -452,7 +474,11 @@ internal class LibraryFlowController private constructor(
         filterSortPanelExpanded = false
         val presentation = tabPresentation(filter)
         state = state.copy(
-            entries = if (filter == SystemLibraryFilter.READ_LATER) readLaterEntries else rootEntries,
+            entries = when (filter) {
+                SystemLibraryFilter.CONTINUE -> continueEntries
+                SystemLibraryFilter.READ_LATER -> readLaterEntries
+                else -> rootEntries
+            },
             filter = filter,
             isRootProjection = filter == SystemLibraryFilter.ALL,
             layout = runCatching { org.tsuyomi.feature.library.LibraryLayout.valueOf(presentation.layout) }
@@ -466,6 +492,44 @@ internal class LibraryFlowController private constructor(
             refreshing = false,
             failure = null,
             refreshFailure = null,
+        )
+    }
+    /**
+     * Returns the independently restored state for each fixed Library page.
+     *
+     * The selected page remains [state]'s sole mutable owner. Neighboring Pager pages are
+     * read-only projections from their own persisted presentation, so composing them can never
+     * overwrite the selected page's viewport or preferences.
+     */
+    fun primaryTabStates(): Map<SystemLibraryFilter, LibraryUiState> =
+        SystemLibraryFilter.primaryTabs.associateWith(::primaryTabState)
+
+    private fun primaryTabState(filter: SystemLibraryFilter): LibraryUiState {
+        if (selectedCollectionId == null && state.filter == filter) return state
+        val presentation = tabPresentation(filter)
+        return state.copy(
+            entries = when (filter) {
+                SystemLibraryFilter.CONTINUE -> continueEntries
+                SystemLibraryFilter.READ_LATER -> readLaterEntries
+                else -> rootEntries
+            },
+            filter = filter,
+            isRootProjection = filter == SystemLibraryFilter.ALL,
+            layout = runCatching { org.tsuyomi.feature.library.LibraryLayout.valueOf(presentation.layout) }
+                .getOrDefault(defaultTabPresentation(filter).let { org.tsuyomi.feature.library.LibraryLayout.valueOf(it.layout) }),
+            sortMode = runCatching { LibrarySortMode.valueOf(presentation.sortMode) }
+                .getOrDefault(LibrarySortMode.valueOf(defaultTabPresentation(filter).sortMode)),
+            sortDescending = presentation.sortDescending,
+            firstVisibleIndex = presentation.firstVisibleIndex,
+            firstVisibleOffset = presentation.firstVisibleOffset,
+            loading = !rootLoaded,
+            refreshing = false,
+            failure = state.failure.takeUnless { rootLoaded },
+            refreshFailure = null,
+            selectionKind = null,
+            selectedBookIds = emptySet(),
+            selectedCollectionIds = emptySet(),
+            selectionDialog = null,
         )
     }
 
@@ -896,6 +960,9 @@ internal class LibraryFlowController private constructor(
     fun updateTagDraft(value: String) {
         tagDraft = value
     }
+    fun toggleTagLayout() {
+        tagLayout = if (tagLayout == LibraryTagLayout.CHIPS) LibraryTagLayout.LIST else LibraryTagLayout.CHIPS
+    }
 
     suspend fun resolveEntry(identity: BookIdentity?) {
         selectedEntry = identity?.let { key ->
@@ -1039,16 +1106,17 @@ internal class LibraryFlowController private constructor(
             filterName: String,
             layoutName: String,
             sortModeName: String,
-
             sortDescending: String,
             firstVisibleIndex: String,
             firstVisibleOffset: String,
+            tagLayoutName: String,
         ): LibraryFlowController = LibraryFlowController(
             repository,
             preferencesRepository,
             profileName,
             collectionId.ifEmpty { null },
             tagDraft,
+            runCatching { LibraryTagLayout.valueOf(tagLayoutName) }.getOrDefault(LibraryTagLayout.CHIPS),
             runCatching { SystemLibraryFilter.valueOf(filterName) }.getOrDefault(SystemLibraryFilter.ALL),
             runCatching { org.tsuyomi.feature.library.LibraryLayout.valueOf(layoutName) }
                 .getOrDefault(org.tsuyomi.feature.library.LibraryLayout.GRID),
@@ -1078,6 +1146,7 @@ internal fun rememberLibraryFlowController(
                     it.state.sortDescending.toString(),
                     it.state.firstVisibleIndex.toString(),
                     it.state.firstVisibleOffset.toString(),
+                    it.tagLayout.name,
                 )
             },
             restore = {
@@ -1093,6 +1162,7 @@ internal fun rememberLibraryFlowController(
                     it[5],
                     it[6],
                     it[7],
+                    it.getOrElse(8) { LibraryTagLayout.CHIPS.name },
                 )
             },
         )

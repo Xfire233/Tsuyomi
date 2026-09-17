@@ -12,6 +12,7 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.tsuyomi.core.network.HostHttpResponse
+import org.tsuyomi.core.network.HostResponseHeaders
 import org.tsuyomi.core.network.HostHttpTransport
 import org.tsuyomi.core.network.HostNetworkError
 import org.tsuyomi.core.network.HostNetworkException
@@ -46,7 +47,7 @@ internal class UpdateSourceDiagnosticsInstrumentedTest : SourceFlowInstrumentedT
             HostHttpResponse(
                 status = 200,
                 finalUrl = request.url,
-                headers = mapOf("Content-Type" to "text/html; charset=gb18030"),
+                headers = HostResponseHeaders.of("Content-Type" to "text/html; charset=gb18030"),
                 bytes = html.toByteArray(Charset.forName("GB18030")),
             )
         })

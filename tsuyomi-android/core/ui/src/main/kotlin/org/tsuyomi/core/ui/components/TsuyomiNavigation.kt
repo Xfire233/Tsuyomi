@@ -248,7 +248,7 @@ private fun NavigationItemView(
     // The icon sits on the indicator pill; the label sits on the bar/rail surface.
     val iconTint = when {
         selected && eInk -> TsuyomiEInkPalette.Paper
-        selected -> MaterialTheme.colorScheme.onSurface
+        selected -> MaterialTheme.colorScheme.onSecondaryContainer
         else -> MaterialTheme.colorScheme.onSurfaceVariant
     }
     val labelColor = if (selected) {

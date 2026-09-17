@@ -11,10 +11,14 @@ import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.onAllNodesWithTag
+import androidx.compose.ui.test.isDisplayed
 import androidx.compose.ui.test.onAllNodesWithContentDescription
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.hasSetTextAction
+import androidx.compose.ui.test.hasAnyDescendant
+import androidx.compose.ui.test.hasTestTag
+import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.longClick
 import androidx.compose.ui.test.assertIsSelected
 import androidx.compose.ui.test.assertIsDisplayed
@@ -31,6 +35,13 @@ import java.time.Instant
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.yield
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import androidx.datastore.preferences.core.PreferenceDataStoreFactory
+import org.tsuyomi.core.preferences.LibraryPreferencesRepository
+import java.io.File
+import java.util.UUID
 import kotlin.math.abs
 import org.junit.After
 import org.junit.Assert.assertEquals
@@ -40,17 +51,17 @@ import org.junit.Before
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
-import org.tsuyomi.core.database.LibraryBook
-import org.tsuyomi.core.database.CollectionKind
-import org.tsuyomi.core.database.LibraryCollection
-import org.tsuyomi.core.database.LibraryEntry
-import org.tsuyomi.core.database.ReadingProgress
+import org.tsuyomi.shared.librarydomain.LibraryBook
+import org.tsuyomi.shared.librarydomain.CollectionKind
+import org.tsuyomi.shared.librarydomain.LibraryCollection
+import org.tsuyomi.shared.librarydomain.LibraryEntry
+import org.tsuyomi.shared.librarydomain.ReadingProgress
 import org.tsuyomi.core.media.api.CoverRepository
 import org.tsuyomi.core.media.api.CoverRequest
 import org.tsuyomi.core.media.api.CoverUiState
 import org.tsuyomi.shared.locator.DocumentIdentity
 import org.tsuyomi.shared.locator.ReaderLocator
-import org.tsuyomi.core.display.DisplayPreference
+import org.tsuyomi.core.preferences.DisplayPreference
 import org.tsuyomi.shared.model.BookIdentity
 import org.tsuyomi.feature.library.projectedEntries
 
@@ -108,7 +119,9 @@ class LibraryProductionJourneyInstrumentedTest {
             application.displayController.setDisplayPreference(DisplayPreference.STANDARD)
             application.libraryRepository.removeFromLibrary(identity)
         }
-        waitForText("书架")
+        composeRule.waitUntil(timeoutMillis = 10_000) {
+            composeRule.onNodeWithTag("tsuyomi-tab-CONTINUE").isDisplayed()
+        }
 
         assertTrue(composeRule.onAllNodesWithText("本地藏书").fetchSemanticsNodes().isEmpty())
         composeRule.onNodeWithTag("library-shortcut-shelf").assertDoesNotExist()
@@ -377,12 +390,49 @@ class LibraryProductionJourneyInstrumentedTest {
         assertEquals(true, repository.libraryEntry(behaviorOlder)?.localMembership)
     }
     @Test
-    fun library_controller_restores_root_projection_without_collection_flash() = runBlocking {
+    fun library_controller_projects_actual_unpinned_reader_history_and_keeps_root_membership() = runBlocking {
+        val repository = (composeRule.activity.application as TsuyomiApplication).libraryRepository
+        val suffix = UUID.randomUUID().toString()
+        val reopened = BookIdentity("fixture.reader.history", "opened-$suffix")
+        val completed = BookIdentity("fixture.reader.history", "completed-$suffix")
+        val metadataOnly = BookIdentity("fixture.reader.history", "metadata-$suffix")
+        val initialVisit = Instant.parse("2200-09-14T01:00:00Z")
+        val completedVisit = initialVisit.plusSeconds(10)
+        val returnVisit = initialVisit.plusSeconds(20)
+
+        repository.saveBook(book(reopened, "未收藏的继续阅读"))
+        repository.saveBook(book(completed, "已完成的继续阅读"))
+        repository.saveBook(book(metadataOnly, "只打开详情"))
+        repository.recordReaderVisit(reopened, initialVisit)
+        repository.saveProgress(progress(completed, completedVisit.minusSeconds(1), 1.0))
+        repository.recordReaderVisit(completed, completedVisit)
+
+        val controller = LibraryFlowController(repository, libraryPreferences, "FIXTURE_READER_HISTORY_$suffix")
+        controller.reload("failed")
+        controller.selectTab(org.tsuyomi.feature.library.SystemLibraryFilter.CONTINUE)
+
+        assertEquals(listOf(completed, reopened), controller.state.entries.take(2).map { it.book.identity })
+        assertTrue(controller.state.entries.take(2).none { it.localMembership })
+        assertEquals(null, controller.state.entries.first { it.book.identity == reopened }.progress)
+        assertTrue(controller.state.entries.none { it.book.identity == metadataOnly })
+        assertEquals(null, repository.libraryEntry(reopened))
+        assertEquals(null, repository.libraryEntry(completed))
+
+        repository.recordReaderVisit(reopened, returnVisit)
+        controller.reload("failed")
+        assertEquals(reopened, controller.state.entries.first().book.identity)
+        controller.selectTab(org.tsuyomi.feature.library.SystemLibraryFilter.ALL)
+        assertTrue(controller.state.entries.none { it.book.identity in setOf(reopened, completed) })
+    }
+
+    @Test
+    fun library_controller_restores_actual_caller_tab_without_collection_flash() = runBlocking {
         val repository = (composeRule.activity.application as TsuyomiApplication).libraryRepository
         repository.deleteCollection(behaviorCollectionId)
         listOf(behaviorNewer, behaviorOlder).forEach { repository.removeFromLibrary(it) }
         repository.addToLibrary(book(behaviorNewer, "根书架 A"))
         repository.addToLibrary(book(behaviorOlder, "根书架 B"))
+        repository.saveProgress(progress(behaviorOlder, Instant.EPOCH, 0.4))
         repository.createCollection(
             LibraryCollection(
                 collectionId = behaviorCollectionId,
@@ -395,7 +445,8 @@ class LibraryProductionJourneyInstrumentedTest {
         assertTrue(repository.addManualMembership(behaviorCollectionId, behaviorOlder))
         val controller = LibraryFlowController(repository, libraryPreferences)
         controller.reload("failed")
-        val rootIdentities = controller.state.entries.map { it.book.identity }.toSet()
+        controller.selectTab(org.tsuyomi.feature.library.SystemLibraryFilter.CONTINUE)
+        val callerIdentities = controller.state.entries.map { it.book.identity }.toSet()
 
         controller.selectCollection(behaviorCollectionId)
         assertTrue(controller.state.loading)
@@ -405,7 +456,8 @@ class LibraryProductionJourneyInstrumentedTest {
 
         controller.restoreLibraryHome()
         assertFalse(controller.state.loading)
-        assertEquals(rootIdentities, controller.state.entries.map { it.book.identity }.toSet())
+        assertEquals(org.tsuyomi.feature.library.SystemLibraryFilter.CONTINUE, controller.state.filter)
+        assertEquals(callerIdentities, controller.state.entries.map { it.book.identity }.toSet())
     }
 
     @Test
@@ -451,7 +503,7 @@ class LibraryProductionJourneyInstrumentedTest {
                     sourceName = "测试网站",
                     books = emptyList(),
                     targets = listOf(
-                        org.tsuyomi.core.database.RemoteMirrorTargetSnapshot(
+                        org.tsuyomi.shared.librarydomain.RemoteMirrorTargetSnapshot(
                             targetId = "favorites",
                             sourceId = sourceId,
                             displayName = "特别收藏",
@@ -498,7 +550,7 @@ class LibraryProductionJourneyInstrumentedTest {
     }
 
     @Test
-    fun library_controller_persists_independent_state_for_each_fixed_tab() = runBlocking {
+    fun library_controller_persists_independent_state_for_each_fixed_tab() = withControllerPreferences { libraryPreferences ->
         val repository = (composeRule.activity.application as TsuyomiApplication).libraryRepository
         val profile = "FIXTURE_TABS"
         libraryPreferences.updateTabPresentation(
@@ -519,6 +571,11 @@ class LibraryProductionJourneyInstrumentedTest {
         assertEquals(org.tsuyomi.feature.library.LibraryLayout.GRID, controller.state.layout)
         assertEquals(org.tsuyomi.feature.library.LibrarySortMode.TITLE, controller.state.sortMode)
         assertEquals(4, controller.state.firstVisibleIndex)
+        controller.primaryTabStates().let { pages ->
+            assertEquals(org.tsuyomi.feature.library.LibraryLayout.GRID, pages.getValue(org.tsuyomi.feature.library.SystemLibraryFilter.ALL).layout)
+            assertEquals(org.tsuyomi.feature.library.LibraryLayout.LIST, pages.getValue(org.tsuyomi.feature.library.SystemLibraryFilter.CONTINUE).layout)
+            assertEquals(org.tsuyomi.feature.library.LibraryLayout.COMPACT, pages.getValue(org.tsuyomi.feature.library.SystemLibraryFilter.READ_LATER).layout)
+        }
 
         controller.selectTab(org.tsuyomi.feature.library.SystemLibraryFilter.CONTINUE)
         assertEquals(org.tsuyomi.feature.library.LibraryLayout.LIST, controller.state.layout)
@@ -526,6 +583,11 @@ class LibraryProductionJourneyInstrumentedTest {
         controller.persistViewport(6, 20)
         controller.selectTab(org.tsuyomi.feature.library.SystemLibraryFilter.READ_LATER)
         assertEquals(org.tsuyomi.feature.library.LibraryLayout.COMPACT, controller.state.layout)
+        controller.primaryTabStates().let { pages ->
+            assertEquals(4, pages.getValue(org.tsuyomi.feature.library.SystemLibraryFilter.ALL).firstVisibleIndex)
+            assertEquals(6, pages.getValue(org.tsuyomi.feature.library.SystemLibraryFilter.CONTINUE).firstVisibleIndex)
+            assertEquals(1, pages.getValue(org.tsuyomi.feature.library.SystemLibraryFilter.READ_LATER).firstVisibleIndex)
+        }
         controller.selectTab(org.tsuyomi.feature.library.SystemLibraryFilter.CONTINUE)
         assertEquals(6, controller.state.firstVisibleIndex)
         assertEquals(20, controller.state.firstVisibleOffset)
@@ -543,7 +605,7 @@ class LibraryProductionJourneyInstrumentedTest {
     }
 
     @Test
-    fun library_controller_keeps_root_filter_out_of_system_tabs_and_clearing_it_keeps_sort() = runBlocking {
+    fun library_controller_keeps_root_filter_out_of_system_tabs_and_clearing_it_keeps_sort() = withControllerPreferences { libraryPreferences ->
         val repository = (composeRule.activity.application as TsuyomiApplication).libraryRepository
         repository.removeFromLibrary(behaviorNewer)
         repository.addToLibrary(book(behaviorNewer, "筛选隔离"))
@@ -554,6 +616,15 @@ class LibraryProductionJourneyInstrumentedTest {
         controller.selectSortDirection(true)
         controller.setUpdateFilter(org.tsuyomi.feature.library.LibraryUpdateFilter.UPDATES_ONLY)
         assertTrue(controller.state.projectedEntries().isEmpty())
+        controller.primaryTabStates().let { pages ->
+            assertTrue(pages.getValue(org.tsuyomi.feature.library.SystemLibraryFilter.ALL).projectedEntries().isEmpty())
+            assertEquals(
+                listOf(behaviorNewer),
+                pages.getValue(org.tsuyomi.feature.library.SystemLibraryFilter.READ_LATER)
+                    .projectedEntries()
+                    .map { it.book.identity },
+            )
+        }
 
         controller.selectTab(org.tsuyomi.feature.library.SystemLibraryFilter.READ_LATER)
         assertEquals(listOf(behaviorNewer), controller.state.projectedEntries().map { it.book.identity })
@@ -568,7 +639,103 @@ class LibraryProductionJourneyInstrumentedTest {
     }
 
     @Test
-    fun root_book_drop_creates_one_collection_with_complete_deduplicated_batch() = runBlocking {
+    fun tag_layout_and_source_ownership_survive_recreation_without_changing_associations() {
+        val repository = (composeRule.activity.application as TsuyomiApplication).libraryRepository
+        val fixtures = listOf(behaviorNewer, behaviorOlder)
+        val sourceRow = "library-tag-SOURCE-${behaviorNewer.sourceId}-重建来源标签"
+        try {
+            runBlocking {
+                fixtures.forEachIndexed { index, identity ->
+                    repository.addToLibrary(book(identity, "标签重建书籍$index").copy(remoteTags = setOf("重建来源标签")))
+                    repository.setLocalTags(identity, setOf("重建本地标签"))
+                }
+            }
+            composeRule.activityRule.scenario.recreate()
+            waitForText("标签重建书籍0")
+            composeRule.onNodeWithContentDescription("更多操作").performClick()
+            composeRule.onNodeWithText("标签").performClick()
+            waitForText("重建本地标签")
+            composeRule.onNodeWithContentDescription("切换布局；当前为", substring = true).performClick()
+            composeRule.onNodeWithTag("tsuyomi-tab-SOURCE").performClick()
+            composeRule.onNode(
+                hasTestTag(sourceRow) and hasAnyDescendant(hasText("2 本")),
+                useUnmergedTree = true,
+            ).assertIsDisplayed()
+            composeRule.activityRule.scenario.recreate()
+            waitForText("重建来源标签")
+            composeRule.onNodeWithTag("tsuyomi-tab-SOURCE").assertIsSelected()
+            composeRule.onNode(
+                hasTestTag(sourceRow) and hasAnyDescendant(hasText("2 本")),
+                useUnmergedTree = true,
+            ).assertIsDisplayed().performClick()
+            waitForText("标签重建书籍0")
+            composeRule.onNodeWithText("标签重建书籍1").assertIsDisplayed()
+            runBlocking {
+                fixtures.forEach { identity ->
+                    assertEquals(setOf("重建本地标签"), requireNotNull(repository.libraryEntry(identity)).localTags)
+                    assertEquals(setOf("重建来源标签"), requireNotNull(repository.book(identity)).remoteTags)
+                }
+            }
+        } finally {
+            runBlocking { fixtures.forEach { repository.setLocalTags(it, emptySet()) } }
+        }
+    }
+
+    @Test
+    fun tags_use_the_complete_local_snapshot_without_mutating_the_calling_root() = withControllerPreferences { libraryPreferences ->
+        val repository = (composeRule.activity.application as TsuyomiApplication).libraryRepository
+        val controller = LibraryFlowController(repository, libraryPreferences, "FIXTURE_TAGS")
+        try {
+            listOf(behaviorNewer, behaviorOlder).forEach {
+                repository.removeFromLibrary(it)
+            }
+            repository.addToLibrary(book(behaviorNewer, "标签继续阅读").copy(remoteTags = setOf("来源标签")))
+            repository.addToLibrary(book(behaviorOlder, "标签完整快照").copy(remoteTags = setOf("来源标签")))
+            repository.setLocalTags(behaviorNewer, setOf("共同标签"))
+            repository.setLocalTags(behaviorOlder, setOf("共同标签"))
+            repository.setReadLater(behaviorOlder, true)
+            repository.removeFromLibrary(behaviorOlder)
+            repository.saveProgress(progress(behaviorNewer, Instant.EPOCH, 0.4))
+            controller.reload("failed")
+            controller.selectTab(org.tsuyomi.feature.library.SystemLibraryFilter.CONTINUE)
+            controller.setUpdateFilter(org.tsuyomi.feature.library.LibraryUpdateFilter.UPDATES_ONLY)
+            val rootBeforeTag = controller.state
+
+            val tagState = controller.tagProjection(
+                org.tsuyomi.feature.library.LibraryTagOwnership.LOCAL,
+                sourceId = null,
+                normalizedTag = "共同标签",
+            )
+
+            assertEquals(
+                setOf(behaviorNewer, behaviorOlder),
+                tagState.entries.mapTo(linkedSetOf()) { it.book.identity },
+            )
+            val sourceTagState = controller.tagProjection(
+                org.tsuyomi.feature.library.LibraryTagOwnership.SOURCE,
+                sourceId = behaviorNewer.sourceId,
+                normalizedTag = "来源标签",
+            )
+            assertEquals(
+                setOf(behaviorNewer, behaviorOlder),
+                sourceTagState.entries.mapTo(linkedSetOf()) { it.book.identity },
+            )
+            assertEquals(org.tsuyomi.feature.library.SystemLibraryFilter.ALL, tagState.filter)
+            assertEquals(org.tsuyomi.feature.library.LibraryUpdateFilter.ALL, tagState.updateFilter)
+            assertFalse(tagState.isRootProjection)
+            assertEquals(rootBeforeTag, controller.state)
+        } finally {
+            repository.setReadLater(behaviorOlder, false)
+            listOf(behaviorNewer, behaviorOlder).forEach {
+                repository.setLocalTags(it, emptySet())
+                repository.removeFromLibrary(it)
+            }
+            libraryPreferences.updateShowUpdatesOnly(false)
+        }
+    }
+
+    @Test
+    fun root_book_drop_creates_one_collection_with_complete_deduplicated_batch() = withControllerPreferences { libraryPreferences ->
         val repository = (composeRule.activity.application as TsuyomiApplication).libraryRepository
         repository.collections().filter { it.title == rootBatchCollectionTitle }.forEach {
             repository.deleteCollection(it.collectionId)
@@ -610,6 +777,7 @@ class LibraryProductionJourneyInstrumentedTest {
         try {
             controller.configureCoverRepository(
                 repository = object : CoverRepository {
+                    override fun cached(request: CoverRequest) = CoverUiState.Ready(bitmap)
                     override fun observe(request: CoverRequest) = flowOf(CoverUiState.Ready(bitmap))
                 },
                 sourceId = "fixture.cover",
@@ -639,6 +807,22 @@ class LibraryProductionJourneyInstrumentedTest {
             assertTrue(controller.coverStates.size <= 24)
         } finally {
             bitmap.recycle()
+        }
+    }
+
+    private fun withControllerPreferences(action: suspend (LibraryPreferencesRepository) -> Unit) = runBlocking {
+        val job = SupervisorJob()
+        val file = File(composeRule.activity.cacheDir, "controller-${UUID.randomUUID()}.preferences_pb")
+        val store = PreferenceDataStoreFactory.create(
+            scope = CoroutineScope(Dispatchers.IO + job),
+            produceFile = { file },
+        )
+        try {
+            action(LibraryPreferencesRepository(store))
+        } finally {
+            job.cancel()
+            job.join()
+            file.delete()
         }
     }
 

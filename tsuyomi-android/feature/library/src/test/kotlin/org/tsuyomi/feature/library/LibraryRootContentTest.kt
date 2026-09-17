@@ -6,13 +6,12 @@ package org.tsuyomi.feature.library
 
 import java.time.Instant
 import org.junit.Assert.assertEquals
-import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
-import org.tsuyomi.core.database.CollectionKind
-import org.tsuyomi.core.database.LibraryBook
-import org.tsuyomi.core.database.LibraryCollection
-import org.tsuyomi.core.database.LibraryEntry
+import org.tsuyomi.shared.librarydomain.CollectionKind
+import org.tsuyomi.shared.librarydomain.LibraryBook
+import org.tsuyomi.shared.librarydomain.LibraryCollection
+import org.tsuyomi.shared.librarydomain.LibraryEntry
 import org.tsuyomi.shared.model.BookIdentity
 
 class LibraryRootContentTest {
@@ -73,11 +72,12 @@ class LibraryRootContentTest {
     }
 
     @Test
-    fun tabDestinationFadeRunsOnlyForNonStaticFixedTabChanges() {
-        assertFalse(shouldFadeLibraryTabDestination(null, SystemLibraryFilter.ALL, staticMotion = false))
-        assertTrue(shouldFadeLibraryTabDestination(SystemLibraryFilter.ALL, SystemLibraryFilter.CONTINUE, staticMotion = false))
-        assertFalse(shouldFadeLibraryTabDestination(SystemLibraryFilter.ALL, SystemLibraryFilter.ALL, staticMotion = false))
-        assertFalse(shouldFadeLibraryTabDestination(SystemLibraryFilter.ALL, SystemLibraryFilter.CONTINUE, staticMotion = true))
+    fun primaryPagerMapsTapAndSwipeToTheSameTab() {
+        val tapTarget = libraryPrimaryPageFor(SystemLibraryFilter.READ_LATER)
+        val swipeTarget = libraryPrimaryTabAt(2)
+
+        assertEquals(SystemLibraryFilter.READ_LATER, libraryPrimaryTabAt(tapTarget))
+        assertEquals(SystemLibraryFilter.READ_LATER, swipeTarget)
     }
 
     private fun entry(id: String): LibraryEntry {

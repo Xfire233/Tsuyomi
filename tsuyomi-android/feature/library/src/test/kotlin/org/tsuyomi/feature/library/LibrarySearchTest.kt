@@ -8,11 +8,11 @@ import java.time.Instant
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
-import org.tsuyomi.core.database.CollectionKind
-import org.tsuyomi.core.database.LibraryBook
-import org.tsuyomi.core.database.LibraryCollection
-import org.tsuyomi.core.database.LibraryEntry
-import org.tsuyomi.core.database.ReadingProgress
+import org.tsuyomi.shared.librarydomain.CollectionKind
+import org.tsuyomi.shared.librarydomain.LibraryBook
+import org.tsuyomi.shared.librarydomain.LibraryCollection
+import org.tsuyomi.shared.librarydomain.LibraryEntry
+import org.tsuyomi.shared.librarydomain.ReadingProgress
 import org.tsuyomi.shared.locator.DocumentIdentity
 import org.tsuyomi.shared.locator.ReaderLocator
 import org.tsuyomi.shared.model.BookIdentity

@@ -15,7 +15,7 @@ import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
-import androidx.compose.ui.test.onRoot
+import androidx.compose.ui.test.isRoot
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.printToString
 import androidx.room.withTransaction
@@ -35,11 +35,11 @@ import org.junit.Before
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
-import org.tsuyomi.core.database.LibraryBook
-import org.tsuyomi.core.database.ReadingProgress
-import org.tsuyomi.core.database.SourceAvailability
-import org.tsuyomi.core.display.DisplayPreference
-import org.tsuyomi.core.display.DisplayPreferences
+import org.tsuyomi.shared.librarydomain.LibraryBook
+import org.tsuyomi.shared.librarydomain.ReadingProgress
+import org.tsuyomi.shared.librarydomain.SourceAvailability
+import org.tsuyomi.core.preferences.DisplayPreference
+import org.tsuyomi.core.preferences.DisplayPreferences
 import org.tsuyomi.core.preferences.LibraryPresentationPreferences
 import org.tsuyomi.feature.browse.BrowseUiState
 import org.tsuyomi.shared.backup.PortableReaderPreferences
@@ -63,7 +63,6 @@ class LibraryUpdatesProductionJourneyInstrumentedTest {
     private val identity = BookIdentity(SOURCE_ID, REMOTE_BOOK_ID)
     private val updateRowTag = "library-book-${identity.sourceId}-${identity.remoteBookId}"
     private val updateActionsTag = "library-update-actions-${identity.sourceId}-${identity.remoteBookId}"
-    private val updateIgnoreTag = "library-update-ignore-${identity.sourceId}-${identity.remoteBookId}"
     private lateinit var fixtureBook: LibraryBook
     private lateinit var originalReaderPreferences: PortableReaderPreferences
     private lateinit var originalLibraryPreferences: LibraryPresentationPreferences
@@ -171,7 +170,7 @@ class LibraryUpdatesProductionJourneyInstrumentedTest {
         waitForTag(updateRowTag)
         composeRule.onNodeWithTag("library-update-filter").performClick()
         composeRule.onNodeWithText("有更新").performClick()
-        waitForTag(updateRowTag)
+        waitForTag("library-filter-summary-edit")
         composeRule.onNodeWithTag("library-filter-summary-edit").performClick()
         composeRule.onNodeWithText("筛选与排序").assertIsDisplayed()
         composeRule.onNodeWithText("筛选").assertIsDisplayed()
@@ -180,8 +179,9 @@ class LibraryUpdatesProductionJourneyInstrumentedTest {
         waitForTag(updateRowTag)
 
         composeRule.onNodeWithTag(updateActionsTag, useUnmergedTree = true).performClick()
-        waitForTag(updateIgnoreTag)
-        composeRule.onNodeWithTag(updateIgnoreTag).performClick()
+        val ignoreLabel = composeRule.activity.getString(org.tsuyomi.feature.library.R.string.updates_ignore_current)
+        waitForText(ignoreLabel)
+        composeRule.onNodeWithText(ignoreLabel).performClick()
         waitUntil { currentUpdate() == null }
         composeRule.onNodeWithText("撤销").performClick()
         waitUntil { currentUpdate() != null }
@@ -297,7 +297,7 @@ class LibraryUpdatesProductionJourneyInstrumentedTest {
                 composeRule.onAllNodesWithTag(tag).fetchSemanticsNodes().isNotEmpty()
             }
         } catch (failure: ComposeTimeoutException) {
-            throw AssertionError("Missing $tag\n" + composeRule.onRoot(useUnmergedTree = true).printToString(), failure)
+            throw AssertionError("Missing $tag\n" + composeRule.onAllNodes(isRoot(), useUnmergedTree = true).printToString(), failure)
         }
     }
 
@@ -363,6 +363,10 @@ class LibraryUpdatesProductionJourneyInstrumentedTest {
             )
             database.execSQL(
                 "DELETE FROM reading_progress WHERE source_id = ? AND remote_book_id = ?",
+                arrayOf(SOURCE_ID, REMOTE_BOOK_ID),
+            )
+            database.execSQL(
+                "DELETE FROM reader_history WHERE source_id = ? AND remote_book_id = ?",
                 arrayOf(SOURCE_ID, REMOTE_BOOK_ID),
             )
         }

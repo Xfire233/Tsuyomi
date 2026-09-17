@@ -21,10 +21,14 @@ class RepositoryPolicyTest(unittest.TestCase):
         self.assertEqual([paths[1]], check_repository.paths_in_scope(paths, "protocol"))
         self.assertEqual(paths, check_repository.paths_in_scope(paths, "all"))
 
-    def test_only_the_public_wenku8_hxp_fixture_is_allowed(self) -> None:
+    def test_only_explicit_public_hxp_fixtures_are_allowed(self) -> None:
         self.assertFalse(
             check_repository.violates_policy(Path("tsuyomi-android/source/extension-testkit/fixtures/wenku8/wenku8-fixture.hxp"))
         )
+        self.assertFalse(
+            check_repository.violates_policy(Path("tsuyomi-android/source/extension-testkit/fixtures/wenku8/malformed-output-fixture.hxp"))
+        )
+        self.assertTrue(check_repository.violates_policy(Path("tsuyomi-android/source/extension-testkit/fixtures/other/malformed-output-fixture.hxp")))
         self.assertTrue(check_repository.violates_policy(Path("tsuyomi-android/source/extension-testkit/fixtures/wenku8/private.hxp")))
         self.assertTrue(check_repository.violates_policy(Path("tsuyomi-android/source/extension-testkit/fixtures/other/wenku8-fixture.hxp")))
 

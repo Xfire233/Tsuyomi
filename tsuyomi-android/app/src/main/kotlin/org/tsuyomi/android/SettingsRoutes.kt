@@ -23,6 +23,9 @@ import org.tsuyomi.feature.settings.MoreScreen
 import org.tsuyomi.feature.settings.ReaderDefaultsScreen
 import org.tsuyomi.shared.backup.PortableReaderPreferences
 
+private const val HelpSelectedIntroductionKey = "settings.help.selected-introduction"
+private const val AboutLicenseVisibleKey = "settings.about.license-visible"
+
 internal data class SettingsRouteDependencies(
     val environment: DisplayEnvironment,
     val displayController: DisplayController,
@@ -74,13 +77,18 @@ internal fun NavGraphBuilder.settingsRoutes(
             },
         )
     }
-    composable(Routes.Help) {
+    composable(Routes.Help) { entry ->
         val scope = rememberCoroutineScope()
         val preferences by dependencies.application.featureIntroductionPreferencesRepository.preferences
             .collectAsStateWithLifecycle(initialValue = FeatureIntroductionPreferences())
+        val selectedIntroductionId by entry.savedStateHandle
+            .getStateFlow<String?>(HelpSelectedIntroductionKey, null)
+            .collectAsStateWithLifecycle()
         HelpScreen(
             introductionsEnabled = preferences.enabled,
             seenVersions = preferences.seenVersions,
+            selectedIntroductionId = selectedIntroductionId,
+            onIntroductionSelected = { id -> entry.savedStateHandle[HelpSelectedIntroductionKey] = id },
             onIntroductionsEnabledChanged = { enabled ->
                 scope.launch { dependencies.application.featureIntroductionPreferencesRepository.setEnabled(enabled) }
             },
@@ -92,17 +100,22 @@ internal fun NavGraphBuilder.settingsRoutes(
             },
         )
     }
-    composable(Routes.About) {
+    composable(Routes.About) { entry ->
         val resources = LocalResources.current
         val licenseText = remember(resources) {
             resources.openRawResource(org.tsuyomi.feature.settings.R.raw.apache_license_2_0)
                 .bufferedReader()
                 .use { it.readText() }
         }
+        val licenseVisible by entry.savedStateHandle
+            .getStateFlow(AboutLicenseVisibleKey, false)
+            .collectAsStateWithLifecycle()
         AboutScreen(
             applicationName = stringResource(R.string.app_name),
             versionName = BuildConfig.VERSION_NAME,
             licenseText = licenseText,
+            licenseVisible = licenseVisible,
+            onLicenseVisibilityChanged = { visible -> entry.savedStateHandle[AboutLicenseVisibleKey] = visible },
         )
     }
 }

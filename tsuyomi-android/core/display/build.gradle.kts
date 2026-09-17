@@ -11,10 +11,9 @@ android {
 }
 
 dependencies {
-    implementation(project(":core:preferences"))
+    api(project(":core:preferences"))
     implementation(libs.androidx.compose.runtime)
     implementation(libs.androidx.compose.ui)
-    implementation(libs.androidx.datastore.preferences)
     implementation(libs.androidx.lifecycle.runtime.compose)
     implementation(libs.kotlinx.coroutines.android)
     testImplementation(libs.kotlinx.coroutines.test)

@@ -168,6 +168,11 @@ FORBIDDEN_SUFFIXES = {
     ".trace",
 }
 
+PUBLIC_HXP_FIXTURES = frozenset({
+    Path("tsuyomi-android/source/extension-testkit/fixtures/wenku8/wenku8-fixture.hxp"),
+    Path("tsuyomi-android/source/extension-testkit/fixtures/wenku8/malformed-output-fixture.hxp"),
+})
+
 RETIRED_ANDROID_PROTOTYPE = Path("tsuyomi-android/prototype/ui-atlas")
 RETIRED_ANDROID_PACKAGE = "org.tsuyomi.prototype"
 
@@ -299,7 +304,7 @@ def paths_in_scope(paths: Iterable[Path], scope: str) -> list[Path]:
 
 
 def is_public_hxp_fixture(path: Path) -> bool:
-    return path == Path("tsuyomi-android/source/extension-testkit/fixtures/wenku8/wenku8-fixture.hxp")
+    return path in PUBLIC_HXP_FIXTURES
 
 
 def is_public_project_skill(path: Path) -> bool:

@@ -13,6 +13,7 @@ android {
 }
 
 dependencies {
+    implementation(project(":core:display"))
     implementation(project(":core:ui"))
     implementation(project(":core:media"))
     implementation(project(":shared:source-contract"))
@@ -23,8 +24,10 @@ dependencies {
     implementation(libs.androidx.compose.ui.tooling.preview)
     debugImplementation(libs.androidx.compose.ui.tooling)
     androidTestImplementation(platform(libs.androidx.compose.bom))
+    androidTestImplementation(project(":core:preferences"))
     androidTestImplementation(libs.androidx.compose.ui.test.junit4)
     debugImplementation(libs.androidx.compose.ui.test.manifest)
     screenshotTestImplementation(libs.screenshot.validation.api)
+    screenshotTestImplementation(project(":core:preferences"))
     screenshotTestImplementation(libs.androidx.compose.ui.tooling)
 }

@@ -5,6 +5,7 @@
 package org.tsuyomi.android
 
 import androidx.test.ext.junit.runners.AndroidJUnit4
+import org.tsuyomi.feature.book.SourceBookState
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.async
 import kotlinx.coroutines.runBlocking
@@ -15,13 +16,14 @@ import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
-import org.tsuyomi.core.database.RemoteReconciliationState
+import org.tsuyomi.shared.librarydomain.RemoteReconciliationState
 import org.tsuyomi.shared.sourcecontract.RemoteLibraryMoveOutcome
 import org.tsuyomi.shared.sourcecontract.RemoteLibraryMoveResult
 import org.tsuyomi.shared.sourcecontract.RemoteLibraryRemoveOutcome
 import org.tsuyomi.shared.sourcecontract.RemoteLibraryRemoveResult
 import org.tsuyomi.shared.sourcecontract.RemoteLibraryTargetsResult
 import org.tsuyomi.shared.sourcecontract.RemoteTarget
+import org.tsuyomi.source.extensionmanager.RemoteOperation
 
 @RunWith(AndroidJUnit4::class)
 internal class SourceRemoteLibraryMutationInstrumentedTest : SourceFlowInstrumentedTestFixture() {
@@ -45,7 +47,7 @@ internal class SourceRemoteLibraryMutationInstrumentedTest : SourceFlowInstrumen
             controller.open(packageInfo)
             controller.selectBook(book)
             // Add book to local library first
-            controller.addSelectedBook(SOURCE_FLOW_TEST_TIME)
+            controller.addSelectedBook((controller.detailState as? SourceBookState.Content)?.value, SOURCE_FLOW_TEST_TIME)
             assertTrue(library.libraryEntries().any { it.book.identity == book.identity })
 
             // Remove from remote website
@@ -82,7 +84,7 @@ internal class SourceRemoteLibraryMutationInstrumentedTest : SourceFlowInstrumen
             assertTrue(library.setMoveWritebackEnabled(sourceId, policy.capabilitySetFingerprint, true))
             controller.open(packageInfo)
             controller.selectBook(book)
-            controller.addSelectedBook(SOURCE_FLOW_TEST_TIME)
+            controller.addSelectedBook((controller.detailState as? SourceBookState.Content)?.value, SOURCE_FLOW_TEST_TIME)
 
             val result = controller.moveSelectedBookOnWebsite("favorites", "特别收藏", SOURCE_FLOW_TEST_TIME)
             assertEquals(RemoteMutationUiResult.Confirmed, result)
@@ -171,6 +173,16 @@ internal class SourceRemoteLibraryMutationInstrumentedTest : SourceFlowInstrumen
             library.setSourceAvailability(sourceId, availability.verifiedVersion, true, availability.generation + 2)
             controller.open(packageInfo)
             controller.selectBook(book)
+
+            val beforeMoveRetry = requireNotNull(library.bookReconciliation(sourceId, book.identity.remoteBookId))
+            val moveOnlyResult = controller.retryRemoteMutation(
+                book,
+                SOURCE_FLOW_TEST_TIME.plusSeconds(1),
+                expectedOperation = RemoteOperation.MOVE,
+            )
+            assertEquals("MOVE-only retry must not dispatch the replacement REMOVE", 1, removeCalls)
+            assertEquals(beforeMoveRetry, library.bookReconciliation(sourceId, book.identity.remoteBookId))
+            assertEquals(RemoteMutationUiResult.Failure("reconciliation-operation-changed"), moveOnlyResult)
 
             assertEquals(
                 RemoteMutationUiResult.Unresolved,

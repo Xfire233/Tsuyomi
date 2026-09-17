@@ -11,6 +11,8 @@ import org.tsuyomi.shared.sourcecontract.NetworkMethod
 import org.tsuyomi.shared.sourcecontract.SourceCookieMode
 import org.tsuyomi.shared.sourcecontract.SourceNetworkRequest
 
+internal fun responseHeaders(vararg entries: Pair<String, String>): HostResponseHeaders = HostResponseHeaders.of(*entries)
+
 internal val addPolicy = RemoteOperationRequestPolicy(
     origin = HttpsOrigin("https://www.wenku8.net"),
     method = NetworkMethod.POST,
@@ -69,7 +71,10 @@ internal class RecordingTransport : HostHttpTransport {
         return HostHttpResponse(
             status = 200,
             finalUrl = request.url,
-            headers = mapOf("content-type" to "text/html; charset=utf-8", "set-cookie" to "hidden"),
+            headers = responseHeaders(
+                "content-type" to "text/html; charset=utf-8",
+                "set-cookie" to "hidden",
+            ),
             bytes = "fixture".encodeToByteArray(),
         )
     }

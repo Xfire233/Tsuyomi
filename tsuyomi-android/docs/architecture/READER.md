@@ -74,9 +74,17 @@ Raw-route ↔ structured-forum-reply is a source-content transition, not a compa
 
 ## Preview sessions
 
-Progress scrubbing creates `PreviewSession`, owned by `reader/engine`, with document identity/revision, session epoch, metric layout key, immutable plan/geometry revision, target, and preview witness. The preview surface shares the frozen page plan/layout inputs and visual components, but owns an independent viewport controller. It cannot alter active locator, history, prefetch direction, or source loading during pointer hold.
+Progress scrubbing creates `PreviewSession`, owned by `reader/engine`, with document identity/revision, session epoch, metric layout key, immutable plan/geometry revision, target, and preview witness. Preview state is isolated from committed navigation while the mounted body presents the temporary target using frozen layout inputs. This does not require a second visible viewport or coordinator. During pointer hold it cannot alter the committed locator, history, prefetch direction, or source loading.
 
 Input coalesces to one target per frame. A target outside the available plan is `preparing`, never a fabricated percentage preview. On release, the engine accepts only a visual witness for the latest target under the same epochs, then performs one semantic navigation and persists the resulting settled locator. Any key/revision change, user interaction, or cancellation discards the session. E-ink uses label/minimap feedback or release-only navigation; it does not repeatedly render a WYSIWYG viewport.
+
+Cancellation restores the opening semantic viewport before durable settled-position observers resume. A document/session/layout epoch change invalidates the old preview and its witness; late preview work cannot write or restore into a newer owner. Visible-body preview and cancellation are owned by Constitution §14 rather than an independently scrolling preview surface.
+
+## Non-linear return anchor
+
+A successfully settled non-linear navigation may retain one in-memory `ReturnAnchor` for the active Reader book/session. It captures the exact committed semantic locator immediately before the first progress-track tap, committed seek release, bookmark selection, or directory chapter selection. Later non-linear jumps do not replace it. Preview-only, cancelled, failed, restoration, relayout, preload, and ordinary page/scroll movement never create an anchor.
+
+The anchor carries book identity, locator, capture precision, document/session generation, and a return-in-progress witness. It may resolve across chapters of the same book through the existing bounded generic exact-locator navigation owner, but cannot cross book identity or survive leaving the Reader session/process. Cross-chapter return must not route through durable-bookmark membership validation: the session-only origin need not be a saved bookmark, and bookmark absence alone cannot become a chapter-unavailable failure. Return performs one ordinary generation-fenced semantic navigation, clears the anchor only after the target visibly settles, and never creates a second anchor from that return. Three successfully settled ordinary page/scroll advances also clear it. The anchor is not durable progress, history, a bookmark, or a second locator authority; normal settled-position persistence remains unchanged.
 
 ## Session and layout state
 
@@ -110,6 +118,16 @@ Text layout is expensive and depends on width, density, font resolver, line spac
 ## Scroll and dual page
 
 The scroll surface virtualizes blocks and publishes semantic captures after a settled layout. The paged surface consumes `PagePlan`; dual-page pairs adjacent logical pages but stores the same locator. Crossing a chapter boundary is a coordinator transition, not an adapter side effect. Adjacent preloading is bounded and never replaces the visible document while a gesture or navigation is in flight.
+
+### Bounded adjacent preloading
+
+STANDARD may preload only after the current exact document has visibly mounted and the active route has remained settled for a short bounded interval. One cycle may fetch at most the immediate next chapter plus two not-yet-requested illustrations from the current document. The next document is retained in the existing bounded in-memory `ReaderDocumentCache`; it is not written as an explicit offline/downloaded chapter and cannot create a cache marker. Illustration requests use the existing host media cache and retain its origin, credential, byte and decode limits.
+
+The preload owner captures book identity, current document generation, selected chapter, source package revision and credential revision. Any mismatch, foreground navigation, owner disposal or cancellation stops the work and rejects late results. Offline loads, E-ink, verification-required responses and other typed failures do not start recovery UI or mutate the visible Reader. Preload never writes progress, completion, history, pin/read-later state or a non-linear return anchor. A foreground transition may consume an exact prefetched document; otherwise the normal typed request path remains authoritative.
+
+The accepted 2026-09-12 adaptive-flow contract separates durable requested flow from effective presentation. For a Standard `DUAL` request, an ineligible window temporarily renders `PAGED`; eligible width restores `DUAL` automatically. Window changes never write back the fallback to preferences or replace the global-default/per-book precedence. Use the presentation transaction above to preserve semantic position; a changed layout epoch discards uncommitted preview work. Page/spread indexes remain transient. UI presentation is owned by Constitution §14.1a; portable requested flow is owned by ADR 0008.
+
+Semantic-position bookmarks are separately durable identity-keyed data, not a renderer-owned set or progress mutation. Each bookmark is a `ReaderLocator`; a block plus Unicode code-point offset distinguishes positions in the same document while recapture time and rendered metrics never create another position. Reader receives bookmark state/actions from the existing domain owner; auxiliary tabs do not create independent copies. Their transfer and presence boundaries are owned by ADR 0008.
 
 ## Images
 

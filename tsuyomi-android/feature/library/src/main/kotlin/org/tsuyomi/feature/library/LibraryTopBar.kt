@@ -9,7 +9,7 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalWindowInfo
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
-import org.tsuyomi.core.database.LibraryCollection
+import org.tsuyomi.shared.librarydomain.LibraryCollection
 import org.tsuyomi.core.ui.components.TsuyomiOverflowAction
 import org.tsuyomi.core.ui.components.TsuyomiTopBar
 import org.tsuyomi.core.ui.components.TsuyomiTopBarAction
@@ -250,6 +250,29 @@ fun LibraryTopBar(
                 ),
             )
         },
+    )
+}
+
+@Composable
+fun LibraryTagsTopBar(
+    title: String,
+    layout: LibraryTagLayout,
+    onNavigateUp: () -> Unit,
+    onCycleLayout: () -> Unit,
+) {
+    val layoutLabel = stringResource(
+        if (layout == LibraryTagLayout.CHIPS) R.string.library_layout_compact else R.string.library_layout_list,
+    )
+    TsuyomiTopBar(
+        title = title,
+        onNavigateUp = onNavigateUp,
+        actions = listOf(
+            TsuyomiTopBarAction(
+                icon = if (layout == LibraryTagLayout.CHIPS) TsuyomiIcons.Grid else TsuyomiIcons.List,
+                label = stringResource(R.string.library_action_cycle_layout, layoutLabel),
+                onClick = onCycleLayout,
+            ),
+        ),
     )
 }
 

@@ -108,7 +108,7 @@ class FileHostNetworkCacheTest {
             )
             HostNetworkGateway(
                 HostHttpTransport {
-                    HostHttpResponse(200, it.url, emptyMap(), "fixture response".encodeToByteArray())
+                    HostHttpResponse(200, it.url, responseHeaders(), "fixture response".encodeToByteArray())
                 },
                 FileHostNetworkCache(files),
             ).request(grant, request)
@@ -177,7 +177,7 @@ class FileHostNetworkCacheTest {
             )
             val gateway = HostNetworkGateway(
                 HostHttpTransport {
-                    HostHttpResponse(200, it.url, emptyMap(), "fixture response".encodeToByteArray())
+                    HostHttpResponse(200, it.url, responseHeaders(), "fixture response".encodeToByteArray())
                 },
                 FileHostNetworkCache(files),
             )
@@ -224,12 +224,7 @@ class FileHostNetworkCacheTest {
             val cache = FileHostNetworkCache(files)
             val gateway = HostNetworkGateway(
                 HostHttpTransport {
-                    HostHttpResponse(
-                        200,
-                        it.url,
-                        emptyMap(),
-                        "<title>Just a moment...</title>".encodeToByteArray(),
-                    )
+                    HostHttpResponse(200, it.url, responseHeaders(), "<title>Just a moment...</title>".encodeToByteArray())
                 },
                 cache,
             )

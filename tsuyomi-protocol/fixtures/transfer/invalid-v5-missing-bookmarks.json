@@ -1,0 +1,17 @@
+{
+  "format": "tsuyomi-transfer",
+  "version": 5,
+  "createdAt": "2026-09-14T00:00:00Z",
+  "library": [
+    {
+      "identity": {
+        "sourceId": "org.tsuyomi.wenku8",
+        "remoteBookId": "missing-bookmarks"
+      },
+      "title": "Missing semantic bookmark state",
+      "localPin": false,
+      "updatedAt": "2026-09-14T00:00:00Z"
+    }
+  ],
+  "shelves": []
+}

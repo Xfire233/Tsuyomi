@@ -27,6 +27,32 @@ class ReaderDocumentSessionTest {
     }
 
     @Test
+    fun requestedDualTemporarilyPagesOnNarrowWindowsWithoutChangingTheLocator() {
+        val session = ReaderDocumentSession(document(), null, ReaderPresentation.DUAL_PAGE)
+        session.navigateToBlock(1, 3)
+        val locator = session.capture(Instant.EPOCH)
+
+        assertEquals(ReaderPresentation.PAGED, effectiveReaderPresentation(ReaderPresentation.DUAL_PAGE, false))
+        assertEquals(ReaderPresentation.DUAL_PAGE, effectiveReaderPresentation(ReaderPresentation.DUAL_PAGE, true))
+        assertEquals(locator.copy(capturedAt = session.position.locator.capturedAt), session.position.locator)
+        assertEquals(1, session.position.blockIndex)
+        assertEquals(3, session.position.characterOffset)
+    }
+
+
+    @Test
+    fun previewPositionDoesNotMoveTheCommittedReaderPosition() {
+        val session = ReaderDocumentSession(document(), null, ReaderPresentation.SCROLL)
+        session.navigateToBlock(0, 1)
+
+        val preview = session.previewPositionAtBlock(2, 4)
+
+        assertEquals(2, preview.blockIndex)
+        assertEquals(4, preview.characterOffset)
+        assertEquals(0, session.position.blockIndex)
+        assertEquals(1, session.position.characterOffset)
+    }
+    @Test
     fun missing_anchor_uses_bounded_progress_and_reports_degraded_precision() {
         val locator = ReaderLocator(
             document = DocumentIdentity("org.tsuyomi.wenku8", "1234", "10001"),

@@ -1,0 +1,45 @@
+{
+  "format": "tsuyomi-transfer",
+  "version": 5,
+  "createdAt": "2026-09-14T00:00:00Z",
+  "library": [
+    {
+      "identity": {
+        "sourceId": "org.tsuyomi.wenku8",
+        "remoteBookId": "book-42"
+      },
+      "title": "Duplicate semantic locator",
+      "localPin": true,
+      "updatedAt": "2026-09-14T00:00:00Z",
+      "bookmarks": [
+        {
+          "document": {
+            "sourceId": "org.tsuyomi.wenku8",
+            "remoteBookId": "book-42",
+            "contentId": "chapter-7",
+            "revision": "r1"
+          },
+          "blockId": "paragraph-1",
+          "textAnchorDigest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "characterOffset": 12,
+          "chapterProgress": 0.2,
+          "capturedAt": "2026-09-14T00:00:00Z"
+        },
+        {
+          "document": {
+            "sourceId": "org.tsuyomi.wenku8",
+            "remoteBookId": "book-42",
+            "contentId": "chapter-7",
+            "revision": "r1"
+          },
+          "blockId": "paragraph-1",
+          "textAnchorDigest": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+          "characterOffset": 12,
+          "chapterProgress": 0.8,
+          "capturedAt": "2026-09-14T00:00:01Z"
+        }
+      ]
+    }
+  ],
+  "shelves": []
+}

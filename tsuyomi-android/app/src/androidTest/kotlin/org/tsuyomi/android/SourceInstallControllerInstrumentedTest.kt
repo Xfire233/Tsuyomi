@@ -125,18 +125,14 @@ internal class SourceInstallControllerInstrumentedTest : SourceFlowInstrumentedT
         val installed = installFixture()
         val sourceId = installed.manifest.sourceId.value
         val book = summary(sourceId, "1001", "保留的书籍")
-        library.addToLibrary(org.tsuyomi.core.database.LibraryBook(
-            identity = book.identity, title = book.title, author = book.author,
-            coverUrl = book.coverUrl, canonicalUrl = book.canonicalUrl,
-            addedAt = SOURCE_FLOW_TEST_TIME, metadataUpdatedAt = SOURCE_FLOW_TEST_TIME,
-        ))
-        val progress = org.tsuyomi.core.database.ReadingProgress(
-            book.identity,
-            org.tsuyomi.shared.locator.ReaderLocator(
-                document = org.tsuyomi.shared.locator.DocumentIdentity(sourceId, "1001", "chapter-1"),
-                blockId = "p1", characterOffset = 7, chapterProgress = 0.4, capturedAt = SOURCE_FLOW_TEST_TIME,
-            ),
-        )
+        library.addToLibrary(org.tsuyomi.shared.librarydomain.LibraryBook(identity = book.identity, title = book.title, author = book.author,
+        coverUrl = book.coverUrl, canonicalUrl = book.canonicalUrl,
+        addedAt = SOURCE_FLOW_TEST_TIME, metadataUpdatedAt = SOURCE_FLOW_TEST_TIME,))
+        val progress = org.tsuyomi.shared.librarydomain.ReadingProgress(book.identity,
+        org.tsuyomi.shared.locator.ReaderLocator(
+            document = org.tsuyomi.shared.locator.DocumentIdentity(sourceId, "1001", "chapter-1"),
+            blockId = "p1", characterOffset = 7, chapterProgress = 0.4, capturedAt = SOURCE_FLOW_TEST_TIME,
+        ),)
         library.saveProgress(progress)
         putCredential(sourceId)
         val partition = SourceCredentialPartition(sourceId, HttpsOrigin("https://www.wenku8.net"))
@@ -227,11 +223,9 @@ internal class SourceInstallControllerInstrumentedTest : SourceFlowInstrumentedT
         val installed = installFixture()
         val sourceId = installed.manifest.sourceId.value
         val book = summary(sourceId, "1001", "保留的书籍")
-        library.addToLibrary(org.tsuyomi.core.database.LibraryBook(
-            identity = book.identity, title = book.title, author = book.author,
-            coverUrl = book.coverUrl, canonicalUrl = book.canonicalUrl,
-            addedAt = SOURCE_FLOW_TEST_TIME, metadataUpdatedAt = SOURCE_FLOW_TEST_TIME,
-        ))
+        library.addToLibrary(org.tsuyomi.shared.librarydomain.LibraryBook(identity = book.identity, title = book.title, author = book.author,
+        coverUrl = book.coverUrl, canonicalUrl = book.canonicalUrl,
+        addedAt = SOURCE_FLOW_TEST_TIME, metadataUpdatedAt = SOURCE_FLOW_TEST_TIME,))
         val savedBook = library.book(book.identity)
         val before = requireNotNull(library.sourceAvailability(sourceId))
         assertTrue(File(context.noBackupFilesDir, "extensions/active/$sourceId.hxp").delete())
@@ -305,7 +299,7 @@ internal class SourceInstallControllerInstrumentedTest : SourceFlowInstrumentedT
         val archiveBytes = archive.readBytes()
         val descriptor = JSONObject(InstrumentationRegistry.getInstrumentation().context.assets
             .open("repository/source-user-consent.json").bufferedReader().use { it.readText() })
-        val now = Instant.parse("2026-09-11T12:00:00Z")
+        val now = Instant.now()
         val root = Ed25519PrivateKeyParameters(ByteArray(32) { (it + 43).toByte() }, 0)
         val catalog = signedRepositoryCatalog(archiveBytes, descriptor, root, now)
         var packageRequests = 0

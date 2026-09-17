@@ -4,6 +4,11 @@
  */
 package org.tsuyomi.core.database
 
+import org.tsuyomi.shared.librarydomain.SourceRemotePolicy
+import org.tsuyomi.shared.librarydomain.LibraryBook
+import org.tsuyomi.shared.librarydomain.RemoteReconciliationState
+import org.tsuyomi.shared.librarydomain.RemoteMirrorTargetSnapshot
+import org.tsuyomi.shared.librarydomain.RemoteMirrorBookSnapshot
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import java.time.Instant
 import kotlinx.coroutines.runBlocking

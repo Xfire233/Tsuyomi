@@ -6,6 +6,19 @@
 package org.tsuyomi.core.database
 
 import java.time.Instant
+import kotlinx.coroutines.flow.Flow
+import org.tsuyomi.shared.librarydomain.LibraryBook
+import org.tsuyomi.shared.librarydomain.LibraryCollection
+import org.tsuyomi.shared.librarydomain.LibraryEntry
+import org.tsuyomi.shared.librarydomain.ReadingProgress
+import org.tsuyomi.shared.librarydomain.ProgressWriteResult
+import org.tsuyomi.shared.librarydomain.RemoteMirrorBinding
+import org.tsuyomi.shared.librarydomain.RemoteMirrorSnapshot
+import org.tsuyomi.shared.librarydomain.RemoteReconciliationRecord
+import org.tsuyomi.shared.librarydomain.RemoteReconciliationState
+import org.tsuyomi.shared.librarydomain.SourceAvailability
+import org.tsuyomi.shared.librarydomain.SourceRemotePolicy
+import org.tsuyomi.shared.locator.ReaderLocator
 import org.tsuyomi.shared.model.BookIdentity
 import org.tsuyomi.shared.smartshelf.SmartRule
 
@@ -19,11 +32,16 @@ class RoomLibraryRepository(database: TsuyomiDatabase) {
     private val remote = RoomRemoteLibraryStore(database, dao, catalog)
     private val collections = RoomCollectionStore(database, dao, catalog)
     private val progress = RoomReadingProgressStore(database, dao)
+    private val bookmarks = RoomReaderBookmarkStore(database, dao)
+    private val readerHistory = RoomReaderHistoryStore(database, dao)
 
     suspend fun saveBook(book: LibraryBook) = catalog.saveBook(book)
+    suspend fun ensureRetainedLibraryEntry(book: LibraryBook): Boolean = catalog.ensureRetainedLibraryEntry(book)
     suspend fun book(identity: BookIdentity): LibraryBook? = catalog.book(identity)
     suspend fun libraryEntries(): List<LibraryEntry> = catalog.libraryEntries()
     suspend fun readLaterEntries(): List<LibraryEntry> = catalog.readLaterEntries()
+    suspend fun readerHistoryEntries(): List<LibraryEntry> = catalog.readerHistoryEntries()
+    suspend fun readerHistoryEntry(identity: BookIdentity): LibraryEntry? = catalog.readerHistoryEntry(identity)
     suspend fun libraryEntry(identity: BookIdentity): LibraryEntry? = catalog.libraryEntry(identity)
     suspend fun addToLibrary(book: LibraryBook): Boolean = catalog.addToLibrary(book)
     suspend fun removeFromLibrary(identity: BookIdentity): Boolean = catalog.removeFromLibrary(identity)
@@ -132,6 +150,8 @@ class RoomLibraryRepository(database: TsuyomiDatabase) {
         collections.reorderManualMemberships(collectionId, identities)
 
     suspend fun saveProgress(incoming: ReadingProgress): ProgressWriteResult = progress.saveProgress(incoming)
+    suspend fun recordReaderVisit(identity: BookIdentity, visitedAt: Instant = Instant.now()) =
+        readerHistory.recordReaderVisit(identity, visitedAt)
     suspend fun progress(identity: BookIdentity): ReadingProgress? = progress.progress(identity)
     suspend fun markChapterCompleted(
         identity: BookIdentity,
@@ -139,4 +159,15 @@ class RoomLibraryRepository(database: TsuyomiDatabase) {
         completedAt: Instant = Instant.now(),
     ): Boolean = progress.markChapterCompleted(identity, chapterId, completedAt)
     suspend fun completedChapterIds(identity: BookIdentity): Set<String> = progress.completedChapterIds(identity)
+    fun observeBookmarks(identity: BookIdentity): Flow<List<ReaderLocator>> = bookmarks.observeBookmarks(identity)
+    suspend fun bookmarks(identity: BookIdentity): List<ReaderLocator> = bookmarks.bookmarks(identity)
+    suspend fun toggleBookmark(locator: ReaderLocator): Boolean {
+        check(book(locator.document.book) != null) { "Bookmark requires retained book metadata" }
+        return bookmarks.toggleBookmark(locator)
+    }
+    suspend fun removeBookmark(locator: ReaderLocator): Boolean = bookmarks.removeBookmark(locator)
+    suspend fun addBookmarks(identity: BookIdentity, locators: List<ReaderLocator>) {
+        check(book(identity) != null) { "Bookmark requires retained book metadata" }
+        bookmarks.addBookmarks(identity, locators)
+    }
 }

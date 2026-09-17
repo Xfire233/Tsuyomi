@@ -4,21 +4,21 @@
  */
 package org.tsuyomi.feature.settings
 
-import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.layout.Column
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Slider
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.ui.Alignment
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import java.util.Locale
@@ -30,6 +30,8 @@ import org.tsuyomi.core.ui.components.SettingsGroup
 import org.tsuyomi.core.ui.components.SettingsSectionHeader
 import org.tsuyomi.core.ui.components.SettingsSwitchRow
 import org.tsuyomi.core.ui.components.TsuyomiSegment
+import org.tsuyomi.core.ui.components.TsuyomiSlider
+import org.tsuyomi.core.ui.components.TsuyomiTextField
 import org.tsuyomi.core.ui.theme.TsuyomiSpacing
 import org.tsuyomi.shared.backup.PortableReaderPreferences
 
@@ -76,6 +78,88 @@ fun ReaderDefaultsScreen(
                 steps = 7,
                 onValueChange = { onPreferencesChanged(preferences.copy(paragraphSpacing = it.toDouble())) },
             )
+            Text(
+                stringResource(R.string.settings_reader_font_family),
+                modifier = Modifier.padding(horizontal = TsuyomiSpacing.Md),
+                style = MaterialTheme.typography.bodyLarge,
+            )
+            SegmentedSelector(
+                options = listOf(
+                    TsuyomiSegment("system", stringResource(R.string.settings_reader_font_family_system)),
+                    TsuyomiSegment("sans", stringResource(R.string.settings_reader_font_family_sans)),
+                    TsuyomiSegment("serif", stringResource(R.string.settings_reader_font_family_serif)),
+                    TsuyomiSegment("monospace", stringResource(R.string.settings_reader_font_family_monospace)),
+                ),
+                selected = preferences.fontFamily ?: "system",
+                onSelect = { onPreferencesChanged(preferences.copy(fontFamily = it)) },
+                modifier = Modifier.padding(TsuyomiSpacing.Md),
+            )
+            Text(
+                stringResource(R.string.settings_reader_font_weight),
+                modifier = Modifier.padding(horizontal = TsuyomiSpacing.Md),
+                style = MaterialTheme.typography.bodyLarge,
+            )
+            SegmentedSelector(
+                options = listOf(
+                    TsuyomiSegment("400", stringResource(R.string.settings_reader_font_weight_regular)),
+                    TsuyomiSegment("500", stringResource(R.string.settings_reader_font_weight_medium)),
+                ),
+                selected = (preferences.fontWeight ?: 400).toString(),
+                onSelect = { onPreferencesChanged(preferences.copy(fontWeight = it.toInt())) },
+                modifier = Modifier.padding(TsuyomiSpacing.Md),
+            )
+            ReaderSliderRow(
+                label = stringResource(R.string.settings_reader_letter_spacing),
+                valueLabel = String.format(Locale.ROOT, "%.2fsp", preferences.letterSpacing ?: 0.0),
+                value = (preferences.letterSpacing ?: 0.0).toFloat(),
+                valueRange = -0.05f..0.20f,
+                steps = 24,
+                onValueChange = { onPreferencesChanged(preferences.copy(letterSpacing = it.toDouble())) },
+            )
+            ReaderSliderRow(
+                label = stringResource(R.string.settings_reader_first_line_indent),
+                valueLabel = String.format(Locale.ROOT, "%.2fem", preferences.firstLineIndent ?: 0.0),
+                value = (preferences.firstLineIndent ?: 0.0).toFloat(),
+                valueRange = 0f..4f,
+                steps = 15,
+                onValueChange = { onPreferencesChanged(preferences.copy(firstLineIndent = it.toDouble())) },
+            )
+            ReaderSliderRow(
+                label = stringResource(R.string.settings_reader_vertical_margin),
+                valueLabel = "${(preferences.verticalMargin ?: 24.0).toInt()}dp",
+                value = (preferences.verticalMargin ?: 24.0).toFloat(),
+                valueRange = 0f..64f,
+                steps = 15,
+                onValueChange = { onPreferencesChanged(preferences.copy(verticalMargin = it.toDouble())) },
+            )
+            Text(
+                stringResource(R.string.settings_reader_text_alignment),
+                modifier = Modifier.padding(horizontal = TsuyomiSpacing.Md),
+                style = MaterialTheme.typography.bodyLarge,
+            )
+            SegmentedSelector(
+                options = listOf(
+                    TsuyomiSegment("start", stringResource(R.string.settings_reader_text_alignment_start)),
+                    TsuyomiSegment("justify", stringResource(R.string.settings_reader_text_alignment_justify)),
+                    TsuyomiSegment("center", stringResource(R.string.settings_reader_text_alignment_center)),
+                    TsuyomiSegment("end", stringResource(R.string.settings_reader_text_alignment_end)),
+                ),
+                selected = preferences.textAlignment ?: "start",
+                onSelect = { onPreferencesChanged(preferences.copy(textAlignment = it)) },
+                modifier = Modifier.padding(TsuyomiSpacing.Md),
+            )
+            ReaderColorOverrideRow(
+                label = stringResource(R.string.settings_reader_foreground_color),
+                value = preferences.foregroundColor,
+                tag = "settings-reader-foreground-color",
+                onValueChanged = { onPreferencesChanged(preferences.copy(foregroundColor = it)) },
+            )
+            ReaderColorOverrideRow(
+                label = stringResource(R.string.settings_reader_background_color),
+                value = preferences.backgroundColor,
+                tag = "settings-reader-background-color",
+                onValueChanged = { onPreferencesChanged(preferences.copy(backgroundColor = it)) },
+            )
         }
 
         SettingsSectionHeader(stringResource(R.string.settings_reader_section_page))
@@ -84,6 +168,7 @@ fun ReaderDefaultsScreen(
                 options = listOf(
                     TsuyomiSegment("scroll", stringResource(R.string.settings_reader_flow_scroll)),
                     TsuyomiSegment("paged", stringResource(R.string.settings_reader_flow_paged)),
+                    TsuyomiSegment("dual", stringResource(R.string.settings_reader_flow_dual)),
                 ),
                 selected = preferences.flow ?: "scroll",
                 onSelect = { onPreferencesChanged(preferences.copy(flow = it)) },
@@ -96,6 +181,8 @@ fun ReaderDefaultsScreen(
                     TsuyomiSegment("paper", stringResource(R.string.settings_reader_theme_paper)),
                     TsuyomiSegment("warmGray", stringResource(R.string.settings_reader_theme_warm)),
                     TsuyomiSegment("nightInk", stringResource(R.string.settings_reader_theme_night)),
+                    TsuyomiSegment("black", stringResource(R.string.settings_reader_theme_black)),
+                    TsuyomiSegment("inkGreen", stringResource(R.string.settings_reader_theme_ink_green)),
                 ),
                 selected = preferences.theme ?: "paper",
                 onSelect = { onPreferencesChanged(preferences.copy(theme = it)) },
@@ -156,20 +243,43 @@ private fun ReaderSliderRow(
     steps: Int,
     onValueChange: (Float) -> Unit,
 ) {
-    Column(
-        modifier = Modifier.fillMaxWidth().padding(horizontal = TsuyomiSpacing.Md, vertical = TsuyomiSpacing.Sm),
-        verticalArrangement = Arrangement.spacedBy(TsuyomiSpacing.Xs),
-    ) {
-        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-            Text(label, modifier = Modifier.weight(1f), style = MaterialTheme.typography.bodyLarge)
-            Text(valueLabel, style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
-        }
-        Slider(
-            value = value.coerceIn(valueRange.start, valueRange.endInclusive),
+    Column(Modifier.fillMaxWidth().padding(horizontal = TsuyomiSpacing.Md, vertical = TsuyomiSpacing.Sm)) {
+        Text(label, style = MaterialTheme.typography.bodyLarge)
+        TsuyomiSlider(
+            value = value,
             onValueChange = onValueChange,
+            label = label,
             valueRange = valueRange,
             steps = steps,
-            modifier = Modifier.fillMaxWidth(),
+            valueDescription = valueLabel,
         )
+        Text(valueLabel, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
     }
 }
+
+@Composable
+private fun ReaderColorOverrideRow(
+    label: String,
+    value: String?,
+    tag: String,
+    onValueChanged: (String?) -> Unit,
+) {
+    var draft by rememberSaveable(value) { mutableStateOf(value.orEmpty()) }
+    TsuyomiTextField(
+        value = draft,
+        onValueChange = { candidate ->
+            val normalized = candidate.uppercase(Locale.ROOT)
+            draft = normalized
+            if (normalized.isEmpty()) {
+                onValueChanged(null)
+            } else if (DEFAULTS_HEX_COLOR.matches(normalized)) {
+                onValueChanged(normalized)
+            }
+        },
+        label = label,
+        singleLine = true,
+        modifier = Modifier.fillMaxWidth().testTag(tag),
+    )
+}
+
+private val DEFAULTS_HEX_COLOR = Regex("^#[0-9A-F]{6}$")

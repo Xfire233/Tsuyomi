@@ -40,6 +40,7 @@ object TsuyomiMotion {
     const val SELECTION_DURATION_MS = 200
     const val SWITCH_DURATION_MS = 150
     const val EXPAND_DURATION_MS = 220
+    const val PAGE_TURN_DURATION_MS = 220
     val Easing = EaseOut
 }
 
@@ -129,6 +130,22 @@ fun tsuyomiAnimateColorAsState(target: Color, instant: Boolean, label: String): 
     )
     return animated
 }
+
+/** Animates a scalar under the same bounded, instant-motion policy as semantic colors. */
+@Composable
+fun tsuyomiAnimateFloatAsState(target: Float, instant: Boolean, label: String): Float {
+    if (instant) return target
+    val animated by androidx.compose.animation.core.animateFloatAsState(
+        targetValue = target,
+        animationSpec = tween(TsuyomiMotion.SELECTION_DURATION_MS, easing = TsuyomiMotion.Easing),
+        label = label,
+    )
+    return animated
+}
+
+/** Shared bounded animation spec for core-owned transition wrappers. */
+fun <T> policyMotionSpec(instant: Boolean, durationMillis: Int): FiniteAnimationSpec<T> =
+    if (instant) snap() else tween(durationMillis, easing = TsuyomiMotion.Easing)
 
 /**
  * Immediate, fully opaque press feedback for the instant motion policy. It never fades, expands,

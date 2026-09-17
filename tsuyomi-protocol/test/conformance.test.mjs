@@ -16,6 +16,18 @@ const createAjv = () => {
 const compare = (left, right) => (left < right ? -1 : left > right ? 1 : 0);
 const transferMaxBytes = 32 * 1024 * 1024;
 
+const bookmarkPositionKey = (locator) => {
+  const document = locator.document;
+  const identity = [document.sourceId, document.remoteBookId, document.contentId, document.revision ?? null];
+  if (locator.blockId !== undefined && locator.characterOffset !== undefined) {
+    return JSON.stringify([...identity, 'offset', locator.blockId, locator.characterOffset]);
+  }
+  if (locator.blockId !== undefined && locator.textAnchorDigest !== undefined) {
+    return JSON.stringify([...identity, 'anchor', locator.blockId, locator.textAnchorDigest]);
+  }
+  return JSON.stringify([...identity, 'fallback', locator.blockId ?? null, locator.chapterProgress ?? null, locator.bookProgress ?? null]);
+};
+
 const updateCheckIssues = (document) => {
   const issues = [];
   if (document.complete !== true) issues.push('incomplete-evidence');
@@ -68,11 +80,24 @@ const transferIssues = (document) => {
     }
   }
   for (const book of document.library) {
+    const key = `${book.identity.sourceId}\u0000${book.identity.remoteBookId}`;
     for (const shelfId of book.shelfIds ?? []) {
       if (!shelves.has(shelfId)) issues.push(`missing-shelf:${shelfId}`);
     }
     if (document.version >= 3 && book.localPin === false && (book.shelfIds?.length ?? 0) > 0) {
       issues.push(`unpinned-manual-membership:${book.identity.sourceId}\u0000${book.identity.remoteBookId}`);
+    }
+    if (document.version === 5) {
+      if ((book.bookmarks?.length ?? 0) > 20000) issues.push(`bookmark-limit:${key}`);
+      const bookmarkPositions = new Set();
+      for (const [bookmarkIndex, bookmark] of (book.bookmarks ?? []).entries()) {
+        if (bookmark.document.sourceId !== book.identity.sourceId || bookmark.document.remoteBookId !== book.identity.remoteBookId) {
+          issues.push(`bookmark-document-book-mismatch:${key}:${bookmarkIndex}`);
+        }
+        const bookmarkKey = bookmarkPositionKey(bookmark);
+        if (bookmarkPositions.has(bookmarkKey)) issues.push(`duplicate-bookmark-position:${key}:${bookmarkIndex}`);
+        bookmarkPositions.add(bookmarkKey);
+      }
     }
   }
   return issues;
@@ -202,6 +227,57 @@ test('transfer v3 preserves retained unpinned metadata without a manual membersh
 test('transfer v3 rejects manual membership for an unpinned book', async () => {
   const document = await loadJson('../fixtures/transfer/invalid-v3-unpinned-shelf-membership.json');
   assert.ok(transferIssues(document).some((issue) => issue.startsWith('unpinned-manual-membership:')));
+});
+
+test('transfer v4 preserves unpinned bookmark records and portable Reader typography', async () => {
+  const document = await loadJson('../fixtures/transfer/valid-v4-reader-bookmarks.json');
+  const retained = document.library.find((book) => book.identity.remoteBookId === 'retained-unpinned');
+  assert.deepEqual(transferIssues(document), []);
+  assert.equal(retained?.localPin, false);
+  assert.deepEqual(retained?.bookmarkedChapterIds, ['chapter-9']);
+  assert.deepEqual(document.preferences?.reader, {
+    flow: 'dual',
+    fontScale: 1.2,
+    lineHeight: 1.6,
+    theme: 'nightInk',
+    horizontalMargin: 24,
+    paragraphSpacing: 12,
+    lockPortrait: false,
+    progressVisible: true,
+    immersive: false,
+    keepAwake: true,
+    volumePaging: true,
+    fontFamily: 'serif',
+    fontWeight: 500,
+    letterSpacing: 0.1,
+    firstLineIndent: 1.5,
+    verticalMargin: 32,
+    textAlignment: 'justify',
+    foregroundColor: '#112233',
+    backgroundColor: '#AABBCC',
+  });
+});
+
+test('transfer v5 preserves exact semantic bookmarks without restoring an unpinned membership', async () => {
+  const document = await loadJson('../fixtures/transfer/valid-v5-semantic-bookmarks.json');
+  const retained = document.library.find((book) => book.identity.remoteBookId === 'retained-unpinned');
+  assert.deepEqual(transferIssues(document), []);
+  assert.equal(retained?.localPin, false);
+  assert.equal(retained?.bookmarks[0].document.contentId, 'chapter-9');
+  assert.equal(retained?.bookmarks[0].chapterProgress, 0);
+  assert.equal(retained?.bookmarks[0].capturedAt, '1970-01-01T00:00:00Z');
+  assert.equal(document.library[0].bookmarks[0].characterOffset, 0);
+  assert.equal(document.library[0].bookmarks[1].characterOffset, 42);
+});
+
+test('transfer v5 semantic validation rejects foreign documents and duplicate positions despite recapture metadata', async () => {
+  const foreign = await loadJson('../fixtures/transfer/invalid-v5-foreign-bookmark-document.json');
+  const duplicate = await loadJson('../fixtures/transfer/invalid-v5-duplicate-bookmark-position.json');
+  assert.ok(transferIssues(foreign).some((issue) => issue.startsWith('bookmark-document-book-mismatch:')));
+  const oversized = await loadJson('../fixtures/transfer/valid-v5-semantic-bookmarks.json');
+  oversized.library[0].bookmarks = Array.from({ length: 20001 }, () => structuredClone(oversized.library[0].bookmarks[0]));
+  assert.ok(transferIssues(oversized).some((issue) => issue.startsWith('bookmark-limit:')));
+  assert.ok(transferIssues(duplicate).some((issue) => issue.startsWith('duplicate-bookmark-position:')));
 });
 
 test('transfer semantic conformance rejects duplicate stable book identities', async () => {

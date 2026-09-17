@@ -13,14 +13,14 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.material3.AlertDialog
+import org.tsuyomi.core.ui.components.TsuyomiDialog
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -43,15 +43,13 @@ import java.time.Instant
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.collect
-import org.tsuyomi.core.database.LibraryEntry
+import org.tsuyomi.shared.librarydomain.LibraryEntry
 import org.tsuyomi.core.display.DisplayController
 import org.tsuyomi.core.display.DisplayProfile
 import org.tsuyomi.core.display.DisplayEnvironment
 import org.tsuyomi.core.display.DisplayEnvironmentProvider
 import org.tsuyomi.core.display.DisplayEnvironmentResolver
 import org.tsuyomi.core.display.displayRedrawLayer
-import org.tsuyomi.core.media.api.CoverRepositoryFactory
-import org.tsuyomi.core.media.api.CoverMediaFetcher
 import org.tsuyomi.core.ui.components.AppScaffold
 import org.tsuyomi.core.ui.components.TsuyomiNavigation
 import org.tsuyomi.core.ui.components.TsuyomiTopBar
@@ -65,6 +63,7 @@ import org.tsuyomi.core.ui.theme.TsuyomiTheme
 import org.tsuyomi.feature.library.LibrarySelectionDialog
 import org.tsuyomi.feature.library.LibrarySelectionKind
 import org.tsuyomi.feature.library.LibraryTopBar
+import org.tsuyomi.feature.library.LibraryTagsTopBar
 import org.tsuyomi.feature.library.SystemLibraryFilter
 import org.tsuyomi.feature.library.projectedEntries
 import org.tsuyomi.feature.library.libraryNodeRouteTitle
@@ -198,9 +197,15 @@ internal fun TsuyomiApp(
     val sourceOwner = rememberSourceRouteOwner(
         application = application,
         navController = navController,
-        currentRoute = observedRoute,
         onLibraryChanged = ::reloadLibrary,
     )
+    val trustedSourcePackages = sourceOwner.installer.trustedInstalledPackages
+    val sourceTagLabels = remember(trustedSourcePackages) {
+        trustedSourcePackages.associate { source ->
+            source.manifest.sourceId.value to source.manifest.displayName
+        }
+    }
+    SideEffect { libraryFlow.updateSourceTagLabels(sourceTagLabels) }
     libraryFlow.configureInstalledMirrorRoots(sourceOwner.installer::installedRemoteLibraryRoots)
     var pendingIntroductionId by rememberSaveable { mutableStateOf<String?>(null) }
     val introductionRouteId = when (currentRoute) {
@@ -234,41 +239,18 @@ internal fun TsuyomiApp(
         libraryFlow.setFilterAndSortPanelExpanded(false)
     }
     val activeSourcePackage = sourceOwner.installer.activePackage
-    val coverGateway = remember(activeSourcePackage?.packageSha256) {
-        activeSourcePackage?.let { packageInfo ->
-            Phase2SourceGateway.create(context, packageInfo, org.tsuyomi.core.network.DirectActionTokenRegistry())
-        }
+    val credentialGeneration = sourceOwner.credentialGeneration
+    val coverCache = remember(sourceOwner, activeSourcePackage?.packageSha256, credentialGeneration) {
+        sourceOwner.coverCacheState()
     }
-    val coverCredentialRevision = remember(activeSourcePackage?.packageSha256) {
-        activeSourcePackage?.let { SourceGatewayFactory.mediaCredentialRevision(context, it) } ?: "anonymous"
-    }
-    val coverMediaFetcher = remember(coverGateway, activeSourcePackage?.packageSha256) {
-        val packageInfo = activeSourcePackage
-        if (coverGateway == null || packageInfo == null) null else CoverMediaFetcher { url, referrerUrl ->
-            coverGateway.fetchMedia(SourceGatewayFactory.networkGrant(packageInfo), url, referrerUrl)
-                .let { org.tsuyomi.core.media.api.CoverMediaPayload(it.bytes, it.contentType) }
-        }
-    }
-    val coverRepository = remember(activeSourcePackage?.packageSha256) {
-        activeSourcePackage?.let { packageInfo ->
-            val network = packageInfo.manifest.capabilities.network
-            CoverRepositoryFactory.create(
-                context = context.applicationContext,
-                origins = network.origins,
-                maxResponseBytes = network.maxResponseBytes,
-                sourceId = packageInfo.manifest.sourceId.value,
-                packageRevision = packageInfo.packageSha256,
-                credentialRevision = coverCredentialRevision,
-                mediaFetcher = coverMediaFetcher,
-            )
-        }
-    }
-    LaunchedEffect(coverRepository, activeSourcePackage?.packageSha256) {
+    val coverRepository = coverCache.repository
+    val coverCredentialRevision = coverCache.credentialRevision
+    LaunchedEffect(coverRepository, coverCache.sourceId, coverCache.packageRevision, coverCredentialRevision) {
         libraryFlow.configureCoverRepository(
             repository = coverRepository,
-            sourceId = activeSourcePackage?.manifest?.sourceId?.value,
-            packageRevision = activeSourcePackage?.packageSha256,
-            credentialRevision = activeSourcePackage?.let { coverCredentialRevision },
+            sourceId = coverCache.sourceId,
+            packageRevision = coverCache.packageRevision,
+            credentialRevision = coverCredentialRevision,
             scope = scope,
         )
     }
@@ -295,7 +277,8 @@ internal fun TsuyomiApp(
         }
     }
 
-    val selectedRoot = rootRouteFor(currentRoute)
+    val selectedRoot = currentEntry?.savedStateHandle?.get<String>(BookCallerRootKey)
+        ?: rootRouteFor(currentRoute)
     val appNavigationItems = navigationItems()
     val title = if (currentRoute == Routes.LibrarySystem || currentRoute == Routes.LibraryCollection) {
         libraryNodeRouteTitle(
@@ -322,22 +305,16 @@ internal fun TsuyomiApp(
     }
 
     if (detailRemoveConfirmationVisible) {
-        AlertDialog(
+        TsuyomiDialog(
             onDismissRequest = { detailRemoveConfirmationVisible = false },
-            title = { Text(stringResource(R.string.detail_remove_confirm_title)) },
-            text = { Text(stringResource(R.string.detail_remove_confirm_message)) },
-            confirmButton = {
-                TextButton(
-                    onClick = {
-                        detailRemoveConfirmationVisible = false
-                        issueDetailCommand(SourceDetailRouteOwner.Command.REMOVE_FROM_LIBRARY)
-                    },
-                ) { Text(stringResource(R.string.detail_remove_confirm_action)) }
-            },
-            dismissButton = {
-                TextButton(onClick = { detailRemoveConfirmationVisible = false }) {
-                    Text(stringResource(R.string.detail_remove_cancel))
-                }
+            title = stringResource(R.string.detail_remove_confirm_title),
+            text = stringResource(R.string.detail_remove_confirm_message),
+            confirmLabel = stringResource(R.string.detail_remove_confirm_action),
+            dismissLabel = stringResource(R.string.detail_remove_cancel),
+            destructive = true,
+            onConfirm = {
+                detailRemoveConfirmationVisible = false
+                issueDetailCommand(SourceDetailRouteOwner.Command.REMOVE_FROM_LIBRARY)
             },
         )
     }
@@ -386,6 +363,13 @@ internal fun TsuyomiApp(
                 topBar = {
                     if (routeOwnsChrome) {
                         // Source routes own their chrome.
+                    } else if (currentRoute == Routes.LibraryTags) {
+                        LibraryTagsTopBar(
+                            title = title,
+                            layout = libraryFlow.tagLayout,
+                            onNavigateUp = navController::navigateUp,
+                            onCycleLayout = libraryFlow::toggleTagLayout,
+                        )
                     } else if (currentRoute in setOf(
                         Routes.Library,
                         Routes.LibrarySystem,
@@ -434,7 +418,7 @@ internal fun TsuyomiApp(
                                     )
                                 }
                                 LibrarySelectionKind.COLLECTION -> libraryFlow.collections
-                                    .filter { it.kind == org.tsuyomi.core.database.CollectionKind.MANUAL }
+                                    .filter { it.kind == org.tsuyomi.shared.librarydomain.CollectionKind.MANUAL }
                                     .let { visible ->
                                         visible.isNotEmpty() && libraryFlow.state.selectedCollectionIds.containsAll(
                                             visible.map { it.collectionId },
@@ -504,7 +488,7 @@ internal fun TsuyomiApp(
                                 )
                             },
                             onNavigateUp = {
-                                if (!sourceOwner.flow.home.navigateBackFromFeature()) navController.navigateUp()
+                                if (!sourceOwner.navigateBackFromHomeFeature()) navController.navigateUp()
                             },
                             actions = listOf(
                                 TsuyomiTopBarAction(
@@ -564,10 +548,13 @@ internal fun TsuyomiApp(
                         val sameActiveSource = selectedBook != null &&
                             selectedPackage?.manifest?.sourceId?.value == selectedBook.identity.sourceId
                         val remotePolicies = selectedPackage?.manifest?.capabilities?.remoteLibrary?.policies
+                        val backDispatcher = checkNotNull(
+                            androidx.activity.compose.LocalOnBackPressedDispatcherOwner.current,
+                        ).onBackPressedDispatcher
                         BookDetailTopBar(
                             title = stringResource(R.string.title_book_detail),
                             inLibrary = sourceOwner.flow.remoteLibrary.selectedBookInLibrary,
-                            onNavigateUp = { navController.navigateUp() },
+                            onNavigateUp = { backDispatcher.onBackPressed() },
                             onCacheDetail = { issueDetailCommand(SourceDetailRouteOwner.Command.CACHE_DETAIL) },
                             onRefresh = { issueDetailCommand(SourceDetailRouteOwner.Command.REFRESH_DETAIL) },
                             onRemoveFromLibrary = { detailRemoveConfirmationVisible = true },
@@ -628,7 +615,7 @@ internal fun TsuyomiApp(
                         resumeReading = sourceOwner::resumeReading,
                         onCoverVisibility = libraryFlow::setCoverVisible,
                         openRemoteDestination = sourceOwner::openRemoteDestination,
-                        onManualUpdate = ::requestManualUpdate,
+                        onManualUpdate = { application.updateScheduler.enqueueManual() },
                         onCancelUpdate = { scope.launch { application.updateScheduler.cancel() } },
                         onOpenUpdateSettings = { navController.navigate(Routes.UpdateSettings) },
                         onIgnoreUpdate = { update ->
@@ -645,9 +632,6 @@ internal fun TsuyomiApp(
                         onReaderPreferencesChanged = { updated ->
                             scope.launch { application.readerPreferencesRepository.update(updated) }
                         },
-                        coverRepository = coverRepository,
-                        packageRevision = activeSourcePackage?.packageSha256,
-                        credentialRevision = activeSourcePackage?.let { coverCredentialRevision },
                         onRequestRemoveFromLibrary = { detailRemoveConfirmationVisible = true },
                         onExactChapterCompleted = { identity ->
                             application.updateCoordinator.reconcileCompleted(

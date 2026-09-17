@@ -13,6 +13,8 @@ import org.tsuyomi.core.database.room.BookEntity
 import org.tsuyomi.core.database.room.BrowsingHistoryEntity
 import org.tsuyomi.core.database.room.CollectionEntity
 import org.tsuyomi.core.database.room.CompletedChapterEntity
+import org.tsuyomi.core.database.room.ReaderBookmarkEntity
+import org.tsuyomi.core.database.room.ReaderHistoryEntity
 import org.tsuyomi.core.database.room.LibraryDao
 import org.tsuyomi.core.database.room.LibraryEntryEntity
 import org.tsuyomi.core.database.room.LocalBookTagEntity
@@ -48,7 +50,9 @@ import org.tsuyomi.core.database.room.UpdateUndoEntity
         LocalBookTagEntity::class,
         ManualCollectionMembershipEntity::class,
         CompletedChapterEntity::class,
+        ReaderBookmarkEntity::class,
         ReadingProgressEntity::class,
+        ReaderHistoryEntity::class,
         RemoteLibraryReconciliationEntity::class,
         SourceAvailabilityEntity::class,
         SourceRemotePolicyEntity::class,
@@ -70,7 +74,7 @@ import org.tsuyomi.core.database.room.UpdateUndoEntity
         UpdateSourceExclusionEntity::class,
         UpdateUndoEntity::class,
     ],
-    version = 10,
+    version = 13,
     exportSchema = true,
 )
 @TypeConverters(RoomConverters::class)
@@ -182,5 +186,36 @@ val MIGRATION_8_9 = object : Migration(8, 9) {
 val MIGRATION_9_10 = object : Migration(9, 10) {
     override fun migrate(db: SupportSQLiteDatabase) {
         db.execSQL("ALTER TABLE library_entries ADD COLUMN local_pin INTEGER NOT NULL DEFAULT 1")
+    }
+}
+
+val MIGRATION_10_11 = object : Migration(10, 11) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        db.execSQL(
+            "CREATE TABLE IF NOT EXISTS chapter_bookmarks (source_id TEXT NOT NULL, remote_book_id TEXT NOT NULL, chapter_id TEXT NOT NULL, PRIMARY KEY(source_id, remote_book_id, chapter_id))",
+        )
+    }
+}
+
+/** Migrates Room11 chapter marks to honest degraded chapter-start semantic locators. */
+val MIGRATION_11_12 = object : Migration(11, 12) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        db.execSQL(
+            "CREATE TABLE IF NOT EXISTS reader_bookmarks (source_id TEXT NOT NULL, remote_book_id TEXT NOT NULL, bookmark_position_key TEXT NOT NULL, content_id TEXT NOT NULL, revision TEXT, block_id TEXT, text_anchor_digest TEXT, character_offset INTEGER, chapter_progress REAL, book_progress REAL, captured_at_epoch_second INTEGER NOT NULL, captured_at_nano INTEGER NOT NULL, PRIMARY KEY(source_id, remote_book_id, bookmark_position_key))",
+        )
+        db.execSQL(
+            "INSERT INTO reader_bookmarks(source_id,remote_book_id,bookmark_position_key,content_id,revision,block_id,text_anchor_digest,character_offset,chapter_progress,book_progress,captured_at_epoch_second,captured_at_nano) " +
+                "SELECT source_id,remote_book_id,'v1|D|' || hex(source_id) || '|' || hex(remote_book_id) || '|' || hex(chapter_id) || '|-|P|-|0|-',chapter_id,NULL,NULL,NULL,NULL,0.0,NULL,0,0 FROM chapter_bookmarks",
+        )
+        db.execSQL("DROP TABLE chapter_bookmarks")
+    }
+}
+
+/** Adds explicit Reader admissions without inferring visits from browsing metadata. */
+val MIGRATION_12_13 = object : Migration(12, 13) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        db.execSQL(
+            "CREATE TABLE IF NOT EXISTS reader_history (source_id TEXT NOT NULL, remote_book_id TEXT NOT NULL, last_visited_at_epoch_second INTEGER NOT NULL, last_visited_at_nano INTEGER NOT NULL, PRIMARY KEY(source_id, remote_book_id), FOREIGN KEY(source_id, remote_book_id) REFERENCES books(source_id, remote_book_id) ON UPDATE NO ACTION ON DELETE CASCADE)",
+        )
     }
 }

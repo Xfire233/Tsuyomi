@@ -106,6 +106,16 @@ class TransferCoordinator(
         return prepared
     }
 
+    suspend fun restorePreparedExport(ownerGeneration: Long, canonicalDigest: String): PreparedExport? {
+        val ownership = ExportPreflightOwnership(ownerGeneration, canonicalDigest)
+        return withContext(Dispatchers.IO) {
+            exportPreflightStore.restore(ownership) ?: run {
+                exportPreflightStore.clearIfOwned(ownership)
+                null
+            }
+        }
+    }
+
     suspend fun cancelPreparedExport(ownerGeneration: Long, canonicalDigest: String) {
         val owned = withContext(Dispatchers.IO) {
             exportPreflightStore.clearIfOwned(ExportPreflightOwnership(ownerGeneration, canonicalDigest))
@@ -120,20 +130,18 @@ class TransferCoordinator(
         canonicalDigest: String,
     ) {
         val ownership = ExportPreflightOwnership(ownerGeneration, canonicalDigest)
-        val source = withContext(Dispatchers.IO) { exportPreflightStore.verifiedFile(ownership) } ?: return
-        presentation.state = TransferUiState.Working(appContext.getString(R.string.transfer_writing_export))
         val success = withContext(Dispatchers.IO) {
-            runCatching {
-                check(exportPreflightStore.verifiedFile(ownership) == source)
-                val output = resolver.openOutputStream(uri, "w") ?: error("output-unavailable")
-                output.use { stream ->
-                    source.inputStream().use { input -> input.copyTo(stream) }
-                    stream.flush()
-                }
-            }.isSuccess
+            exportPreflightStore.consumeVerifiedFile(ownership) { source ->
+                runCatching {
+                    val output = resolver.openOutputStream(uri, "w") ?: error("output-unavailable")
+                    output.use { stream ->
+                        source.inputStream().use { input -> input.copyTo(stream) }
+                        stream.flush()
+                    }
+                }.isSuccess
+            }
         }
-        val stillOwned = withContext(Dispatchers.IO) { exportPreflightStore.clearIfOwned(ownership) }
-        if (stillOwned) {
+        if (success != null) {
             presentation.state = if (success) {
                 TransferUiState.Exported
             } else {

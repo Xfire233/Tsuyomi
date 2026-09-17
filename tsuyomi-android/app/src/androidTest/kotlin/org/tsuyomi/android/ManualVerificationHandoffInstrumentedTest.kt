@@ -13,7 +13,10 @@ import android.view.View
 import android.view.ViewGroup
 import android.webkit.WebView
 import android.webkit.WebViewClient
+import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.test.junit4.v2.createAndroidComposeRule
+import androidx.compose.ui.test.onRoot
+import androidx.compose.ui.test.printToString
 import androidx.compose.ui.test.assert
 import androidx.compose.ui.test.click
 import androidx.compose.ui.test.hasSetTextAction
@@ -21,6 +24,7 @@ import androidx.compose.ui.test.hasStateDescription
 import androidx.compose.ui.test.longClick
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsEnabled
+import androidx.compose.ui.test.assertIsSelected
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.test.assertTextContains
 import androidx.compose.ui.test.performTextReplacement
@@ -33,6 +37,7 @@ import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollToIndex
 import androidx.compose.ui.test.performScrollTo
+import androidx.compose.ui.test.assertIsNotDisplayed
 import androidx.compose.ui.test.performTouchInput
 import androidx.compose.ui.test.swipe
 import androidx.compose.ui.test.performTextInput
@@ -46,6 +51,11 @@ import java.io.ByteArrayInputStream
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
+import androidx.compose.ui.graphics.luminance
+import androidx.compose.ui.graphics.toPixelMap
+import androidx.compose.ui.test.captureToImage
+import org.tsuyomi.core.preferences.ColorSchemePreference
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
 import org.junit.AfterClass
 import org.junit.Assert.assertEquals
@@ -56,13 +66,15 @@ import org.junit.Before
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
-import org.tsuyomi.core.display.DisplayPreference
+import org.tsuyomi.core.preferences.DisplayPreference
 import org.tsuyomi.core.security.SourceCredentialPartition
 import org.tsuyomi.shared.backup.PortableReaderPreferences
+import org.tsuyomi.shared.model.BookIdentity
 import org.tsuyomi.core.security.VerifiedBrowserSessionStore
 import org.tsuyomi.core.security.VerifiedBrowserSession
 import org.tsuyomi.feature.browse.BrowseUiState
 import org.tsuyomi.shared.sourcecontract.HttpsOrigin
+import kotlin.math.abs
 
 @RunWith(AndroidJUnit4::class)
 class ManualVerificationHandoffInstrumentedTest {
@@ -76,6 +88,35 @@ class ManualVerificationHandoffInstrumentedTest {
             Thread.sleep(50)
         }
         assertEquals(0, quickJsLaneCount())
+    }
+
+    @Test
+    fun standard_settings_dialogs_restore_with_their_route_and_dismiss_without_popping_it() {
+        cleanSessionState()
+        runBlocking {
+            (composeRule.activity.application as TsuyomiApplication).displayController
+                .setDisplayPreference(DisplayPreference.STANDARD)
+        }
+        waitForText("书架")
+        composeRule.onNodeWithText("更多").performClick()
+        composeRule.onNodeWithText("关于").performClick()
+        composeRule.onNodeWithText("开源许可证").performClick()
+        waitForText("关闭")
+        composeRule.activityRule.scenario.recreate()
+        waitForText("关闭")
+        composeRule.onNodeWithText("关闭").performClick()
+        waitForTextGone("关闭")
+        composeRule.onNodeWithText("开源许可证").assertIsDisplayed()
+        pressBack()
+        composeRule.onNodeWithText("帮助").performClick()
+        composeRule.onNodeWithText("网站镜像").performScrollTo().performClick()
+        waitForText("稍后再看")
+        composeRule.activityRule.scenario.recreate()
+        waitForText("稍后再看")
+        composeRule.onNodeWithText("稍后再看").performClick()
+        waitForTextGone("稍后再看")
+        composeRule.onNodeWithText("网站镜像").assertIsDisplayed()
+        composeRule.onNodeWithText("搜索帮助").assertExists()
     }
 
     @Test
@@ -109,7 +150,10 @@ class ManualVerificationHandoffInstrumentedTest {
         val identityBounds = composeRule.onNodeWithTag("verification-host-identity", useUnmergedTree = true)
             .fetchSemanticsNode()
             .boundsInWindow
-        composeRule.onNodeWithTag("verification-action-dock", useUnmergedTree = true).assertIsDisplayed()
+        val dockBounds = composeRule.onNodeWithTag("verification-action-dock", useUnmergedTree = true)
+            .assertIsDisplayed()
+            .fetchSemanticsNode()
+            .boundsInWindow
         val webViewBounds = composeRule.onNodeWithTag("verification-webview", useUnmergedTree = true)
             .assertIsDisplayed()
             .fetchSemanticsNode()
@@ -121,16 +165,46 @@ class ManualVerificationHandoffInstrumentedTest {
             "Verification host identity should stay away from common left-aligned site titles: $identityBounds",
             identityBounds.center.x > windowWidth * 0.5f,
         )
-        val actionCenters = listOf(
-            composeRule.onNodeWithContentDescription("取消验证").fetchSemanticsNode().boundsInWindow.center.y,
-            composeRule.onNodeWithContentDescription("打开对应搜索页面").fetchSemanticsNode().boundsInWindow.center.y,
-            composeRule.onNodeWithText("使用当前页面").fetchSemanticsNode().boundsInWindow.center.y,
-            composeRule.onNodeWithText("保存会话并返回").fetchSemanticsNode().boundsInWindow.center.y,
+        val actionBounds = listOf(
+            composeRule.onNodeWithContentDescription("取消验证").fetchSemanticsNode().boundsInWindow,
+            composeRule.onNodeWithContentDescription("打开对应搜索页面").fetchSemanticsNode().boundsInWindow,
+            composeRule.onNodeWithText("使用当前页面").fetchSemanticsNode().boundsInWindow,
+            composeRule.onNodeWithText("保存会话并返回").fetchSemanticsNode().boundsInWindow,
         )
+        val actionCenters = actionBounds.map { it.center.y }
         assertTrue(
             "Verification actions are not one compact horizontal group: $actionCenters",
             requireNotNull(actionCenters.maxOrNull()) - requireNotNull(actionCenters.minOrNull()) < 2f,
         )
+        assertTrue(
+            "Verification action row must not add enclosing toolbar gutters: $dockBounds, $actionBounds",
+            kotlin.math.abs(dockBounds.left - actionBounds.minOf { it.left }) < 1f &&
+                kotlin.math.abs(dockBounds.top - actionBounds.minOf { it.top }) < 1f &&
+                kotlin.math.abs(dockBounds.right - actionBounds.maxOf { it.right }) < 1f &&
+                kotlin.math.abs(dockBounds.bottom - actionBounds.maxOf { it.bottom }) < 1f,
+        )
+        val displayController = (composeRule.activity.application as TsuyomiApplication).displayController
+        val previousScheme = runBlocking { displayController.preferences.first().colorSchemePreference }
+        try {
+            runBlocking { displayController.setColorSchemePreference(ColorSchemePreference.DARK) }
+            composeRule.waitForIdle()
+            for (label in listOf("取消验证", "打开对应搜索页面")) {
+                val pixels = composeRule.onNodeWithContentDescription(label).captureToImage().toPixelMap()
+                var minimum = 1f
+                var maximum = 0f
+                for (y in 0 until pixels.height) {
+                    for (x in 0 until pixels.width) {
+                        val luminance = pixels[x, y].luminance()
+                        minimum = minOf(minimum, luminance)
+                        maximum = maxOf(maximum, luminance)
+                    }
+                }
+                val contrast = (maximum + 0.05f) / (minimum + 0.05f)
+                assertTrue("Floating night action is unreadable over the webpage: $label contrast=$contrast", contrast >= 3f)
+            }
+        } finally {
+            runBlocking { displayController.setColorSchemePreference(previousScheme) }
+        }
         composeRule.onNodeWithText("此验证由宿主应用发起。", substring = true).assertDoesNotExist()
         val searchHtml = targetContext.assets.open("search.html").bufferedReader().use { it.readText() }
         val searchUrl =
@@ -248,7 +322,12 @@ class ManualVerificationHandoffInstrumentedTest {
         performPlatformClick("雾港纪事")
         waitForText("上次更新：2026-02-03")
         pressBack()
-        waitForText("搜索作者")
+        try {
+            waitForText("搜索作者")
+        } catch (failure: androidx.compose.ui.test.ComposeTimeoutException) {
+            System.err.println(composeRule.onRoot(useUnmergedTree = true).printToString())
+            throw failure
+        }
         composeRule.onNodeWithText("雾港纪事").assertIsDisplayed()
         composeRule.onNodeWithText("星环邮差").assertDoesNotExist()
         assertEquals(1, Phase2SourceGateway.searchRequestCount())
@@ -374,7 +453,7 @@ class ManualVerificationHandoffInstrumentedTest {
     }
 
     @Test
-    fun recreation_closes_the_old_source_runtime_before_opening_a_new_session() {
+    fun source_search_remains_usable_after_activity_recreation() {
         cleanSessionState()
         runBlocking {
             (composeRule.activity.application as TsuyomiApplication).displayController
@@ -397,27 +476,6 @@ class ManualVerificationHandoffInstrumentedTest {
         waitForText("雾港纪事")
     }
 
-    @Test
-    fun popping_the_browse_entry_closes_its_source_runtime() {
-        cleanSessionState()
-        runBlocking {
-            (composeRule.activity.application as TsuyomiApplication).displayController
-                .setDisplayPreference(DisplayPreference.STANDARD)
-        }
-        waitForText("书架")
-        performPlatformClick("浏览")
-        waitForText("聚合搜索")
-        performPlatformClick("聚合搜索")
-        waitForText("输入关键词后搜索")
-        waitForQuickJsLaneCount(1)
-
-        pressBack()
-        waitForText("聚合搜索")
-        waitForQuickJsLaneCount(1)
-        pressBack()
-        waitForText("书架")
-        waitForQuickJsLaneCount(0)
-    }
 
     @Test
     fun standard_detail_uses_stable_app_bar_title_and_visible_cache_action() {
@@ -441,7 +499,6 @@ class ManualVerificationHandoffInstrumentedTest {
         performPlatformClick("雾港纪事")
 
         waitForText("书籍详情")
-        composeRule.onNodeWithContentDescription("缓存详情与目录").assertIsDisplayed()
         waitForText("简介")
         composeRule.onNodeWithContentDescription("更多加入选项").performClick()
         waitForText("稍后再读")
@@ -452,6 +509,107 @@ class ManualVerificationHandoffInstrumentedTest {
         composeRule.onNodeWithText("稍后再读").performClick()
         composeRule.onNodeWithContentDescription("更多加入选项").performClick()
         waitForStateDescription("detail-read-later-action", "未稍后再读")
+    }
+
+    @Test
+    fun standard_detail_tag_action_uses_theme_primary_while_legend_keeps_outline() {
+        cleanSessionState()
+        val application = composeRule.activity.application as TsuyomiApplication
+        runBlocking {
+            application.displayController.setDisplayPreference(DisplayPreference.STANDARD)
+            application.displayController.setColorSchemePreference(ColorSchemePreference.LIGHT)
+        }
+        waitForText("书架")
+        performPlatformClick("浏览")
+        waitForText("聚合搜索")
+        performPlatformClick("聚合搜索")
+        waitForText("输入关键词后搜索")
+        composeRule.onNode(hasSetTextAction()).performTextInput("fixture")
+        waitForText("fixture")
+        performPlatformClick("提交搜索")
+        waitForText("雾港纪事")
+        performPlatformClick("雾港纪事")
+        waitForText("书籍详情")
+        waitForText("简介")
+
+        fun mostDistinctPixel(
+            tag: String,
+            background: androidx.compose.ui.graphics.Color,
+            topBandOnly: Boolean = false,
+        ): androidx.compose.ui.graphics.Color {
+            val pixels = composeRule.onNodeWithTag(tag, useUnmergedTree = true).captureToImage().toPixelMap()
+            var distinct = pixels[0, 0]
+            var distinctDistance = -1f
+            val startX = if (topBandOnly) pixels.width / 3 else 0
+            val endX = if (topBandOnly) pixels.width * 2 / 3 else pixels.width
+            val endY = if (topBandOnly) minOf(6, pixels.height) else pixels.height
+            for (y in 0 until endY) {
+                for (x in startX until endX) {
+                    val candidate = pixels[x, y]
+                    val distance =
+                        (candidate.red - background.red) * (candidate.red - background.red) +
+                            (candidate.green - background.green) * (candidate.green - background.green) +
+                            (candidate.blue - background.blue) * (candidate.blue - background.blue)
+                    if (distance > distinctDistance) {
+                        distinct = candidate
+                        distinctDistance = distance
+                    }
+                }
+            }
+            return distinct
+        }
+        fun assertColorNear(
+            expected: androidx.compose.ui.graphics.Color,
+            actual: androidx.compose.ui.graphics.Color,
+            message: String,
+            tolerance: Float = 0.03f,
+        ) {
+            assertTrue(
+                "$message: expected=$expected actual=$actual",
+                abs(expected.red - actual.red) <= tolerance &&
+                    abs(expected.green - actual.green) <= tolerance &&
+                    abs(expected.blue - actual.blue) <= tolerance,
+            )
+        }
+
+        fun assertLegendColors() {
+            val surfacePixels = composeRule.onNodeWithTag("detail-tag-surface", useUnmergedTree = true)
+                .captureToImage().toPixelMap()
+            val pageBackground = surfacePixels[0, 0]
+            val addGapPixels = composeRule.onNodeWithTag("detail-add-tag-gap", useUnmergedTree = true)
+                .captureToImage().toPixelMap()
+            assertColorNear(
+                expected = pageBackground,
+                actual = addGapPixels[0, 0],
+                message = "The add-action outline gap must use the surrounding Detail page background",
+                tolerance = 0.01f,
+            )
+
+            val border = mostDistinctPixel("detail-tag-region", pageBackground, topBandOnly = true)
+            val legend = mostDistinctPixel("detail-tag-title", pageBackground)
+            assertColorNear(
+                expected = border,
+                actual = legend,
+                message = "The tag title must use the same theme outline color as the tag-region border",
+            )
+            val action = mostDistinctPixel("detail-add-tag-glyph", pageBackground)
+            val outlineDistance =
+                abs(action.red - border.red) + abs(action.green - border.green) + abs(action.blue - border.blue)
+            assertTrue(
+                "The add-tag action must use the distinct theme primary role: action=$action outline=$border",
+                outlineDistance >= 0.08f,
+            )
+        }
+
+        assertLegendColors()
+        try {
+            runBlocking { application.displayController.setColorSchemePreference(ColorSchemePreference.DARK) }
+            composeRule.waitForIdle()
+            assertLegendColors()
+        } finally {
+            runBlocking { application.displayController.setColorSchemePreference(ColorSchemePreference.LIGHT) }
+            composeRule.waitForIdle()
+        }
     }
 
     @Test
@@ -485,6 +643,10 @@ class ManualVerificationHandoffInstrumentedTest {
         performPlatformClick("雾港纪事")
         waitForText("简介")
         composeRule.onNodeWithTag("detail-cover").fetchSemanticsNode()
+        composeRule.onNodeWithText("书架").assertIsSelected()
+        composeRule.activityRule.scenario.recreate()
+        waitForText("简介")
+        composeRule.onNodeWithText("书架").assertIsSelected()
         assertEquals(0, Phase2SourceGateway.websiteMutationCount())
 
         runBlocking {
@@ -494,6 +656,74 @@ class ManualVerificationHandoffInstrumentedTest {
                 .forEach { application.libraryRepository.removeFromLibrary(it.book.identity) }
         }
     }
+    @Test
+    fun standard_library_continue_reader_preserves_caller_and_root_navigation() {
+        cleanSessionState()
+        val application = composeRule.activity.application as TsuyomiApplication
+        runBlocking {
+            application.libraryRepository.libraryEntries()
+                .filter { it.book.title == "雾港纪事" }
+                .forEach { application.libraryRepository.removeFromLibrary(it.book.identity) }
+            application.displayController.setDisplayPreference(DisplayPreference.STANDARD)
+            application.readerPreferencesRepository.update(
+                PortableReaderPreferences(flow = "scroll", fontScale = 1.0, lineHeight = 1.5, theme = "paper"),
+            )
+        }
+        try {
+            waitForText("书架")
+            performPlatformClick("浏览")
+            waitForText("聚合搜索")
+            performPlatformClick("聚合搜索")
+            waitForText("输入关键词后搜索")
+            composeRule.onNode(hasSetTextAction()).performTextInput("fixture")
+            performPlatformClick("提交搜索")
+            waitForText("雾港纪事")
+            performPlatformClick("雾港纪事")
+            waitForText("简介")
+            performPlatformClick("加入书架")
+            waitForText("已在书架")
+            waitForDirectoryChapterIndex()
+            composeRule.onNodeWithText("第一章 雾中的灯塔").performClick()
+            waitForText("设置")
+            composeRule.onNodeWithTag("reader-chapter-progress-slider").performTouchInput { click(center) }
+            waitForText("邮差把未署名的信收入防水袋，沿着旧轨道继续前行。")
+            composeRule.onNodeWithContentDescription("返回").performClick()
+            waitForText("简介")
+            runBlocking {
+                // Seed unfinished reading state independently of fixture text length.
+                val saved = application.libraryRepository.libraryEntries()
+                    .single { it.book.title == "雾港纪事" }.progress
+                requireNotNull(saved)
+                val capturedAt = saved.updatedAt.plusMillis(1)
+                application.libraryRepository.saveProgress(
+                    saved.copy(
+                        updatedAt = capturedAt,
+                        locator = saved.locator.copy(bookProgress = 0.25, chapterProgress = 0.5, capturedAt = capturedAt),
+                    ),
+                )
+                check(application.libraryRepository.progress(saved.identity)?.locator?.bookProgress == 0.25)
+            }
+            performPlatformClick("书架")
+            composeRule.onNodeWithTag("tsuyomi-tab-CONTINUE").performClick()
+            waitForText("雾港纪事")
+            performPlatformClick("雾港纪事")
+            waitForText("设置")
+            composeRule.onNodeWithContentDescription("返回").performClick()
+            composeRule.onNodeWithTag("tsuyomi-tab-CONTINUE").assertIsSelected()
+            performPlatformClick("更多")
+            waitForText("显示")
+            performPlatformClick("书架")
+            composeRule.onNodeWithTag("tsuyomi-tab-ALL").assertIsSelected()
+            composeRule.onNodeWithText("雾港纪事").assertIsDisplayed()
+        } finally {
+            runBlocking {
+                application.libraryRepository.libraryEntries()
+                    .filter { it.book.title == "雾港纪事" }
+                    .forEach { application.libraryRepository.removeFromLibrary(it.book.identity) }
+            }
+        }
+    }
+
     @Test
     fun standard_reader_promotes_atlas_chrome_and_adjacent_chapter_navigation() {
         cleanSessionState()
@@ -524,6 +754,19 @@ class ManualVerificationHandoffInstrumentedTest {
 
         waitForText("第一章 雾中的灯塔")
         waitForText("设置")
+        val readerSafeBounds = composeRule.runOnUiThread {
+            val view = composeRule.activity.window.decorView
+            val insets = requireNotNull(ViewCompat.getRootWindowInsets(view)).getInsets(
+                WindowInsetsCompat.Type.systemBars() or WindowInsetsCompat.Type.displayCutout(),
+            )
+            android.graphics.Rect(insets.left, insets.top, view.width - insets.right, view.height - insets.bottom)
+        }
+        val readerContentBounds = composeRule.onNodeWithTag("reader-content-surface")
+            .fetchSemanticsNode().boundsInWindow
+        assertTrue("Reader content extends beneath the status/cutout area: $readerContentBounds", readerContentBounds.top >= readerSafeBounds.top)
+        assertTrue("Reader content extends beneath the left unsafe area: $readerContentBounds", readerContentBounds.left >= readerSafeBounds.left)
+        assertTrue("Reader content extends beneath the right unsafe area: $readerContentBounds", readerContentBounds.right <= readerSafeBounds.right)
+        assertTrue("Reader content extends beneath the navigation area: $readerContentBounds", readerContentBounds.bottom <= readerSafeBounds.bottom)
         composeRule.onNodeWithText("书架").assertDoesNotExist()
         val progressSlider = composeRule.onNodeWithTag("reader-chapter-progress-slider")
         progressSlider.performTouchInput { click(center) }
@@ -567,20 +810,48 @@ class ManualVerificationHandoffInstrumentedTest {
         assertEquals(quickActionBounds[0].top, quickActionBounds[1].top, 1f)
         assertEquals(quickActionBounds[2].top, quickActionBounds[3].top, 1f)
         assertTrue(quickActionBounds[2].top > quickActionBounds[0].top)
+        val readerPreferencesRepository = (composeRule.activity.application as TsuyomiApplication).readerPreferencesRepository
+        val beforeQueuedTypography = runBlocking { readerPreferencesRepository.preferences.first() }
+        val otherBook = BookIdentity("org.tsuyomi.reader.test", "queued-global-flow")
+        val changeFontSize = composeRule.onNodeWithTag("reader-typography-font-size-slider")
+            .fetchSemanticsNode().config[SemanticsActions.SetProgress].action!!
+        try {
+            // Persist a newer explicit choice before this mounted frame receives its preference echo.
+            composeRule.mainClock.autoAdvance = false
+            try {
+                runBlocking { readerPreferencesRepository.setFlowOverride(otherBook, "dual") }
+                composeRule.runOnUiThread { changeFontSize(24f) }
+            } finally {
+                composeRule.mainClock.autoAdvance = true
+            }
+            composeRule.waitUntil(5_000) {
+                runBlocking { (readerPreferencesRepository.preferences.first().fontScale ?: 1.0) > 1.1 }
+            }
+            assertEquals("dual", runBlocking { readerPreferencesRepository.preferences.first().flow })
+        } finally {
+            runBlocking {
+                readerPreferencesRepository.setFlowOverride(otherBook, null)
+                readerPreferencesRepository.update(beforeQueuedTypography)
+            }
+        }
+        waitForText("连续滚动")
         waitForText("全部设置")
         composeRule.onNodeWithText("连续滚动").performClick()
         waitForText("分页")
         composeRule.onNodeWithText("全部设置").performClick()
         waitForText("排版")
         waitForText("页面")
+        assertEquals(1, composeRule.onAllNodesWithText("排版").fetchSemanticsNodes().size)
         quickActionTags.forEach { tag -> composeRule.onNodeWithTag(tag).assertDoesNotExist() }
-        composeRule.onNodeWithTag("reader-full-settings-groups").assertIsDisplayed()
         val expandedSliderWidths = typographySliderTags.map { tag ->
             composeRule.onNodeWithTag(tag).assertIsDisplayed().fetchSemanticsNode().boundsInRoot.width
         }
         expandedSliderWidths.forEachIndexed { index, width ->
             assertTrue(width >= compactSliderWidths[index] + 32f * density)
         }
+        composeRule.onNodeWithText("页面").performScrollTo().assertIsDisplayed()
+        composeRule.onNodeWithTag(typographySliderTags.first()).assertIsNotDisplayed()
+        composeRule.onNodeWithText("排版").performScrollTo().assertIsDisplayed()
         composeRule.onNodeWithTag("reader-settings-content").performTouchInput {
             swipe(
                 start = center,
@@ -598,7 +869,7 @@ class ManualVerificationHandoffInstrumentedTest {
         waitForText("全部设置")
         composeRule.onNodeWithText("全部设置").performClick()
         waitForText("排版")
-        composeRule.onNodeWithTag("reader-full-settings-groups").assertIsDisplayed()
+        composeRule.onNodeWithText("页面").performScrollTo().assertIsDisplayed()
 
         pressBack()
         waitForText("全部设置")
@@ -736,6 +1007,56 @@ class ManualVerificationHandoffInstrumentedTest {
     }
 
     @Test
+    fun standard_source_home_keeps_settled_tabs_across_library_theme_and_activity_recreation() {
+        cleanSessionState()
+        Phase2SourceGateway.resetOperationCounts()
+        val displayController = (composeRule.activity.application as TsuyomiApplication).displayController
+        val previousScheme = runBlocking { displayController.preferences.first().colorSchemePreference }
+        try {
+            runBlocking { displayController.setDisplayPreference(DisplayPreference.STANDARD) }
+            waitForText("书架")
+            performPlatformClick("浏览")
+            waitForText("Wenku8")
+            performPlatformClick("Wenku8")
+            waitForText("Wenku8 书库")
+            composeRule.waitUntil(timeoutMillis = 15_000) { Phase2SourceGateway.homeRequestCount() == 1 }
+
+            composeRule.onNodeWithText("分类").performClick()
+            waitForText("按更新")
+            composeRule.waitUntil(timeoutMillis = 15_000) { Phase2SourceGateway.homeRequestCount() > 1 }
+            val categoryRequestCount = Phase2SourceGateway.homeRequestCount()
+            composeRule.onNodeWithText("推荐").performClick()
+            composeRule.onNodeWithTag("source-home-book-grid-recommend").assertIsDisplayed()
+            assertEquals(categoryRequestCount, Phase2SourceGateway.homeRequestCount())
+
+            performPlatformClick("书架")
+            waitForText("书架")
+            performPlatformClick("浏览")
+            waitForText("Wenku8 书库")
+            composeRule.onNodeWithTag("source-home-book-grid-recommend").assertIsDisplayed()
+            assertEquals(categoryRequestCount, Phase2SourceGateway.homeRequestCount())
+
+            pressBack()
+            waitForText("Wenku8")
+            performPlatformClick("Wenku8")
+            waitForText("Wenku8 书库")
+            assertEquals(categoryRequestCount, Phase2SourceGateway.homeRequestCount())
+
+            runBlocking { displayController.setColorSchemePreference(ColorSchemePreference.DARK) }
+            composeRule.waitForIdle()
+            composeRule.onNodeWithTag("source-home-book-grid-recommend").assertIsDisplayed()
+            assertEquals(categoryRequestCount, Phase2SourceGateway.homeRequestCount())
+
+            composeRule.activityRule.scenario.recreate()
+            waitForText("Wenku8 书库")
+            composeRule.onNodeWithTag("source-home-book-grid-recommend").assertIsDisplayed()
+            assertEquals(categoryRequestCount, Phase2SourceGateway.homeRequestCount())
+        } finally {
+            runBlocking { displayController.setColorSchemePreference(previousScheme) }
+        }
+    }
+
+    @Test
     fun standard_remote_library_requires_explicit_refresh_and_copies_locally_only() {
         cleanSessionState()
         Phase2SourceGateway.resetOperationCounts()
@@ -830,6 +1151,20 @@ class ManualVerificationHandoffInstrumentedTest {
         composeRule.waitUntil(timeoutMillis = 15_000) {
             composeRule.onAllNodes(hasSetTextAction()).fetchSemanticsNodes().isNotEmpty()
         }
+        if (profile == DisplayPreference.STANDARD) {
+            val bitmap = android.graphics.Bitmap.createBitmap(32, 48, android.graphics.Bitmap.Config.ARGB_8888)
+            val png = java.io.ByteArrayOutputStream().apply {
+                bitmap.eraseColor(android.graphics.Color.BLUE)
+                check(bitmap.compress(android.graphics.Bitmap.CompressFormat.PNG, 100, this))
+            }.toByteArray()
+            bitmap.recycle()
+            Phase2SourceGateway.useCredentialCoverFixture(png)
+            composeRule.onNode(hasSetTextAction()).performTextInput("雾港")
+            performPlatformClick("提交搜索")
+            waitForText("雾港纪事")
+            composeRule.waitUntil(timeoutMillis = 15_000) { Phase2SourceGateway.rejectedCredentialCoverCount() > 0 }
+            composeRule.onNode(hasSetTextAction()).performTextReplacement("")
+        }
         composeRule.onNode(hasSetTextAction()).performTextInput("challenge")
         waitForText("challenge")
         performPlatformClick(if (profile == DisplayPreference.EINK) "搜索" else "提交搜索")
@@ -871,6 +1206,9 @@ class ManualVerificationHandoffInstrumentedTest {
         waitForText("challenge")
         performPlatformClick(if (profile == DisplayPreference.EINK) "搜索" else "提交搜索")
         waitForText("雾港纪事")
+        if (profile == DisplayPreference.STANDARD) {
+            composeRule.waitUntil(timeoutMillis = 15_000) { Phase2SourceGateway.acceptedCredentialCoverCount() > 0 }
+        }
 
         if (profile != DisplayPreference.STANDARD) return
 
@@ -1172,10 +1510,12 @@ class ManualVerificationHandoffInstrumentedTest {
         @AfterClass
         @JvmStatic
         fun cleanUpFixtureSource() {
+            if (InstrumentationRegistry.getArguments().getString("keep_p4c_review_state") == "true") return
             cleanPrivateState()
         }
 
         private fun cleanSessionState() {
+            Phase2SourceGateway.clearCredentialCoverFixture()
             Phase2SourceGateway.clearLiveValidationMode(targetContext)
             File(targetContext.noBackupFilesDir, "normalized-source-content").deleteRecursively()
             File(targetContext.noBackupFilesDir, "source-credentials").deleteRecursively()

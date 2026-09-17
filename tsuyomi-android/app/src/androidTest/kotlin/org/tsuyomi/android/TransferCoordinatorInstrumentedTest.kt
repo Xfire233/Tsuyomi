@@ -22,7 +22,7 @@ import org.junit.runner.RunWith
 import org.tsuyomi.core.database.ImportSessionStatus
 import org.tsuyomi.core.database.RoomTransferRepository
 import org.tsuyomi.core.database.TsuyomiDatabase
-import org.tsuyomi.core.database.LibraryBook
+import org.tsuyomi.shared.librarydomain.LibraryBook
 import org.tsuyomi.core.database.RoomLibraryRepository
 import org.tsuyomi.core.preferences.PortableReaderPreferencesRepository
 import org.tsuyomi.feature.backup.TransferUiState
@@ -354,12 +354,53 @@ class TransferCoordinatorInstrumentedTest {
             assertTrue(secondFile.exists())
 
             val recreated = TransferCoordinator(context, fixture.repository, fixture.preferenceRepository)
+            val restored = recreated.restorePreparedExport(second.ownerGeneration, second.canonicalDigest)
+                ?: error("missing restored preflight")
+            assertEquals(second.ownerGeneration, restored.ownerGeneration)
+            assertEquals(second.canonicalDigest, restored.canonicalDigest)
             val output = File(context.cacheDir, "export-${fixture.sessionId}.json")
             recreated.writePreparedExport(Uri.fromFile(output), context.contentResolver, second.ownerGeneration, second.canonicalDigest)
 
             assertEquals(second.canonicalDigest, TransferCodec.digest(output.readBytes()))
             assertFalse(secondFile.exists())
             assertTrue(recreated.state is TransferUiState.Exported)
+        } finally {
+            fixture.close()
+        }
+    }
+
+    @Test
+    fun restoredExportStateInvalidatesOnlyItsMissingPreflightAndPreparesANewerIdentity() = runBlocking {
+        val fixture = fixture("export-restore")
+        try {
+            val readerPreferences = requireNotNull(fixture.plan.readerPreferences)
+            val stale = fixture.coordinator.prepareExport(readerPreferences) ?: error("missing stale preflight")
+            val staleFile = preflightFile(stale)
+            assertTrue(staleFile.delete())
+            val recreated = TransferCoordinator(context, fixture.repository, fixture.preferenceRepository)
+
+            assertNull(recreated.restorePreparedExport(stale.ownerGeneration, stale.canonicalDigest))
+            val fresh = recreated.prepareExport(readerPreferences) ?: error("missing fresh preflight")
+            val freshFile = preflightFile(fresh)
+            assertTrue(fresh.ownerGeneration > stale.ownerGeneration)
+            assertTrue(freshFile.isFile)
+
+            val staleOutput = File(context.cacheDir, "stale-restored-${fixture.sessionId}.json")
+            recreated.writePreparedExport(
+                Uri.fromFile(staleOutput),
+                context.contentResolver,
+                stale.ownerGeneration,
+                stale.canonicalDigest,
+            )
+            assertFalse(staleOutput.exists())
+            assertTrue(freshFile.isFile)
+            assertNull(recreated.restorePreparedExport(fresh.ownerGeneration, "0".repeat(64)))
+            assertTrue(freshFile.isFile)
+            assertEquals(fresh.canonicalDigest, requireNotNull(
+                recreated.restorePreparedExport(fresh.ownerGeneration, fresh.canonicalDigest),
+            ).canonicalDigest)
+            recreated.cancelPreparedExport(fresh.ownerGeneration, fresh.canonicalDigest)
+            assertFalse(freshFile.exists())
         } finally {
             fixture.close()
         }

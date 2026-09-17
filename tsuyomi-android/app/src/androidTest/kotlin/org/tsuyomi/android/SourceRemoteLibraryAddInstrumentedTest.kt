@@ -5,6 +5,7 @@
 package org.tsuyomi.android
 
 import java.io.File
+import org.tsuyomi.feature.book.SourceBookState
 import java.util.concurrent.atomic.AtomicInteger
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.async
@@ -17,7 +18,7 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
 import androidx.test.ext.junit.runners.AndroidJUnit4
-import org.tsuyomi.core.database.RemoteReconciliationState
+import org.tsuyomi.shared.librarydomain.RemoteReconciliationState
 import org.tsuyomi.shared.sourcecontract.RemoteLibraryAddOutcome
 import org.tsuyomi.shared.sourcecontract.RemoteLibraryAddResult
 import org.tsuyomi.shared.sourcecontract.RemoteLibraryMoveOutcome
@@ -204,7 +205,7 @@ internal class SourceRemoteLibraryAddInstrumentedTest : SourceFlowInstrumentedTe
             controller.selectBook(selected)
             assertTrue(controller.remoteLibrary.selectedBookAddWritesRemote)
 
-            assertEquals(RemoteAddUiResult.LocalOnly, controller.addSelectedBook(SOURCE_FLOW_TEST_TIME))
+            assertEquals(RemoteAddUiResult.LocalOnly, controller.addSelectedBook((controller.detailState as? SourceBookState.Content)?.value, SOURCE_FLOW_TEST_TIME))
             assertTrue(controller.remoteLibrary.selectedBookInLibrary)
             assertEquals(null, controller.remoteLibrary.selectedBookReconciliation)
             assertTrue(controller.removeSelectedBook())

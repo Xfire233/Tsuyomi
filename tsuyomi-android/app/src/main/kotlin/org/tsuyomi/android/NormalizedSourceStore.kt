@@ -70,6 +70,46 @@ internal class NormalizedSourceStore(context: Context) {
         files.read(documentPath(identity, contentId))?.let(SourceValueCodec::decodeDocument)
     }.getOrNull()
 
+    /**
+     * Records a chapter only when its persisted normalized representation can immediately be read
+     * back as the exact requested document. Callers must perform this potentially large decode off
+     * the UI thread.
+     */
+    fun writeAndVerifyDocument(
+        identity: BookIdentity,
+        chapterId: String,
+        document: ReaderDocument,
+    ): Boolean {
+        require(document.contentId == chapterId) { "Document content ID does not match chapter" }
+        writeDocument(identity, document)
+        return hasReadableDocument(identity, chapterId)
+    }
+
+    /** Reads and validates the full normalized document; callers must use a background dispatcher. */
+    fun hasReadableDocument(identity: BookIdentity, chapterId: String): Boolean =
+        readDocument(identity, chapterId)?.let { document ->
+            document.sourceId == identity.sourceId &&
+                document.remoteBookId == identity.remoteBookId &&
+                document.contentId == chapterId
+        } == true
+
+    /**
+     * Reports which of [chapterIds] already have a durable snapshot. Probing per chapter with
+     * [hasReadableDocument] canonicalises the target path on every call, which costs a filesystem
+     * syscall each; over a whole large directory that dominated detail load time even when nothing
+     * was cached. One listing answers the same question. Path membership is exact because the path
+     * is derived from the identity, the write is atomic, and [writeAndVerifyDocument] still
+     * read-verifies every document it records.
+     */
+    fun cachedDocumentIds(identity: BookIdentity, chapterIds: Collection<String>): Set<String> {
+        if (chapterIds.isEmpty()) return emptySet()
+        val stored = files.entries()
+            .asSequence()
+            .filter { entry -> entry.byteCount > 0L }
+            .mapTo(hashSetOf()) { entry -> entry.relativePath }
+        return chapterIds.filterTo(linkedSetOf()) { chapterId -> documentPath(identity, chapterId) in stored }
+    }
+
     private fun detailPath(identity: BookIdentity): String = "detail/${key(identity)}.json"
 
     private fun directoryPath(identity: BookIdentity): String = "directory/${key(identity)}.json"
