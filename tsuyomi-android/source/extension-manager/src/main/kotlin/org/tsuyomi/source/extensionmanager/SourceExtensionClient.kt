@@ -4,6 +4,7 @@
  */
 package org.tsuyomi.source.extensionmanager
 
+import android.util.Log
 import java.io.Closeable
 import java.net.URI
 import java.net.URLEncoder
@@ -551,10 +552,14 @@ class SourceExtensionClient private constructor(
             ) {
                 throw error
             }
-            val retried = verifiedGet?.let { browser ->
+            val retried = if (verifiedGet == null) {
+                Log.w("TsuyomiWebView", "fallback-unavailable reason=no-verified-transport")
+                null
+            } else {
                 try {
-                    browser.request(grant, request.copy(cache = NetworkCacheMode.NETWORK_ONLY), operationContext)
-                } catch (_: HostNetworkException) {
+                    verifiedGet.request(grant, request.copy(cache = NetworkCacheMode.NETWORK_ONLY), operationContext)
+                } catch (failure: HostNetworkException) {
+                    Log.w("TsuyomiWebView", "fallback-failed code=${failure.error}")
                     null
                 }
             }

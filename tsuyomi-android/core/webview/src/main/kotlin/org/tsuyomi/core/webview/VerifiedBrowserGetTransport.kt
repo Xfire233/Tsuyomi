@@ -11,6 +11,7 @@ import android.util.Log
 import android.webkit.CookieManager
 import android.webkit.WebResourceError
 import android.webkit.WebResourceRequest
+import android.webkit.WebSettings
 import android.webkit.WebView
 import android.webkit.WebViewClient
 import java.net.URI
@@ -155,10 +156,30 @@ class VerifiedBrowserGetTransport(
         return view
     }
 
+    /**
+     * The host's own browsing WebView can already hold an admitted session for this origin while the
+     * encrypted partition is still empty. Adopt that jar once, so a challenged fetch does not
+     * require a separate verification round trip, and record why adoption was impossible.
+     */
+    private fun adoptBrowserSession(
+        origin: HttpsOrigin,
+        store: VerifiedBrowserSessionStore,
+    ): VerifiedBrowserSession {
+        val rawCookie = CookieManager.getInstance().getCookie(origin.canonical)?.takeIf { it.isNotBlank() }
+        if (rawCookie == null) {
+            Log.w(WEBVIEW_TIMING_TAG, "fallback-unavailable reason=no-session ${origin.canonical}")
+            throw HostNetworkException(HostNetworkError.TRANSPORT)
+        }
+        val session = VerifiedBrowserSession(rawCookie, WebSettings.getDefaultUserAgent(appContext))
+        store.put(SourceCredentialPartition(sourceId, origin), session)
+        Log.i(WEBVIEW_TIMING_TAG, "adopted-session ${origin.canonical}")
+        return session
+    }
+
     private fun restoreSessions(initial: HttpsOrigin): List<Pair<HttpsOrigin, VerifiedBrowserSession>> {
         val store = VerifiedBrowserSessionStore(credentials)
         val initialSession = store.getSnapshot(SourceCredentialPartition(sourceId, initial))?.session
-            ?: throw HostNetworkException(HostNetworkError.TRANSPORT)
+            ?: adoptBrowserSession(initial, store)
         return buildList {
             add(initial to initialSession)
             allowedOrigins.forEach { origin ->
