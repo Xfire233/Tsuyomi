@@ -86,10 +86,15 @@ class SourceCredentialStoreInstrumentedTest {
             output.write(encrypted.ciphertext)
         }
 
-        assertArrayEquals(plaintext, requireNotNull(store.getSnapshot(first)).plaintext)
+        val legacy = requireNotNull(store.getSnapshot(first))
+        assertArrayEquals(plaintext, legacy.plaintext)
+        // A v1 record still reports the legacy digest (64 hex chars) until its next write upgrades it.
+        assertEquals(64, legacy.cachePartitionId.length)
 
         store.put(first, plaintext)
         val upgraded = requireNotNull(store.getSnapshot(first)).cachePartitionId
+        assertEquals(32, upgraded.length)
+        assertNotEquals(legacy.cachePartitionId, upgraded)
         store.put(first, plaintext)
         assertEquals(upgraded, requireNotNull(store.getSnapshot(first)).cachePartitionId)
     }
@@ -154,12 +159,15 @@ class SourceCredentialStoreInstrumentedTest {
 
         val initial = requireNotNull(store.getSnapshot(first))
         assertArrayEquals(secret, initial.plaintext)
-        assertEquals(64, initial.cachePartitionId.length)
+        // A v2 record carries a 16-byte partition id (32-char hex), never the secret.
+        assertEquals(32, initial.cachePartitionId.length)
         assertFalse(initial.cachePartitionId.contains("opaque-secret"))
         assertEquals(initial.cachePartitionId, requireNotNull(store.getSnapshot(first)).cachePartitionId)
 
         store.put(first, secret)
+        assertEquals(initial.cachePartitionId, requireNotNull(store.getSnapshot(first)).cachePartitionId)
 
+        store.put(first, secret, renewCachePartition = true)
         assertNotEquals(initial.cachePartitionId, requireNotNull(store.getSnapshot(first)).cachePartitionId)
     }
 
@@ -172,7 +180,7 @@ class SourceCredentialStoreInstrumentedTest {
 
         assertEquals("session=accepted", snapshot.session.requestCookies)
         assertEquals("fixture-webview-agent/1", snapshot.session.userAgent)
-        assertEquals(64, snapshot.cachePartitionId.length)
+        assertEquals(32, snapshot.cachePartitionId.length)
     }
 
     @Test
