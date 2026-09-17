@@ -24,6 +24,11 @@ import androidx.compose.ui.test.hasStateDescription
 import androidx.compose.ui.test.longClick
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsEnabled
+import androidx.compose.ui.test.ComposeTimeoutException
+import androidx.compose.ui.test.hasAnyAncestor
+import androidx.compose.ui.test.hasTestTag
+import androidx.compose.ui.test.hasText
+import androidx.compose.ui.test.performScrollToNode
 import androidx.compose.ui.test.assertIsSelected
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.test.assertTextContains
@@ -64,6 +69,8 @@ import org.junit.Ignore
 import org.junit.BeforeClass
 import org.junit.Before
 import org.junit.Rule
+import org.tsuyomi.core.preferences.LibraryPreferencesRepository
+import org.tsuyomi.feature.library.projectedEntries
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.tsuyomi.core.preferences.DisplayPreference
@@ -705,6 +712,13 @@ class ManualVerificationHandoffInstrumentedTest {
             }
             performPlatformClick("书架")
             composeRule.onNodeWithTag("tsuyomi-tab-CONTINUE").performClick()
+            // The Continue tab lists every book with reading progress, including records the user
+            // removed from the shelf, so the row is not guaranteed to be inside the first window of
+            // the lazy surface. Scroll to it instead of assuming it is already rendered.
+            composeRule.waitUntil(timeoutMillis = 15_000) {
+                composeRule.onAllNodes(librarySurface("CONTINUE")).fetchSemanticsNodes().isNotEmpty()
+            }
+            composeRule.onNode(librarySurface("CONTINUE")).performScrollToNode(hasText("雾港纪事"))
             waitForText("雾港纪事")
             performPlatformClick("雾港纪事")
             waitForText("设置")
@@ -714,7 +728,15 @@ class ManualVerificationHandoffInstrumentedTest {
             waitForText("显示")
             performPlatformClick("书架")
             composeRule.onNodeWithTag("tsuyomi-tab-ALL").assertIsSelected()
-            composeRule.onNodeWithText("雾港纪事").assertIsDisplayed()
+            try {
+                composeRule.waitUntil(timeoutMillis = 15_000) {
+                    composeRule.onAllNodes(librarySurface("ALL")).fetchSemanticsNodes().isNotEmpty()
+                }
+                composeRule.onNode(librarySurface("ALL")).performScrollToNode(hasText("雾港纪事"))
+                composeRule.onNodeWithText("雾港纪事").assertIsDisplayed()
+            } catch (failure: AssertionError) {
+                throw AssertionError("The root list did not show the book\n" + rootDiagnostics(), failure)
+            }
         } finally {
             runBlocking {
                 application.libraryRepository.libraryEntries()
@@ -1367,11 +1389,101 @@ class ManualVerificationHandoffInstrumentedTest {
         composeRule.onNodeWithTag("book-detail-scroll").performScrollToIndex(5)
     }
 
-    private fun waitForText(text: String, timeoutMillis: Long = 15_000) {
-        composeRule.waitUntil(timeoutMillis = timeoutMillis) {
-            platformHasText(text)
+    private fun rootDiagnostics(): String = runBlocking {
+        val application = composeRule.activity.application as TsuyomiApplication
+        val pinned = runCatching {
+            application.libraryRepository.libraryEntries().map { it.book.title }
+        }.getOrElse { listOf("error=${it::class.java.simpleName}") }
+        val history = runCatching {
+            application.libraryRepository.readerHistoryEntries().map { it.book.title }
+        }.getOrElse { listOf("error=${it::class.java.simpleName}") }
+        val replayed = runCatching {
+            val scopeJob = kotlinx.coroutines.SupervisorJob()
+            val preferenceFile = java.io.File(composeRule.activity.cacheDir, "probe-${java.util.UUID.randomUUID()}.preferences_pb")
+            val store = androidx.datastore.preferences.core.PreferenceDataStoreFactory.create(
+                scope = kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.IO + scopeJob),
+                produceFile = { preferenceFile },
+            )
+            try {
+                val controller = LibraryFlowController(
+                    application.libraryRepository,
+                    LibraryPreferencesRepository(store),
+                    "PROBE_ALL",
+                )
+                controller.reload("probe")
+                controller.selectTab(org.tsuyomi.feature.library.SystemLibraryFilter.ALL)
+                controller.state.projectedEntries().map { it.book.title }
+            } finally {
+                scopeJob.cancel()
+                preferenceFile.delete()
+            }
+        }.getOrElse { listOf("error=${it::class.java.simpleName}:${it.message}") }
+        buildString {
+            appendLine("pinned titles = ${ascii(pinned.toString())}")
+            appendLine("replayed ALL projection = ${ascii(replayed.toString())}")
+            appendLine("history titles = ${ascii(history.toString())}")
+            appendLine("ALL surfaces = ${composeRule.onAllNodes(librarySurface("ALL")).fetchSemanticsNodes().size}")
+            append("platform: ")
+            append(ascii(platformTextSnapshot()))
         }
     }
+
+    /** The pager pre-composes neighbouring pages, so the surface tag alone is ambiguous. */
+    private fun librarySurface(filterName: String) =
+        hasTestTag("library-book-surface") and
+            hasAnyAncestor(hasTestTag("library-primary-page-$filterName"))
+
+    private fun waitForText(text: String, timeoutMillis: Long = 15_000) {
+        try {
+            composeRule.waitUntil(timeoutMillis = timeoutMillis) {
+                platformHasText(text)
+            }
+        } catch (failure: ComposeTimeoutException) {
+            throw AssertionError("Missing text: ${ascii(text)}\n" + textDiagnostics(text), failure)
+        }
+    }
+
+    /**
+     * A text timeout used to surface as a bare `ComposeTimeoutException`, so a failure carried no
+     * evidence of what was actually on screen. Report the persisted titles, the Continue list's own
+     * source, the Compose matches, the tab row and the platform accessibility snapshot instead. Every
+     * value is escaped because this host's Gradle output encoding drops non-ASCII characters.
+     */
+    private fun textDiagnostics(text: String): String = runBlocking {
+        val application = composeRule.activity.application as TsuyomiApplication
+        val libraryTitles = runCatching {
+            application.libraryRepository.libraryEntries().map { it.book.title }
+        }.getOrElse { error -> listOf("error=${error::class.java.simpleName}:${error.message}") }
+        val historyTitles = runCatching {
+            application.libraryRepository.readerHistoryEntries().map { it.book.title }
+        }.getOrElse { error -> listOf("error=${error::class.java.simpleName}:${error.message}") }
+        val showUpdatesOnly = runCatching {
+            application.libraryPreferencesRepository.preferences.first().showUpdatesOnly
+        }.getOrElse { error -> "error=${error::class.java.simpleName}:${error.message}" }
+        buildString {
+            appendLine("library titles = ${ascii(libraryTitles.toString())}")
+            appendLine("reader history titles = ${ascii(historyTitles.toString())}")
+            appendLine("persisted showUpdatesOnly = $showUpdatesOnly")
+            appendLine("compose nodes for the text = ${nodesWithText(text)}")
+            appendLine("nodes 'tsuyomi-tab-CONTINUE' = ${nodesWithTag("tsuyomi-tab-CONTINUE")}")
+            appendLine("nodes 'tsuyomi-tab-ALL' = ${nodesWithTag("tsuyomi-tab-ALL")}")
+            appendLine("nodes 'library-filter-summary' = ${nodesWithTag("library-filter-summary")}")
+            append("platform snapshot: ")
+            append(ascii(platformTextSnapshot()))
+        }
+    }
+
+    private fun ascii(value: String): String = value.map { character ->
+        if (character.code in 0x20..0x7e) character.toString() else "\\u%04x".format(character.code)
+    }.joinToString("")
+
+    private fun nodesWithText(text: String): String = runCatching {
+        composeRule.onAllNodesWithText(text, useUnmergedTree = true).fetchSemanticsNodes().size.toString()
+    }.getOrElse { error -> "error=${error::class.java.simpleName}" }
+
+    private fun nodesWithTag(tag: String): String = runCatching {
+        composeRule.onAllNodesWithTag(tag, useUnmergedTree = true).fetchSemanticsNodes().size.toString()
+    }.getOrElse { error -> "error=${error::class.java.simpleName}" }
 
     private fun waitForTextGone(text: String) {
         composeRule.waitUntil(timeoutMillis = 15_000) {

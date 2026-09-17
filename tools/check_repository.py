@@ -5,11 +5,12 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import re
 from pathlib import Path
 import subprocess
 import sys
-from typing import Iterable
+from typing import Iterable, Mapping
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 TOOLING_PATH = Path("TOOLING.md")
@@ -284,7 +285,64 @@ def frozen_profile_instrumentation_violations(repo_root: Path = REPO_ROOT) -> li
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Reject local or sensitive repository artifacts")
     parser.add_argument("--scope", choices=tuple(SCOPE_ROOTS), default="all")
+    parser.add_argument(
+        "--commit-range",
+        default=None,
+        help="Revision range whose commit messages must reject automated attribution, for example BASE..HEAD.",
+    )
     return parser.parse_args(argv)
+
+
+AUTOMATED_ATTRIBUTION_TRAILER = re.compile(r"^co-authored-by:[^\n]*commandcode", re.IGNORECASE | re.MULTILINE)
+
+
+def automated_attribution_in(message: str) -> bool:
+    return bool(AUTOMATED_ATTRIBUTION_TRAILER.search(message))
+
+
+def commit_range_from_environment(environment: Mapping[str, str]) -> str | None:
+    """Resolve the revision range a protected check owns, or None when it is unavailable."""
+    event_path = environment.get("GITHUB_EVENT_PATH")
+    if event_path and Path(event_path).is_file():
+        try:
+            event = json.loads(Path(event_path).read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            event = {}
+        candidates = (
+            event.get("pull_request", {}).get("base", {}).get("sha"),
+            event.get("before"),
+        )
+        for candidate in candidates:
+            if isinstance(candidate, str) and candidate and set(candidate) != {"0"}:
+                return f"{candidate}..HEAD"
+    base_ref = environment.get("GITHUB_BASE_REF")
+    if base_ref:
+        return f"origin/{base_ref}..HEAD"
+    return None
+
+
+def commit_messages(range_spec: str, repo_root: Path = REPO_ROOT) -> list[tuple[str, str]]:
+    result = subprocess.run(
+        ["git", "-C", str(repo_root), "log", "-z", "--format=%H%x00%B", range_spec],
+        check=True,
+        capture_output=True,
+    )
+    fields = result.stdout.decode("utf-8", errors="replace").split("\0")
+    return [
+        (fields[index].strip(), fields[index + 1])
+        for index in range(0, len(fields) - 1, 2)
+        if fields[index].strip()
+    ]
+
+
+def automated_attribution_violations(range_spec: str | None, repo_root: Path = REPO_ROOT) -> list[str]:
+    if not range_spec:
+        return []
+    return [
+        revision
+        for revision, message in commit_messages(range_spec, repo_root)
+        if automated_attribution_in(message)
+    ]
 
 
 def git_visible_paths() -> list[Path]:
@@ -552,6 +610,8 @@ def main(argv: list[str] | None = None) -> int:
     prototype_violations = retired_android_prototype_violations()
     frozen_screenshot_violations = frozen_profile_screenshot_violations()
     frozen_instrumentation_violations = frozen_profile_instrumentation_violations()
+    commit_range = args.commit_range or commit_range_from_environment(os.environ)
+    attribution_violations = automated_attribution_violations(commit_range)
     if (
         artifact_violations
         or tooling_violations
@@ -559,6 +619,7 @@ def main(argv: list[str] | None = None) -> int:
         or prototype_violations
         or frozen_screenshot_violations
         or frozen_instrumentation_violations
+        or attribution_violations
     ):
         if artifact_violations:
             print(f"Forbidden repository artifacts in scope {args.scope}:", file=sys.stderr)
@@ -584,6 +645,10 @@ def main(argv: list[str] | None = None) -> int:
             print("Frozen Android profile instrumentation violations:", file=sys.stderr)
             for violation in frozen_instrumentation_violations:
                 print(f"- {violation}", file=sys.stderr)
+        if attribution_violations:
+            print(f"Automated attribution in {commit_range}:", file=sys.stderr)
+            for violation in attribution_violations:
+                print(f"- {violation}", file=sys.stderr)
         return 1
     print(f"Repository artifact policy passed for {len(paths)} candidate files in scope {args.scope}.")
     print("Tooling governance policy passed.")
@@ -591,6 +656,11 @@ def main(argv: list[str] | None = None) -> int:
     print("Retired Android prototype policy passed.")
     print("Frozen Android profile screenshot policy passed.")
     print("Frozen Android profile instrumentation policy passed.")
+    print(
+        "Automated attribution policy passed."
+        if commit_range
+        else "Automated attribution policy skipped: no commit range was provided."
+    )
     return 0
 
 
