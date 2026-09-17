@@ -55,6 +55,27 @@ class VerifiedBrowserGetTransport(
     private var warmView: WebView? = null
     private var nextRequestAt = 0L
     private var pacingMillis = MIN_INTERVAL_MS
+    private var lastFetchAt = 0L
+    private var burst = 0
+
+    init {
+        // The warm WebView costs a whole sandboxed renderer, so release it when the app leaves the
+        // foreground. Releasing on an idle timer instead would rebuild it mid-read.
+        (appContext as? android.app.Application)?.registerActivityLifecycleCallbacks(
+            object : android.app.Application.ActivityLifecycleCallbacks {
+                override fun onActivityStopped(activity: android.app.Activity) {
+                    warmView?.let(::releaseView)
+                }
+
+                override fun onActivityCreated(activity: android.app.Activity, state: android.os.Bundle?) = Unit
+                override fun onActivityStarted(activity: android.app.Activity) = Unit
+                override fun onActivityResumed(activity: android.app.Activity) = Unit
+                override fun onActivityPaused(activity: android.app.Activity) = Unit
+                override fun onActivitySaveInstanceState(activity: android.app.Activity, state: android.os.Bundle) = Unit
+                override fun onActivityDestroyed(activity: android.app.Activity) = Unit
+            },
+        )
+    }
 
     override suspend fun execute(request: HostHttpRequest): HostHttpResponse {
         if (request.method != NetworkMethod.GET || request.body != null) {
@@ -69,7 +90,6 @@ class VerifiedBrowserGetTransport(
         val response = ControlledWebLoginSession.withIdleBrowser {
             withContext(Dispatchers.Main) { fetch(request, origin) }
         } ?: throw HostNetworkException(HostNetworkError.TRANSPORT)
-        Log.i(WEBVIEW_TIMING_TAG, "verified-get ${SystemClock.uptimeMillis() - startedAt}ms ${origin.canonical}")
         return response
     }
 
@@ -118,13 +138,7 @@ class VerifiedBrowserGetTransport(
             if (extraHeaders.isEmpty()) view.loadUrl(request.url.toString()) else view.loadUrl(request.url.toString(), extraHeaders)
             awaitSettled(finished, view, request.timeoutMs)
             val html = captureHtml(view, request.maxResponseBytes)
-            val markers = pageMarkersOf(html)
-            Log.i(
-                WEBVIEW_TIMING_TAG,
-                "page host=${origin.canonical} title=${view.title.orEmpty().take(40)}" +
-                    " cookies=${cookieNamesOf(sessions)} markers=$markers",
-            )
-            if (markers.contains(ACCESS_DENIED_MARKER)) {
+            if (pageMarkersOf(html).contains(ACCESS_DENIED_MARKER)) {
                 noteBlocked()
                 throw HostNetworkException(HostNetworkError.TRANSPORT)
             }
@@ -145,13 +159,19 @@ class VerifiedBrowserGetTransport(
     }
 
     /**
-     * The site sits behind a WAF that rejects a burst of browser requests, so the verified path keeps
-     * a minimum interval between fetches and backs off further once a rejection is seen.
+     * The site sits behind a WAF that rejects a sustained burst of browser requests, but one page
+     * load legitimately needs several fetches in a row. Throttle only once a burst exceeds the
+     * allowed number, so interactive reading stays responsive and a fan-out still backs off.
      */
     private suspend fun pace() {
-        val wait = nextRequestAt - SystemClock.uptimeMillis()
-        if (wait > 0) delay(wait)
-        nextRequestAt = SystemClock.uptimeMillis() + pacingMillis
+        val now = SystemClock.uptimeMillis()
+        burst = if (now - lastFetchAt <= BURST_WINDOW_MS) burst + 1 else 1
+        if (burst > BURST_FREE_FETCHES) {
+            val wait = nextRequestAt - now
+            if (wait > 0) delay(wait)
+        }
+        lastFetchAt = SystemClock.uptimeMillis()
+        nextRequestAt = lastFetchAt + pacingMillis
     }
 
     private fun noteBlocked() {
@@ -208,15 +228,6 @@ class VerifiedBrowserGetTransport(
         Log.i(WEBVIEW_TIMING_TAG, "adopted-session ${origin.canonical}")
         return session
     }
-
-    private fun cookieNamesOf(sessions: List<Pair<HttpsOrigin, VerifiedBrowserSession>>): String = sessions
-        .flatMap { (_, session) ->
-            session.requestCookies.split(';').mapNotNull { fragment ->
-                fragment.substringBefore('=', "").trim().takeIf(String::isNotEmpty)
-            }
-        }
-        .sorted()
-        .joinToString(",")
 
     private fun pageMarkersOf(html: String): String = buildList {
         if (html.contains("Just a moment", ignoreCase = true)) add("just-a-moment")
@@ -331,8 +342,14 @@ class VerifiedBrowserGetTransport(
         /** Bounded settle after onPageFinished so late DOM mutations are still captured. */
         const val SETTLE_MS = 250L
 
+        /** Sustained fetches inside this window count as one burst. */
+        const val BURST_WINDOW_MS = 5_000L
+
+        /** Fetches a single page load may make before throttling starts. */
+        const val BURST_FREE_FETCHES = 3
+
         /** Minimum interval between verified fetches; the WAF rejected a 1.2s cadence after four pages. */
-        const val MIN_INTERVAL_MS = 2_500L
+        const val MIN_INTERVAL_MS = 2_000L
 
         /** Upper bound of the exponential backoff applied after a WAF rejection. */
         const val MAX_INTERVAL_MS = 15_000L

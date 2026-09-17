@@ -541,11 +541,11 @@ class SourceExtensionClient private constructor(
             fail(mapNetworkError(error.error), networkStage, error.error.name.lowercase(), error.diagnosticId)
         }
         try {
-            Log.i("TsuyomiCache", "attempt stage=$classifyStage state=${response.cacheState} mode=${request.cache}")
             classify(response, classifyStage, operation, remoteBookId, chapterId)
             if (!offlineOnly) gateway.rememberLastGood(grant, request, response)
             return response
         } catch (error: SourceException) {
+            gateway.forgetLastGood(grant, request)
             if (
                 offlineOnly ||
                 error.code != SourceErrorCode.SESSION_REQUIRED &&
@@ -567,7 +567,6 @@ class SourceExtensionClient private constructor(
             if (retried != null) {
                 try {
                     classify(retried, classifyStage, operation, remoteBookId, chapterId)
-                    Log.i("TsuyomiCache", "read stage=$classifyStage state=${retried.cacheState} mode=RETRY")
                     gateway.rememberLastGood(grant, request, retried)
                     return retried
                 } catch (_: SourceException) {
@@ -685,6 +684,7 @@ class SourceExtensionClient private constructor(
     override fun close() = runtime.close()
 
     companion object {
+
         private val JSON = Json { ignoreUnknownKeys = false; isLenient = false }
         // Only bounded host tokens enter the durable report; never exception messages or source payloads.
         private val UPDATE_DIAGNOSTIC_STAGE = Regex("^[a-z][a-z0-9_-]{0,31}$")
