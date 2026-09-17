@@ -53,6 +53,8 @@ class VerifiedBrowserGetTransport(
     private val appContext = context.applicationContext
     private val credentials = SourceCredentialStore(appContext)
     private var warmView: WebView? = null
+    private var nextRequestAt = 0L
+    private var pacingMillis = MIN_INTERVAL_MS
 
     override suspend fun execute(request: HostHttpRequest): HostHttpResponse {
         if (request.method != NetworkMethod.GET || request.body != null) {
@@ -63,6 +65,7 @@ class VerifiedBrowserGetTransport(
             throw HostNetworkException(HostNetworkError.DISALLOWED_ORIGIN)
         }
         val startedAt = SystemClock.uptimeMillis()
+        pace()
         val response = ControlledWebLoginSession.withIdleBrowser {
             withContext(Dispatchers.Main) { fetch(request, origin) }
         } ?: throw HostNetworkException(HostNetworkError.TRANSPORT)
@@ -115,11 +118,17 @@ class VerifiedBrowserGetTransport(
             if (extraHeaders.isEmpty()) view.loadUrl(request.url.toString()) else view.loadUrl(request.url.toString(), extraHeaders)
             awaitSettled(finished, view, request.timeoutMs)
             val html = captureHtml(view, request.maxResponseBytes)
+            val markers = pageMarkersOf(html)
             Log.i(
                 WEBVIEW_TIMING_TAG,
                 "page host=${origin.canonical} title=${view.title.orEmpty().take(40)}" +
-                    " cookies=${cookieNamesOf(sessions)} markers=${pageMarkersOf(html)}",
+                    " cookies=${cookieNamesOf(sessions)} markers=$markers",
             )
+            if (markers.contains(ACCESS_DENIED_MARKER)) {
+                noteBlocked()
+                throw HostNetworkException(HostNetworkError.TRANSPORT)
+            }
+            noteServed()
             persistCookies(sessions, view.settings.userAgentString.orEmpty())
             val bytes = encode(html, request.decode)
             if (bytes.size > request.maxResponseBytes) throw HostNetworkException(HostNetworkError.RESPONSE_LIMIT)
@@ -133,6 +142,25 @@ class VerifiedBrowserGetTransport(
             releaseView(view)
             throw error
         }
+    }
+
+    /**
+     * The site sits behind a WAF that rejects a burst of browser requests, so the verified path keeps
+     * a minimum interval between fetches and backs off further once a rejection is seen.
+     */
+    private suspend fun pace() {
+        val wait = nextRequestAt - SystemClock.uptimeMillis()
+        if (wait > 0) delay(wait)
+        nextRequestAt = SystemClock.uptimeMillis() + pacingMillis
+    }
+
+    private fun noteBlocked() {
+        pacingMillis = (pacingMillis * 2).coerceAtMost(MAX_INTERVAL_MS)
+        Log.w(WEBVIEW_TIMING_TAG, "blocked-backoff interval=${pacingMillis}ms")
+    }
+
+    private fun noteServed() {
+        pacingMillis = (pacingMillis * 3 / 4).coerceAtLeast(MIN_INTERVAL_MS)
     }
 
     private fun releaseView(view: WebView) {
@@ -194,6 +222,9 @@ class VerifiedBrowserGetTransport(
         if (html.contains("Just a moment", ignoreCase = true)) add("just-a-moment")
         if (html.contains("challenge-platform")) add("challenge-platform")
         if (html.contains("cf_chl_opt")) add("cf-chl-opt")
+        if (html.contains("Access denied", ignoreCase = true) || html.contains("restricted access", ignoreCase = true)) {
+            add(ACCESS_DENIED_MARKER)
+        }
         if (html.contains("登录")) add("login-zh")
         if (html.contains("password", ignoreCase = true)) add("password")
     }.joinToString(",")
@@ -299,6 +330,14 @@ class VerifiedBrowserGetTransport(
     private companion object {
         /** Bounded settle after onPageFinished so late DOM mutations are still captured. */
         const val SETTLE_MS = 250L
+
+        /** Minimum interval between verified fetches; the site's WAF rejects faster bursts. */
+        const val MIN_INTERVAL_MS = 1_200L
+
+        /** Upper bound of the exponential backoff applied after a WAF rejection. */
+        const val MAX_INTERVAL_MS = 15_000L
+
+        const val ACCESS_DENIED_MARKER = "access-denied"
 
         /** Diagnostic timing tag: one line per verified fallback fetch. */
         const val WEBVIEW_TIMING_TAG = "TsuyomiWebView"
