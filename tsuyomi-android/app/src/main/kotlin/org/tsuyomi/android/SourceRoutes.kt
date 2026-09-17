@@ -532,8 +532,13 @@ private fun NavGraphBuilder.detailRoute(
                 entry.savedStateHandle[VerifiedDirectoryResultSequenceKey] = 0L
             }
             if (verifiedDetailSequence == 0L && verifiedDirectorySequence == 0L) {
+                android.util.Log.i(
+                    "TsuyomiRoute",
+                    "detail-enter state=${detail.state::class.simpleName} book=${detail.selectedBook?.identity?.remoteBookId}",
+                )
                 if (detail.state !is SourceBookState.Content && detail.state !is SourceBookState.Failure) {
                     if (packageInfo != null) detail.restore(packageInfo) else detail.loadAll()
+                    android.util.Log.i("TsuyomiRoute", "detail-enter restore=${packageInfo != null}")
                 }
             }
         }

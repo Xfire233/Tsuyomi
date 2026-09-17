@@ -1445,9 +1445,15 @@ internal fun rememberSourceDetailRouteOwner(
 ): SourceDetailRouteOwner {
     val notifyLibraryChanged = rememberUpdatedState(sourceRouteOwner::notifyLibraryChanged)
     val owner = remember(entry, flow) {
+        android.util.Log.i("TsuyomiRoute", "detail-owner create entry=${entry.hashCode()}")
         SourceDetailRouteOwner(flow, entry.savedStateHandle) { notifyLibraryChanged.value.invoke() }
     }
-    DisposableEffect(owner) { onDispose(owner::dispose) }
+    DisposableEffect(owner) {
+        onDispose {
+            android.util.Log.i("TsuyomiRoute", "detail-owner dispose entry=${entry.hashCode()}")
+            owner.dispose()
+        }
+    }
     LaunchedEffect(owner, owner.directoryState, owner.selectedBook?.identity) {
         owner.refreshCachedChapterStatuses()
     }
