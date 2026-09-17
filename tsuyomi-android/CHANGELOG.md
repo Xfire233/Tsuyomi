@@ -7,6 +7,8 @@ All notable changes use semantic versioning. Future Phase baselines use annotate
 
 ## [0.3.0-beta.4] - 2026-09-17
 
+首个公开发布的 Beta 预发布：tag `android-v0.3.0-beta.4`，`versionCode 6`，资产 `Tsuyomi-0.3.0-beta.4.apk` 为 16 KiB 对齐、仅 v3 签名、非 debug 的发布制品，并已作为 GitHub 预发布发布。预发布不等于稳定版：物理真机验收与稳定版转换仍待完成，发布步骤与密钥托管边界见 [`docs/process/RELEASE_PROCEDURE.md`](docs/process/RELEASE_PROCEDURE.md)。
+
 ### Changed
 
 - Private candidate builds are now individually identifiable: `versionCode` advanced to `6` and `versionName` to `0.3.0-beta.4`, and `-Ptsuyomi.buildFingerprint=<value>` appends a per-candidate suffix (for example `0.3.0-beta.4+justify6`) that appears in `dumpsys package org.tsuyomi.android` and the in-app About screen. Previously six distinct `0.3.0-beta.3` APKs shared `versionCode=5`, so `install -r` could silently keep an older build.
