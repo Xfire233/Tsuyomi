@@ -11,11 +11,15 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.TextMeasurer
 import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.rememberTextMeasurer
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextIndent
 import androidx.compose.ui.unit.Constraints
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.em
 import androidx.compose.ui.unit.sp
 import kotlin.math.ceil
 import kotlin.math.roundToInt
@@ -70,21 +74,24 @@ internal fun rememberReaderPageLayout(
     settings: ReaderSettingsUiState,
     viewportSize: IntSize,
     dual: Boolean,
+    enabled: Boolean,
 ): ReaderPageLayout {
     val density = LocalDensity.current
     val textMeasurer = rememberTextMeasurer()
     val bodyStyle = readerBodyStyle(settings)
     val headingStyle = readerHeadingStyle(settings)
-    val marginPx = with(density) { settings.horizontalMargin.dp.toPx().roundToInt() }
+    val horizontalMarginPx = with(density) { settings.horizontalMargin.dp.toPx().roundToInt() }
+    val verticalMarginPx = with(density) { settings.verticalMargin.dp.toPx().roundToInt() }
     val paragraphSpacingPx = with(density) { settings.paragraphSpacing.dp.toPx().roundToInt() }
-    val availableWidth = (viewportSize.width - marginPx * 2).coerceAtLeast(0)
+    val availableWidth = (viewportSize.width - horizontalMarginPx * 2).coerceAtLeast(0)
     val columnWidth = if (dual) {
-        ((availableWidth - marginPx).coerceAtLeast(0) / 2)
+        ((availableWidth - horizontalMarginPx).coerceAtLeast(0) / 2)
     } else {
         availableWidth
     }
-    val pageHeight = (viewportSize.height - marginPx * 2).coerceAtLeast(0)
+    val pageHeight = (viewportSize.height - verticalMarginPx * 2).coerceAtLeast(0)
     return remember(
+        enabled,
         document,
         bodyStyle,
         headingStyle,
@@ -94,7 +101,7 @@ internal fun rememberReaderPageLayout(
         density.density,
         density.fontScale,
     ) {
-        if (columnWidth == 0 || pageHeight == 0) {
+        if (!enabled || columnWidth == 0 || pageHeight == 0) {
             ReaderPageLayout.Empty
         } else {
             paginateReaderDocument(
@@ -112,16 +119,39 @@ internal fun rememberReaderPageLayout(
 
 @Composable
 internal fun readerBodyStyle(settings: ReaderSettingsUiState): TextStyle = MaterialTheme.typography.bodyLarge.copy(
+    fontFamily = settings.fontFamily.fontFamily(),
+    fontWeight = FontWeight(settings.fontWeight),
     fontSize = settings.fontSize.sp,
+    letterSpacing = settings.letterSpacing.sp,
     lineHeight = (settings.fontSize * settings.lineHeight).sp,
+    textAlign = settings.textAlignment.textAlign(),
+    textIndent = TextIndent(firstLine = settings.firstLineIndent.em),
 )
 
 @Composable
 internal fun readerHeadingStyle(settings: ReaderSettingsUiState): TextStyle = MaterialTheme.typography.titleLarge.copy(
+    fontFamily = settings.fontFamily.fontFamily(),
+    fontWeight = FontWeight(settings.fontWeight),
     fontSize = (settings.fontSize * 1.12f).sp,
+    letterSpacing = settings.letterSpacing.sp,
     lineHeight = (settings.fontSize * settings.lineHeight * 1.12f).sp,
-    fontWeight = FontWeight.Medium,
+    textAlign = settings.textAlignment.textAlign(),
 )
+
+private fun String.fontFamily(): FontFamily = when (this) {
+    "sans" -> FontFamily.SansSerif
+    "serif" -> FontFamily.Serif
+    "monospace" -> FontFamily.Monospace
+    else -> FontFamily.Default
+}
+
+private fun String.textAlign(): TextAlign = when (this) {
+    "justify" -> TextAlign.Justify
+    "center" -> TextAlign.Center
+    "end" -> TextAlign.End
+    else -> TextAlign.Start
+}
+
 
 private fun paginateReaderDocument(
     document: ReaderDocument,

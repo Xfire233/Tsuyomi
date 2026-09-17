@@ -11,10 +11,20 @@ import androidx.room.RawQuery
 import androidx.sqlite.db.SupportSQLiteQuery
 import androidx.room.Query
 import androidx.room.Update
+import kotlinx.coroutines.flow.Flow
 
 internal data class BookIdentityRow(
     @androidx.room.ColumnInfo(name = "source_id") val sourceId: String,
     @androidx.room.ColumnInfo(name = "remote_book_id") val remoteBookId: String,
+)
+
+/** A durable Reader visit, or a legacy semantic-progress fallback when [explicitVisit] is false. */
+internal data class ReaderHistoryRow(
+    @androidx.room.ColumnInfo(name = "source_id") val sourceId: String,
+    @androidx.room.ColumnInfo(name = "remote_book_id") val remoteBookId: String,
+    @androidx.room.ColumnInfo(name = "visited_at_epoch_second") val visitedAtEpochSecond: Long,
+    @androidx.room.ColumnInfo(name = "visited_at_nano") val visitedAtNano: Int,
+    @androidx.room.ColumnInfo(name = "explicit_visit") val explicitVisit: Boolean,
 )
 
 @Dao
@@ -361,8 +371,78 @@ internal interface LibraryDao {
     suspend fun insertProgressIfAbsent(entity: ReadingProgressEntity): Long
 
     @Insert(onConflict = OnConflictStrategy.IGNORE)
+    suspend fun insertReaderHistoryIfAbsent(entity: ReaderHistoryEntity): Long
+
+    @Query("SELECT * FROM reader_history WHERE source_id = :sourceId AND remote_book_id = :remoteBookId")
+    suspend fun readerHistory(sourceId: String, remoteBookId: String): ReaderHistoryEntity?
+
+    /** Keeps a visit's order monotonic if two admissions race. */
+    @Query(
+        """
+        UPDATE reader_history
+        SET last_visited_at_epoch_second = :visitedAtEpochSecond,
+            last_visited_at_nano = :visitedAtNano
+        WHERE source_id = :sourceId AND remote_book_id = :remoteBookId
+          AND (
+            last_visited_at_epoch_second < :visitedAtEpochSecond
+            OR (last_visited_at_epoch_second = :visitedAtEpochSecond AND last_visited_at_nano < :visitedAtNano)
+          )
+        """,
+    )
+    suspend fun updateReaderHistoryIfNewer(
+        sourceId: String,
+        remoteBookId: String,
+        visitedAtEpochSecond: Long,
+        visitedAtNano: Int,
+    ): Int
+
+    /**
+     * Explicit Reader visits win. Existing semantic progress is an honest pre-history fallback;
+     * it is validated at the domain boundary before projection.
+     */
+    @Query(
+        """
+        SELECT source_id, remote_book_id,
+            last_visited_at_epoch_second AS visited_at_epoch_second,
+            last_visited_at_nano AS visited_at_nano,
+            1 AS explicit_visit
+        FROM reader_history
+        UNION ALL
+        SELECT p.source_id, p.remote_book_id,
+            p.updated_at_epoch_second AS visited_at_epoch_second,
+            p.updated_at_nano AS visited_at_nano,
+            0 AS explicit_visit
+        FROM reading_progress p
+        WHERE NOT EXISTS (
+            SELECT 1 FROM reader_history h
+            WHERE h.source_id = p.source_id AND h.remote_book_id = p.remote_book_id
+        )
+        ORDER BY visited_at_epoch_second DESC, visited_at_nano DESC, source_id, remote_book_id
+        """,
+    )
+    suspend fun readerHistoryRows(): List<ReaderHistoryRow>
+
+    @Insert(onConflict = OnConflictStrategy.IGNORE)
     suspend fun insertCompletedChapter(entity: CompletedChapterEntity): Long
 
     @Query("SELECT chapter_id FROM completed_chapters WHERE source_id = :sourceId AND remote_book_id = :remoteBookId ORDER BY completed_at_epoch_second, completed_at_nano, chapter_id")
     suspend fun completedChapterIds(sourceId: String, remoteBookId: String): List<String>
+
+    @Insert(onConflict = OnConflictStrategy.IGNORE)
+    suspend fun insertReaderBookmark(entity: ReaderBookmarkEntity): Long
+
+    @Query("DELETE FROM reader_bookmarks WHERE source_id = :sourceId AND remote_book_id = :remoteBookId AND bookmark_position_key = :positionKey")
+    suspend fun deleteReaderBookmark(sourceId: String, remoteBookId: String, positionKey: String): Int
+
+    @Query("SELECT * FROM reader_bookmarks WHERE source_id = :sourceId AND remote_book_id = :remoteBookId ORDER BY bookmark_position_key LIMIT :limit")
+    suspend fun firstBookmarkPage(sourceId: String, remoteBookId: String, limit: Int): List<ReaderBookmarkEntity>
+
+    @Query("SELECT COUNT(*) FROM reader_bookmarks WHERE source_id = :sourceId AND remote_book_id = :remoteBookId")
+    suspend fun readerBookmarkCount(sourceId: String, remoteBookId: String): Int
+
+    @Query("SELECT * FROM reader_bookmarks WHERE source_id = :sourceId AND remote_book_id = :remoteBookId AND bookmark_position_key > :afterPositionKey ORDER BY bookmark_position_key LIMIT :limit")
+    suspend fun bookmarkPageAfter(sourceId: String, remoteBookId: String, afterPositionKey: String, limit: Int): List<ReaderBookmarkEntity>
+
+    @Query("SELECT DISTINCT source_id, remote_book_id FROM reader_bookmarks")
+    suspend fun readerBookmarkIdentities(): List<BookIdentityRow>
 }

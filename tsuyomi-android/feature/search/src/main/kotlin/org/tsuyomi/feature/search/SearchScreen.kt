@@ -14,7 +14,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.width
+
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
@@ -24,14 +24,16 @@ import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import org.tsuyomi.core.display.DisplayProfile
 import org.tsuyomi.core.display.LocalDisplayEnvironment
@@ -42,8 +44,12 @@ import org.tsuyomi.core.ui.components.StateView
 import org.tsuyomi.core.ui.components.TsuyomiButton
 import org.tsuyomi.core.ui.components.TsuyomiButtonStyle
 import org.tsuyomi.core.ui.components.TsuyomiIconButton
+import org.tsuyomi.core.ui.components.TsuyomiCoverGridCard
+import org.tsuyomi.core.ui.components.currentCoverCardLayout
+
 import org.tsuyomi.core.ui.components.TsuyomiStateKind
 import org.tsuyomi.core.ui.components.TsuyomiTopBar
+import org.tsuyomi.core.ui.components.TsuyomiTextField
 import org.tsuyomi.core.ui.components.TsuyomiTopBarAction
 import org.tsuyomi.core.ui.icons.TsuyomiIcons
 import org.tsuyomi.core.ui.theme.TsuyomiSpacing
@@ -124,26 +130,30 @@ fun SearchScreen(
     }
 
     Column(modifier.fillMaxSize()) {
-        OutlinedTextField(
+        TsuyomiTextField(
             value = query,
             onValueChange = onQueryChange,
             modifier = Modifier.fillMaxWidth().padding(
                 horizontal = TsuyomiSpacing.Md,
                 vertical = TsuyomiSpacing.Sm,
             ),
-            label = { Text(stringResource(if (authorSearch) R.string.search_author_query_label else R.string.search_query_label)) },
+            label = stringResource(if (authorSearch) R.string.search_author_query_label else R.string.search_query_label),
             trailingIcon = {
                 TsuyomiIconButton(
                     imageVector = TsuyomiIcons.Search,
                     contentDescription = stringResource(R.string.search_submit_description),
                     onClick = onSearch,
-                    enabled = query.isNotBlank(),
+                    enabled = query.isNotBlank() && state !is SearchResultState.Loading,
                 )
             },
-            supportingText = { Text(stringResource(R.string.search_query_count, query.length)) },
+            supportingText = stringResource(R.string.search_query_count, query.length),
             singleLine = true,
             keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
-            keyboardActions = KeyboardActions(onSearch = { if (query.isNotBlank()) onSearch() }),
+            keyboardActions = KeyboardActions(
+                onSearch = {
+                    if (query.isNotBlank() && state !is SearchResultState.Loading) onSearch()
+                },
+            ),
         )
         when (state) {
             SearchResultState.Idle -> StateView(
@@ -227,29 +237,49 @@ private fun SearchListRow(
     onSelectBook: (SourceBookSummary) -> Unit,
     coverState: CoverUiState,
 ) {
+    val typography = MaterialTheme.typography
+    val rowHeight = with(LocalDensity.current) {
+        (typography.titleMedium.lineHeight.toDp() * 2 +
+            (if (book.author == null) 0.dp else typography.bodySmall.lineHeight.toDp()) +
+            typography.labelMedium.lineHeight.toDp()).coerceAtLeast(96.dp)
+    }
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .clickable { onSelectBook(book) }
+            .clickable(role = Role.Button) { onSelectBook(book) }
             .padding(horizontal = TsuyomiSpacing.Md, vertical = TsuyomiSpacing.Sm),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         CoverImage(
             state = coverState,
-            modifier = Modifier.width(72.dp).height(96.dp),
+            modifier = Modifier.height(rowHeight)
+                .aspectRatio(currentCoverCardLayout().leadingArtworkAspectRatio)
+                .testTag("search-list-cover-${bookKey(book)}"),
         )
-        Column(Modifier.weight(1f).padding(start = TsuyomiSpacing.Md)) {
-            Text(book.title, style = MaterialTheme.typography.titleMedium)
+        Column(
+            Modifier.weight(1f).height(rowHeight).padding(start = TsuyomiSpacing.Md),
+            verticalArrangement = Arrangement.SpaceBetween,
+        ) {
+            Text(
+                book.title,
+                style = MaterialTheme.typography.titleMedium,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
+            )
             book.author?.let {
                 Text(
                     stringResource(R.string.search_author, it),
                     style = MaterialTheme.typography.bodySmall,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
                 )
             }
             Text(
                 stringResource(R.string.search_source_label, book.identity.sourceId),
                 style = MaterialTheme.typography.labelMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
             )
         }
     }
@@ -265,11 +295,18 @@ private fun SearchCompactRow(book: SourceBookSummary, onSelectBook: (SourceBookS
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Column(Modifier.weight(1f)) {
-            Text(book.title, style = MaterialTheme.typography.titleSmall)
+            Text(
+                book.title,
+                style = MaterialTheme.typography.titleSmall,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
+            )
             Text(
                 listOfNotNull(book.author, book.identity.sourceId).joinToString(" · "),
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
             )
         }
     }
@@ -281,24 +318,14 @@ private fun SearchGridCard(
     onSelectBook: (SourceBookSummary) -> Unit,
     coverState: CoverUiState,
 ) {
-    Surface(
-        modifier = Modifier.fillMaxWidth().clickable { onSelectBook(book) },
-        shape = MaterialTheme.shapes.medium,
-        tonalElevation = 1.dp,
-    ) {
-        Column {
-            CoverImage(coverState, Modifier.fillMaxWidth().aspectRatio(2f / 3f))
-            Column(Modifier.padding(TsuyomiSpacing.Sm)) {
-                Text(book.title, style = MaterialTheme.typography.titleSmall, maxLines = 2)
-                Text(
-                    book.author ?: book.identity.sourceId,
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    maxLines = 1,
-                )
-            }
-        }
-    }
+    TsuyomiCoverGridCard(
+        title = book.title,
+        supportingText = book.author ?: book.identity.sourceId,
+        onClick = { onSelectBook(book) },
+        cover = { CoverImage(coverState, Modifier.fillMaxSize()) },
+        modifier = Modifier.testTag("search-grid-${bookKey(book)}"),
+        titleInsideCover = true,
+    )
 }
 
 @Composable
@@ -362,10 +389,10 @@ private fun FrozenEInkSearchScreen(
             horizontalArrangement = Arrangement.spacedBy(12.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            OutlinedTextField(
+            TsuyomiTextField(
                 value = query,
                 onValueChange = onQueryChange,
-                label = { Text(stringResource(R.string.search_eink_query_label)) },
+                label = stringResource(R.string.search_eink_query_label),
                 singleLine = true,
                 keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
                 keyboardActions = KeyboardActions(onSearch = { onSearch() }),

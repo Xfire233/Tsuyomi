@@ -83,6 +83,7 @@ internal class SourceSessionOwnerInstrumentedTest : SourceFlowInstrumentedTestFi
         val secondPackage = installSignedSwitchOverlay(installer, "source-switch-home")
         val oldHomeStarted = CompletableDeferred<Unit>()
         val releaseOldHome = CompletableDeferred<Unit>()
+        var oldRequest: kotlinx.coroutines.Job? = null
         val openedSourceIds = mutableListOf<String>()
         val searchedSourceIds = mutableListOf<String>()
         val controller = controller { candidate ->
@@ -94,6 +95,7 @@ internal class SourceSessionOwnerInstrumentedTest : SourceFlowInstrumentedTestFi
                 },
                 homeResult = { _, _, _ ->
                     if (candidate.manifest.sourceId == firstPackage.manifest.sourceId) {
+                        oldRequest = kotlinx.coroutines.currentCoroutineContext()[kotlinx.coroutines.Job]
                         oldHomeStarted.complete(Unit)
                         withContext(NonCancellable) { releaseOldHome.await() }
                         homePage("旧来源", candidate.manifest.sourceId.value)
@@ -130,6 +132,7 @@ internal class SourceSessionOwnerInstrumentedTest : SourceFlowInstrumentedTestFi
             } ?: false
             check(targetPublished) { "Prepared target Home was not published: ${controller.home.state}" }
             releaseOldHome.complete(Unit)
+            kotlinx.coroutines.withTimeout(5_000) { requireNotNull(oldRequest).join() }
 
             assertEquals("新来源", controller.home.activePage?.title)
             assertEquals(

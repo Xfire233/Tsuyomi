@@ -43,9 +43,9 @@ class HostNetworkGatewayRemotePolicyTest {
         val transport = HostHttpTransport { received ->
             requests += received
             if (requests.size == 1) {
-                HostHttpResponse(302, received.url, mapOf("location" to "/remote/complete?status=ok"), byteArrayOf())
+                HostHttpResponse(302, received.url, responseHeaders("location" to "/remote/complete?status=ok"), byteArrayOf())
             } else {
-                HostHttpResponse(200, received.url, emptyMap(), "ok".encodeToByteArray())
+                HostHttpResponse(200, received.url, responseHeaders(), "ok".encodeToByteArray())
             }
         }
         val policy = RemoteOperationRequestPolicy(
@@ -77,7 +77,7 @@ class HostNetworkGatewayRemotePolicyTest {
     @Test
     fun signed_context_rejects_undeclared_success_redirect() = runBlocking {
         val transport = HostHttpTransport { received ->
-            HostHttpResponse(302, received.url, mapOf("location" to "/remote/complete?status=ok"), byteArrayOf())
+            HostHttpResponse(302, received.url, responseHeaders("location" to "/remote/complete?status=ok"), byteArrayOf())
         }
         val policy = RemoteOperationRequestPolicy(
             origin = HttpsOrigin("https://www.wenku8.net"),
@@ -103,9 +103,9 @@ class HostNetworkGatewayRemotePolicyTest {
         val transport = HostHttpTransport { received ->
             requests += received
             if (requests.size == 1) {
-                HostHttpResponse(302, received.url, mapOf("location" to "/remote/complete?status=added"), byteArrayOf())
+                HostHttpResponse(302, received.url, responseHeaders("location" to "/remote/complete?status=added"), byteArrayOf())
             } else {
-                HostHttpResponse(200, received.url, emptyMap(), "confirmed".encodeToByteArray())
+                HostHttpResponse(200, received.url, responseHeaders(), "confirmed".encodeToByteArray())
             }
         }
         val registry = DirectActionTokenRegistry()
@@ -176,7 +176,7 @@ class HostNetworkGatewayRemotePolicyTest {
         val requests = mutableListOf<HostHttpRequest>()
         val transport = HostHttpTransport { received ->
             requests += received
-            HostHttpResponse(302, received.url, mapOf("location" to "/remote/complete?status=added"), byteArrayOf())
+            HostHttpResponse(302, received.url, responseHeaders("location" to "/remote/complete?status=added"), byteArrayOf())
         }
         val policy = RemoteOperationRequestPolicy(
             origin = HttpsOrigin("https://www.wenku8.net"),
@@ -210,12 +210,7 @@ class HostNetworkGatewayRemotePolicyTest {
         val requests = mutableListOf<HostHttpRequest>()
         val transport = HostHttpTransport { request ->
             requests += request
-            HostHttpResponse(
-                status = 302,
-                finalUrl = request.url,
-                headers = mapOf("location" to "/remote/complete?status=added"),
-                bytes = ByteArray(0),
-            )
+            HostHttpResponse(status = 302, finalUrl = request.url, headers = responseHeaders("location" to "/remote/complete?status=added"), bytes = ByteArray(0))
         }
         val alias = RemoteOperationRedirectPolicy(
             origin = HttpsOrigin("https://www.wenku8.net"),

@@ -18,20 +18,21 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
-import org.tsuyomi.core.display.ColorSchemePreference
 import org.tsuyomi.core.display.DisplayDecisionReason
 import org.tsuyomi.core.display.DisplayEnvironment
-import org.tsuyomi.core.display.DisplayPreference
 import org.tsuyomi.core.display.DisplayProfile
+import org.tsuyomi.core.preferences.ColorSchemePreference
+import org.tsuyomi.core.preferences.DisplayPreference
 import org.tsuyomi.core.ui.components.InfoBanner
 import org.tsuyomi.core.ui.components.InlineStatus
 import org.tsuyomi.core.ui.components.SegmentedSelector
-import org.tsuyomi.core.ui.components.SettingsGroup
 import org.tsuyomi.core.ui.components.SettingsActionRow
+import org.tsuyomi.core.ui.components.SettingsGroup
 import org.tsuyomi.core.ui.components.SettingsSectionHeader
 import org.tsuyomi.core.ui.components.SettingsSwitchRow
 import org.tsuyomi.core.ui.components.TsuyomiSegment
 import org.tsuyomi.core.ui.theme.TsuyomiSpacing
+import org.tsuyomi.shared.model.CoverCardPresentation
 
 /** A durable write that failed; surfaced as recoverable state with a stable id. */
 data class DisplayWriteFailure(val id: Int)
@@ -47,6 +48,7 @@ class DisplaySettingsActions(
     val onDisplayPreferenceChange: (DisplayPreference) -> Unit,
     val onColorSchemePreferenceChange: (ColorSchemePreference) -> Unit,
     val onDynamicColorEnabledChange: (Boolean) -> Unit,
+    val onCoverCardPresentationChange: (CoverCardPresentation) -> Unit,
     val onRefreshNow: () -> Unit,
     val onRetryWrite: () -> Unit,
     val onAcknowledgeWriteFailure: () -> Unit,
@@ -133,6 +135,33 @@ fun DisplaySettingsScreen(
                         else -> stringResource(R.string.settings_display_dynamic_disabled_api)
                     },
                 )
+            }
+
+            if (!eInk) {
+                SettingsSectionHeader(title = stringResource(R.string.settings_display_section_cover_cards))
+                SettingsGroup {
+                    SegmentedSelector(
+                        options = listOf(
+                            TsuyomiSegment(
+                                CoverCardPresentation.STANDARD,
+                                stringResource(R.string.settings_display_cover_standard),
+                            ),
+                            TsuyomiSegment(
+                                CoverCardPresentation.WIDE,
+                                stringResource(R.string.settings_display_cover_wide),
+                            ),
+                        ),
+                        selected = preferences.coverCardPresentation,
+                        onSelect = actions.onCoverCardPresentationChange,
+                        enabled = !preferences.coverCardPresentationReadOnly,
+                        disabledReason = if (preferences.coverCardPresentationReadOnly) {
+                            stringResource(R.string.settings_display_cover_unsupported)
+                        } else {
+                            null
+                        },
+                        modifier = Modifier.padding(TsuyomiSpacing.Md),
+                    )
+                }
             }
 
             if (eInk) {

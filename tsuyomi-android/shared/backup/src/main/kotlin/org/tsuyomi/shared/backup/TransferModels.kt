@@ -5,6 +5,7 @@
 package org.tsuyomi.shared.backup
 
 import java.time.Instant
+import org.tsuyomi.shared.locator.ReaderLocator
 import org.tsuyomi.shared.model.BookIdentity
 
 const val MAX_TRANSFER_BYTES: Int = 32 * 1024 * 1024
@@ -24,6 +25,14 @@ data class PortableReaderPreferences(
     val immersive: Boolean? = null,
     val keepAwake: Boolean? = null,
     val volumePaging: Boolean? = null,
+    val fontFamily: String? = null,
+    val fontWeight: Int? = null,
+    val letterSpacing: Double? = null,
+    val firstLineIndent: Double? = null,
+    val verticalMargin: Double? = null,
+    val textAlignment: String? = null,
+    val foregroundColor: String? = null,
+    val backgroundColor: String? = null,
 )
 
 data class TransferProgress(
@@ -52,6 +61,7 @@ data class TransferBook(
     val updatedAt: Instant,
     val progress: TransferProgress? = null,
     val completedChapterIds: Set<String> = emptySet(),
+    val bookmarks: List<ReaderLocator> = emptyList(),
 )
 
 data class TransferShelf(

@@ -37,6 +37,7 @@ WORKFLOW_FILES = {
 }
 EXCLUDED_DIRECTORIES = {
     "build",
+    ".local",
     ".gradle",
     ".idea",
     ".kotlin",

@@ -7,6 +7,7 @@ plugins {
 
 dependencies {
     implementation(project(":shared:model"))
+    implementation(project(":shared:locator"))
     implementation(project(":shared:source-contract"))
     implementation(libs.kotlinx.coroutines.core)
 }

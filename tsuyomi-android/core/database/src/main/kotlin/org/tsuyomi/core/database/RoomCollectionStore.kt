@@ -15,6 +15,9 @@ import org.tsuyomi.core.database.room.SmartRuleEntity
 import org.tsuyomi.shared.model.BookIdentity
 import org.tsuyomi.shared.smartshelf.SmartRule
 import org.tsuyomi.shared.smartshelf.SmartRuleCodec
+import org.tsuyomi.shared.librarydomain.CollectionKind
+import org.tsuyomi.shared.librarydomain.LibraryCollection
+import org.tsuyomi.shared.librarydomain.LibraryEntry
 
 internal class RoomCollectionStore(
     private val database: TsuyomiDatabase,

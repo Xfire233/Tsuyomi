@@ -5,12 +5,8 @@
 
 package org.tsuyomi.core.display
 
-/** The user's persisted choice for resolving the global display profile. */
-enum class DisplayPreference {
-    AUTO,
-    STANDARD,
-    EINK,
-}
+import org.tsuyomi.core.preferences.DisplayPreferences
+
 
 /** The resolved global display profile consumed by the UI. */
 enum class DisplayProfile {
@@ -18,12 +14,6 @@ enum class DisplayProfile {
     EINK,
 }
 
-/** The user's persisted standard-profile color-scheme preference. */
-enum class ColorSchemePreference {
-    SYSTEM,
-    LIGHT,
-    DARK,
-}
 
 
 /** Why the resolver selected the current effective display profile. */
@@ -34,12 +24,6 @@ enum class DisplayDecisionReason {
     UNKNOWN_DEVICE,
 }
 
-/** The complete set of persisted display preferences. */
-data class DisplayPreferences(
-    val displayPreference: DisplayPreference = DisplayPreference.AUTO,
-    val colorSchemePreference: ColorSchemePreference = ColorSchemePreference.SYSTEM,
-    val dynamicColorEnabled: Boolean = false,
-)
 
 /** A local-only device-classification result. This value is never persisted or uploaded. */
 data class DeviceClassification(

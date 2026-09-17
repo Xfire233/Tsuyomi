@@ -69,6 +69,53 @@ class LibraryPreferencesRepositoryTest {
     }
 
     @Test
+    fun absentLegacyOrderCompletesWithoutOverwritingCurrentPresentation() = runBlocking {
+        val store = InMemoryPreferencesDataStore(mutablePreferencesOf(LegacyShortcutLocked to true))
+        val repository = LibraryPreferencesRepository(store)
+        val existingRoots = listOf(LibraryRootNodePreference("collection:existing", 4))
+        repository.updateRootNodes(existingRoots)
+        repository.updateWebsiteGrouping("fixture.source", true)
+
+        repository.migrateLegacyRootPresentation(emptyMap())
+
+        val migrated = repository.preferences.first()
+        assertEquals(existingRoots, migrated.rootNodes)
+        assertTrue(migrated.websiteGroupingBySource.getValue("fixture.source"))
+        assertNull(store.current()[LegacyShortcutLocked])
+        assertTrue(store.current()[RootMigrationComplete] == true)
+    }
+
+    @Test
+    fun invalidLegacyOrdersStayUntouchedAndMigrationRemainsIncomplete() = runBlocking {
+        val invalidOrders = listOf(
+            "not-length-prefixed",
+            encodeLegacyOrder(listOf("collection:duplicate", "collection:duplicate")),
+            encodeLegacyOrder(List(257) { "collection:$it" }),
+        )
+        invalidOrders.forEach { legacyOrder ->
+            val store = InMemoryPreferencesDataStore(
+                mutablePreferencesOf(
+                    LegacyShortcutOrder to legacyOrder,
+                    LegacyShortcutLocked to true,
+                ),
+            )
+            val repository = LibraryPreferencesRepository(store)
+            val existingRoots = listOf(LibraryRootNodePreference("collection:existing", 4))
+            repository.updateRootNodes(existingRoots)
+            repository.updateWebsiteGrouping("fixture.source", true)
+
+            repository.migrateLegacyRootPresentation(emptyMap())
+
+            val preserved = repository.preferences.first()
+            assertEquals(legacyOrder, existingRoots, preserved.rootNodes)
+            assertTrue(legacyOrder, preserved.websiteGroupingBySource.getValue("fixture.source"))
+            assertEquals(legacyOrder, store.current()[LegacyShortcutOrder])
+            assertTrue(store.current()[LegacyShortcutLocked] == true)
+            assertNull(store.current()[RootMigrationComplete])
+        }
+    }
+
+    @Test
     fun typedRootAndTabPresentationsRoundTripWithoutCrossContamination() = runBlocking {
         val repository = LibraryPreferencesRepository(InMemoryPreferencesDataStore())
         val roots = listOf(

@@ -14,18 +14,18 @@ import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
-import org.tsuyomi.core.database.LibraryBook
-import org.tsuyomi.core.database.LibraryEntry
+import org.tsuyomi.shared.librarydomain.LibraryBook
+import org.tsuyomi.shared.librarydomain.LibraryEntry
 import org.tsuyomi.core.database.RemoteAddRequest
 import org.tsuyomi.core.database.RemoteMutationRequest
-import org.tsuyomi.core.database.RemoteReconciliationState
+import org.tsuyomi.shared.librarydomain.RemoteReconciliationState
 import org.tsuyomi.core.database.RoomLibraryRepository
-import org.tsuyomi.core.database.SourceAvailability
-import org.tsuyomi.core.database.RemoteMirrorBookSnapshot
+import org.tsuyomi.shared.librarydomain.SourceAvailability
+import org.tsuyomi.shared.librarydomain.RemoteMirrorBookSnapshot
 import org.tsuyomi.core.database.RemoteMirrorReplaceRequest
-import org.tsuyomi.core.database.RemoteMirrorSnapshot
-import org.tsuyomi.core.database.RemoteMirrorTargetSnapshot
-import org.tsuyomi.core.database.SourceRemotePolicy
+import org.tsuyomi.shared.librarydomain.RemoteMirrorSnapshot
+import org.tsuyomi.shared.librarydomain.RemoteMirrorTargetSnapshot
+import org.tsuyomi.shared.librarydomain.SourceRemotePolicy
 import org.tsuyomi.core.network.DirectActionBinding
 import org.tsuyomi.core.security.SourceCredentialPartition
 import org.tsuyomi.core.security.VerifiedBrowserSessionStore
@@ -438,7 +438,7 @@ internal class SourceRemoteLibraryCoordinator(
                 if (continuationTargetId == null) {
                     RemoteTargetedAddResult.Confirmed
                 } else {
-                    when (val move = retryRemoteMutation(summary, importedAt)) {
+                    when (val move = retryRemoteMutation(summary, importedAt, RemoteOperation.MOVE)) {
                         RemoteMutationUiResult.Confirmed -> RemoteTargetedAddResult.Confirmed
                         RemoteMutationUiResult.Unresolved,
                         RemoteMutationUiResult.Cancelled,
@@ -459,13 +459,21 @@ internal class SourceRemoteLibraryCoordinator(
         }
     }
 
-    suspend fun retryRemoteMutation(summary: SourceBookSummary?, importedAt: Instant = Instant.now()): RemoteMutationUiResult =
+    suspend fun retryRemoteMutation(
+        summary: SourceBookSummary?,
+        importedAt: Instant = Instant.now(),
+        expectedOperation: RemoteOperation? = null,
+    ): RemoteMutationUiResult =
         remoteAddMutex.withLock {
             val selected = summary ?: return@withLock RemoteMutationUiResult.Failure("book-not-selected")
             val record = library.bookReconciliation(selected.identity.sourceId, selected.identity.remoteBookId)
                 ?: return@withLock RemoteMutationUiResult.Failure("no-reconciliation-record")
             val targetedAddContinuation = record.operation.equals("ADD", ignoreCase = true) &&
                 record.state == RemoteReconciliationState.CONFIRMED && record.targetId != null
+            val effectiveOperation = if (targetedAddContinuation) "MOVE" else record.operation
+            if (expectedOperation != null && !effectiveOperation.equals(expectedOperation.name, ignoreCase = true)) {
+                return@withLock RemoteMutationUiResult.Failure("reconciliation-operation-changed")
+            }
             if (!targetedAddContinuation && record.state !in RETRYABLE_RECONCILIATION_STATES) {
                 return@withLock RemoteMutationUiResult.Failure("reconciliation-not-retryable")
             }

@@ -26,7 +26,9 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.ButtonShapes
 import androidx.compose.material3.FilterChip
+import androidx.compose.material3.FilledTonalIconButton
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButtonDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Surface
@@ -270,11 +272,13 @@ fun TsuyomiIconButton(
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
     enabled: Boolean = true,
+    iconModifier: Modifier = Modifier,
+    iconTint: Color? = null,
 ) {
     val interactionSource = remember { MutableInteractionSource() }
     val focused by interactionSource.collectIsFocusedAsState()
     val shape = RoundedCornerShape(24.dp)
-    val tint = if (enabled) {
+    val tint = iconTint ?: if (enabled) {
         MaterialTheme.colorScheme.onSurface
     } else {
         MaterialTheme.colorScheme.onSurfaceVariant
@@ -295,12 +299,71 @@ fun TsuyomiIconButton(
         Icon(
             imageVector = imageVector,
             contentDescription = contentDescription,
+            modifier = iconModifier,
             tint = tint,
         )
     }
 }
+/** Standard tonal icon action with a compact 40dp visual inside a 48dp interaction slot. */
+@Composable
+fun TsuyomiTonalIconButton(
+    imageVector: ImageVector,
+    contentDescription: String,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+    enabled: Boolean = true,
+    compact: Boolean = false,
+) {
+    if (LocalDisplayEnvironment.current.effectiveProfile == DisplayProfile.EINK) {
+        TsuyomiIconButton(imageVector, contentDescription, onClick, modifier, enabled)
+        return
+    }
 
-/** Standard Material selection chip with an explicit 48dp visual and touch boundary. */
+    val interactionSource = remember { MutableInteractionSource() }
+    val focused by interactionSource.collectIsFocusedAsState()
+    val shape = MaterialTheme.shapes.small
+    val interactionModifier = modifier
+        .size(48.dp)
+        .tsuyomiFocusRing(shape, focused, MaterialTheme.colorScheme.primary)
+
+    if (!compact) {
+        FilledTonalIconButton(
+            onClick = onClick,
+            modifier = interactionModifier,
+            enabled = enabled,
+            interactionSource = interactionSource,
+        ) {
+            Icon(imageVector = imageVector, contentDescription = contentDescription)
+        }
+        return
+    }
+
+    FilledTonalIconButton(
+        onClick = onClick,
+        modifier = interactionModifier,
+        enabled = enabled,
+        shape = androidx.compose.ui.graphics.RectangleShape,
+        colors = IconButtonDefaults.filledTonalIconButtonColors(
+            containerColor = Color.Transparent,
+            disabledContainerColor = Color.Transparent,
+        ),
+        interactionSource = interactionSource,
+    ) {
+        Surface(
+            modifier = Modifier.size(40.dp),
+            shape = shape,
+            color = if (enabled) MaterialTheme.colorScheme.secondaryContainer else MaterialTheme.colorScheme.surfaceVariant,
+            contentColor = if (enabled) MaterialTheme.colorScheme.onSecondaryContainer else MaterialTheme.colorScheme.onSurfaceVariant,
+        ) {
+            Box(contentAlignment = Alignment.Center) {
+                Icon(imageVector = imageVector, contentDescription = contentDescription)
+            }
+        }
+    }
+}
+
+
+/** Standard Material selection chip with an optional compact visual inside a 48dp touch slot. */
 @Composable
 fun TsuyomiToggleChip(
     text: String,
@@ -309,23 +372,42 @@ fun TsuyomiToggleChip(
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
     enabled: Boolean = true,
+    compact: Boolean = false,
+    leadingIcon: ImageVector? = null,
 ) {
-    FilterChip(
-        selected = selected,
-        onClick = onClick,
-        enabled = enabled,
-        modifier = modifier
-            .heightIn(min = 48.dp)
-            .semantics { this.stateDescription = stateDescription },
-        label = {
-            Text(
-                text = text,
-                modifier = Modifier.fillMaxWidth(),
-                textAlign = TextAlign.Center,
-                maxLines = 1,
-            )
-        },
-    )
+    val useCompact = compact && LocalDisplayEnvironment.current.effectiveProfile != DisplayProfile.EINK
+    val chipModifier = modifier
+        .heightIn(min = if (useCompact) 40.dp else 48.dp)
+        .semantics { this.stateDescription = stateDescription }
+    val chip: @Composable () -> Unit = {
+        FilterChip(
+            selected = selected,
+            onClick = onClick,
+            enabled = enabled,
+            modifier = chipModifier,
+            label = {
+                Text(
+                    text = text,
+                    modifier = if (useCompact) Modifier else Modifier.fillMaxWidth(),
+                    textAlign = TextAlign.Center,
+                    maxLines = 1,
+                )
+            },
+            leadingIcon = leadingIcon?.let { icon ->
+                { Icon(imageVector = icon, contentDescription = null) }
+            },
+        )
+    }
+    if (useCompact) {
+        Box(
+            modifier = Modifier.heightIn(min = 48.dp),
+            contentAlignment = Alignment.Center,
+        ) {
+            chip()
+        }
+    } else {
+        chip()
+    }
 }
 
 /** Standard Material action chip for a bounded compact action that is not a selection state. */

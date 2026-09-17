@@ -11,17 +11,18 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.Surface
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.tooling.preview.Preview
 import com.android.tools.screenshot.PreviewTest
-import org.tsuyomi.core.display.ColorSchemePreference
+import org.tsuyomi.core.preferences.ColorSchemePreference
 import org.tsuyomi.core.display.DisplayDecisionReason
 import org.tsuyomi.core.display.DisplayEnvironment
 import org.tsuyomi.core.display.DisplayEnvironmentProvider
-import org.tsuyomi.core.display.DisplayPreference
-import org.tsuyomi.core.display.DisplayPreferences
+import org.tsuyomi.core.preferences.DisplayPreference
+import org.tsuyomi.core.preferences.DisplayPreferences
 import org.tsuyomi.core.display.DisplayProfile
 import org.tsuyomi.core.display.MotionPolicy
 import org.tsuyomi.core.ui.components.InfoBanner
@@ -92,7 +93,7 @@ fun PaginationStatesScreenshot() {
 @Preview(name = "controls-focus-disabled-error", device = ComponentPhone, locale = "zh-rCN")
 @Composable
 fun ControlStatesScreenshot() {
-    val focusRequester = FocusRequester()
+    val focusRequester = remember { FocusRequester() }
     CorePreview(standardEnvironment()) {
         Column(Modifier.padding(TsuyomiSpacing.Md)) {
             TsuyomiButton(

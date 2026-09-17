@@ -30,6 +30,10 @@
     <string name="settings_display_dynamic_summary">基于系统壁纸生成界面配色</string>
     <string name="settings_display_dynamic_disabled_eink">墨水屏模式不使用系统颜色；返回标准后恢复此偏好</string>
     <string name="settings_display_dynamic_disabled_api">Android 12 及以上可用；当前偏好会保留</string>
+    <string name="settings_display_section_cover_cards">封面卡片</string>
+    <string name="settings_display_cover_standard">标准 5:7</string>
+    <string name="settings_display_cover_wide">宽屏 16:9</string>
+    <string name="settings_display_cover_unsupported">封面偏好来自更新版本，已保留。可在“更多 > 数据”重置界面与阅读偏好后修改。</string>
 
     <string name="settings_display_section_refresh">墨水屏刷新</string>
     <string name="settings_display_refresh_note">此操作只请求应用界面重绘，不控制厂商硬件刷新模式。</string>
@@ -63,6 +67,27 @@
     <string name="settings_reader_section_device">设备</string>
     <string name="settings_reader_keep_awake">保持屏幕常亮</string>
     <string name="settings_reader_lock_portrait">锁定竖屏</string>
+    <string name="settings_reader_font_family">字体</string>
+    <string name="settings_reader_font_family_system">系统</string>
+    <string name="settings_reader_font_family_sans">无衬线</string>
+    <string name="settings_reader_font_family_serif">衬线</string>
+    <string name="settings_reader_font_family_monospace">等宽</string>
+    <string name="settings_reader_font_weight">字重</string>
+    <string name="settings_reader_font_weight_regular">常规</string>
+    <string name="settings_reader_font_weight_medium">中等</string>
+    <string name="settings_reader_letter_spacing">字距</string>
+    <string name="settings_reader_first_line_indent">首行缩进</string>
+    <string name="settings_reader_vertical_margin">纵向边距</string>
+    <string name="settings_reader_text_alignment">对齐</string>
+    <string name="settings_reader_text_alignment_start">起始</string>
+    <string name="settings_reader_text_alignment_justify">两端对齐</string>
+    <string name="settings_reader_text_alignment_center">居中</string>
+    <string name="settings_reader_text_alignment_end">末端</string>
+    <string name="settings_reader_foreground_color">文字颜色</string>
+    <string name="settings_reader_background_color">背景颜色</string>
+    <string name="settings_reader_theme_black">纯黑</string>
+    <string name="settings_reader_theme_ink_green">墨绿</string>
+    <string name="settings_reader_flow_dual">双页</string>
 
     <string name="settings_help_search_section">帮助搜索</string>
     <string name="settings_help_search_label">搜索帮助</string>

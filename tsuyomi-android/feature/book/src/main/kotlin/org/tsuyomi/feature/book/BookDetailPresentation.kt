@@ -20,12 +20,9 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
-import androidx.compose.material3.ExtendedFloatingActionButton
-import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.Immutable
 import androidx.compose.runtime.LaunchedEffect
@@ -37,6 +34,8 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.ui.semantics.liveRegion
@@ -46,22 +45,27 @@ import androidx.compose.ui.unit.dp
 import org.tsuyomi.core.media.api.CoverUiState
 import org.tsuyomi.core.ui.components.StateView
 import org.tsuyomi.core.ui.components.TsuyomiAdaptiveListFab
+import org.tsuyomi.core.ui.components.TsuyomiButton
+import org.tsuyomi.core.ui.components.TsuyomiButtonStyle
 import org.tsuyomi.core.ui.components.TsuyomiStateKind
 import org.tsuyomi.core.ui.icons.TsuyomiIcons
 import org.tsuyomi.core.ui.theme.TsuyomiSpacing
 import org.tsuyomi.shared.sourcecontract.SourceBookDetail
 import org.tsuyomi.shared.sourcecontract.SourceChapter
 import org.tsuyomi.shared.sourcecontract.SourceDirectory
+import org.tsuyomi.core.ui.components.TsuyomiExtendedFab
 
 @Immutable
 data class DetailLocalState(
     val inLibrary: Boolean = false,
     val rating: Int? = null,
     val localTags: List<String> = emptyList(),
+    val localTagsEditable: Boolean = false,
     val readLater: Boolean = false,
     val progressChapterId: String? = null,
     val progressChapterFraction: Double? = null,
     val completedChapterIds: Set<String> = emptySet(),
+    val updatedChapterIds: Set<String> = emptySet(),
     val reconciliationOperation: String? = null,
     val reconciliation: String? = null,
     val remoteRemoveEnabled: Boolean = false,
@@ -71,7 +75,6 @@ data class DetailLocalState(
 enum class DetailMutationOperation {
     ADD_TO_LIBRARY,
     REMOVE_FROM_LIBRARY,
-    CACHE_DETAIL,
     REFRESH_DETAIL,
     SET_RATING,
     ADD_TAG,
@@ -99,6 +102,33 @@ data class DetailChapterItem(
     val updated: Boolean = false,
     val downloaded: Boolean = false,
 )
+@Immutable
+enum class DetailChapterCachePhase {
+    QUEUED,
+    CACHING,
+    CACHED,
+    FAILED,
+    CANCELLED,
+}
+
+@Immutable
+data class DetailCacheState(
+    val selecting: Boolean = false,
+    val selectedChapterIds: Set<String> = emptySet(),
+    val chapters: Map<String, DetailChapterCachePhase> = emptyMap(),
+) {
+    val working: Boolean
+        get() = chapters.values.any { it == DetailChapterCachePhase.QUEUED || it == DetailChapterCachePhase.CACHING }
+}
+
+sealed interface DetailCacheAction {
+    data class Toggle(val chapterId: String) : DetailCacheAction
+    data class ToggleAll(val chapterIds: Set<String>) : DetailCacheAction
+    data object Start : DetailCacheAction
+    data object Cancel : DetailCacheAction
+    data object Close : DetailCacheAction
+}
+
 
 internal data class DetailVolumeGroup(
     val key: String,
@@ -116,9 +146,10 @@ internal fun StandardBookDetailScreen(
     unreadOnly: Boolean,
     descending: Boolean,
     selectedChapterId: String?,
+    cacheState: DetailCacheState,
+    onCacheAction: (DetailCacheAction) -> Unit,
     onSetRating: (Int?) -> Unit,
     onSearchAuthor: (String) -> Unit,
-    onAddTag: (String) -> Unit,
     onToggleUnreadOnly: () -> Unit,
     onToggleOrder: () -> Unit,
     onSelectChapter: (SourceChapter) -> Unit,
@@ -129,6 +160,12 @@ internal fun StandardBookDetailScreen(
     onUseOfflineCache: () -> Unit,
     onOpenVerification: () -> Unit,
     modifier: Modifier = Modifier,
+    tagEditorOpen: Boolean = false,
+    tagDraft: String = "",
+    onOpenTagEditor: () -> Unit = {},
+    onTagDraftChange: (String) -> Unit = {},
+    onDismissTagEditor: () -> Unit = {},
+    onConfirmTag: () -> Unit = {},
     onOpenDestinations: () -> Unit = {},
     destinationMenuExpanded: Boolean = false,
     onDestinationMenuExpandedChange: (Boolean) -> Unit = {},
@@ -136,6 +173,7 @@ internal fun StandardBookDetailScreen(
     destinationMessage: String? = null,
     partialMoveTargetName: String? = null,
     onRetryMoveOnly: () -> Unit = {},
+    onKeepDefaultLibrary: () -> Unit,
     onRetryRemoteReconciliation: () -> Unit = {},
     onAcknowledgeRemoteReconciliation: () -> Unit = {},
     focusChapterId: String? = null,
@@ -148,6 +186,7 @@ internal fun StandardBookDetailScreen(
                 message = it,
                 partialMoveTargetName = partialMoveTargetName,
                 onRetryMoveOnly = onRetryMoveOnly,
+                onKeepDefaultLibrary = onKeepDefaultLibrary,
             )
         }
         if (localState.reconciliation == "UNRESOLVED") {
@@ -178,9 +217,17 @@ internal fun StandardBookDetailScreen(
                 unreadOnly = unreadOnly,
                 descending = descending,
                 selectedChapterId = selectedChapterId,
+                cacheState = cacheState,
+                onCacheAction = onCacheAction,
                 onSetRating = onSetRating,
                 onSearchAuthor = onSearchAuthor,
-                onAddTag = onAddTag,
+                tagEditorOpen = tagEditorOpen,
+                tagDraft = tagDraft,
+                onOpenTagEditor = onOpenTagEditor,
+                onTagDraftChange = onTagDraftChange,
+                onDismissTagEditor = onDismissTagEditor,
+                onConfirmTag = onConfirmTag,
+                tagMutation = mutation,
                 onToggleUnreadOnly = onToggleUnreadOnly,
                 onToggleOrder = onToggleOrder,
                 onSelectChapter = onSelectChapter,
@@ -207,6 +254,7 @@ private fun DestinationFeedbackBanner(
     message: String,
     partialMoveTargetName: String?,
     onRetryMoveOnly: () -> Unit,
+    onKeepDefaultLibrary: () -> Unit,
 ) {
     Card(
         modifier = Modifier.fillMaxWidth()
@@ -222,7 +270,16 @@ private fun DestinationFeedbackBanner(
                     horizontalArrangement = Arrangement.End,
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    TextButton(onClick = onRetryMoveOnly) { Text("继续移至$targetName") }
+                    TsuyomiButton(
+                        text = stringResource(R.string.book_keep_default_library),
+                        onClick = onKeepDefaultLibrary,
+                        style = TsuyomiButtonStyle.TEXT,
+                    )
+                    TsuyomiButton(
+                        text = stringResource(R.string.book_retry_move_only, targetName),
+                        onClick = onRetryMoveOnly,
+                        style = TsuyomiButtonStyle.TEXT,
+                    )
                 }
             }
         }
@@ -239,9 +296,16 @@ private fun DetailContent(
     unreadOnly: Boolean,
     descending: Boolean,
     selectedChapterId: String?,
+    cacheState: DetailCacheState,
+    onCacheAction: (DetailCacheAction) -> Unit,
     onSetRating: (Int?) -> Unit,
     onSearchAuthor: (String) -> Unit,
-    onAddTag: (String) -> Unit,
+    tagEditorOpen: Boolean,
+    tagDraft: String,
+    onOpenTagEditor: () -> Unit,
+    onTagDraftChange: (String) -> Unit,
+    onDismissTagEditor: () -> Unit,
+    onConfirmTag: () -> Unit,
     onToggleUnreadOnly: () -> Unit,
     onToggleOrder: () -> Unit,
     onSelectChapter: (SourceChapter) -> Unit,
@@ -258,9 +322,11 @@ private fun DetailContent(
     onOpenVerification: () -> Unit,
     focusChapterId: String?,
     onFocusHandled: () -> Unit,
+    tagMutation: DetailMutationStatus?,
     modifier: Modifier,
 ) {
     val listState = rememberLazyListState()
+    val cacheSelectionFocusRequester = remember { FocusRequester() }
     val atDirectory by remember(listState) {
         derivedStateOf { listState.firstVisibleItemIndex >= 3 }
     }
@@ -270,7 +336,9 @@ private fun DetailContent(
         allChapters,
         currentChapterId,
         localState.completedChapterIds,
+        localState.updatedChapterIds,
         descending,
+        cacheState.chapters,
     ) {
         allChapters
             .map { chapter ->
@@ -278,11 +346,18 @@ private fun DetailContent(
                     chapter = chapter,
                     current = chapter.chapterId == currentChapterId,
                     read = chapter.chapterId in localState.completedChapterIds,
+                    updated = chapter.chapterId in localState.updatedChapterIds,
+                    downloaded = cacheState.chapters[chapter.chapterId] == DetailChapterCachePhase.CACHED,
                 )
             }
             .let { if (descending) it.reversed() else it }
     }
     val visibleChapters = if (unreadOnly) chapterItems.filter { it.read != true } else chapterItems
+    val cacheSelectableChapterIds = remember(visibleChapters, cacheState.chapters) {
+        visibleChapters
+            .filter { cacheState.chapters[it.chapter.chapterId] != DetailChapterCachePhase.CACHED }
+            .mapTo(linkedSetOf()) { it.chapter.chapterId }
+    }
     val unnamedVolume = stringResource(R.string.book_ungrouped_volume)
     val volumeGroups = remember(visibleChapters, unnamedVolume) {
         val grouped = linkedMapOf<String, MutableList<DetailChapterItem>>()
@@ -300,6 +375,12 @@ private fun DetailContent(
     LaunchedEffect(volumeGroups.map { it.key }) {
         if (volumeGroups.isNotEmpty() && expandedVolumeKeys.none { key -> volumeGroups.any { it.key == key } }) {
             expandedVolumeKeys = listOf(volumeGroups.first().key)
+        }
+    }
+    LaunchedEffect(cacheState.selecting, directoryState) {
+        if (cacheState.selecting && directoryState is SourceBookState.Content) {
+            listState.scrollToItem(3)
+            cacheSelectionFocusRequester.requestFocus()
         }
     }
     val focusVolumeKey = focusChapterId
@@ -332,7 +413,10 @@ private fun DetailContent(
             onFocusHandled()
         }
     }
-    val continueChapter = allChapters.firstOrNull { it.chapterId == currentChapterId } ?: allChapters.firstOrNull()
+    val savedProgressChapter = localState.progressChapterId?.let { progressChapterId ->
+        allChapters.firstOrNull { it.chapterId == progressChapterId }
+    }
+    val readingChapter = savedProgressChapter ?: allChapters.firstOrNull()
 
     Box(modifier) {
         LazyColumn(
@@ -358,8 +442,14 @@ private fun DetailContent(
             item(key = "tags") {
                 DetailTagActionsModule(
                     tags = (localState.localTags + detail.tags).distinct(),
-                    enabled = localState.inLibrary,
-                    onAddTag = onAddTag,
+                    enabled = localState.localTagsEditable,
+                    mutation = tagMutation,
+                    tagEditorOpen = tagEditorOpen,
+                    tagDraft = tagDraft,
+                    onOpenTagEditor = onOpenTagEditor,
+                    onTagDraftChange = onTagDraftChange,
+                    onDismissTagEditor = onDismissTagEditor,
+                    onConfirmTag = onConfirmTag,
                 )
             }
             item(key = "introduction") {
@@ -393,6 +483,16 @@ private fun DetailContent(
                             onToggleOrder = onToggleOrder,
                         )
                     }
+                    if (cacheState.selecting) {
+                        item(key = "cache-selection") {
+                            DetailCacheSelectionToolbar(
+                                cacheState = cacheState,
+                                selectableChapterIds = cacheSelectableChapterIds,
+                                onCacheAction = onCacheAction,
+                                focusRequester = cacheSelectionFocusRequester,
+                            )
+                        }
+                    }
                     volumeGroups.forEach { volume ->
                         val expanded = volume.key in expandedVolumeKeys
                         item(key = "volume:${volume.key}") {
@@ -411,7 +511,15 @@ private fun DetailContent(
                         }
                         if (expanded) {
                             items(volume.items, key = { it.chapter.chapterId }) { chapter ->
-                                DetailChapterRow(chapter, onSelectChapter)
+                                if (cacheState.selecting) {
+                                    DetailCacheChapterRow(
+                                        item = chapter,
+                                        cacheState = cacheState,
+                                        onCacheAction = onCacheAction,
+                                    )
+                                } else {
+                                    DetailChapterRow(chapter, onSelectChapter)
+                                }
                             }
                         }
                     }
@@ -423,7 +531,7 @@ private fun DetailContent(
             horizontalAlignment = Alignment.End,
             verticalArrangement = Arrangement.spacedBy(TsuyomiSpacing.Sm),
         ) {
-            if (continueChapter != null) {
+            if (!cacheState.selecting && readingChapter != null) {
                 if (atDirectory) {
                     TsuyomiAdaptiveListFab(
                         state = listState,
@@ -432,11 +540,15 @@ private fun DetailContent(
                         hideWhileScrolling = true,
                     )
                 } else {
-                    ExtendedFloatingActionButton(
-                        onClick = { onContinueReading(continueChapter) },
+                    val readingLabel = stringResource(
+                        if (savedProgressChapter == null) R.string.book_start_reading else R.string.book_continue_reading,
+                    )
+                    TsuyomiExtendedFab(
+                        text = readingLabel,
+                        imageVector = TsuyomiIcons.ContinueReading,
+                        contentDescription = readingLabel,
+                        onClick = { onContinueReading(readingChapter) },
                         modifier = Modifier.testTag("detail-reading-fab"),
-                        icon = { Icon(TsuyomiIcons.ContinueReading, contentDescription = null) },
-                        text = { Text(stringResource(R.string.book_continue_reading)) },
                     )
                 }
             }
@@ -489,14 +601,18 @@ private fun UnresolvedReconciliationBanner(
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 if (canAcknowledge) {
-                    TextButton(onClick = onAcknowledge) {
-                        Text("仅解除锁定")
-                    }
+                    TsuyomiButton(
+                        text = "仅解除锁定",
+                        onClick = onAcknowledge,
+                        style = TsuyomiButtonStyle.TEXT,
+                    )
                     Spacer(Modifier.width(8.dp))
                 }
-                FilledTonalButton(onClick = onRetry) {
-                    Text("重试${operationLabel}")
-                }
+                TsuyomiButton(
+                    text = "重试${operationLabel}",
+                    onClick = onRetry,
+                    style = TsuyomiButtonStyle.SECONDARY,
+                )
             }
         }
     }

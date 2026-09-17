@@ -78,6 +78,10 @@ val TsuyomiTypography: Typography = Typography(
     labelSmall = captionStyle,
 )
 
+/** Compact, readable title treatment shared by every in-cover grid-card title. */
+val Typography.coverCardTitle: TextStyle
+    get() = titleSmall.copy(fontSize = 13.sp, lineHeight = 20.sp)
+
 /** Library-only selection hierarchy; other navigation retains the base type scale. */
 val Typography.libraryTabSelected: TextStyle
     get() = titleLarge.copy(fontSize = 20.sp, lineHeight = 30.sp, fontWeight = FontWeight.Bold)

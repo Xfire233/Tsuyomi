@@ -9,7 +9,6 @@ import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.WindowInsetsSides
@@ -22,11 +21,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.material3.Button
-import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -59,10 +54,10 @@ import org.tsuyomi.core.ui.components.TsuyomiButton
 import org.tsuyomi.core.ui.components.TsuyomiButtonStyle
 import org.tsuyomi.core.ui.components.TsuyomiStateKind
 import org.tsuyomi.core.ui.components.TsuyomiVerificationToolbar
+import org.tsuyomi.core.ui.components.TsuyomiVerificationAction
+import org.tsuyomi.core.ui.components.TsuyomiTonalIconButton
 import org.tsuyomi.core.ui.icons.TsuyomiIcons
 import org.tsuyomi.core.ui.theme.TsuyomiSpacing
-import org.tsuyomi.core.ui.theme.instantMotion
-import org.tsuyomi.core.ui.theme.rememberSystemReducedMotion
 import org.tsuyomi.core.webview.CapturedVerifiedPage
 import org.tsuyomi.core.webview.ControlledWebLoginSession
 import org.tsuyomi.shared.sourcecontract.SourceDiagnostic
@@ -242,7 +237,6 @@ private fun VerificationContent(
     onComplete: () -> Unit,
     modifier: Modifier,
 ) {
-    val staticMotion = LocalDisplayEnvironment.current.instantMotion || rememberSystemReducedMotion()
     BackHandler {
         if (webView.canGoBack()) webView.goBack() else onCancel()
     }
@@ -257,59 +251,34 @@ private fun VerificationContent(
                 .testTag("verification-action-dock")
                 .zIndex(2f),
         ) {
-            IconButton(onClick = onCancel) {
-                Icon(
-                    imageVector = TsuyomiIcons.Close,
-                    contentDescription = stringResource(R.string.verification_cancel_action),
+            TsuyomiTonalIconButton(
+                imageVector = TsuyomiIcons.Close,
+                contentDescription = stringResource(R.string.verification_cancel_action),
+                onClick = onCancel,
+            )
+            if (onOpenRequestedPage != null) {
+                TsuyomiTonalIconButton(
+                    imageVector = TsuyomiIcons.Refresh,
+                    contentDescription = verifiedPageOpenLabel,
+                    onClick = onOpenRequestedPage,
+                    enabled = !snapshotWorking,
                 )
             }
-            if (onOpenRequestedPage != null) {
-                IconButton(onClick = onOpenRequestedPage, enabled = !snapshotWorking) {
-                    Icon(
-                        imageVector = TsuyomiIcons.Refresh,
-                        contentDescription = verifiedPageOpenLabel,
-                    )
-                }
-            }
             if (onUseCurrentPage != null) {
-                Button(
+                TsuyomiVerificationAction(
+                    text = stringResource(R.string.verification_use_current_page),
                     onClick = onUseCurrentPage,
-                    enabled = !snapshotWorking,
+                    working = snapshotWorking,
+                    workingText = stringResource(R.string.verification_snapshot_working),
                     modifier = Modifier.testTag("verification-use-current-page"),
-                    contentPadding = VerificationButtonPadding,
-                ) {
-                    if (snapshotWorking && staticMotion) {
-                        Text(
-                            text = stringResource(R.string.verification_snapshot_working),
-                            modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite },
-                        )
-                    } else if (snapshotWorking) {
-                        CircularProgressIndicator(
-                            modifier = Modifier.size(18.dp),
-                            strokeWidth = 2.dp,
-                        )
-                    } else {
-                        Text(stringResource(R.string.verification_use_current_page))
-                    }
-                }
+                )
             }
-            if (snapshotActionAvailable) {
-                FilledTonalButton(
-                    onClick = onComplete,
-                    enabled = !snapshotWorking,
-                    contentPadding = VerificationButtonPadding,
-                ) {
-                    Text(stringResource(R.string.verification_complete_action))
-                }
-            } else {
-                Button(
-                    onClick = onComplete,
-                    enabled = !snapshotWorking,
-                    contentPadding = VerificationButtonPadding,
-                ) {
-                    Text(stringResource(R.string.verification_complete_action))
-                }
-            }
+            TsuyomiVerificationAction(
+                text = stringResource(R.string.verification_complete_action),
+                onClick = onComplete,
+                enabled = !snapshotWorking,
+                tonal = snapshotActionAvailable,
+            )
         }
 
         AndroidView(
@@ -445,7 +414,6 @@ private fun FrozenEInkVerificationContent(
     }
 }
 
-private val VerificationButtonPadding = PaddingValues(horizontal = 12.dp)
 private val VerificationToolbarMaxWidth = 560.dp
 private val VerificationFeedbackMaxWidth = 560.dp
 private val VerificationFeedbackTopOffset = 56.dp

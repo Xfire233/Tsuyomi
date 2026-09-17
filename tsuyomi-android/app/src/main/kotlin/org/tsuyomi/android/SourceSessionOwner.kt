@@ -308,6 +308,11 @@ internal class SourceSessionOwner(
         client.takeIf { activePackage?.let(isPackageTrusted) == true }
     }
 
+    fun hasUntrustedActivePackage(): Boolean = synchronized(lock) {
+        checkOpen()
+        activePackage?.let { !isPackageTrusted(it) } == true
+    }
+
     suspend fun reopen(): SourceSessionOpenResult? {
         val packageInfo = synchronized(lock) {
             checkOpen()
@@ -333,7 +338,7 @@ internal class SourceSessionOwner(
         return true
     }
 
-    private fun closeActiveClient() {
+    fun closeActiveClient() {
         val activeClient = synchronized(lock) {
             checkOpen()
             openGeneration += 1

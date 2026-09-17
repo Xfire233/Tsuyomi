@@ -15,6 +15,7 @@ android {
 dependencies {
     api(project(":core:display"))
     implementation(project(":core:media"))
+    api(project(":shared:model"))
     implementation(libs.androidx.compose.foundation)
     implementation(libs.androidx.compose.material3)
     implementation(libs.androidx.compose.material.icons.extended)

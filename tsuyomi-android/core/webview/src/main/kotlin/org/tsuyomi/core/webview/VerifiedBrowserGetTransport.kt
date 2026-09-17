@@ -22,6 +22,7 @@ import org.json.JSONObject
 import org.json.JSONTokener
 import org.tsuyomi.core.network.HostHttpRequest
 import org.tsuyomi.core.network.HostHttpResponse
+import org.tsuyomi.core.network.HostResponseHeaders
 import org.tsuyomi.core.network.HostHttpTransport
 import org.tsuyomi.core.network.HostNetworkError
 import org.tsuyomi.core.network.HostNetworkException
@@ -98,7 +99,7 @@ class VerifiedBrowserGetTransport(
             return HostHttpResponse(
                 status = 200,
                 finalUrl = request.url,
-                headers = mapOf("content-type" to "text/html; charset=${charsetName(request.decode)}"),
+                headers = HostResponseHeaders.of("content-type" to "text/html; charset=${charsetName(request.decode)}"),
                 bytes = bytes,
             )
         } finally {

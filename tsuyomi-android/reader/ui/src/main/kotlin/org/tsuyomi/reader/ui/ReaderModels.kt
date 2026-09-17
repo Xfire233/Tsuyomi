@@ -88,6 +88,14 @@ data class ReaderSettingsUiState(
     val lineHeight: Float = 1.6f,
     val horizontalMargin: Float = 24f,
     val paragraphSpacing: Float = 12f,
+    val fontFamily: String = "system",
+    val fontWeight: Int = 400,
+    val letterSpacing: Float = 0f,
+    val firstLineIndent: Float = 0f,
+    val verticalMargin: Float = 24f,
+    val textAlignment: String = "start",
+    val foregroundColor: String? = null,
+    val backgroundColor: String? = null,
     val flow: ReaderFlow = ReaderFlow.PAGED,
     val theme: ReaderTheme = ReaderTheme.PAPER,
     val lockPortrait: Boolean = false,
@@ -102,6 +110,14 @@ sealed interface ReaderSettingsAction {
     data class LineHeight(val value: Float) : ReaderSettingsAction
     data class HorizontalMargin(val value: Float) : ReaderSettingsAction
     data class ParagraphSpacing(val value: Float) : ReaderSettingsAction
+    data class FontFamily(val value: String) : ReaderSettingsAction
+    data class FontWeight(val value: Int) : ReaderSettingsAction
+    data class LetterSpacing(val value: Float) : ReaderSettingsAction
+    data class FirstLineIndent(val value: Float) : ReaderSettingsAction
+    data class VerticalMargin(val value: Float) : ReaderSettingsAction
+    data class TextAlignment(val value: String) : ReaderSettingsAction
+    data class ForegroundColor(val value: String?) : ReaderSettingsAction
+    data class BackgroundColor(val value: String?) : ReaderSettingsAction
     data class Flow(val value: ReaderFlow) : ReaderSettingsAction
     data class Theme(val value: ReaderTheme) : ReaderSettingsAction
     data class LockPortrait(val value: Boolean) : ReaderSettingsAction

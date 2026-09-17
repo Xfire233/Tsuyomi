@@ -3,7 +3,7 @@
 
 # `tsuyomi-transfer` v1 boundary
 
-V1 remains an accepted legacy import contract. Current exporters emit [v3](transfer-v2.md); fields added by v2 or v3 are never accepted under a document claiming `version: 1`.
+V1 remains an accepted legacy import contract. Current exporters emit [v4](transfer-v4.md); fields added by v2, v3, or v4 are never accepted under a document claiming `version: 1`.
 
 `tsuyomi-transfer` is a portable, UTF-8 JSON exchange document. It is deliberately readable and never contains cookies, authentication tokens, browser sessions, WebView state, cache files, or device secrets.
 

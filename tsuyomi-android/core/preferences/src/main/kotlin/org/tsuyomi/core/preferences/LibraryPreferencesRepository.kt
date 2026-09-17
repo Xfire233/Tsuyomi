@@ -56,15 +56,26 @@ class LibraryPreferencesRepository(private val dataStore: DataStore<Preferences>
             require(tabPresentations.size <= MaxTabPresentationCount)
             values[TabPresentations] = encodeTabPresentations(tabPresentations)
             if (values[RootMigrationComplete] == true) return@edit
-            val legacyOrder = decodeOrder(values[LegacyShortcutOrder].orEmpty())
-            val rootNodes = legacyOrder.mapNotNull { id ->
-                id.takeIf { it.startsWith("collection:") || it.startsWith("mirror:") }
-            }.distinct().map { id -> LibraryRootNodePreference(id) }
-            val grouping = decodeWebsiteGrouping(values[WebsiteGrouping].orEmpty()).toMutableMap()
-            legacyOrder.mapNotNull(::legacyMirrorFolderSourceId).forEach { sourceId -> grouping[sourceId] = true }
-            values[RootNodes] = encodeRootNodes(rootNodes)
-            values[WebsiteGrouping] = encodeWebsiteGrouping(grouping)
-            values.remove(LegacyShortcutOrder)
+            when (
+                val legacyOrder = decodeLegacyShortcutOrder(
+                    values[LegacyShortcutOrderKey],
+                    MaxStructuralNodeCount,
+                    MaxEncodedItemLength,
+                )
+            ) {
+                LegacyShortcutOrder.Absent -> Unit
+                is LegacyShortcutOrder.Valid -> {
+                    val rootNodes = legacyOrder.ids.mapNotNull { id ->
+                        id.takeIf { it.startsWith("collection:") || it.startsWith("mirror:") }
+                    }.map { id -> LibraryRootNodePreference(id) }
+                    val grouping = decodeWebsiteGrouping(values[WebsiteGrouping].orEmpty()).toMutableMap()
+                    legacyOrder.ids.mapNotNull(::legacyMirrorFolderSourceId).forEach { sourceId -> grouping[sourceId] = true }
+                    values[RootNodes] = encodeRootNodes(rootNodes)
+                    values[WebsiteGrouping] = encodeWebsiteGrouping(grouping)
+                }
+                LegacyShortcutOrder.Invalid -> return@edit
+            }
+            values.remove(LegacyShortcutOrderKey)
             values.remove(LegacyShortcutLocked)
             values[RootMigrationComplete] = true
         }
@@ -114,7 +125,7 @@ class LibraryPreferencesRepository(private val dataStore: DataStore<Preferences>
         const val MaxEncodedItemLength = 2304
         const val MaxTabKeyLength = 96
         const val MaxTabPresentationCount = 12
-        val LegacyShortcutOrder = stringPreferencesKey("library_shortcut_order")
+        val LegacyShortcutOrderKey = stringPreferencesKey("library_shortcut_order")
         val LegacyShortcutLocked = booleanPreferencesKey("library_shortcut_locked")
         val RootNodes = stringPreferencesKey("library_root_nodes_v1")
         val TabPresentations = stringPreferencesKey("library_tab_presentations_v1")
@@ -122,6 +133,12 @@ class LibraryPreferencesRepository(private val dataStore: DataStore<Preferences>
         val WebsiteGrouping = stringPreferencesKey("library_website_grouping")
         val ShowUpdatesOnly = booleanPreferencesKey("library_show_updates_only")
     }
+}
+
+private sealed interface LegacyShortcutOrder {
+    object Absent : LegacyShortcutOrder
+    data class Valid(val ids: List<String>) : LegacyShortcutOrder
+    object Invalid : LegacyShortcutOrder
 }
 
 private fun encodeOrder(order: List<String>): String = buildString {
@@ -148,6 +165,32 @@ private fun decodeOrder(encoded: String): List<String> {
         cursor = end
     }
     return result.takeIf { cursor == encoded.length && result.distinct().size == result.size }.orEmpty()
+}
+
+private fun decodeLegacyShortcutOrder(
+    encoded: String?,
+    maxRecords: Int,
+    maxItemLength: Int,
+): LegacyShortcutOrder {
+    if (encoded == null) return LegacyShortcutOrder.Absent
+    val result = ArrayList<String>()
+    val seen = HashSet<String>()
+    var cursor = 0
+    while (cursor < encoded.length) {
+        if (result.size >= maxRecords) return LegacyShortcutOrder.Invalid
+        val separator = encoded.indexOf(':', cursor)
+        if (separator <= cursor) return LegacyShortcutOrder.Invalid
+        val length = encoded.substring(cursor, separator).toIntOrNull()
+            ?.takeIf { it in 0..maxItemLength }
+            ?: return LegacyShortcutOrder.Invalid
+        val start = separator + 1
+        if (length > encoded.length - start) return LegacyShortcutOrder.Invalid
+        val id = encoded.substring(start, start + length)
+        if (id.isBlank() || !seen.add(id)) return LegacyShortcutOrder.Invalid
+        result.add(id)
+        cursor = start + length
+    }
+    return LegacyShortcutOrder.Valid(result)
 }
 
 private fun encodeRootNodes(nodes: List<LibraryRootNodePreference>): String = encodeOrder(

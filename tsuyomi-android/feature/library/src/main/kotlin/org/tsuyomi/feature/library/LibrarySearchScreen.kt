@@ -21,7 +21,6 @@ import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.ListItem
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -40,13 +39,14 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.text.Normalizer
 import java.util.Locale
-import org.tsuyomi.core.database.CollectionKind
-import org.tsuyomi.core.database.LibraryCollection
-import org.tsuyomi.core.database.LibraryEntry
+import org.tsuyomi.shared.librarydomain.CollectionKind
+import org.tsuyomi.shared.librarydomain.LibraryCollection
+import org.tsuyomi.shared.librarydomain.LibraryEntry
 import org.tsuyomi.core.media.api.CoverUiState
 import org.tsuyomi.core.media.api.FallbackSpec
 import org.tsuyomi.core.ui.components.StateView
 import org.tsuyomi.core.ui.components.TsuyomiIconButton
+import org.tsuyomi.core.ui.components.TsuyomiTextField
 import org.tsuyomi.core.ui.components.TsuyomiStateKind
 import org.tsuyomi.core.ui.icons.TsuyomiIcons
 import org.tsuyomi.core.ui.theme.TsuyomiSpacing
@@ -152,13 +152,13 @@ fun LibrarySearchScreen(
     }
 
     Column(modifier.fillMaxSize()) {
-        OutlinedTextField(
+        TsuyomiTextField(
             value = query,
             onValueChange = { value -> onQueryChange(value.take(MaxQueryLength)) },
             modifier = Modifier
                 .fillMaxWidth()
                 .padding(horizontal = TsuyomiSpacing.Md, vertical = TsuyomiSpacing.Sm),
-            label = { Text(stringResource(R.string.library_search_query_label)) },
+            label = stringResource(R.string.library_search_query_label),
             trailingIcon = {
                 TsuyomiIconButton(
                     imageVector = TsuyomiIcons.Search,
@@ -167,9 +167,7 @@ fun LibrarySearchScreen(
                     onClick = onSearch,
                 )
             },
-            supportingText = {
-                Text(stringResource(R.string.library_search_query_count, query.length, MaxQueryLength))
-            },
+            supportingText = stringResource(R.string.library_search_query_count, query.length, MaxQueryLength),
             singleLine = true,
             keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
             keyboardActions = KeyboardActions(onSearch = { if (query.isNotBlank()) onSearch() }),

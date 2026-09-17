@@ -2,6 +2,8 @@
 # SPDX-License-Identifier: Apache-2.0
 
 name: protocol-quality
+run-name: >-
+  ${{ github.event_name == 'pull_request' && format('Protocol PR #{0} admission', github.event.pull_request.number) || 'Protocol main health' }}
 
 on:
   pull_request:

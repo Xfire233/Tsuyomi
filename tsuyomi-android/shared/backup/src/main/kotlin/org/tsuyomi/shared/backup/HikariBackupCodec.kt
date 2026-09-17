@@ -35,9 +35,8 @@ internal object HikariBackupCodec {
         val progress = parseProgress(payload.obj("readingData"), createdAt, warnings)
         val books = parseBooks(payload.obj("bookshelf"), createdAt, progress, shelves, warnings)
         val reader = parseReaderPreferences(payload.obj("readerSettings"), warnings)
-        val manualEInk = payload.obj("appSettings")?.let { settings ->
-            settings.bool("browsingEInkMode") == true || payload.obj("readerSettings")?.bool("readerEInkMode") == true
-        } == true
+        val manualEInk = payload.obj("appSettings")?.bool("browsingEInkMode") == true ||
+            payload.obj("readerSettings")?.bool("readerEInkMode") == true
         val search = parseSearchHistory(payload.obj("readingData"), createdAt, warnings)
         val browsing = parseBrowsingHistory(payload.obj("readingData"), createdAt, warnings)
         val (smartCollections, subscriptionDrafts) = parseSmartSettings(payload.obj("appSettings"), warnings)

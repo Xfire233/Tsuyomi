@@ -17,9 +17,17 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.semantics.SemanticsActions
+import androidx.compose.ui.test.DeviceConfigurationOverride
+import androidx.compose.ui.test.ExperimentalTestApi
+import androidx.compose.ui.test.ForcedSize
+import androidx.compose.ui.test.onRoot
+import androidx.compose.ui.unit.DpSize
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.filterToOne
 import androidx.compose.ui.test.hasClickAction
+import androidx.compose.ui.test.hasAnyAncestor
+import androidx.compose.ui.test.hasTestTag
+import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onAllNodesWithTag
@@ -41,20 +49,23 @@ import kotlin.math.abs
 import org.junit.Test
 import org.junit.runner.RunWith
 import java.time.Instant
-import org.tsuyomi.core.display.ColorSchemePreference
+import org.tsuyomi.core.preferences.ColorSchemePreference
 import org.tsuyomi.core.display.DisplayDecisionReason
 import org.tsuyomi.core.display.DisplayEnvironment
 import org.tsuyomi.core.display.DisplayEnvironmentProvider
-import org.tsuyomi.core.display.DisplayPreference
-import org.tsuyomi.core.display.DisplayPreferences
+import org.tsuyomi.core.preferences.DisplayPreference
+import org.tsuyomi.core.preferences.DisplayPreferences
 import org.tsuyomi.core.display.DisplayProfile
 import org.tsuyomi.core.display.MotionPolicy
 import org.tsuyomi.core.media.api.CoverUiState
-import org.tsuyomi.core.database.LibraryBook
-import org.tsuyomi.core.database.LibraryEntry
+import org.tsuyomi.shared.librarydomain.LibraryBook
+import org.tsuyomi.shared.librarydomain.LibraryEntry
 import org.tsuyomi.core.media.api.FallbackSpec
 import org.tsuyomi.core.ui.icons.TsuyomiIcons
 import org.tsuyomi.core.ui.theme.TsuyomiTheme
+import org.tsuyomi.core.ui.components.CoverCardPresentationProvider
+import org.tsuyomi.shared.model.CoverCardPresentation
+
 import org.tsuyomi.shared.model.BookIdentity
 import androidx.compose.ui.unit.dp
 import org.tsuyomi.shared.sourcecontract.RemoteTarget
@@ -65,10 +76,12 @@ class RemoteLibraryScreenInstrumentedTest {
     @get:Rule
     val composeRule = createComposeRule()
 
+    @OptIn(ExperimentalTestApi::class)
     @Test
     fun groupedMirrorUsesFolderFirstSharedLibrarySurfaceWithoutPinAction() {
         var openedTarget: String? = null
         composeRule.setContent {
+            DeviceConfigurationOverride(DeviceConfigurationOverride.ForcedSize(DpSize(840.dp, 900.dp))) {
             DisplayEnvironmentProvider(environment) {
                 TsuyomiTheme(environment) {
                     RemoteLibraryScreen(
@@ -94,11 +107,16 @@ class RemoteLibraryScreenInstrumentedTest {
                     )
                 }
             }
+            }
         }
 
         composeRule.onNodeWithTag("remote-library-folder-favorites").assertIsDisplayed().performClick()
         assertEquals("favorites", openedTarget)
         composeRule.onNodeWithTag("library-book-$SourceId-1").assertIsDisplayed()
+        val viewportWidth = composeRule.onRoot().fetchSemanticsNode().boundsInRoot.width
+        val cardWidth = composeRule.onNodeWithTag("library-book-$SourceId-1").fetchSemanticsNode().boundsInRoot.width
+        val cellFraction = cardWidth / viewportWidth
+        assertTrue("Wide grid cell occupies $cellFraction of the viewport", cellFraction in (150f / 840f)..(200f / 840f))
         composeRule.onNodeWithContentDescription("更多操作").performClick()
         composeRule.onNodeWithText("固定到快捷书架").assertDoesNotExist()
         composeRule.onNodeWithText("全部复制到本地书架").assertIsDisplayed()
@@ -352,10 +370,9 @@ class RemoteLibraryScreenInstrumentedTest {
             }
         }
 
-        composeRule.onNodeWithTag("library-drag-preview-list-content").assertIsDisplayed()
         val coverBounds = composeRule.onNodeWithTag("library-drag-preview-list-cover", useUnmergedTree = true)
             .fetchSemanticsNode().boundsInRoot
-        assertTrue(kotlin.math.abs(coverBounds.width / coverBounds.height - 0.75f) < 0.02f)
+        assertTrue(kotlin.math.abs(coverBounds.width / coverBounds.height - 5f / 7f) < 0.02f)
         composeRule.onNodeWithText("快捷书籍").assertIsDisplayed()
         composeRule.onNodeWithText("测试作者").assertIsDisplayed()
         composeRule.onNodeWithText("未开始").assertIsDisplayed()
@@ -411,8 +428,13 @@ class RemoteLibraryScreenInstrumentedTest {
     }
 
     @Test
-    fun mirrorGridCardKeepsBookGeometryAndBottomMetadataSlot() {
+    fun mirrorGridCardsAndDragPreviewFollowTheSelectedPresentation() {
+
         val coordinator = LibraryDragCoordinator()
+        val presentation = mutableStateOf(CoverCardPresentation.STANDARD)
+        val drops = mutableListOf<LibraryDropDestination>()
+        coordinator.onDrop = { _, destination -> drops += destination }
+        var mirrorVisible by mutableStateOf(true)
         val mirror = LibraryMirrorShortcut(
             sourceId = SourceId,
             targetId = null,
@@ -422,8 +444,11 @@ class RemoteLibraryScreenInstrumentedTest {
         )
         composeRule.setContent {
             DisplayEnvironmentProvider(environment) {
+                CoverCardPresentationProvider(presentation.value) {
+
                 TsuyomiTheme(environment) {
                     Column(Modifier.width(180.dp)) {
+                        if (mirrorVisible) {
                         LibraryRootNodeGridCard(
                             item = LibraryRootItem.Mirror(mirror),
                             index = 0,
@@ -436,6 +461,7 @@ class RemoteLibraryScreenInstrumentedTest {
                             onLongPressCollection = {},
                             onToggleCollectionSelection = {},
                         )
+                        }
                         LibraryBookGridCard(
                             entry = shortcutEntry,
                             update = null,
@@ -453,25 +479,84 @@ class RemoteLibraryScreenInstrumentedTest {
                             onToggleBookSelection = {},
                             onIgnoreUpdate = {},
                         )
+                        LibraryBookDragPreview(
+                            entries = listOf(shortcutEntry.copy(book = shortcutEntry.book.copy(title = "拖拽预览书籍"))),
+                            layout = LibraryLayout.GRID,
+                            coverState = {
+                                CoverUiState.Fallback(FallbackSpec(it.book.title, it.book.identity.sourceId))
+                            },
+                        )
+
                     }
                 }
+                }
+
             }
         }
+
+        val standardRootBounds = composeRule.onNodeWithTag("library-root-node-${libraryMirrorRootId(SourceId)}")
+            .fetchSemanticsNode().boundsInRoot
+        val standardBookBounds = composeRule.onNodeWithTag("library-book-$SourceId-shortcut-book")
+            .fetchSemanticsNode().boundsInRoot
+        val standardDragPreviewBounds = composeRule.onNodeWithTag("library-drag-preview-grid-content")
+            .fetchSemanticsNode().boundsInRoot
+        assertTrue(abs(standardRootBounds.width / standardRootBounds.height - 5f / 7f) < 0.02f)
+        assertTrue(abs(standardBookBounds.width / standardBookBounds.height - 5f / 7f) < 0.02f)
+        assertTrue(abs(standardDragPreviewBounds.width / standardDragPreviewBounds.height - 5f / 7f) < 0.02f)
+
+        composeRule.runOnIdle { presentation.value = CoverCardPresentation.WIDE }
+        composeRule.waitForIdle()
 
         val rootBounds = composeRule.onNodeWithTag("library-root-node-${libraryMirrorRootId(SourceId)}")
             .fetchSemanticsNode().boundsInRoot
         val bookBounds = composeRule.onNodeWithTag("library-book-$SourceId-shortcut-book")
             .fetchSemanticsNode().boundsInRoot
-        val rootMetadataBounds = composeRule.onNodeWithTag("library-root-node-metadata-${libraryMirrorRootId(SourceId)}")
+        val rootStatusBounds = composeRule.onNodeWithText("网站收藏 · 4 本", useUnmergedTree = true)
             .fetchSemanticsNode().boundsInRoot
-        val bookMetadataBounds = composeRule.onNodeWithTag("library-book-metadata-$SourceId-shortcut-book")
+        val bookTitleBounds = composeRule.onNodeWithText("快捷书籍", useUnmergedTree = true)
+            .fetchSemanticsNode().boundsInRoot
+        val bookStatusBounds = composeRule.onNode(
+            hasText("未开始") and hasAnyAncestor(hasTestTag("library-book-$SourceId-shortcut-book")),
+            useUnmergedTree = true,
+        ).fetchSemanticsNode().boundsInRoot
+        val dragPreviewBounds = composeRule.onNodeWithTag("library-drag-preview-grid-content")
             .fetchSemanticsNode().boundsInRoot
 
         assertTrue(abs(rootBounds.height - bookBounds.height) <= 1f)
         assertTrue(abs(rootBounds.width - bookBounds.width) <= 1f)
-        assertTrue(rootMetadataBounds.bottom <= rootBounds.bottom)
-        assertTrue(abs((rootBounds.bottom - rootMetadataBounds.bottom) - (bookBounds.bottom - bookMetadataBounds.bottom)) <= 1f)
+        assertTrue(abs(rootBounds.width / rootBounds.height - 16f / 9f) < 0.02f)
+        assertTrue(abs(bookBounds.width / bookBounds.height - 16f / 9f) < 0.02f)
+        assertTrue(abs(dragPreviewBounds.width / dragPreviewBounds.height - 16f / 9f) < 0.02f)
+        assertTrue(rootStatusBounds.bottom <= rootBounds.bottom)
+        assertTrue(abs((rootBounds.bottom - rootStatusBounds.bottom) - (bookBounds.bottom - bookStatusBounds.bottom)) <= 1f)
+        assertTrue(bookBounds.top <= bookTitleBounds.top)
+        assertTrue(bookTitleBounds.bottom <= bookStatusBounds.top)
+        assertTrue(bookStatusBounds.bottom <= bookBounds.bottom)
         composeRule.onNodeWithText("网站收藏 · 4 本").assertIsDisplayed()
+        val mirrorWindow = composeRule.onNodeWithTag("library-root-node-${libraryMirrorRootId(SourceId)}")
+            .fetchSemanticsNode().boundsInWindow
+        val bookWindow = composeRule.onNodeWithTag("library-book-$SourceId-shortcut-book")
+            .fetchSemanticsNode().boundsInWindow
+        composeRule.runOnIdle {
+            coordinator.registerSource("mounted-card-drag", bookWindow)
+            coordinator.start(
+                subjectKey = "mounted-card-drag",
+                localPosition = Offset.Zero,
+                payload = LibraryDragPayload.Books(setOf(shortcutEntry.book.identity)),
+                canRemove = false,
+                libraryReorderSource = false,
+            )
+            coordinator.moveBy(mirrorWindow.center - bookWindow.topLeft)
+            assertEquals(LibraryDropDestination.RemoteMirror(SourceId, null, mirror.label), coordinator.externalDestination)
+            mirrorVisible = false
+        }
+        composeRule.waitForIdle()
+        composeRule.onNodeWithTag("library-root-node-${libraryMirrorRootId(SourceId)}").assertDoesNotExist()
+        composeRule.runOnIdle {
+            assertEquals(null, coordinator.externalDestination)
+            coordinator.finish(minimumDragDistance = 0f)
+            assertEquals(emptyList<LibraryDropDestination>(), drops)
+        }
     }
 
     private companion object {

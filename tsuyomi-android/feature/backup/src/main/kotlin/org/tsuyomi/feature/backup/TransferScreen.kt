@@ -11,10 +11,9 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material3.AlertDialog
+import org.tsuyomi.core.ui.components.TsuyomiDialog
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -202,22 +201,16 @@ fun TransferScreen(
         }
     }
     if (resetVisible) {
-        AlertDialog(
+        TsuyomiDialog(
             onDismissRequest = { resetVisible = false },
-            title = { Text(stringResource(R.string.transfer_reset_preferences_dialog_title)) },
-            text = { Text(stringResource(R.string.transfer_reset_preferences_dialog_message)) },
-            confirmButton = {
-                TextButton(
-                    onClick = {
-                        resetVisible = false
-                        onResetInterfacePreferences()
-                    },
-                ) { Text(stringResource(R.string.transfer_reset_preferences_confirm)) }
-            },
-            dismissButton = {
-                TextButton(onClick = { resetVisible = false }) {
-                    Text(stringResource(R.string.transfer_reset_preferences_cancel))
-                }
+            title = stringResource(R.string.transfer_reset_preferences_dialog_title),
+            text = stringResource(R.string.transfer_reset_preferences_dialog_message),
+            confirmLabel = stringResource(R.string.transfer_reset_preferences_confirm),
+            dismissLabel = stringResource(R.string.transfer_reset_preferences_cancel),
+            destructive = true,
+            onConfirm = {
+                resetVisible = false
+                onResetInterfacePreferences()
             },
         )
     }

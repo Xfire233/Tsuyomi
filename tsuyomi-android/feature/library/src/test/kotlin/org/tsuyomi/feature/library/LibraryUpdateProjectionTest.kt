@@ -7,9 +7,9 @@ package org.tsuyomi.feature.library
 import java.time.Instant
 import org.junit.Assert.assertEquals
 import org.junit.Test
-import org.tsuyomi.core.database.LibraryBook
-import org.tsuyomi.core.database.LibraryEntry
-import org.tsuyomi.core.database.ReadingProgress
+import org.tsuyomi.shared.librarydomain.LibraryBook
+import org.tsuyomi.shared.librarydomain.LibraryEntry
+import org.tsuyomi.shared.librarydomain.ReadingProgress
 import org.tsuyomi.shared.librarydomain.UnresolvedUpdate
 import org.tsuyomi.shared.locator.DocumentIdentity
 import org.tsuyomi.shared.locator.ReaderLocator

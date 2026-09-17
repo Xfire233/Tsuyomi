@@ -18,9 +18,34 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.tsuyomi.feature.browse.BrowseUiState
+import org.tsuyomi.feature.browse.SourceHomeViewState
 
 @RunWith(AndroidJUnit4::class)
 internal class SourceHomeSwitchInstrumentedTest : SourceFlowInstrumentedTestFixture() {
+
+    @Test
+    fun nondefault_source_selection_survives_runtime_recreation() {
+        val first = runBlocking { installFixture() }
+        val installer = SourceInstallController(context, library)
+        val other = runBlocking {
+            installer.restoreInstalled()
+            installSignedSwitchOverlay(installer, "source-switch-home")
+        }
+        val initial = requireNotNull(installer.activePackage)
+        val selected = if (initial.manifest.sourceId == first.manifest.sourceId) other else first
+
+        runBlocking {
+            val activated = requireNotNull(installer.activateInstalledSource(selected.manifest.sourceId.value))
+            assertEquals(selected.manifest.sourceId, activated.manifest.sourceId)
+
+            val recreatedRuntime = SourceInstallController(context, library)
+            recreatedRuntime.restoreInstalled()
+            assertEquals(selected.manifest.sourceId, recreatedRuntime.activePackage?.manifest?.sourceId)
+
+            installer.activateInstalledSource(initial.manifest.sourceId.value)
+        }
+    }
+
     @Test
     fun uninstallLeavesBrowseWithoutADeadSourceBackEntryAndReinstallCanOpenAgain() = runBlocking(Dispatchers.Main) {
         val first = installFixture()
@@ -41,6 +66,59 @@ internal class SourceHomeSwitchInstrumentedTest : SourceFlowInstrumentedTestFixt
             assertEquals(Routes.SourceHome, navController.currentDestination?.route)
             assertTrue(navController.popBackStack())
             assertEquals(Routes.Browse, navController.currentDestination?.route)
+        }
+    }
+
+    @Test
+    fun cached_home_survives_library_root_round_trip_without_reopening_source_session() = runBlocking(Dispatchers.Main) {
+        val packageInfo = installFixture()
+        val installer = SourceInstallController(context, library)
+        installer.restoreInstalled()
+        val openedSourceIds = mutableListOf<String>()
+        controller { candidate ->
+            openedSourceIds += candidate.manifest.sourceId.value
+            FakeSession()
+        }.use { flow ->
+            flow.open(packageInfo)
+            flow.home.acceptVerifiedPage(
+                org.tsuyomi.shared.sourcecontract.SourceHomePage(
+                    title = "缓存来源首页",
+                    schemaVersion = 1,
+                    filters = emptyList(),
+                    selectedFilters = emptyMap(),
+                    sections = listOf(org.tsuyomi.shared.sourcecontract.SourceHomeSection(
+                        "cached", "缓存书籍", (1..10).map { id ->
+                            org.tsuyomi.shared.sourcecontract.SourceBookSummary(
+                                org.tsuyomi.shared.model.BookIdentity(packageInfo.manifest.sourceId.value, id.toString()),
+                                "书籍 $id", null, null, "https://www.wenku8.net/book/$id.htm",
+                            )
+                        },
+                    )),
+                    nextCursor = null,
+                    complete = true,
+                ),
+            )
+            val cached = flow.homeState as SourceHomeViewState.Content
+            val cachedPage = requireNotNull(cached.activePageState)
+            flow.home.updateScrollPosition(cached.selectedPrimary, cachedPage.queryKey, index = 7, offset = 14)
+
+            val navController = navigationController()
+            routeOwner(installer, flow, navController).navigateToSourceHome()
+
+            val restored = flow.homeState as SourceHomeViewState.Content
+            assertEquals("缓存来源首页", restored.activePage?.title)
+            assertEquals(7, restored.activePageState?.firstVisibleItemIndex)
+            assertEquals(14, restored.activePageState?.firstVisibleItemScrollOffset)
+            assertEquals(listOf(packageInfo.manifest.sourceId.value), openedSourceIds)
+            assertEquals(Routes.SourceHome, navController.currentDestination?.route)
+            navController.navigate(Routes.Library)
+            assertEquals(Routes.Library, navController.currentDestination?.route)
+            routeOwner(installer, flow, navController).navigateToSourceHome()
+            val reentered = flow.homeState as SourceHomeViewState.Content
+            assertEquals("缓存来源首页", reentered.activePage?.title)
+            assertEquals(7, reentered.activePageState?.firstVisibleItemIndex)
+            assertEquals(14, reentered.activePageState?.firstVisibleItemScrollOffset)
+            assertEquals(listOf(packageInfo.manifest.sourceId.value), openedSourceIds)
         }
     }
 
@@ -237,6 +315,7 @@ internal class SourceHomeSwitchInstrumentedTest : SourceFlowInstrumentedTestFixt
     ) = SourceRouteOwner(
         installer = installer,
         flow = flow,
+        coverCache = SourceCoverCache(context),
         navController = navController,
         requestImportAction = {},
         library = library,
@@ -247,6 +326,7 @@ internal class SourceHomeSwitchInstrumentedTest : SourceFlowInstrumentedTestFixt
         navigatorProvider.addNavigator(ComposeNavigator())
         graph = createGraph(startDestination = Routes.Browse) {
             composable(Routes.Browse) {}
+            composable(Routes.Library) {}
             composable(Routes.SourceHome) {}
             composable(Routes.Search) {}
         }

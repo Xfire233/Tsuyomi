@@ -28,13 +28,14 @@ import androidx.core.view.WindowCompat
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import java.util.concurrent.CancellationException
 import kotlinx.coroutines.launch
-import org.tsuyomi.core.display.ColorSchemePreference
 import org.tsuyomi.core.display.DisplayController
 import org.tsuyomi.core.display.DisplayEnvironment
 import org.tsuyomi.core.display.DisplayEnvironmentProvider
 import org.tsuyomi.core.display.DisplayEnvironmentResolver
 import org.tsuyomi.core.display.DisplaySystemState
-import org.tsuyomi.core.display.DisplayPreference
+import org.tsuyomi.core.preferences.ColorSchemePreference
+import org.tsuyomi.core.preferences.DisplayPreference
+import org.tsuyomi.core.ui.components.CoverCardPresentationProvider
 import org.tsuyomi.core.ui.theme.TsuyomiBootScreen
 import org.tsuyomi.core.ui.theme.TsuyomiTheme
 import org.tsuyomi.core.ui.theme.rememberSystemReducedMotion
@@ -42,6 +43,7 @@ import org.tsuyomi.feature.settings.DisplaySettingsActions
 import org.tsuyomi.feature.settings.DisplaySettingsScreen
 import org.tsuyomi.feature.settings.DisplaySettingsUiState
 import org.tsuyomi.feature.settings.DisplayWriteFailure
+import org.tsuyomi.shared.model.CoverCardPresentation
 
 @Composable
 internal fun TsuyomiApplicationRoot(
@@ -82,11 +84,14 @@ internal fun TsuyomiApplicationRoot(
     )
 
     DisplayEnvironmentProvider(environment) {
-        TsuyomiTheme {
-            SystemBarPolicy(environment)
-            TsuyomiApp(environment, controller, updateNavigationSignal)
+        CoverCardPresentationProvider(currentPreferences.coverCardPresentation) {
+            TsuyomiTheme {
+                SystemBarPolicy(environment)
+                TsuyomiApp(environment, controller, updateNavigationSignal)
+            }
         }
     }
+
 }
 
 @Composable
@@ -123,6 +128,10 @@ internal fun DisplaySettingsRoute(
             key.startsWith("dynamic:") -> submit(key) {
                 controller.setDynamicColorEnabled(key.substringAfter(':').toBooleanStrict())
             }
+            key.startsWith("cover:") -> submit(key) {
+                controller.setCoverCardPresentation(CoverCardPresentation.valueOf(key.substringAfter(':')))
+            }
+
         }
     }
 
@@ -140,6 +149,9 @@ internal fun DisplaySettingsRoute(
             },
             onDynamicColorEnabledChange = { enabled ->
                 submit("dynamic:$enabled") { controller.setDynamicColorEnabled(enabled) }
+            },
+            onCoverCardPresentationChange = { presentation ->
+                submit("cover:${presentation.name}") { controller.setCoverCardPresentation(presentation) }
             },
             onRefreshNow = controller::requestRedraw,
             onRetryWrite = ::retry,

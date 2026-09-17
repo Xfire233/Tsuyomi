@@ -1,0 +1,29 @@
+{
+  "format": "tsuyomi-transfer",
+  "version": 5,
+  "createdAt": "2026-09-14T00:00:00Z",
+  "library": [
+    {
+      "identity": {
+        "sourceId": "org.tsuyomi.wenku8",
+        "remoteBookId": "book-42"
+      },
+      "title": "Foreign locator document",
+      "localPin": true,
+      "updatedAt": "2026-09-14T00:00:00Z",
+      "bookmarks": [
+        {
+          "document": {
+            "sourceId": "org.tsuyomi.other",
+            "remoteBookId": "book-42",
+            "contentId": "chapter-7"
+          },
+          "blockId": "paragraph-1",
+          "characterOffset": 12,
+          "capturedAt": "2026-09-14T00:00:00Z"
+        }
+      ]
+    }
+  ],
+  "shelves": []
+}

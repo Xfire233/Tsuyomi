@@ -4,26 +4,19 @@
  */
 package org.tsuyomi.feature.library
 
-import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.animation.core.snap
-import androidx.compose.animation.core.tween
-import androidx.compose.animation.fadeIn
-import androidx.compose.animation.fadeOut
-import androidx.compose.animation.scaleIn
-import androidx.compose.animation.scaleOut
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.material3.Icon
 import androidx.compose.material3.ListItem
 import androidx.compose.material3.ListItemDefaults
@@ -33,7 +26,6 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.LocalDensity
@@ -45,13 +37,14 @@ import androidx.compose.ui.unit.DpSize
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import kotlin.math.roundToInt
-import org.tsuyomi.core.database.LibraryEntry
-import org.tsuyomi.core.display.LocalDisplayEnvironment
 import org.tsuyomi.core.media.api.CoverUiState
 import org.tsuyomi.core.ui.components.CoverImage
+import org.tsuyomi.core.ui.components.TsuyomiCoverCardContent
+import org.tsuyomi.core.ui.components.TsuyomiVisibility
+import org.tsuyomi.core.ui.components.coverCardHeight
+import org.tsuyomi.core.ui.components.currentCoverCardLayout
 import org.tsuyomi.core.ui.icons.TsuyomiIcons
-import org.tsuyomi.core.ui.theme.TsuyomiMotion
-import org.tsuyomi.core.ui.theme.instantMotion
+import org.tsuyomi.shared.librarydomain.LibraryEntry
 
 @Composable
 internal fun LibraryDragVisualOverlay(
@@ -63,18 +56,14 @@ internal fun LibraryDragVisualOverlay(
     showRemoveTarget: Boolean = true,
 ) {
     val payload = coordinator.activePayload
-    val instant = LocalDisplayEnvironment.current.instantMotion
-    AnimatedVisibility(
+    TsuyomiVisibility(
         visible = payload != null,
         modifier = modifier.testTag("library-drag-overlay").semantics { hideFromAccessibility() },
-        enter = fadeIn(if (instant) snap() else tween(TsuyomiMotion.SWITCH_DURATION_MS)) +
-            scaleIn(if (instant) snap() else tween(TsuyomiMotion.SWITCH_DURATION_MS), initialScale = 0.96f),
-        exit = fadeOut(if (instant) snap() else tween(TsuyomiMotion.SWITCH_DURATION_MS)) +
-            scaleOut(if (instant) snap() else tween(TsuyomiMotion.SWITCH_DURATION_MS), targetScale = 0.96f),
     ) {
         Box(Modifier.fillMaxSize()) {
             payload?.let { active ->
                 val previewSize = dragPreviewSize(active, layout)
+
                 val density = LocalDensity.current
                 val host = coordinator.hostTopLeft()
                 val previewWidthPx = with(density) { previewSize.width.toPx() }
@@ -128,14 +117,24 @@ internal fun LibraryDragVisualOverlay(
     }
 }
 
-internal fun dragPreviewSize(payload: LibraryDragPayload, layout: LibraryLayout): DpSize = when (payload) {
+private val GridDragPreviewWidth = 200.dp
+
+@Composable
+internal fun dragPreviewSize(
+    payload: LibraryDragPayload,
+    layout: LibraryLayout,
+): DpSize = when (payload) {
     is LibraryDragPayload.Shortcut -> DpSize(216.dp, 64.dp)
     is LibraryDragPayload.Books -> when (layout) {
-        LibraryLayout.GRID -> DpSize(132.dp, 176.dp)
+        LibraryLayout.GRID -> DpSize(
+            GridDragPreviewWidth,
+            coverCardHeight(GridDragPreviewWidth),
+        )
         LibraryLayout.LIST -> DpSize(328.dp, 144.dp)
         LibraryLayout.COMPACT -> DpSize(320.dp, 64.dp)
     }
 }
+
 
 @Composable
 internal fun LibraryBookDragPreview(
@@ -146,37 +145,24 @@ internal fun LibraryBookDragPreview(
     val lead = entries.firstOrNull() ?: return
     when (layout) {
         LibraryLayout.GRID -> Surface(
-            modifier = Modifier.size(width = 132.dp, height = 176.dp).testTag("library-drag-preview-grid-content"),
+            modifier = Modifier
+                .width(GridDragPreviewWidth)
+                .testTag("library-drag-preview-grid-content"),
             shape = MaterialTheme.shapes.medium,
             color = MaterialTheme.colorScheme.surfaceContainerHigh,
             tonalElevation = 8.dp,
             shadowElevation = 10.dp,
         ) {
-            Box {
-                CoverImage(coverState(lead), modifier = Modifier.fillMaxSize())
-                Column(
-                    Modifier.align(Alignment.BottomCenter).fillMaxWidth()
-                        .background(Brush.verticalGradient(listOf(Color.Transparent, Color.Black.copy(alpha = 0.86f))))
-                        .padding(start = 8.dp, top = 28.dp, end = 8.dp, bottom = 6.dp),
-                ) {
-                    Text(
-                        lead.book.title,
-                        maxLines = 2,
-                        overflow = TextOverflow.Ellipsis,
-                        style = MaterialTheme.typography.titleSmall,
-                        color = Color.White,
-                    )
-                    Text(
-                        dragPreviewStatus(lead),
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                        style = MaterialTheme.typography.labelMedium,
-                        color = Color.White.copy(alpha = 0.9f),
-                    )
-                }
-                DragBatchBadge(entries.size, Modifier.align(Alignment.TopEnd).padding(6.dp))
-            }
+            TsuyomiCoverCardContent(
+                title = lead.book.title,
+                supportingText = dragPreviewStatus(lead),
+                cover = { CoverImage(coverState(lead), modifier = Modifier.fillMaxSize()) },
+                artworkOverlay = {
+                    DragBatchBadge(entries.size, Modifier.align(Alignment.TopEnd).padding(6.dp))
+                },
+            )
         }
+
         LibraryLayout.LIST -> Surface(
             modifier = Modifier.size(width = 328.dp, height = 144.dp).testTag("library-drag-preview-list-content"),
             shape = MaterialTheme.shapes.medium,
@@ -193,7 +179,8 @@ internal fun LibraryBookDragPreview(
                 leadingContent = {
                     CoverImage(
                         coverState(lead),
-                        modifier = Modifier.size(width = 84.dp, height = 112.dp)
+                        modifier = Modifier.height(112.dp)
+                            .aspectRatio(currentCoverCardLayout().leadingArtworkAspectRatio)
                             .testTag("library-drag-preview-list-cover"),
                     )
                 },
@@ -229,37 +216,6 @@ internal fun LibraryBookDragPreview(
     }
 }
 
-@Composable
-internal fun ShortcutBookDragPreview(
-    entry: LibraryEntry,
-    coverState: @Composable (LibraryEntry) -> CoverUiState,
-) {
-    Surface(
-        modifier = Modifier.size(width = 96.dp, height = 128.dp)
-            .testTag("library-shortcut-book-drag-preview-content"),
-        shape = MaterialTheme.shapes.medium,
-        color = MaterialTheme.colorScheme.surfaceContainerHigh,
-        tonalElevation = 8.dp,
-        shadowElevation = 10.dp,
-    ) {
-        Box {
-            CoverImage(coverState(entry), modifier = Modifier.fillMaxSize())
-            Column(
-                modifier = Modifier.align(Alignment.BottomCenter).fillMaxWidth()
-                    .background(Brush.verticalGradient(listOf(Color.Transparent, Color.Black.copy(alpha = 0.86f))))
-                    .padding(start = 7.dp, top = 24.dp, end = 7.dp, bottom = 6.dp),
-            ) {
-                Text(
-                    entry.book.title,
-                    maxLines = 2,
-                    overflow = TextOverflow.Ellipsis,
-                    style = MaterialTheme.typography.titleSmall,
-                    color = Color.White,
-                )
-            }
-        }
-    }
-}
 
 @Composable
 internal fun RootNodeDragPreview(id: String) {
@@ -294,17 +250,10 @@ internal fun RootNodeDragPreview(id: String) {
     }
 }
 
-private fun dragPreviewStatus(entry: LibraryEntry): String =
-    entry.progress?.locator?.bookProgress?.let { "读至 ${(it * 100).toInt()}%" }
-        ?: when {
-            entry.readLater -> "稍后再读"
-            !entry.sourceAvailable -> "来源未安装"
-            else -> "未开始"
-        }
+private fun dragPreviewStatus(entry: LibraryEntry): String = entry.libraryStatusLabel()
 
 private fun compactDragPreviewSupporting(entry: LibraryEntry): String =
-    entry.progress?.locator?.bookProgress?.let { "读至 ${(it * 100).toInt()}%" }
-        ?: entry.book.authors.joinToString("、")
+    entry.readingStatusLabel() ?: entry.book.authors.joinToString("、")
 
 @Composable
 internal fun DragBatchBadge(count: Int, modifier: Modifier = Modifier) {

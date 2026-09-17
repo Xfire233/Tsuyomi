@@ -13,7 +13,7 @@ android {
 }
 
 dependencies {
-    implementation(project(":core:database"))
+    implementation(project(":core:display"))
     implementation(project(":core:ui"))
     implementation(project(":core:media"))
     implementation(project(":shared:model"))
@@ -27,8 +27,10 @@ dependencies {
     debugImplementation(libs.androidx.compose.ui.tooling)
     testImplementation(libs.junit)
     androidTestImplementation(platform(libs.androidx.compose.bom))
+    androidTestImplementation(project(":core:preferences"))
     androidTestImplementation(libs.androidx.compose.ui.test.junit4)
     debugImplementation(libs.androidx.compose.ui.test.manifest)
     screenshotTestImplementation(libs.screenshot.validation.api)
+    screenshotTestImplementation(project(":core:preferences"))
     screenshotTestImplementation(libs.androidx.compose.ui.tooling)
 }

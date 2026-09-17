@@ -1,0 +1,63 @@
+{
+  "format": "tsuyomi-transfer",
+  "version": 4,
+  "createdAt": "2026-09-12T00:00:00Z",
+  "library": [
+    {
+      "identity": {
+        "sourceId": "org.tsuyomi.wenku8",
+        "remoteBookId": "pinned-member"
+      },
+      "title": "Pinned bookmarked fixture",
+      "shelfIds": ["favorites"],
+      "localPin": true,
+      "updatedAt": "2026-09-12T00:00:00Z",
+      "completedChapterIds": ["chapter-1"],
+      "bookmarkedChapterIds": ["chapter-2", "chapter-5"]
+    },
+    {
+      "identity": {
+        "sourceId": "org.tsuyomi.wenku8",
+        "remoteBookId": "retained-unpinned"
+      },
+      "title": "Retained bookmark metadata fixture",
+      "localTags": ["favorite"],
+      "rating": 4,
+      "readLater": true,
+      "localPin": false,
+      "updatedAt": "2026-09-12T00:00:00Z",
+      "completedChapterIds": [],
+      "bookmarkedChapterIds": ["chapter-9"]
+    }
+  ],
+  "shelves": [
+    {
+      "id": "favorites",
+      "name": "Favorites",
+      "position": 0
+    }
+  ],
+  "preferences": {
+    "reader": {
+      "flow": "dual",
+      "fontScale": 1.2,
+      "lineHeight": 1.6,
+      "theme": "nightInk",
+      "horizontalMargin": 24,
+      "paragraphSpacing": 12,
+      "lockPortrait": false,
+      "progressVisible": true,
+      "immersive": false,
+      "keepAwake": true,
+      "volumePaging": true,
+      "fontFamily": "serif",
+      "fontWeight": 500,
+      "letterSpacing": 0.1,
+      "firstLineIndent": 1.5,
+      "verticalMargin": 32,
+      "textAlignment": "justify",
+      "foregroundColor": "#112233",
+      "backgroundColor": "#AABBCC"
+    }
+  }
+}

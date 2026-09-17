@@ -54,6 +54,7 @@ sealed interface CoverUiState {
 }
 
 interface CoverRepository {
+    fun cached(request: CoverRequest): CoverUiState.Ready?
     fun observe(request: CoverRequest): Flow<CoverUiState>
 }
 

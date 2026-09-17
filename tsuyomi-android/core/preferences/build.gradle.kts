@@ -12,5 +12,6 @@ android {
 dependencies {
     implementation(libs.androidx.datastore.preferences)
     implementation(project(":shared:backup"))
+    api(project(":shared:model"))
     implementation(libs.kotlinx.coroutines.android)
 }

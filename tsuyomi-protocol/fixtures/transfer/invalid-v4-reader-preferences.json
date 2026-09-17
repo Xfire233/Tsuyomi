@@ -1,0 +1,13 @@
+{
+  "format": "tsuyomi-transfer",
+  "version": 4,
+  "createdAt": "2026-09-12T00:00:00Z",
+  "library": [],
+  "shelves": [],
+  "preferences": {
+    "reader": {
+      "fontWeight": 300,
+      "foregroundColor": "#abcdef"
+    }
+  }
+}

@@ -4,29 +4,26 @@
  */
 package org.tsuyomi.feature.library
 
-import androidx.compose.animation.core.animateFloatAsState
-import androidx.compose.animation.core.snap
-import androidx.compose.animation.core.tween
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.Orientation
 import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+
 import androidx.compose.foundation.lazy.LazyItemScope
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.grid.LazyGridItemScope
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.ListItem
 import androidx.compose.material3.ListItemDefaults
 import androidx.compose.material3.MaterialTheme
@@ -39,10 +36,8 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
-import androidx.compose.ui.platform.LocalInspectionMode
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
@@ -52,14 +47,18 @@ import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import org.tsuyomi.core.database.CollectionKind
-import org.tsuyomi.core.database.LibraryCollection
-import org.tsuyomi.core.database.LibraryEntry
+import org.tsuyomi.shared.librarydomain.CollectionKind
+import org.tsuyomi.shared.librarydomain.LibraryCollection
+import org.tsuyomi.shared.librarydomain.LibraryEntry
 import org.tsuyomi.core.display.LocalDisplayEnvironment
-import org.tsuyomi.core.ui.icons.TsuyomiIcons
-import org.tsuyomi.core.ui.theme.TsuyomiMotion
-import org.tsuyomi.core.ui.theme.TsuyomiSpacing
 import org.tsuyomi.core.ui.theme.instantMotion
+import org.tsuyomi.core.ui.theme.TsuyomiSpacing
+import org.tsuyomi.core.ui.icons.TsuyomiIcons
+import org.tsuyomi.core.ui.components.TsuyomiCoverCardContent
+import org.tsuyomi.core.ui.components.TsuyomiIconButton
+import org.tsuyomi.core.ui.components.tsuyomiAnimateItem
+
+import org.tsuyomi.core.ui.theme.tsuyomiAnimateFloatAsState
 
 data class LibraryRootNodePlacement(
     val id: String,
@@ -150,10 +149,9 @@ internal fun LibraryRootNodeGridCard(
             ?.sourceId == item.mirror.sourceId
         is LibraryRootItem.Book -> false
     }
-    val instant = LocalDisplayEnvironment.current.instantMotion
-    val scale by animateFloatAsState(
-        targetValue = if (targeted) 1.025f else 1f,
-        animationSpec = if (instant) snap() else tween(TsuyomiMotion.SWITCH_DURATION_MS, easing = TsuyomiMotion.Easing),
+    val scale = tsuyomiAnimateFloatAsState(
+        target = if (targeted) 1.025f else 1f,
+        instant = LocalDisplayEnvironment.current.instantMotion,
         label = "libraryRootNodeTargetScale",
     )
     Card(
@@ -178,34 +176,24 @@ internal fun LibraryRootNodeGridCard(
         ),
         border = BorderStroke(2.dp, if (selected || targeted) MaterialTheme.colorScheme.primary else Color.Transparent),
     ) {
-        Box(
-            modifier = Modifier.fillMaxWidth().aspectRatio(3f / 4f)
-                .background(model.containerColor()),
-            contentAlignment = Alignment.Center,
-        ) {
-            Icon(model.icon, contentDescription = null, modifier = Modifier.size(48.dp), tint = model.contentColor())
-            Column(
-                modifier = Modifier.align(Alignment.BottomCenter).fillMaxWidth()
-                    .background(Brush.verticalGradient(listOf(Color.Transparent, Color.Black.copy(alpha = 0.82f))))
-                    .padding(start = TsuyomiSpacing.Sm, top = 28.dp, end = TsuyomiSpacing.Sm, bottom = 6.dp)
-                    .testTag("library-root-node-metadata-${item.key}"),
-            ) {
-                Text(
-                    model.title,
-                    style = MaterialTheme.typography.titleSmall,
-                    color = Color.White,
-                    maxLines = 2,
-                    overflow = TextOverflow.Ellipsis,
-                )
-                Text(
-                    model.supporting,
-                    style = MaterialTheme.typography.labelMedium,
-                    color = Color.White.copy(alpha = 0.9f),
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
-            }
-        }
+        TsuyomiCoverCardContent(
+            title = model.title,
+            supportingText = model.supporting,
+            cover = {
+                Box(
+                    modifier = Modifier.fillMaxSize().background(model.containerColor()),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Icon(
+                        model.icon,
+                        contentDescription = null,
+                        modifier = Modifier.size(48.dp),
+                        tint = model.contentColor(),
+                    )
+                }
+            },
+            metadataModifier = Modifier.testTag("library-root-node-metadata-${item.key}"),
+        )
     }
 }
 
@@ -355,9 +343,12 @@ internal fun LibraryFilterSummary(
                 Text("有更新", style = MaterialTheme.typography.labelLarge)
                 Text("$count 本", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
-            IconButton(onClick = onClear, modifier = Modifier.size(48.dp)) {
-                Icon(TsuyomiIcons.Close, contentDescription = "清除筛选")
-            }
+            TsuyomiIconButton(
+                imageVector = TsuyomiIcons.Close,
+                contentDescription = "清除筛选",
+                onClick = onClear,
+                modifier = Modifier.size(48.dp),
+            )
         }
     }
 }
@@ -496,25 +487,9 @@ private fun RootNodeModel.contentColor(): Color = if (mirror) {
 }
 
 @Composable
-internal fun Modifier.optionalAnimateItem(scope: LazyItemScope): Modifier {
-    val instant = LocalDisplayEnvironment.current.instantMotion
-    return if (LocalInspectionMode.current) this else with(scope) {
-        this@optionalAnimateItem.animateItem(
-            fadeInSpec = if (instant) snap() else tween(TsuyomiMotion.SWITCH_DURATION_MS, easing = TsuyomiMotion.Easing),
-            placementSpec = if (instant) snap() else tween(TsuyomiMotion.EXPAND_DURATION_MS, easing = TsuyomiMotion.Easing),
-            fadeOutSpec = if (instant) snap() else tween(TsuyomiMotion.SWITCH_DURATION_MS, easing = TsuyomiMotion.Easing),
-        )
-    }
-}
+internal fun Modifier.optionalAnimateItem(scope: LazyItemScope): Modifier =
+    this.tsuyomiAnimateItem(scope)
 
 @Composable
-internal fun Modifier.optionalAnimateItem(scope: LazyGridItemScope): Modifier {
-    val instant = LocalDisplayEnvironment.current.instantMotion
-    return if (LocalInspectionMode.current) this else with(scope) {
-        this@optionalAnimateItem.animateItem(
-            fadeInSpec = if (instant) snap() else tween(TsuyomiMotion.SWITCH_DURATION_MS, easing = TsuyomiMotion.Easing),
-            placementSpec = if (instant) snap() else tween(TsuyomiMotion.EXPAND_DURATION_MS, easing = TsuyomiMotion.Easing),
-            fadeOutSpec = if (instant) snap() else tween(TsuyomiMotion.SWITCH_DURATION_MS, easing = TsuyomiMotion.Easing),
-        )
-    }
-}
+internal fun Modifier.optionalAnimateItem(scope: LazyGridItemScope): Modifier =
+    this.tsuyomiAnimateItem(scope)

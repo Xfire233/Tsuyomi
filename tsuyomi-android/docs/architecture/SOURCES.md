@@ -30,6 +30,10 @@ Extensions describe source semantics—URLs, request parameters, expected pages,
 
 Every level returns the same redacted diagnostic envelope. The UI can offer direct retry, cache retry, open verification, reopen source, or report diagnostic; it must not silently escalate to WebView or a remote write.
 
+One route-owned Search submission owns one in-flight operation. Repeated trailing-icon or IME commands while that operation is working coalesce before extension or transport execution. A fixed-length response that ends before its declared body length, or an I/O interruption while reading it, is a typed network failure and is never passed to source classification or parser admission. Connectivity recovery is explicit: one retry creates one fresh request; the host does not immediately replay a failed search into a source rate limit.
+
+The active installed source is a durable host preference, not list-order state. Every successful explicit activation persists the exact source ID before returning; runtime recreation restores that source when its trusted archive remains installed, otherwise it selects the first trusted installed source and replaces the stale preference. Uninstalling the selected source clears the preference. Source selection never transfers credentials, sessions, caches, or request ownership across source IDs.
+
 ## Cookie and WebView lifecycle
 
 HTTP browser-session credentials are an encrypted host-owned source/origin partition containing declared-origin request cookies and the exact user agent captured from the same user-visible verification WebView. Extension JavaScript never reads, writes, logs, exports, or supplies `Cookie`, `Set-Cookie`, or `User-Agent` headers.

@@ -14,6 +14,7 @@ android {
 
 dependencies {
     implementation(project(":core:display"))
+    implementation(project(":core:preferences"))
     implementation(project(":core:ui"))
     implementation(project(":shared:backup"))
     implementation(libs.androidx.compose.foundation)

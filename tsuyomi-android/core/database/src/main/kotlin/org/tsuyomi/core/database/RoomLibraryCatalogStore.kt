@@ -18,6 +18,10 @@ import org.tsuyomi.core.database.room.LibraryDao
 import org.tsuyomi.core.database.room.LibraryEntryEntity
 import org.tsuyomi.core.database.room.LocalBookTagEntity
 import org.tsuyomi.shared.model.BookIdentity
+import org.tsuyomi.shared.librarydomain.LibraryBook
+import org.tsuyomi.shared.librarydomain.LibraryEntry
+import org.tsuyomi.shared.librarydomain.ReadingProgress
+import org.tsuyomi.shared.librarydomain.RemoteReconciliationState
 
 internal class RoomLibraryCatalogStore(
     private val database: TsuyomiDatabase,
@@ -42,6 +46,21 @@ internal class RoomLibraryCatalogStore(
         }
     }
 
+    /** Retains metadata for local state without changing an existing entry's pin or presentation. */
+    suspend fun ensureRetainedLibraryEntry(book: LibraryBook): Boolean = database.withTransaction {
+        saveBook(book)
+        dao.insertLibraryEntry(
+            LibraryEntryEntity(
+                sourceId = book.identity.sourceId,
+                remoteBookId = book.identity.remoteBookId,
+                addedAtEpochSecond = book.addedAt.epochSecond,
+                addedAtNano = book.addedAt.nano,
+                rating = null,
+                locallyPinned = false,
+            ),
+        ) != -1L
+    }
+
     suspend fun book(identity: BookIdentity): LibraryBook? =
         dao.book(identity.sourceId, identity.remoteBookId)?.toDomain()
 
@@ -53,14 +72,49 @@ internal class RoomLibraryCatalogStore(
         dao.readLaterBooks().map { BookIdentityRow(it.sourceId, it.remoteBookId) },
     )
 
+    suspend fun readerHistoryEntries(): List<LibraryEntry> = dao.readerHistoryRows().mapNotNull { row ->
+        val identity = BookIdentity(row.sourceId, row.remoteBookId)
+        val fallbackProgress = if (row.explicitVisit) {
+            null
+        } else {
+            dao.progress(row.sourceId, row.remoteBookId)?.toDomainOrNull() ?: return@mapNotNull null
+        }
+        entryFor(
+            identity = identity,
+            readerVisitedAt = Instant.ofEpochSecond(row.visitedAtEpochSecond, row.visitedAtNano.toLong()),
+            knownProgress = fallbackProgress,
+        )
+    }
+
+    suspend fun readerHistoryEntry(identity: BookIdentity): LibraryEntry? {
+        val visit = dao.readerHistory(identity.sourceId, identity.remoteBookId)
+        val fallbackProgress = if (visit == null) {
+            dao.progress(identity.sourceId, identity.remoteBookId)?.toDomainOrNull() ?: return null
+        } else {
+            null
+        }
+        val visitedAt = visit?.let {
+            Instant.ofEpochSecond(it.lastVisitedAtEpochSecond, it.lastVisitedAtNano.toLong())
+        } ?: requireNotNull(fallbackProgress).updatedAt
+        return entryFor(identity, visitedAt, fallbackProgress)
+    }
+
     suspend fun libraryEntry(identity: BookIdentity): LibraryEntry? = entriesFor(
         listOf(BookIdentityRow(identity.sourceId, identity.remoteBookId)),
     ).singleOrNull()
 
+    suspend fun entriesFor(identities: List<BookIdentityRow>): List<LibraryEntry> =
+        identities.mapNotNull { entryFor(BookIdentity(it.sourceId, it.remoteBookId)) }
 
-    suspend fun entriesFor(identities: List<BookIdentityRow>): List<LibraryEntry> = identities.mapNotNull { identity ->
-        val book = dao.book(identity.sourceId, identity.remoteBookId) ?: return@mapNotNull null
-        val entry = dao.libraryEntry(identity.sourceId, identity.remoteBookId) ?: return@mapNotNull null
+    private suspend fun entryFor(
+        identity: BookIdentity,
+        readerVisitedAt: Instant? = null,
+        knownProgress: ReadingProgress? = null,
+    ): LibraryEntry? {
+        val book = dao.book(identity.sourceId, identity.remoteBookId) ?: return null
+        val domainBook = book.toDomain()
+        val entry = dao.libraryEntry(identity.sourceId, identity.remoteBookId)
+        if (entry == null && readerVisitedAt == null) return null
         val availability = dao.sourceAvailability(identity.sourceId)?.available == true
         val tags = dao.localTags(identity.sourceId, identity.remoteBookId).mapTo(linkedSetOf()) { it.displayTag }
         val currentReconciliation = dao.activeReconciliation(identity.sourceId, identity.remoteBookId)
@@ -68,17 +122,19 @@ internal class RoomLibraryCatalogStore(
         val reconciliation = currentReconciliation?.state
             ?.let { runCatching { RemoteReconciliationState.valueOf(it) }.getOrNull() }
         val reconciliationOperation = currentReconciliation?.operation
-        LibraryEntry(
-            book = book.toDomain(),
-            libraryAddedAt = Instant.ofEpochSecond(entry.addedAtEpochSecond, entry.addedAtNano.toLong()),
-            rating = entry.rating,
-            readLater = entry.readLater,
-            progress = dao.progress(identity.sourceId, identity.remoteBookId)?.toDomainOrNull(),
+        return LibraryEntry(
+            book = domainBook,
+            libraryAddedAt = entry?.let { Instant.ofEpochSecond(it.addedAtEpochSecond, it.addedAtNano.toLong()) }
+                ?: domainBook.addedAt,
+            rating = entry?.rating,
+            readLater = entry?.readLater ?: false,
+            progress = knownProgress ?: dao.progress(identity.sourceId, identity.remoteBookId)?.toDomainOrNull(),
             localTags = tags,
             sourceAvailable = availability,
             reconciliation = reconciliation,
             reconciliationOperation = reconciliationOperation,
-            localMembership = entry.locallyPinned,
+            readerVisitedAt = readerVisitedAt,
+            localMembership = entry?.locallyPinned ?: false,
         )
     }
 

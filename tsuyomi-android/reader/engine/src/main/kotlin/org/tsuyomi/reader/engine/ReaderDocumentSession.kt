@@ -13,6 +13,22 @@ import org.tsuyomi.shared.sourcecontract.ReaderDocument
 
 enum class ReaderPresentation { SCROLL, PAGED, DUAL_PAGE }
 
+/**
+ * Resolves the presentation that can be rendered in the current window without
+ * rewriting the user's requested presentation. A narrow window temporarily
+ * renders a requested dual page as a single paged surface; it automatically
+ * becomes dual again once the window is eligible.
+ */
+fun effectiveReaderPresentation(
+    requested: ReaderPresentation,
+    dualPageEligible: Boolean,
+): ReaderPresentation =
+    if (requested == ReaderPresentation.DUAL_PAGE && !dualPageEligible) {
+        ReaderPresentation.PAGED
+    } else {
+        requested
+    }
+
 data class ResolvedReaderPosition(
     val blockIndex: Int,
     val characterOffset: Int,
@@ -26,6 +42,15 @@ class ReaderDocumentSession(
     initialLocator: ReaderLocator?,
     initialPresentation: ReaderPresentation,
 ) {
+    val identity: DocumentIdentity = DocumentIdentity(
+        sourceId = document.sourceId,
+        remoteBookId = document.remoteBookId,
+        contentId = document.contentId,
+        revision = document.revision,
+    )
+    val documentRevision: String = document.revision ?: "unversioned"
+    val contentDigest: String = readerContentDigest(document)
+
     private val blockCodePointLengths = IntArray(document.blocks.size) { index ->
         document.blocks[index].textLengthCodePoints()
     }
@@ -54,12 +79,20 @@ class ReaderDocumentSession(
         return position
     }
 
+    /** Resolves a preview target without moving the durable semantic position. */
+    fun previewPositionAtBlock(blockIndex: Int, characterOffset: Int = 0): ResolvedReaderPosition {
+        val boundedIndex = blockIndex.coerceIn(document.blocks.indices)
+        val block = document.blocks[boundedIndex]
+        val boundedOffset = characterOffset.coerceIn(0, block.textLengthCodePoints())
+        return exactPosition(boundedIndex, boundedOffset)
+    }
+
     fun navigateByBlock(delta: Int): ResolvedReaderPosition = navigateToBlock(position.blockIndex + delta)
 
     fun capture(capturedAt: Instant = Instant.now()): ReaderLocator = position.locator.copy(capturedAt = capturedAt)
 
     private fun resolve(candidate: ReaderLocator?): ResolvedReaderPosition {
-        if (candidate == null || !candidate.document.namesSameDocumentAs(identity())) return degradedAt(0, 0)
+        if (candidate == null || !candidate.document.namesSameDocumentAs(identity)) return degradedAt(0, 0)
         val blockIndex = candidate.blockId?.let { id -> document.blocks.indexOfFirst { it.blockId == id } } ?: -1
         if (blockIndex >= 0) {
             val block = document.blocks[blockIndex]
@@ -120,7 +153,7 @@ class ReaderDocumentSession(
             (cumulativeCodePoints[index] + boundedOffset).toDouble() / totalCodePoints
         }
         val locator = ReaderLocator(
-            document = identity(),
+            document = identity,
             blockId = block.blockId,
             textAnchorDigest = block.anchorDigest().takeIf { includeExactAnchor },
             characterOffset = boundedOffset.takeIf { includeExactAnchor },
@@ -129,13 +162,6 @@ class ReaderDocumentSession(
         )
         return ResolvedReaderPosition(index, boundedOffset, precision, locator)
     }
-
-    private fun identity() = DocumentIdentity(
-        sourceId = document.sourceId,
-        remoteBookId = document.remoteBookId,
-        contentId = document.contentId,
-        revision = document.revision,
-    )
 }
 
 /** Bounded LRU of neighboring structured documents; eviction never changes active progress. */
@@ -165,6 +191,19 @@ class ReaderDocumentCache(private val capacity: Int = 5) {
 
 fun defaultReaderPresentation(isEInk: Boolean): ReaderPresentation =
     if (isEInk) ReaderPresentation.PAGED else ReaderPresentation.SCROLL
+
+private fun readerContentDigest(document: ReaderDocument): String {
+    val digest = MessageDigest.getInstance("SHA-256")
+    digest.update(document.sourceId.encodeToByteArray())
+    digest.update(document.remoteBookId.encodeToByteArray())
+    digest.update(document.contentId.encodeToByteArray())
+    digest.update((document.revision ?: "").encodeToByteArray())
+    document.blocks.forEach { block ->
+        digest.update(block.blockId.encodeToByteArray())
+        digest.update(block.anchorText().encodeToByteArray())
+    }
+    return digest.digest().joinToString("") { "%02x".format(it) }
+}
 
 private fun ReaderBlock.anchorDigest(): String = MessageDigest.getInstance("SHA-256")
     .digest(anchorText().encodeToByteArray())

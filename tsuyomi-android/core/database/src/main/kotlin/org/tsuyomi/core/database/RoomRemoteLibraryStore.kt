@@ -17,6 +17,15 @@ import org.tsuyomi.core.database.room.RemoteMirrorBindingEntity
 import org.tsuyomi.core.database.room.RemoteMirrorItemEntity
 import org.tsuyomi.core.database.room.RemoteMirrorTargetEntity
 import org.tsuyomi.shared.model.BookIdentity
+import org.tsuyomi.shared.librarydomain.LibraryBook
+import org.tsuyomi.shared.librarydomain.SourceAvailability
+import org.tsuyomi.shared.librarydomain.SourceRemotePolicy
+import org.tsuyomi.shared.librarydomain.RemoteMirrorBinding
+import org.tsuyomi.shared.librarydomain.RemoteMirrorSnapshot
+import org.tsuyomi.shared.librarydomain.RemoteMirrorTargetSnapshot
+import org.tsuyomi.shared.librarydomain.RemoteMirrorBookSnapshot
+import org.tsuyomi.shared.librarydomain.RemoteReconciliationRecord
+import org.tsuyomi.shared.librarydomain.RemoteReconciliationState
 
 /** One lease-checked remote library snapshot accepted into local persistence. */
 data class RemoteLibraryMergeRequest(

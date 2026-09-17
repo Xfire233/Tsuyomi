@@ -24,5 +24,6 @@ dependencies {
     implementation(libs.androidx.compose.ui)
     androidTestImplementation(platform(libs.androidx.compose.bom))
     androidTestImplementation(libs.androidx.compose.ui.test.junit4)
+    androidTestImplementation(project(":core:preferences"))
     debugImplementation(libs.androidx.compose.ui.test.manifest)
 }

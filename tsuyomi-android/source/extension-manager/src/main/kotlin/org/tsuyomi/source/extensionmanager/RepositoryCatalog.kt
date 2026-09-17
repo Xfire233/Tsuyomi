@@ -560,12 +560,14 @@ class OfficialRepositoryClient(
 
     /** Every public operation reads the locked durable floor so sibling clients cannot stay stale. */
     private fun loadCachedLocked(): RepositoryCatalog? {
-        cacheFailure?.let { throw it }
+        cacheFailure?.takeUnless { it.error == RepositoryCatalogError.STORAGE_UNAVAILABLE }?.let { throw it }
         try {
-            return withDurableTransaction {
+            val catalog = withDurableTransaction {
                 applyDurableStateLocked(readDurableStateLocked())
                 cachedCatalog
             }
+            cacheFailure = null
+            return catalog
         } catch (error: RepositoryCatalogException) {
             restoreRestrictiveTrustLocked()
             cacheFailure = error

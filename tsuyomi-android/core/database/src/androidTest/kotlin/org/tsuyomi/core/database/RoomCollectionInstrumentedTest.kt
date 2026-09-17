@@ -15,6 +15,10 @@ import org.junit.runner.RunWith
 import org.tsuyomi.shared.locator.DocumentIdentity
 import org.tsuyomi.shared.locator.ReaderLocator
 import org.tsuyomi.core.database.room.ReadingProgressEntity
+import org.tsuyomi.shared.librarydomain.CollectionKind
+import org.tsuyomi.shared.librarydomain.LibraryBook
+import org.tsuyomi.shared.librarydomain.LibraryCollection
+import org.tsuyomi.shared.librarydomain.ReadingProgress
 import org.tsuyomi.shared.model.BookIdentity
 import org.tsuyomi.shared.smartshelf.MatchMode
 import org.tsuyomi.shared.smartshelf.ProgressState
@@ -92,6 +96,54 @@ class RoomCollectionInstrumentedTest {
         assertTrue(repository.addToLibrary(LibraryBook(matching, "100% 奇幻", Instant.EPOCH, Instant.EPOCH)))
         repository.setLocalTags(matching, emptyList())
         assertTrue(repository.collectionEntries("smart", Instant.EPOCH.plusSeconds(10)).isEmpty())
+    }
+
+    @Test
+    fun smartRulesMatchJsonEncodedAuthorsAndRemoteTagsLiterally() = runBlocking {
+        val matching = BookIdentity("fixture.source", "encoded-match")
+        val nearAuthor = BookIdentity("fixture.source", "encoded-near-author")
+        val nearTag = BookIdentity("fixture.source", "encoded-near-tag")
+        val author = "Ada \"Quoted\" \\ Backslash"
+        val tag = "100%_literal"
+        repository.addToLibrary(
+            LibraryBook(
+                matching,
+                "Matching",
+                Instant.EPOCH,
+                Instant.EPOCH,
+                authors = setOf(author),
+                remoteTags = setOf(tag),
+            ),
+        )
+        repository.addToLibrary(
+            LibraryBook(
+                nearAuthor,
+                "Near author",
+                Instant.EPOCH,
+                Instant.EPOCH,
+                authors = setOf("Ada \"Quoted\" / Backslash"),
+            ),
+        )
+        repository.addToLibrary(
+            LibraryBook(
+                nearTag,
+                "Near tag",
+                Instant.EPOCH,
+                Instant.EPOCH,
+                remoteTags = setOf("100Axliteral"),
+            ),
+        )
+        repository.createSmartCollection(
+            LibraryCollection("encoded-author", CollectionKind.SMART, "Encoded author", null, 0),
+            SmartRule(root = SmartRuleNode.Predicate(SmartPredicate.AuthorContains(setOf(author)))),
+        )
+        repository.createSmartCollection(
+            LibraryCollection("encoded-tag", CollectionKind.SMART, "Encoded tag", null, 0),
+            SmartRule(root = SmartRuleNode.Predicate(SmartPredicate.TagContains(MatchMode.ALL, setOf(tag)))),
+        )
+
+        assertEquals(listOf(matching), repository.collectionEntries("encoded-author").map { it.book.identity })
+        assertEquals(listOf(matching), repository.collectionEntries("encoded-tag").map { it.book.identity })
     }
 
     @Test

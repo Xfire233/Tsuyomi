@@ -5,6 +5,9 @@
 package org.tsuyomi.feature.settings
 
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.test.junit4.v2.createComposeRule
 import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.onAllNodesWithText
@@ -18,8 +21,8 @@ import org.junit.Test
 import org.tsuyomi.core.display.DisplayDecisionReason
 import org.tsuyomi.core.display.DisplayEnvironment
 import org.tsuyomi.core.display.DisplayEnvironmentProvider
-import org.tsuyomi.core.display.DisplayPreference
-import org.tsuyomi.core.display.DisplayPreferences
+import org.tsuyomi.core.preferences.DisplayPreference
+import org.tsuyomi.core.preferences.DisplayPreferences
 import org.tsuyomi.core.display.DisplayProfile
 import org.tsuyomi.core.display.MotionPolicy
 
@@ -30,6 +33,7 @@ class HelpScreenInstrumentedTest {
     @Test
     fun replay_marks_only_the_versioned_explanation_after_acknowledgement() {
         var seen: Pair<String, Int>? = null
+        var selectedIntroductionId by mutableStateOf<String?>(null)
         composeRule.setContent {
             DisplayEnvironmentProvider(standardEnvironment) {
                 MaterialTheme {
@@ -37,6 +41,8 @@ class HelpScreenInstrumentedTest {
                         introductionsEnabled = true,
                         seenVersions = emptySet(),
                         onIntroductionsEnabledChanged = {},
+                        selectedIntroductionId = selectedIntroductionId,
+                        onIntroductionSelected = { selectedIntroductionId = it },
                         onIntroductionSeen = { id, version -> seen = id to version },
                         onResetSeenVersions = {},
                     )
@@ -60,6 +66,8 @@ class HelpScreenInstrumentedTest {
                         introductionsEnabled = true,
                         seenVersions = emptySet(),
                         onIntroductionsEnabledChanged = {},
+                        selectedIntroductionId = null,
+                        onIntroductionSelected = {},
                         onIntroductionSeen = { _, _ -> },
                         onResetSeenVersions = {},
                     )

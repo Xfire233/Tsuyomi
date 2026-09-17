@@ -5,6 +5,7 @@
 package org.tsuyomi.core.network
 
 import java.net.HttpURLConnection
+import java.io.IOException
 import java.net.ConnectException
 import java.net.NoRouteToHostException
 import java.net.SocketException
@@ -13,6 +14,7 @@ import java.net.UnknownHostException
 import java.net.URI
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import org.tsuyomi.shared.sourcecontract.NetworkMethod
 
 /**
  * Platform transport deliberately does not follow redirects: [HostNetworkGateway] validates every
@@ -42,12 +44,17 @@ class UrlConnectionHostHttpTransport : HostHttpTransport {
             if (contentLength > request.maxResponseBytes) throw HostNetworkException(HostNetworkError.RESPONSE_LIMIT)
             val stream = if (status >= 400) connection.errorStream else connection.inputStream
             val bytes = stream?.use { input -> input.readBounded(request.maxResponseBytes) } ?: byteArrayOf()
+            if (
+                request.method != NetworkMethod.HEAD &&
+                status !in 100..199 && status != 204 && status != 304 &&
+                contentLength >= 0L && bytes.size.toLong() != contentLength
+            ) {
+                throw HostNetworkException(HostNetworkError.OFFLINE)
+            }
             HostHttpResponse(
                 status = status,
                 finalUrl = URI(connection.url.toString()),
-                headers = connection.headerFields
-                    .filterKeys { it != null }
-                    .mapValues { (_, values) -> values.orEmpty().joinToString(", ") },
+                headers = HostResponseHeaders.fromHeaderFields(connection.headerFields),
                 bytes = bytes,
             )
         } catch (_: SocketTimeoutException) {
@@ -59,6 +66,8 @@ class UrlConnectionHostHttpTransport : HostHttpTransport {
         } catch (_: ConnectException) {
             throw HostNetworkException(HostNetworkError.OFFLINE)
         } catch (_: SocketException) {
+            throw HostNetworkException(HostNetworkError.OFFLINE)
+        } catch (_: IOException) {
             throw HostNetworkException(HostNetworkError.OFFLINE)
         } finally {
             connection.disconnect()

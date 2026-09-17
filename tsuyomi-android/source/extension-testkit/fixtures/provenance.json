@@ -11,7 +11,24 @@
     "originalCommit": "09e0cb7326b0310495083bc8eaf8b3a7e89e1420",
     "originalPath": "tsuyomi-extensions/fixtures"
   },
+  "malformedOutputFixture": {
+    "purpose": "Regression for signed extension runtime output that has a non-object root or omits SourceBookSummary.title.",
+    "authorship": "Fixture-authored minimal protocol module; no external extension source is imported.",
+    "publisher": {
+      "keyId": "tsuyomi-phase2-fixture",
+      "publicKeyHex": "79b5562e8fe654f94078b112e8a98ba7901f853ae695bed7e0e3910bad049664",
+      "trust": "BUILT_IN_TEST"
+    },
+    "generation": {
+      "command": "python source/extension-testkit/fixtures/generate_malformed_output_fixture.py",
+      "checkCommand": "python source/extension-testkit/fixtures/generate_malformed_output_fixture.py --check",
+      "prerequisites": "Python 3.9+ with the cryptography package installed."
+    }
+  },
   "files": {
+    "generate_malformed_output_fixture.py": "d906dcb280a77c50e56e3783d1f0d75344d74980710b9f60a14c1c0b1462f8a6",
+    "wenku8/malformed-output-fixture.hxp": "bd4d1f3a36bdb3ba231a4ca9374e188cca818510efc3dd6ce4745d2e84599f50",
+    "wenku8/malformed-output-fixture.sha256": "640553ef2b0ed48b327ce09d41b17119d2b52aab045f8224500eb4bec021240d",
     "wenku8/challenge.html": "8895328b7187c53cf525b022429fbc7550da5ac132c7b76b8fe53aea0210be1f",
     "wenku8/chapter-2.html": "fc6893a9c74df65c569e9a8abd5233f4a7876c5913653f34aaf94e061d99bad4",
     "wenku8/chapter-illustrations.html": "b940369f67bbc759a96cc649ff7158582a50b929b2751147327dd420f8747f53",

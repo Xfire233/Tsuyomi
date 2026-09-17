@@ -34,6 +34,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.focus.focusProperties
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.paneTitle
 import androidx.compose.ui.semantics.semantics
@@ -74,6 +75,7 @@ fun TsuyomiDialog(
     body: (@Composable ColumnScope.() -> Unit)? = null,
     confirmLabel: String? = null,
     onConfirm: (() -> Unit)? = null,
+    confirmEnabled: Boolean = true,
     dismissLabel: String? = null,
     destructive: Boolean = false,
     restoreFocusTo: FocusRequester? = null,
@@ -119,8 +121,10 @@ fun TsuyomiDialog(
                 body = body,
                 confirmLabel = confirmLabel,
                 onConfirm = onConfirm,
+                confirmEnabled = confirmEnabled,
                 dismissLabel = effectiveDismissLabel,
                 onDismiss = onDismissRequest,
+                destructive = destructive,
                 fullWindow = true,
             )
         }
@@ -140,8 +144,10 @@ fun TsuyomiDialog(
                 body = body,
                 confirmLabel = confirmLabel,
                 onConfirm = onConfirm,
+                confirmEnabled = confirmEnabled,
                 dismissLabel = effectiveDismissLabel,
                 onDismiss = onDismissRequest,
+                destructive = destructive,
                 fullWindow = false,
             )
         }
@@ -158,13 +164,16 @@ fun TsuyomiDialogPane(
     modifier: Modifier = Modifier,
     text: String? = null,
     body: (@Composable ColumnScope.() -> Unit)? = null,
+    confirmEnabled: Boolean = true,
     confirmLabel: String? = null,
     onConfirm: (() -> Unit)? = null,
     dismissLabel: String? = null,
     onDismiss: (() -> Unit)? = null,
+    destructive: Boolean = false,
     fullWindow: Boolean,
 ) {
-    val firstActionFocus = remember { FocusRequester() }
+    val dismissActionFocus = remember { FocusRequester() }
+    val confirmActionFocus = remember { FocusRequester() }
     val shape = RoundedCornerShape(if (fullWindow) 0.dp else 16.dp)
 
     val containerModifier = if (fullWindow) {
@@ -245,8 +254,8 @@ fun TsuyomiDialogPane(
                             text = dismissLabel,
                             onClick = onDismiss,
                             style = TsuyomiButtonStyle.TEXT,
-                            modifier = if (confirmLabel == null) {
-                                Modifier.focusRequester(firstActionFocus)
+                            modifier = if (destructive || confirmLabel == null) {
+                                Modifier.focusRequester(dismissActionFocus).focusProperties { canFocus = true }
                             } else {
                                 Modifier
                             },
@@ -256,8 +265,13 @@ fun TsuyomiDialogPane(
                         TsuyomiButton(
                             text = confirmLabel,
                             onClick = onConfirm,
+                            enabled = confirmEnabled,
                             style = TsuyomiButtonStyle.PRIMARY,
-                            modifier = Modifier.focusRequester(firstActionFocus),
+                            modifier = if (!destructive || dismissLabel == null || onDismiss == null) {
+                                Modifier.focusRequester(confirmActionFocus).focusProperties { canFocus = confirmEnabled }
+                            } else {
+                                Modifier
+                            },
                         )
                     }
                 }
@@ -265,9 +279,15 @@ fun TsuyomiDialogPane(
         }
     }
 
-    LaunchedEffect(Unit) {
+    LaunchedEffect(destructive, dismissLabel, onDismiss, confirmLabel, onConfirm) {
+        val initialFocus = when {
+            destructive && dismissLabel != null && onDismiss != null -> dismissActionFocus
+            confirmLabel != null && onConfirm != null -> confirmActionFocus
+            dismissLabel != null && onDismiss != null -> dismissActionFocus
+            else -> return@LaunchedEffect
+        }
         try {
-            firstActionFocus.requestFocus()
+            initialFocus.requestFocus()
         } catch (_: IllegalStateException) {
             // No action button exists; the pane itself receives focus through the popup window.
         }

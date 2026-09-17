@@ -1,13 +1,13 @@
 <!-- SPDX-FileCopyrightText: 2026 Tsuyomi Contributors -->
 <!-- SPDX-License-Identifier: Apache-2.0 -->
 
-# `tsuyomi-transfer` v2 and v3 boundary
+# `tsuyomi-transfer` v2 and v3 legacy boundary
 
-`tsuyomi-transfer` v3 is the current portable UTF-8 JSON exchange contract. It preserves the v1/v2 envelope, stable `(sourceId, remoteBookId)` identity, deterministic ordering, 32 MiB limit, and explicit exclusion of credentials, cookies, sessions, caches, and device-local display state.
+`tsuyomi-transfer` v2 and v3 remain accepted portable UTF-8 JSON import contracts. The current v4 output contract is documented in [transfer-v4.md](transfer-v4.md). They retain the v1 envelope, stable `(sourceId, remoteBookId)` identity, deterministic ordering, 32 MiB limit, and explicit exclusion of credentials, cookies, sessions, caches, and device-local display state.
 
 ## Compatibility
 
-Current exporters emit `version: 3`. Importers accept strict v1, v2, and v3 documents. A v1 or v2 document is interpreted only with the fields declared by its closed versioned schema; fields introduced later are rejected rather than silently widening historical contracts. V1 and v2 carry no local-pin field, so their records imply `localPin: true` when imported.
+Current importers accept strict v1, v2, v3, and v4 documents. A v1, v2, or v3 document is interpreted only with the fields declared by its closed versioned schema; later fields are rejected rather than silently widening historical contracts. V1 and v2 carry no local-pin field, so their records imply `localPin: true` when imported.
 
 ## Added portable state
 

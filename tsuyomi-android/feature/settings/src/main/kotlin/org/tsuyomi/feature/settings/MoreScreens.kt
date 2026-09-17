@@ -13,15 +13,9 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
@@ -30,6 +24,7 @@ import androidx.compose.ui.unit.dp
 import org.tsuyomi.core.ui.components.SettingsGroup
 import org.tsuyomi.core.ui.components.SettingsInfoRow
 import org.tsuyomi.core.ui.components.SettingsSectionHeader
+import org.tsuyomi.core.ui.components.TsuyomiDialog
 import org.tsuyomi.core.ui.theme.TsuyomiSpacing
 
 @Composable
@@ -80,9 +75,10 @@ fun AboutScreen(
     applicationName: String,
     versionName: String,
     licenseText: String,
+    licenseVisible: Boolean,
+    onLicenseVisibilityChanged: (Boolean) -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    var licenseVisible by remember { mutableStateOf(false) }
     CenteredSettingsColumn(modifier) {
         SettingsSectionHeader(title = stringResource(R.string.settings_more_about_title))
         SettingsGroup {
@@ -101,25 +97,17 @@ fun AboutScreen(
             SettingsActionRow(
                 title = stringResource(R.string.about_license_title),
                 summary = stringResource(R.string.about_license_summary),
-                onClick = { licenseVisible = true },
+                onClick = { onLicenseVisibilityChanged(true) },
             )
         }
     }
     if (licenseVisible) {
-        AlertDialog(
-            onDismissRequest = { licenseVisible = false },
-            title = { Text(stringResource(R.string.about_license_title)) },
-            text = {
-                Text(
-                    licenseText,
-                    modifier = Modifier.verticalScroll(rememberScrollState()),
-                )
-            },
-            confirmButton = {
-                TextButton(onClick = { licenseVisible = false }) {
-                    Text(stringResource(R.string.about_license_close))
-                }
-            },
+        TsuyomiDialog(
+            onDismissRequest = { onLicenseVisibilityChanged(false) },
+            title = stringResource(R.string.about_license_title),
+            body = { Text(licenseText) },
+            confirmLabel = stringResource(R.string.about_license_close),
+            onConfirm = { onLicenseVisibilityChanged(false) },
         )
     }
 }

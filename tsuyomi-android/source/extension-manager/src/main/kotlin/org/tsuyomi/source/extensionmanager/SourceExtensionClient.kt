@@ -137,12 +137,14 @@ class SourceExtensionClient private constructor(
             "search",
             offlineOnly,
         )
-        val root = call(
-            "parseSearch",
-            arrayOf<Any?>(response.text.orEmpty(), response.finalUrl),
-            "search-parse",
-        ).jsonObject
-        return root.requiredArray("items").map { parseSummary(it.jsonObject) }
+        return malformedResponse("search-parse", "invalid-search-results") {
+            val root = call(
+                "parseSearch",
+                arrayOf<Any?>(response.text.orEmpty(), response.finalUrl),
+                "search-parse",
+            ).jsonObject
+            root.requiredArray("items").map { parseSummary(it.jsonObject) }
+        }
     }
 
     suspend fun authorSearch(author: String, page: Int = 1, offlineOnly: Boolean = false): List<SourceBookSummary> {
@@ -154,12 +156,14 @@ class SourceExtensionClient private constructor(
             "search",
             offlineOnly,
         )
-        val root = call(
-            "parseSearch",
-            arrayOf<Any?>(response.text.orEmpty(), response.finalUrl),
-            "author-search-parse",
-        ).jsonObject
-        return root.requiredArray("items").map { parseSummary(it.jsonObject) }
+        return malformedResponse("author-search-parse", "invalid-search-results") {
+            val root = call(
+                "parseSearch",
+                arrayOf<Any?>(response.text.orEmpty(), response.finalUrl),
+                "author-search-parse",
+            ).jsonObject
+            root.requiredArray("items").map { parseSummary(it.jsonObject) }
+        }
     }
     suspend fun homeRequestUrl(
         selectedFilters: Map<String, String> = emptyMap(),
@@ -194,7 +198,7 @@ class SourceExtensionClient private constructor(
             "home",
             offlineOnly,
         )
-        return try {
+        return malformedResponse("home-parse", "invalid-home-page") {
             parseHomePage(
                 call(
                     "parseHome",
@@ -202,10 +206,6 @@ class SourceExtensionClient private constructor(
                     "home-parse",
                 ).jsonObject,
             )
-        } catch (error: SourceException) {
-            throw error
-        } catch (_: Throwable) {
-            fail(SourceErrorCode.MALFORMED_SOURCE_RESPONSE, "home-parse", "invalid-home-page")
         }
     }
 
@@ -220,7 +220,9 @@ class SourceExtensionClient private constructor(
             offlineOnly,
             remoteBookId = remoteBookId,
         )
-        return parseDetail(call("parseDetail", arrayOf<Any?>(response.text.orEmpty(), remoteBookId), "detail-parse").jsonObject)
+        return malformedResponse("detail-parse", "invalid-detail") {
+            parseDetail(call("parseDetail", arrayOf<Any?>(response.text.orEmpty(), remoteBookId), "detail-parse").jsonObject)
+        }
     }
 
     suspend fun directory(remoteBookId: String, offlineOnly: Boolean = false): SourceDirectory {
@@ -233,18 +235,20 @@ class SourceExtensionClient private constructor(
             offlineOnly,
             remoteBookId = remoteBookId,
         )
-        val root = call("parseDirectory", arrayOf<Any?>(response.text.orEmpty(), remoteBookId), "directory-parse").jsonObject
-        val identity = BookIdentity(root.requiredString("sourceId"), root.requiredString("remoteBookId"))
-        val chapters = root.requiredArray("chapters").map { chapter ->
-            val value = chapter.jsonObject
-            SourceChapter(
-                chapterId = value.requiredString("chapterId"),
-                title = value.requiredString("title"),
-                url = value.requiredString("url"),
-                volumeTitle = value.optionalString("volumeTitle"),
-            )
+        return malformedResponse("directory-parse", "invalid-directory") {
+            val root = call("parseDirectory", arrayOf<Any?>(response.text.orEmpty(), remoteBookId), "directory-parse").jsonObject
+            val identity = BookIdentity(root.requiredString("sourceId"), root.requiredString("remoteBookId"))
+            val chapters = root.requiredArray("chapters").map { chapter ->
+                val value = chapter.jsonObject
+                SourceChapter(
+                    chapterId = value.requiredString("chapterId"),
+                    title = value.requiredString("title"),
+                    url = value.requiredString("url"),
+                    volumeTitle = value.optionalString("volumeTitle"),
+                )
+            }
+            SourceDirectory(identity, chapters)
         }
-        return SourceDirectory(identity, chapters)
     }
 
     suspend fun checkUpdates(remoteBookId: String, previousAnchor: String?): SourceUpdateProbeResult {
@@ -269,13 +273,15 @@ class SourceExtensionClient private constructor(
                 operationContext = updateCheckContext(policy, remoteBookId),
             )
             classify(response, "update-check-classify", "update-check", remoteBookId)
-            val parsed = parseUpdateCheck(
-                call(
-                    "parseUpdateCheckV2",
-                    arrayOf(response.text.orEmpty(), remoteBookId),
-                    "update-check-parse",
-                ).jsonObject,
-            )
+            val parsed = malformedResponse("update-check-parse", "invalid-update-check") {
+                parseUpdateCheck(
+                    call(
+                        "parseUpdateCheckV2",
+                        arrayOf(response.text.orEmpty(), remoteBookId),
+                        "update-check-parse",
+                    ).jsonObject,
+                )
+            }
             val admitted = admitSourceUpdateCheck(identity, previousAnchor, parsed)
             updateProbeResult(
                 identity = identity,
@@ -304,6 +310,10 @@ class SourceExtensionClient private constructor(
                     ".${error.diagnostic.stage.takeIf(UPDATE_DIAGNOSTIC_STAGE::matches) ?: "unknown"}" +
                     ".${error.diagnostic.safeCode.takeIf(UPDATE_DIAGNOSTIC_CODE::matches) ?: "unknown"}",
             )
+        } catch (error: SecurityException) {
+            throw error
+        } catch (error: Error) {
+            throw error
         } catch (_: Throwable) {
             updateProbeResult(
                 identity = identity,
@@ -329,13 +339,15 @@ class SourceExtensionClient private constructor(
             remoteBookId = remoteBookId,
             chapterId = chapter.chapterId,
         )
-        return parseDocument(
-            call(
-                "parseChapter",
-                arrayOf<Any?>(response.text.orEmpty(), remoteBookId, chapter.chapterId, chapter.title),
-                "chapter-parse",
-            ).jsonObject,
-        )
+        return malformedResponse("chapter-parse", "invalid-document") {
+            parseDocument(
+                call(
+                    "parseChapter",
+                    arrayOf<Any?>(response.text.orEmpty(), remoteBookId, chapter.chapterId, chapter.title),
+                    "chapter-parse",
+                ).jsonObject,
+            )
+        }
     }
 
     suspend fun listRemoteLibrary(cursor: String?): RemoteLibraryPage {
@@ -350,15 +362,13 @@ class SourceExtensionClient private constructor(
             offlineOnly = false,
             operationContext = remoteLibraryReadContext(policy.toNetworkPolicy(), cursor),
         )
-        val root = call("parseRemoteLibrary", arrayOf<Any?>(response.text.orEmpty()), "remote-library-read-parse").jsonObject
-        val items = root.requiredArray("items").map { parseSummary(it.jsonObject) }
-        val nextCursor = root.optionalString("nextCursor")
-        val complete = root["complete"]?.jsonPrimitive?.booleanOrNull
-            ?: fail(SourceErrorCode.MALFORMED_SOURCE_RESPONSE, "remote-library-read-parse", "missing-complete")
-        return try {
+        return malformedResponse("remote-library-read-parse", "invalid-page") {
+            val root = call("parseRemoteLibrary", arrayOf<Any?>(response.text.orEmpty()), "remote-library-read-parse").jsonObject
+            val items = root.requiredArray("items").map { parseSummary(it.jsonObject) }
+            val nextCursor = root.optionalString("nextCursor")
+            val complete = root["complete"]?.jsonPrimitive?.booleanOrNull
+                ?: fail(SourceErrorCode.MALFORMED_SOURCE_RESPONSE, "remote-library-read-parse", "missing-complete")
             RemoteLibraryPage(items, nextCursor, complete)
-        } catch (_: IllegalArgumentException) {
-            fail(SourceErrorCode.MALFORMED_SOURCE_RESPONSE, "remote-library-read-parse", "invalid-page")
         }
     }
 
@@ -373,21 +383,23 @@ class SourceExtensionClient private constructor(
             operationContext = remoteLibraryAddContext(policy.toNetworkPolicy(), remoteBookId, directActionToken),
         )
         classify(response, "remote-library-add-classify")
-        val root = call(
-            "parseRemoteLibraryAdd",
-            arrayOf<Any?>(response.text.orEmpty(), remoteBookId, response.finalUrl),
-            "remote-library-add-parse",
-        ).jsonObject
-        val identity = BookIdentity(root.requiredString("sourceId"), root.requiredString("remoteBookId"))
-        if (identity.sourceId != manifest.sourceId.value || identity.remoteBookId != remoteBookId) {
-            fail(SourceErrorCode.MALFORMED_SOURCE_RESPONSE, "remote-library-add-parse", "identity-mismatch")
+        return malformedResponse("remote-library-add-parse", "invalid-result") {
+            val root = call(
+                "parseRemoteLibraryAdd",
+                arrayOf<Any?>(response.text.orEmpty(), remoteBookId, response.finalUrl),
+                "remote-library-add-parse",
+            ).jsonObject
+            val identity = BookIdentity(root.requiredString("sourceId"), root.requiredString("remoteBookId"))
+            if (identity.sourceId != manifest.sourceId.value || identity.remoteBookId != remoteBookId) {
+                fail(SourceErrorCode.MALFORMED_SOURCE_RESPONSE, "remote-library-add-parse", "identity-mismatch")
+            }
+            val outcome = when (root.requiredString("outcome")) {
+                "applied" -> RemoteLibraryAddOutcome.APPLIED
+                "already-present" -> RemoteLibraryAddOutcome.ALREADY_PRESENT
+                else -> fail(SourceErrorCode.MALFORMED_SOURCE_RESPONSE, "remote-library-add-parse", "invalid-outcome")
+            }
+            RemoteLibraryAddResult(identity, outcome)
         }
-        val outcome = when (root.requiredString("outcome")) {
-            "applied" -> RemoteLibraryAddOutcome.APPLIED
-            "already-present" -> RemoteLibraryAddOutcome.ALREADY_PRESENT
-            else -> fail(SourceErrorCode.MALFORMED_SOURCE_RESPONSE, "remote-library-add-parse", "invalid-outcome")
-        }
-        return RemoteLibraryAddResult(identity, outcome)
     }
 
     suspend fun removeRemoteLibrary(remoteBookId: String, directActionToken: String): RemoteLibraryRemoveResult {
@@ -401,17 +413,19 @@ class SourceExtensionClient private constructor(
             operationContext = remoteLibraryRemoveContext(policy.toNetworkPolicy(), remoteBookId, directActionToken),
         )
         classify(response, "remote-library-remove-classify")
-        val root = call("parseRemoteLibraryRemove", arrayOf<Any?>(response.text.orEmpty(), remoteBookId), "remote-library-remove-parse").jsonObject
-        val identity = BookIdentity(root.requiredString("sourceId"), root.requiredString("remoteBookId"))
-        if (identity.sourceId != manifest.sourceId.value || identity.remoteBookId != remoteBookId) {
-            fail(SourceErrorCode.MALFORMED_SOURCE_RESPONSE, "remote-library-remove-parse", "identity-mismatch")
+        return malformedResponse("remote-library-remove-parse", "invalid-result") {
+            val root = call("parseRemoteLibraryRemove", arrayOf<Any?>(response.text.orEmpty(), remoteBookId), "remote-library-remove-parse").jsonObject
+            val identity = BookIdentity(root.requiredString("sourceId"), root.requiredString("remoteBookId"))
+            if (identity.sourceId != manifest.sourceId.value || identity.remoteBookId != remoteBookId) {
+                fail(SourceErrorCode.MALFORMED_SOURCE_RESPONSE, "remote-library-remove-parse", "identity-mismatch")
+            }
+            val outcome = when (root.requiredString("outcome")) {
+                "applied" -> RemoteLibraryRemoveOutcome.APPLIED
+                "already-absent" -> RemoteLibraryRemoveOutcome.ALREADY_ABSENT
+                else -> fail(SourceErrorCode.MALFORMED_SOURCE_RESPONSE, "remote-library-remove-parse", "invalid-outcome")
+            }
+            RemoteLibraryRemoveResult(identity, outcome)
         }
-        val outcome = when (root.requiredString("outcome")) {
-            "applied" -> RemoteLibraryRemoveOutcome.APPLIED
-            "already-absent" -> RemoteLibraryRemoveOutcome.ALREADY_ABSENT
-            else -> fail(SourceErrorCode.MALFORMED_SOURCE_RESPONSE, "remote-library-remove-parse", "invalid-outcome")
-        }
-        return RemoteLibraryRemoveResult(identity, outcome)
     }
 
     suspend fun moveRemoteLibrary(remoteBookId: String, targetId: String, directActionToken: String): RemoteLibraryMoveResult {
@@ -425,18 +439,20 @@ class SourceExtensionClient private constructor(
             operationContext = remoteLibraryMoveContext(policy.toNetworkPolicy(), remoteBookId, targetId, directActionToken),
         )
         classify(response, "remote-library-move-classify")
-        val root = call("parseRemoteLibraryMove", arrayOf<Any?>(response.text.orEmpty(), remoteBookId, targetId), "remote-library-move-parse").jsonObject
-        val identity = BookIdentity(root.requiredString("sourceId"), root.requiredString("remoteBookId"))
-        val returnedTargetId = root.requiredString("targetId")
-        if (identity.sourceId != manifest.sourceId.value || identity.remoteBookId != remoteBookId || returnedTargetId != targetId) {
-            fail(SourceErrorCode.MALFORMED_SOURCE_RESPONSE, "remote-library-move-parse", "identity-mismatch")
+        return malformedResponse("remote-library-move-parse", "invalid-result") {
+            val root = call("parseRemoteLibraryMove", arrayOf<Any?>(response.text.orEmpty(), remoteBookId, targetId), "remote-library-move-parse").jsonObject
+            val identity = BookIdentity(root.requiredString("sourceId"), root.requiredString("remoteBookId"))
+            val returnedTargetId = root.requiredString("targetId")
+            if (identity.sourceId != manifest.sourceId.value || identity.remoteBookId != remoteBookId || returnedTargetId != targetId) {
+                fail(SourceErrorCode.MALFORMED_SOURCE_RESPONSE, "remote-library-move-parse", "identity-mismatch")
+            }
+            val outcome = when (root.requiredString("outcome")) {
+                "applied" -> RemoteLibraryMoveOutcome.APPLIED
+                "already-at-target" -> RemoteLibraryMoveOutcome.ALREADY_AT_TARGET
+                else -> fail(SourceErrorCode.MALFORMED_SOURCE_RESPONSE, "remote-library-move-parse", "invalid-outcome")
+            }
+            RemoteLibraryMoveResult(identity, targetId, outcome)
         }
-        val outcome = when (root.requiredString("outcome")) {
-            "applied" -> RemoteLibraryMoveOutcome.APPLIED
-            "already-at-target" -> RemoteLibraryMoveOutcome.ALREADY_AT_TARGET
-            else -> fail(SourceErrorCode.MALFORMED_SOURCE_RESPONSE, "remote-library-move-parse", "invalid-outcome")
-        }
-        return RemoteLibraryMoveResult(identity, targetId, outcome)
     }
 
     suspend fun listRemoteTargets(): RemoteLibraryTargetsResult {
@@ -451,7 +467,7 @@ class SourceExtensionClient private constructor(
             offlineOnly = false,
             operationContext = remoteLibraryTargetsContext(policy.toNetworkPolicy()),
         )
-        return try {
+        return malformedResponse("remote-library-targets-parse", "invalid-targets") {
             decodeRemoteTargets(
                 call(
                     "parseRemoteLibraryTargets",
@@ -460,10 +476,6 @@ class SourceExtensionClient private constructor(
                 ).jsonObject,
                 manifest.sourceId.value,
             )
-        } catch (error: SourceException) {
-            throw error
-        } catch (_: IllegalArgumentException) {
-            fail(SourceErrorCode.MALFORMED_SOURCE_RESPONSE, "remote-library-targets-parse", "invalid-targets")
         }
     }
 
@@ -587,10 +599,34 @@ class SourceExtensionClient private constructor(
         parseRequest(call(function, arguments, "$stage-request").jsonObject).let { built ->
             if (offlineOnly) built.copy(cache = NetworkCacheMode.OFFLINE_ONLY) else built
         }
+    } catch (error: CancellationException) {
+        throw error
     } catch (error: SourceException) {
         throw error
+    } catch (error: SecurityException) {
+        throw error
+    } catch (error: Error) {
+        throw error
     } catch (_: Throwable) {
-        fail(SourceErrorCode.EXTENSION_RUNTIME_FAILURE, "$stage-request", "invalid-request-dto")
+        fail(SourceErrorCode.MALFORMED_SOURCE_RESPONSE, "$stage-request", "invalid-request-dto")
+    }
+
+    private suspend fun <T> malformedResponse(
+        stage: String,
+        safeCode: String,
+        block: suspend () -> T,
+    ): T = try {
+        block()
+    } catch (error: CancellationException) {
+        throw error
+    } catch (error: SourceException) {
+        throw error
+    } catch (error: SecurityException) {
+        throw error
+    } catch (error: Error) {
+        throw error
+    } catch (_: Throwable) {
+        fail(SourceErrorCode.MALFORMED_SOURCE_RESPONSE, stage, safeCode)
     }
 
     private suspend fun classify(
@@ -601,7 +637,10 @@ class SourceExtensionClient private constructor(
         chapterId: String? = null,
     ) {
         val arguments = listOf<Any?>(response.text.orEmpty(), response.finalUrl, operation, remoteBookId, chapterId).toTypedArray()
-        when (call("classifyPage", arguments, stage).jsonPrimitive.content) {
+        val classification = malformedResponse(stage, "invalid-page-classification") {
+            call("classifyPage", arguments, stage).jsonPrimitive.content
+        }
+        when (classification) {
             "ok" -> Unit
             "session-required" -> fail(SourceErrorCode.SESSION_REQUIRED, stage, "session-required")
             "verification-required" -> fail(SourceErrorCode.VERIFICATION_REQUIRED, stage, "verification-required")
@@ -615,17 +654,17 @@ class SourceExtensionClient private constructor(
         val result = try {
             runtime.callJson(function, encoded)
         } catch (error: QuickJsRuntimeException) {
+            if (error.error == QuickJsRuntimeError.CANCELLED) {
+                throw CancellationException("Source operation cancelled").apply { initCause(error) }
+            }
             val code = when (error.error) {
                 QuickJsRuntimeError.EXECUTION_LIMIT -> SourceErrorCode.EXTENSION_TIMEOUT
-                QuickJsRuntimeError.CANCELLED -> SourceErrorCode.EXTENSION_CANCELLED
                 else -> SourceErrorCode.EXTENSION_RUNTIME_FAILURE
             }
             fail(code, stage, error.error.name.lowercase())
         }
-        return try {
+        return malformedResponse(stage, "invalid-json-result") {
             JSON.parseToJsonElement(result)
-        } catch (_: Throwable) {
-            fail(SourceErrorCode.MALFORMED_SOURCE_RESPONSE, stage, "invalid-json-result")
         }
     }
 

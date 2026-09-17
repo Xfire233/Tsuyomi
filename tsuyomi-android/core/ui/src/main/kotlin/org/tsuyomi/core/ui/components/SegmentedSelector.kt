@@ -176,6 +176,7 @@ private fun <T> SegmentView(
         !enabled && eInk -> TsuyomiEInkPalette.N50
         !enabled -> MaterialTheme.colorScheme.onSurfaceVariant
         selected && eInk -> TsuyomiEInkPalette.Paper
+        selected -> MaterialTheme.colorScheme.onSecondaryContainer
         else -> MaterialTheme.colorScheme.onSurface
     }
     val shape = RoundedCornerShape(if (eInk) 4.dp else 12.dp)

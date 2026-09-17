@@ -22,12 +22,20 @@ require(
     ),
 ) { "The public deterministic fixture key cannot be an official repository root" }
 
+// Private candidates reuse one semantic version across many rebuilds, so the installed
+// build must carry its own identifiable marker. `-Ptsuyomi.buildFingerprint=<value>`
+// appends it to versionName and surfaces it in the in-app About screen and `dumpsys`.
+val buildFingerprint = providers.gradleProperty("tsuyomi.buildFingerprint").orElse("").get()
+require(buildFingerprint.isEmpty() || Regex("[A-Za-z0-9._-]{1,32}").matches(buildFingerprint)) {
+    "tsuyomi.buildFingerprint must match [A-Za-z0-9._-]{1,32}"
+}
+
 android {
     namespace = "org.tsuyomi.android"
     defaultConfig {
         applicationId = "org.tsuyomi.android"
-        versionCode = 2
-        versionName = "0.2.0"
+        versionCode = 6
+        versionName = if (buildFingerprint.isEmpty()) "0.3.0-beta.4" else "0.3.0-beta.4+$buildFingerprint"
         testInstrumentationRunnerArguments["keep_p4c_review_state"] =
             providers.gradleProperty("tsuyomi.keepP4cReviewState").orElse("false").get()
         buildConfigField("String", "OFFICIAL_REPOSITORY_KEY_ID", "\"$repositoryKeyId\"")

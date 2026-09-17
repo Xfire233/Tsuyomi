@@ -14,6 +14,7 @@ import org.jetbrains.kotlin.gradle.tasks.KotlinCompile
 class TsuyomiKotlinJvmPlugin : Plugin<Project> {
     override fun apply(target: Project) {
         with(target) {
+        TsuyomiArchitectureVerification.install(this)
         pluginManager.apply("org.jetbrains.kotlin.jvm")
 
         extensions.configure(KotlinJvmProjectExtension::class.java) {

@@ -2,6 +2,8 @@
 # SPDX-License-Identifier: Apache-2.0
 
 name: repository-quality
+run-name: >-
+  ${{ github.event_name == 'pull_request' && format('Repository PR #{0} admission', github.event.pull_request.number) || 'Repository main health' }}
 
 on:
   pull_request:

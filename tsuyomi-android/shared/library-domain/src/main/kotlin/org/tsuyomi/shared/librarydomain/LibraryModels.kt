@@ -2,7 +2,7 @@
  * SPDX-FileCopyrightText: 2026 Tsuyomi Contributors
  * SPDX-License-Identifier: Apache-2.0
  */
-package org.tsuyomi.core.database
+package org.tsuyomi.shared.librarydomain
 
 import java.time.Instant
 import org.tsuyomi.shared.locator.ReaderLocator
@@ -55,12 +55,10 @@ data class LibraryEntry(
     val reconciliation: RemoteReconciliationState?,
     val reconciliationOperation: String? = null,
     val progress: ReadingProgress? = null,
+    /** Actual successful Reader admission, or a preserved legacy semantic progress capture. */
+    val readerVisitedAt: Instant? = null,
     val localMembership: Boolean = true,
-) {
-    init {
-        require(rating == null || rating in 1..5) { "Rating must be 1..5" }
-    }
-}
+)
 
 enum class RemoteReconciliationState {
     PENDING_USER_ACTION,

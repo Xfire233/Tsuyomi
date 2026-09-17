@@ -4,14 +4,20 @@
  */
 package org.tsuyomi.android
 
+import kotlinx.coroutines.CancellationException
 import java.io.File
 import java.security.MessageDigest
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.flow.first
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertTrue
 import org.junit.Assert.assertNull
 import org.junit.Test
 import org.tsuyomi.feature.book.SourceBookState
 import org.tsuyomi.shared.model.BookIdentity
+import org.tsuyomi.shared.librarydomain.LibraryBook
+import org.tsuyomi.shared.locator.DocumentIdentity
+import org.tsuyomi.shared.locator.ReaderLocator
 import org.tsuyomi.shared.sourcecontract.ReaderBlock
 import org.tsuyomi.shared.sourcecontract.ReaderDocument
 import org.tsuyomi.shared.sourcecontract.SourceBookDetail
@@ -73,6 +79,129 @@ internal class NormalizedSourceReplayInstrumentedTest : SourceFlowInstrumentedTe
         offline.close()
     }
 
+    @Test
+    fun history_only_visit_resumes_first_cached_chapter_without_creating_progress_or_pin() = runBlocking {
+        val identity = BookIdentity(SOURCE_FLOW_TEST_SOURCE_ID, "history-only")
+        val book = summary(identity.sourceId, identity.remoteBookId, "历史续读")
+        val first = SourceChapter("first", "第一章", "https://www.wenku8.net/book/history-only/first")
+        val second = SourceChapter("second", "第二章", "https://www.wenku8.net/book/history-only/second")
+        val firstDocument = ReaderDocument(
+            sourceId = identity.sourceId,
+            remoteBookId = identity.remoteBookId,
+            contentId = first.chapterId,
+            revision = null,
+            title = first.title,
+            blocks = listOf(ReaderBlock.Paragraph("first-p", "历史首章")),
+        )
+        NormalizedSourceStore(context).apply {
+            writeDetail(SourceBookDetail(book, null, emptyList(), null))
+            writeDirectory(SourceDirectory(identity, listOf(first, second)))
+            writeDocument(identity, firstDocument)
+        }
+        controller().use { admittingFlow ->
+            admittingFlow.prepareBook(book)
+            assertTrue(admittingFlow.recordReaderVisit(identity, java.time.Instant.EPOCH))
+        }
+        assertNull(library.progress(identity))
+        assertNull(library.libraryEntry(identity))
+
+        controller().use { resumedFlow ->
+            assertTrue(resumedFlow.prepareResume(identity))
+            val load = requireNotNull(resumedFlow.consumePreparedResumeLoad())
+            assertEquals(firstDocument, load.document)
+            assertNull(load.restoredLocator)
+            assertEquals(first, resumedFlow.selectedChapter)
+        }
+        assertNull(library.progress(identity))
+        assertNull(library.libraryEntry(identity))
+    }
+
+
+    @Test
+    fun partial_summary_never_narrows_richer_authors_but_detail_remains_authoritative() = runBlocking {
+        val packageInfo = installFixture()
+        val identity = BookIdentity(SOURCE_FLOW_TEST_SOURCE_ID, "author-preservation")
+        library.saveBook(
+            LibraryBook(
+                identity = identity,
+                title = "本地作者元数据",
+                author = "作者甲",
+                authors = setOf("作者甲", "作者乙"),
+                addedAt = SOURCE_FLOW_TEST_TIME,
+                metadataUpdatedAt = SOURCE_FLOW_TEST_TIME,
+            ),
+        )
+        val summary = summary(identity.sourceId, identity.remoteBookId, "部分摘要").copy(author = "摘要作者")
+        val flow = controller {
+            FakeSession(
+                detail = { source ->
+                    SourceBookDetail(source.copy(author = "详情作者"), null, emptyList(), null)
+                },
+            )
+        }
+        try {
+            flow.open(packageInfo)
+            flow.prepareBook(summary)
+            flow.saveProgress(
+                ReaderLocator(
+                    document = DocumentIdentity(identity.sourceId, identity.remoteBookId, "chapter-1"),
+                    blockId = "block-1",
+                    characterOffset = 0,
+                    capturedAt = SOURCE_FLOW_TEST_TIME,
+                ),
+                precision = org.tsuyomi.shared.locator.LocatorPrecision.DEGRADED,
+            )
+            assertEquals(setOf("作者甲", "作者乙"), requireNotNull(library.book(identity)).authors)
+
+            flow.selectBook(summary)
+            assertEquals(setOf("详情作者"), requireNotNull(library.book(identity)).authors)
+        } finally {
+            flow.close()
+        }
+    }
+
+    @Test
+    fun reader_bookmark_toggle_persists_without_creating_a_local_pin() = runBlocking {
+        val identity = BookIdentity(SOURCE_FLOW_TEST_SOURCE_ID, "bookmark-flow")
+        val bookmark = ReaderLocator(
+            document = DocumentIdentity(identity.sourceId, identity.remoteBookId, "chapter-1"),
+            blockId = "paragraph-1",
+            characterOffset = 7,
+            textAnchorDigest = "a".repeat(64),
+            capturedAt = java.time.Instant.EPOCH,
+        )
+        val flow = controller()
+        try {
+            flow.prepareBook(summary(identity.sourceId, identity.remoteBookId, "Reader 书签"))
+            assertEquals(true, flow.toggleBookmark(bookmark))
+            assertEquals(listOf(bookmark), flow.observeBookmarks(identity).first())
+            assertNull(library.libraryEntry(identity))
+            flow.removeSource(identity.sourceId)
+            assertEquals(listOf(bookmark), library.bookmarks(identity))
+        } finally {
+            flow.close()
+        }
+    }
+
+    @Test
+    fun source_cancellation_is_not_converted_to_a_failed_result() = runBlocking {
+        val packageInfo = installFixture()
+        val flow = controller {
+            FakeSession(homeResult = { _, _, _ -> throw CancellationException("fixture cancellation") })
+        }
+        try {
+            flow.open(packageInfo)
+            var cancelled = false
+            try {
+                flow.loadHome(emptyMap())
+            } catch (_: CancellationException) {
+                cancelled = true
+            }
+            assertTrue(cancelled)
+        } finally {
+            flow.close()
+        }
+    }
     @Test
     fun normalized_detail_preserves_update_date_and_decodes_legacy_detail() {
         val storedIdentity = BookIdentity(SOURCE_FLOW_TEST_SOURCE_ID, "1234")

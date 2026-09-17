@@ -31,6 +31,17 @@ for (const { label, schemaPath, fixturePath } of [
     fixturePath: '../fixtures/transfer/valid-v3-retained-unpinned.json',
   },
   {
+    label: 'tsuyomi-transfer v4',
+    schemaPath: '../schemas/tsuyomi-transfer-v4.schema.json',
+    fixturePath: '../fixtures/transfer/valid-v4-reader-bookmarks.json',
+  },
+  {
+    label: 'tsuyomi-transfer v5',
+    schemaPath: '../schemas/tsuyomi-transfer-v5.schema.json',
+    fixturePath: '../fixtures/transfer/valid-v5-semantic-bookmarks.json',
+  },
+
+  {
     label: 'hxp manifest v1',
     schemaPath: '../schemas/hxp-manifest-v1.schema.json',
     fixturePath: '../fixtures/hxp/valid-minimal-manifest.json',
@@ -84,6 +95,55 @@ test('tsuyomi-transfer v3 requires local pin state and rejects unpinned manual m
   delete valid.library[0].localPin;
   assert.equal(validate(valid), false);
   assert.equal(validate(invalid), false);
+});
+
+test('tsuyomi-transfer v4 requires chapter bookmarks and rejects invalid Reader typography', async () => {
+  const ajv = createAjv();
+  const validate = ajv.compile(await loadJson('../schemas/tsuyomi-transfer-v4.schema.json'));
+  for (const fixture of [
+    'invalid-v4-missing-bookmarks.json',
+    'invalid-v4-reader-preferences.json',
+  ]) {
+    assert.equal(validate(await loadJson(`../fixtures/transfer/${fixture}`)), false, fixture);
+  }
+});
+
+test('tsuyomi-transfer v5 requires locator bookmark arrays and enforces their aggregate bound', async () => {
+  const ajv = createAjv();
+  const validate = ajv.compile(await loadJson('../schemas/tsuyomi-transfer-v5.schema.json'));
+  const missing = await loadJson('../fixtures/transfer/invalid-v5-missing-bookmarks.json');
+  assert.equal(validate(missing), false);
+
+  const oversized = await loadJson('../fixtures/transfer/valid-v5-semantic-bookmarks.json');
+  oversized.library[0].bookmarks = Array.from({ length: 20001 }, () => structuredClone(oversized.library[0].bookmarks[0]));
+  assert.equal(validate(oversized), false);
+});
+
+test('tsuyomi-transfer v5 stays closed to v4 chapter bookmarks while semantic fixtures retain a valid shape', async () => {
+  const ajv = createAjv();
+  const validate = ajv.compile(await loadJson('../schemas/tsuyomi-transfer-v5.schema.json'));
+  const legacyField = await loadJson('../fixtures/transfer/valid-v5-semantic-bookmarks.json');
+  legacyField.library[0].bookmarkedChapterIds = [];
+  assert.equal(validate(legacyField), false);
+
+  for (const fixture of [
+    'invalid-v5-foreign-bookmark-document.json',
+    'invalid-v5-duplicate-bookmark-position.json',
+  ]) {
+    assert.equal(validate(await loadJson(`../fixtures/transfer/${fixture}`)), true, fixture);
+  }
+});
+
+test('tsuyomi-transfer v3 remains closed to v4 bookmark and Reader fields', async () => {
+  const ajv = createAjv();
+  const validate = ajv.compile(await loadJson('../schemas/tsuyomi-transfer-v3.schema.json'));
+  const bookmarked = await loadJson('../fixtures/transfer/valid-v3-retained-unpinned.json');
+  bookmarked.library[0].bookmarkedChapterIds = [];
+  assert.equal(validate(bookmarked), false);
+
+  const dual = await loadJson('../fixtures/transfer/valid-v3-retained-unpinned.json');
+  dual.preferences = { reader: { flow: 'dual' } };
+  assert.equal(validate(dual), false);
 });
 test('tsuyomi repository v1 rejects unsigned shape changes and unsafe package URLs', async () => {
   const ajv = createAjv();

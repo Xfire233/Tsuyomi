@@ -4,15 +4,6 @@
  */
 package org.tsuyomi.feature.browse
 
-import androidx.compose.animation.AnimatedContent
-import androidx.compose.animation.EnterTransition
-import androidx.compose.animation.ExitTransition
-import androidx.compose.animation.core.tween
-import androidx.compose.animation.expandVertically
-import androidx.compose.animation.fadeIn
-import androidx.compose.animation.fadeOut
-import androidx.compose.animation.shrinkVertically
-import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -33,41 +24,49 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.key
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalWindowInfo
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.filterNotNull
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.Job
 import org.tsuyomi.core.display.LocalDisplayEnvironment
 import org.tsuyomi.core.media.api.CoverUiState
 import org.tsuyomi.core.ui.components.CoverImage
 import org.tsuyomi.core.ui.components.StateView
 import org.tsuyomi.core.ui.components.TsuyomiAdaptiveListFab
+import org.tsuyomi.core.ui.components.TsuyomiAnimatedContent
 import org.tsuyomi.core.ui.components.TsuyomiButton
 import org.tsuyomi.core.ui.components.TsuyomiButtonStyle
+import org.tsuyomi.core.ui.components.TsuyomiCoverGridCard
 import org.tsuyomi.core.ui.components.TsuyomiFilterCapsuleButton
 import org.tsuyomi.core.ui.components.TsuyomiFilterCapsuleOption
 import org.tsuyomi.core.ui.components.TsuyomiFilterCapsuleOptionRow
 import org.tsuyomi.core.ui.components.TsuyomiFilterCapsulePanel
-import org.tsuyomi.core.ui.components.TsuyomiCoverGridCard
 import org.tsuyomi.core.ui.components.TsuyomiNavigationCard
 import org.tsuyomi.core.ui.components.TsuyomiPullToRefresh
-import org.tsuyomi.core.ui.components.TsuyomiTabRow
 import org.tsuyomi.core.ui.components.TsuyomiStateKind
 import org.tsuyomi.core.ui.components.TsuyomiTabOption
-import org.tsuyomi.core.ui.theme.TsuyomiSpacing
-import org.tsuyomi.core.ui.theme.TsuyomiMotion
+import org.tsuyomi.core.ui.components.TsuyomiTextTabRow
+import org.tsuyomi.core.ui.components.TsuyomiTextTabPagerDefaults
 import org.tsuyomi.core.ui.theme.instantMotion
+import org.tsuyomi.core.ui.theme.rememberSystemReducedMotion
+import org.tsuyomi.core.ui.theme.TsuyomiSpacing
 import org.tsuyomi.shared.sourcecontract.SourceBookSummary
 import org.tsuyomi.shared.sourcecontract.SourceErrorCode
 import org.tsuyomi.shared.sourcecontract.SourceHomeFilter
@@ -121,31 +120,49 @@ internal fun SourceHomeStandardContent(
     val initialPage = primaryValues.indexOf(state.selectedPrimary).coerceAtLeast(0)
     val pagerState = rememberPagerState(initialPage = initialPage, pageCount = primaryValues::size)
     val scope = rememberCoroutineScope()
+    val instantMotion = LocalDisplayEnvironment.current.instantMotion || rememberSystemReducedMotion()
+    var primaryTransitionJob by remember { mutableStateOf<Job?>(null) }
 
-    LaunchedEffect(state.selectedPrimary, primaryValues) {
+    LaunchedEffect(state.selectedPrimary, primaryValues, instantMotion) {
         val target = primaryValues.indexOf(state.selectedPrimary)
-        if (target >= 0 && pagerState.currentPage != target) pagerState.scrollToPage(target)
+        if (target >= 0 && pagerState.settledPage != target) {
+            if (instantMotion) pagerState.scrollToPage(target) else pagerState.animateScrollToPage(target)
+        }
     }
     LaunchedEffect(pagerState, primaryValues) {
-        snapshotFlow { pagerState.settledPage }
+        snapshotFlow {
+            pagerState.settledPage.takeIf {
+                !pagerState.isScrollInProgress && pagerState.currentPageOffsetFraction == 0f
+            }
+        }
+            .filterNotNull()
             .distinctUntilChanged()
             .collect { index -> primaryValues.getOrNull(index)?.let(onSelectPrimary) }
     }
 
     Column(modifier.fillMaxSize()) {
         state.primaryFilter?.let { filter ->
-            TsuyomiTabRow(
+            TsuyomiTextTabRow(
                 options = filter.options.map { TsuyomiTabOption(it.value, it.label) },
                 selectedKey = primaryValues.getOrNull(pagerState.currentPage),
                 onSelect = { selected ->
                     val target = primaryValues.indexOf(selected)
-                    if (target >= 0) scope.launch { pagerState.animateScrollToPage(target) }
+                    if (target >= 0 &&
+                        (target != pagerState.settledPage || pagerState.isScrollInProgress)
+                    ) {
+                        primaryTransitionJob?.cancel()
+                        primaryTransitionJob = scope.launch {
+                            if (instantMotion) pagerState.scrollToPage(target)
+                            else pagerState.animateScrollToPage(target)
+                        }
+                    }
                 },
                 modifier = Modifier.testTag("source-home-primary-tabs"),
             )
         }
         HorizontalPager(
             state = pagerState,
+            flingBehavior = TsuyomiTextTabPagerDefaults.flingBehavior(pagerState),
             key = { index -> primaryValues[index] },
             modifier = Modifier.fillMaxWidth().weight(1f).testTag("source-home-pager"),
         ) { pageIndex ->
@@ -153,7 +170,7 @@ internal fun SourceHomeStandardContent(
             val pageState = state.pages[primary] ?: return@HorizontalPager
             SourceHomeCatalogPage(
                 primary = primary,
-                active = pageIndex == pagerState.currentPage,
+                active = pageIndex == pagerState.settledPage,
                 pageState = pageState,
                 onSelectFilters = onSelectFilters,
                 onRefresh = onRefresh,
@@ -204,7 +221,7 @@ private fun SourceHomeCatalogPage(
             StateView(
                 kind = TsuyomiStateKind.ERROR,
                 title = stringResource(R.string.source_home_failure_title),
-                message = stringResource(R.string.source_home_failure_message, failure.safeCode),
+                message = stringResource(R.string.source_home_failure_message),
                 actionLabel = stringResource(
                     if (verificationRequired) R.string.source_home_open_verification
                     else R.string.source_home_retry,
@@ -217,18 +234,20 @@ private fun SourceHomeCatalogPage(
         }
         return
     }
+    val wide = with(LocalDensity.current) { LocalWindowInfo.current.containerSize.width.toDp() >= 600.dp }
     val hasPageControls = page.filters.drop(1).isNotEmpty() ||
         pageState.replacing || pageState.replacementFailure != null
 
+    key(pageState.queryKey) {
     val gridState = rememberLazyGridState(
         initialFirstVisibleItemIndex = pageState.firstVisibleItemIndex,
         initialFirstVisibleItemScrollOffset = pageState.firstVisibleItemScrollOffset,
     )
-    LaunchedEffect(gridState, primary, pageState.queryKey) {
+    LaunchedEffect(gridState, primary, pageState.queryKey, active) {
         snapshotFlow { gridState.firstVisibleItemIndex to gridState.firstVisibleItemScrollOffset }
             .distinctUntilChanged()
             .collect { (index, offset) ->
-                onScrollPositionChanged(primary, pageState.queryKey, index, offset)
+                if (active) onScrollPositionChanged(primary, pageState.queryKey, index, offset)
             }
     }
     LaunchedEffect(gridState, active, page.nextCursor, pageState.appending, pageState.appendFailure) {
@@ -250,7 +269,7 @@ private fun SourceHomeCatalogPage(
     ) {
         Box(Modifier.fillMaxSize()) {
             LazyVerticalGrid(
-                columns = GridCells.Adaptive(108.dp),
+                columns = if (wide) GridCells.Adaptive(150.dp) else GridCells.Fixed(3),
                 state = gridState,
                 modifier = Modifier.fillMaxSize().testTag("source-home-book-grid-$primary"),
                 contentPadding = PaddingValues(
@@ -288,6 +307,7 @@ private fun SourceHomeCatalogPage(
                             onClick = { onOpenBook(book) },
                             cover = { CoverImage(coverState(book), Modifier.fillMaxSize()) },
                             modifier = Modifier.testTag("source-home-book-${book.identity.remoteBookId}"),
+                            titleInsideCover = true,
                         )
                     }
                 }
@@ -311,10 +331,7 @@ private fun SourceHomeCatalogPage(
                             horizontalAlignment = Alignment.CenterHorizontally,
                         ) {
                             Text(
-                                text = stringResource(
-                                    R.string.source_home_append_failure,
-                                    pageState.appendFailure.safeCode,
-                                ),
+                                text = stringResource(R.string.source_home_append_failure),
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.error,
                             )
@@ -334,6 +351,7 @@ private fun SourceHomeCatalogPage(
                 modifier = Modifier.align(Alignment.BottomEnd).padding(TsuyomiSpacing.Md),
             )
         }
+    }
     }
 }
 
@@ -418,34 +436,9 @@ private fun SourceHomePageControls(
             }
         }
 
-        val instantMotion = LocalDisplayEnvironment.current.instantMotion
-        AnimatedContent(
+        TsuyomiAnimatedContent(
             targetState = expandedFilterId,
             modifier = Modifier.fillMaxWidth(),
-            transitionSpec = {
-                if (instantMotion) {
-                    EnterTransition.None togetherWith ExitTransition.None
-                } else {
-                    (expandVertically(
-                        animationSpec = tween(
-                            TsuyomiMotion.SELECTION_DURATION_MS,
-                            easing = TsuyomiMotion.Easing,
-                        ),
-                        expandFrom = Alignment.Top,
-                    ) + fadeIn(
-                        tween(TsuyomiMotion.SELECTION_DURATION_MS, easing = TsuyomiMotion.Easing),
-                    )) togetherWith (shrinkVertically(
-                        animationSpec = tween(
-                            TsuyomiMotion.SELECTION_DURATION_MS,
-                            easing = TsuyomiMotion.Easing,
-                        ),
-                        shrinkTowards = Alignment.Top,
-                    ) + fadeOut(
-                        tween(TsuyomiMotion.SELECTION_DURATION_MS, easing = TsuyomiMotion.Easing),
-                    ))
-                }
-            },
-            label = "sourceHomeFilterPanel",
         ) { filterId ->
             val expandedFilter = secondaryFilters.firstOrNull { it.id == filterId }
             if (expandedFilter != null) {
@@ -466,10 +459,7 @@ private fun SourceHomePageControls(
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 Text(
-                    text = stringResource(
-                        R.string.source_home_inline_failure,
-                        pageState.replacementFailure.safeCode,
-                    ),
+                    text = stringResource(R.string.source_home_inline_failure),
                     modifier = Modifier.weight(1f),
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.error,

@@ -6,6 +6,7 @@ package org.tsuyomi.core.media.internal
 
 import android.content.Context
 import java.security.MessageDigest
+import java.util.concurrent.CancellationException
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flow
 import org.tsuyomi.core.media.api.CoverFailureReason
@@ -32,11 +33,27 @@ internal class DefaultCoverRepository(
         mediaFetcher = mediaFetcher,
     )
 
+    override fun cached(request: CoverRequest): CoverUiState.Ready? {
+        if (request.sourceId != sourceId || request.packageRevision != packageRevision ||
+            request.credentialRevision != credentialRevision
+        ) return null
+        return try {
+            loader.cached(request.transportUrl, request.targetWidthPx, request.targetHeightPx)
+                ?.let(CoverUiState::Ready)
+        } catch (_: MediaLoadException) {
+            null
+        }
+    }
+
     override fun observe(request: CoverRequest): Flow<CoverUiState> = flow {
         if (request.sourceId != sourceId || request.packageRevision != packageRevision ||
             request.credentialRevision != credentialRevision
         ) {
             emit(CoverUiState.Failed(CoverFailureReason.INVALID_REFERENCE, request.fallback))
+            return@flow
+        }
+        cached(request)?.let {
+            emit(it)
             return@flow
         }
         emit(CoverUiState.Loading(request.fallback))
@@ -46,6 +63,12 @@ internal class DefaultCoverRepository(
             )
         } catch (error: MediaLoadException) {
             CoverUiState.Failed(error.failure.toPublicReason(), request.fallback)
+        } catch (error: CancellationException) {
+            throw error
+        } catch (error: SecurityException) {
+            throw error
+        } catch (error: Error) {
+            throw error
         } catch (_: Throwable) {
             CoverUiState.Failed(CoverFailureReason.NETWORK, request.fallback)
         }

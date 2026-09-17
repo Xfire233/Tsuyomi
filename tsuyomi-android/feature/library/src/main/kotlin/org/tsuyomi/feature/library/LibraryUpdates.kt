@@ -7,14 +7,10 @@ package org.tsuyomi.feature.library
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
-import androidx.compose.material3.DropdownMenu
-import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -28,6 +24,10 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import kotlinx.coroutines.delay
 import org.tsuyomi.core.ui.icons.TsuyomiIcons
+import org.tsuyomi.core.ui.components.TsuyomiButton
+import org.tsuyomi.core.ui.components.TsuyomiButtonStyle
+import org.tsuyomi.core.ui.components.TsuyomiOverflowAction
+import org.tsuyomi.core.ui.components.TsuyomiOverflowMenu
 import org.tsuyomi.core.ui.theme.TsuyomiSpacing
 import org.tsuyomi.shared.librarydomain.UnresolvedUpdate
 import org.tsuyomi.shared.librarydomain.UpdateSessionStates
@@ -91,16 +91,20 @@ private fun LibraryUpdateStatusStrip(
         ) {
             Text(label, modifier = Modifier.weight(1f), style = MaterialTheme.typography.bodyMedium)
             if (active) {
-                TextButton(onClick = onCancelScan) { Text(stringResource(R.string.updates_cancel)) }
+                TsuyomiButton(
+                    text = stringResource(R.string.updates_cancel),
+                    onClick = onCancelScan,
+                    style = TsuyomiButtonStyle.TEXT,
+                )
             } else {
-                TextButton(onClick = onOpenSettings) {
-                    Text(stringResource(R.string.updates_show_reports, session.completed, session.total))
-                }
+                TsuyomiButton(
+                    text = stringResource(R.string.updates_show_reports, session.completed, session.total),
+                    onClick = onOpenSettings,
+                    style = TsuyomiButtonStyle.TEXT,
+                )
                 if (!successful) {
-                    TextButton(onClick = onRetryScan) { Text(stringResource(R.string.updates_retry)) }
-                    TextButton(onClick = { dismissedSessionId = session.id }) {
-                        Text(stringResource(R.string.updates_dismiss))
-                    }
+                    TsuyomiButton(text = stringResource(R.string.updates_retry), onClick = onRetryScan, style = TsuyomiButtonStyle.TEXT)
+                    TsuyomiButton(text = stringResource(R.string.updates_dismiss), onClick = { dismissedSessionId = session.id }, style = TsuyomiButtonStyle.TEXT)
                 }
             }
         }
@@ -113,27 +117,16 @@ internal fun LibraryUpdateActionButton(
     onIgnore: (UnresolvedUpdate) -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    var expanded by rememberSaveable(update.identity.sourceId, update.identity.remoteBookId, update.anchor) {
-        mutableStateOf(false)
-    }
-    IconButton(
-        onClick = { expanded = true },
-        modifier = modifier.testTag("library-update-actions-${update.identity.sourceId}-${update.identity.remoteBookId}"),
-    ) {
-        Icon(TsuyomiIcons.More, contentDescription = "${update.title} 的更新操作")
-    }
-    DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
-        DropdownMenuItem(
-            text = { Text(stringResource(R.string.updates_ignore_current)) },
-            onClick = {
-                expanded = false
-                onIgnore(update)
-            },
-            modifier = Modifier.testTag(
-                "library-update-ignore-${update.identity.sourceId}-${update.identity.remoteBookId}",
+    TsuyomiOverflowMenu(
+        actions = listOf(
+            TsuyomiOverflowAction(
+                label = stringResource(R.string.updates_ignore_current),
+                onClick = { onIgnore(update) },
             ),
-        )
-    }
+        ),
+        contentDescription = "${update.title} 的更新操作",
+        modifier = modifier.testTag("library-update-actions-${update.identity.sourceId}-${update.identity.remoteBookId}"),
+    )
 }
 
 internal fun updateSuccessVisibilityMillis(

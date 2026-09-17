@@ -4,15 +4,11 @@
  */
 package org.tsuyomi.feature.library
 
-import androidx.compose.animation.animateColorAsState
-import androidx.compose.animation.core.animateFloatAsState
-import androidx.compose.animation.core.snap
-import androidx.compose.animation.core.tween
 import androidx.compose.foundation.BorderStroke
-import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.Orientation
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.aspectRatio
@@ -48,7 +44,6 @@ import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.LocalDensity
@@ -57,14 +52,19 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import org.tsuyomi.core.database.LibraryEntry
+import org.tsuyomi.shared.librarydomain.LibraryEntry
 import org.tsuyomi.core.display.LocalDisplayEnvironment
 import org.tsuyomi.core.media.api.CoverUiState
 import org.tsuyomi.core.ui.components.CoverImage
 import org.tsuyomi.core.ui.components.TsuyomiAdaptiveListFab
+import org.tsuyomi.core.ui.components.TsuyomiCoverCardContent
+import org.tsuyomi.core.ui.components.currentCoverCardLayout
+
 import org.tsuyomi.core.ui.icons.TsuyomiIcons
-import org.tsuyomi.core.ui.theme.TsuyomiMotion
+import org.tsuyomi.core.ui.theme.tsuyomiAnimateColorAsState
+import org.tsuyomi.core.ui.theme.tsuyomiAnimateFloatAsState
 import org.tsuyomi.core.ui.theme.instantMotion
+import org.tsuyomi.core.ui.components.coverCardHeight
 import org.tsuyomi.shared.model.BookIdentity
 
 enum class LibraryScrollDirection {
@@ -102,7 +102,7 @@ internal fun LibraryBookSurface(
     onViewportChanged: ((LibraryViewport) -> Unit)? = null,
     onViewportSettled: suspend (Int, Int) -> Unit = { _, _ -> },
     rootItems: List<LibraryRootItem>? = null,
-    onOpenCollection: (org.tsuyomi.core.database.LibraryCollection) -> Unit = {},
+    onOpenCollection: (org.tsuyomi.shared.librarydomain.LibraryCollection) -> Unit = {},
     onOpenMirror: (LibraryMirrorShortcut) -> Unit = {},
     onLongPressCollection: (String) -> Unit = {},
     onToggleCollectionSelection: (String) -> Unit = {},
@@ -144,7 +144,7 @@ internal fun LibraryBookSurface(
                 )
                 Box(modifier.fillMaxSize()) {
                     LazyVerticalGrid(
-                        columns = if (wide) GridCells.Adaptive(120.dp) else GridCells.Fixed(3),
+                        columns = if (wide) GridCells.Adaptive(150.dp) else GridCells.Fixed(3),
                         state = gridState,
                         modifier = surfaceModifier,
                         contentPadding = PaddingValues(start = 8.dp, top = 8.dp, end = 8.dp, bottom = 96.dp),
@@ -318,12 +318,13 @@ internal fun LibraryBookSurface(
 }
 
 @Composable
-internal fun LibraryBookInsertionGap(layout: LibraryLayout, modifier: Modifier = Modifier) {
+internal fun LibraryBookInsertionGap(layout: LibraryLayout, modifier: Modifier = Modifier) = BoxWithConstraints(modifier.fillMaxWidth()) {
     val gapModifier = when (layout) {
-        LibraryLayout.GRID -> modifier.fillMaxWidth().aspectRatio(3f / 4f)
-        LibraryLayout.LIST -> modifier.fillMaxWidth().height(TsuyomiSpacing.Md)
+        LibraryLayout.GRID -> Modifier.fillMaxWidth().height(coverCardHeight(maxWidth))
+
+        LibraryLayout.LIST -> Modifier.fillMaxWidth().height(TsuyomiSpacing.Md)
             .padding(horizontal = TsuyomiSpacing.Md, vertical = TsuyomiSpacing.Xs)
-        LibraryLayout.COMPACT -> modifier.fillMaxWidth().height(12.dp)
+        LibraryLayout.COMPACT -> Modifier.fillMaxWidth().height(12.dp)
             .padding(horizontal = 16.dp, vertical = 3.dp)
     }
     Surface(
@@ -371,6 +372,20 @@ internal fun ObserveLibraryViewport(
     }
 }
 
+internal fun LibraryEntry.readingStatusLabel(): String? = progress?.let { readingProgress ->
+    val wholeBookProgress = readingProgress.locator.bookProgress?.takeIf(Double::isFinite)
+        ?: return@let "阅读中"
+    val bounded = wholeBookProgress.coerceIn(0.0, 1.0)
+    if (bounded >= 1.0) "已读完" else "读至 ${(bounded * 100).toInt()}%"
+}
+
+internal fun LibraryEntry.libraryStatusLabel(): String = readingStatusLabel()
+    ?: when {
+        readLater -> "稍后再读"
+        !sourceAvailable -> "来源未安装"
+        else -> "未开始"
+    }
+
 @Composable
 internal fun LibraryBookGridCard(
     entry: LibraryEntry,
@@ -390,28 +405,22 @@ internal fun LibraryBookGridCard(
     onIgnoreUpdate: (org.tsuyomi.shared.librarydomain.UnresolvedUpdate) -> Unit,
 ) {
     val identity = entry.book.identity
-    val status = entry.progress?.locator?.bookProgress?.let { "读至 ${(it * 100).toInt()}%" }
-        ?: update?.let { "新增 ${it.newChapterIds.size} 章" }
-        ?: when {
-            entry.readLater -> "稍后再读"
-            !entry.sourceAvailable -> "来源未安装"
-            else -> "未开始"
-        }
+    val wide = currentCoverCardLayout().usesWideTitleLane
+    val status = entry.libraryStatusLabel()
     val targeted = dragCoordinator.bookTargetIdentity == identity
-    val instant = LocalDisplayEnvironment.current.instantMotion
-    val targetScale by animateFloatAsState(
-        targetValue = if (targeted) 1.025f else 1f,
-        animationSpec = if (instant) snap() else tween(TsuyomiMotion.SWITCH_DURATION_MS, easing = TsuyomiMotion.Easing),
+    val targetScale = tsuyomiAnimateFloatAsState(
+        target = if (targeted) 1.025f else 1f,
+        instant = LocalDisplayEnvironment.current.instantMotion,
         label = "libraryBookTargetScale",
     )
-    val targetContainer by animateColorAsState(
-        targetValue = if (selected || targeted) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surface,
-        animationSpec = if (instant) snap() else tween(TsuyomiMotion.SWITCH_DURATION_MS, easing = TsuyomiMotion.Easing),
+    val targetContainer = tsuyomiAnimateColorAsState(
+        target = if (selected || targeted) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surface,
+        instant = LocalDisplayEnvironment.current.instantMotion,
         label = "libraryBookTargetContainer",
     )
-    val targetOutline by animateColorAsState(
-        targetValue = if (selected || targeted) MaterialTheme.colorScheme.primary else Color.Transparent,
-        animationSpec = if (instant) snap() else tween(TsuyomiMotion.SWITCH_DURATION_MS, easing = TsuyomiMotion.Easing),
+    val targetOutline = tsuyomiAnimateColorAsState(
+        target = if (selected || targeted) MaterialTheme.colorScheme.primary else Color.Transparent,
+        instant = LocalDisplayEnvironment.current.instantMotion,
         label = "libraryBookTargetOutline",
     )
     Card(
@@ -442,42 +451,58 @@ internal fun LibraryBookGridCard(
         colors = CardDefaults.cardColors(containerColor = targetContainer),
         border = BorderStroke(2.dp, targetOutline),
     ) {
-        Box(Modifier.fillMaxWidth().aspectRatio(3f / 4f)) {
-            ProductionBookCover(entry, coverState, onCoverVisibility, Modifier.fillMaxSize())
-            update?.let { unresolved ->
-                Surface(
-                    modifier = Modifier.align(Alignment.TopStart).padding(TsuyomiSpacing.Xs),
-                    shape = MaterialTheme.shapes.small,
-                    color = MaterialTheme.colorScheme.primaryContainer,
-                ) {
-                    Text("+${unresolved.newChapterIds.size}", modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp), style = MaterialTheme.typography.labelSmall)
-                }
-            }
-            if (selected) {
-                Surface(
-                    modifier = Modifier.align(Alignment.TopEnd).padding(6.dp).size(32.dp),
-                    shape = MaterialTheme.shapes.extraLarge,
-                    color = MaterialTheme.colorScheme.primary,
-                ) {
-                    Box(contentAlignment = Alignment.Center) {
-                        Icon(TsuyomiIcons.Selected, contentDescription = "已选择", tint = MaterialTheme.colorScheme.onPrimary)
+        TsuyomiCoverCardContent(
+            title = entry.book.title,
+            supportingText = status,
+            cover = {
+                ProductionBookCover(entry, coverState, onCoverVisibility, Modifier.fillMaxSize())
+            },
+            metadataModifier = Modifier.testTag("library-book-metadata-${identity.sourceId}-${identity.remoteBookId}"),
+            artworkOverlay = {
+                update?.let { unresolved ->
+                    Surface(
+                        modifier = Modifier.align(Alignment.TopStart)
+                            .padding(horizontal = TsuyomiSpacing.Xs, vertical = if (wide) 0.dp else TsuyomiSpacing.Xs),
+                        shape = MaterialTheme.shapes.small,
+                        color = MaterialTheme.colorScheme.primaryContainer,
+                    ) {
+                        Text(
+                            "+${unresolved.newChapterIds.size}",
+                            modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
+                            style = MaterialTheme.typography.labelSmall,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
                     }
                 }
-            } else {
-                update?.let { unresolved ->
-                    LibraryUpdateActionButton(unresolved, onIgnoreUpdate, Modifier.align(Alignment.TopEnd).padding(TsuyomiSpacing.Xs))
+                if (selected) {
+                    Surface(
+                        modifier = Modifier.align(if (wide) Alignment.BottomStart else Alignment.TopEnd)
+                            .padding(6.dp).size(32.dp),
+                        shape = MaterialTheme.shapes.extraLarge,
+                        color = MaterialTheme.colorScheme.primary,
+                    ) {
+                        Box(contentAlignment = Alignment.Center) {
+                            Icon(
+                                TsuyomiIcons.Selected,
+                                contentDescription = "已选择",
+                                tint = MaterialTheme.colorScheme.onPrimary,
+                            )
+                        }
+                    }
+                } else {
+                    update?.let { unresolved ->
+                        LibraryUpdateActionButton(
+                            unresolved,
+                            onIgnoreUpdate,
+                            if (wide) Modifier.align(Alignment.BottomStart)
+                            else Modifier.align(Alignment.TopEnd).padding(TsuyomiSpacing.Xs),
+                        )
+                    }
                 }
-            }
-            Column(
-                modifier = Modifier.align(Alignment.BottomCenter).fillMaxWidth()
-                    .background(Brush.verticalGradient(listOf(Color.Transparent, Color.Black.copy(alpha = 0.82f))))
-                    .padding(start = TsuyomiSpacing.Sm, top = 28.dp, end = TsuyomiSpacing.Sm, bottom = 6.dp)
-                    .testTag("library-book-metadata-${identity.sourceId}-${identity.remoteBookId}"),
-            ) {
-                Text(entry.book.title, maxLines = 2, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.titleSmall, color = Color.White)
-                Text(status, maxLines = 1, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.labelMedium, color = Color.White.copy(alpha = 0.9f))
-            }
-        }
+            },
+        )
+
     }
 }
 
@@ -501,10 +526,9 @@ internal fun LibraryBookListRow(
 ) {
     val identity = entry.book.identity
     val targeted = dragCoordinator.bookTargetIdentity == identity
-    val instant = LocalDisplayEnvironment.current.instantMotion
-    val targetContainer by animateColorAsState(
-        targetValue = if (selected || targeted) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surface,
-        animationSpec = if (instant) snap() else tween(TsuyomiMotion.SWITCH_DURATION_MS, easing = TsuyomiMotion.Easing),
+    val targetContainer = tsuyomiAnimateColorAsState(
+        target = if (selected || targeted) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surface,
+        instant = LocalDisplayEnvironment.current.instantMotion,
         label = "libraryBookListTargetContainer",
     )
     ListItem(
@@ -512,11 +536,14 @@ internal fun LibraryBookListRow(
         overlineContent = entry.book.authors.joinToString("、").takeIf(String::isNotBlank)?.let { authors ->
             { Text(authors, maxLines = 1, overflow = TextOverflow.Ellipsis) }
         },
-        supportingContent = {
-            Text(update?.let { "新增 ${it.newChapterIds.size} 章" } ?: entry.progress?.locator?.bookProgress?.let { "读至 ${(it * 100).toInt()}%" } ?: if (entry.readLater) "稍后再读" else "未开始")
-        },
+        supportingContent = { Text(entry.libraryStatusLabel()) },
         leadingContent = {
-            ProductionBookCover(entry, coverState, onCoverVisibility, Modifier.size(width = 84.dp, height = 112.dp))
+            ProductionBookCover(
+                entry,
+                coverState,
+                onCoverVisibility,
+                Modifier.height(112.dp).aspectRatio(currentCoverCardLayout().leadingArtworkAspectRatio),
+            )
         },
         trailingContent = when {
             selected -> ({ Icon(TsuyomiIcons.Selected, contentDescription = "已选择", tint = MaterialTheme.colorScheme.primary) })
@@ -564,18 +591,15 @@ internal fun LibraryCompactBookRow(
 ) {
     val identity = entry.book.identity
     val targeted = dragCoordinator.bookTargetIdentity == identity
-    val instant = LocalDisplayEnvironment.current.instantMotion
-    val targetContainer by animateColorAsState(
-        targetValue = if (selected || targeted) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surface,
-        animationSpec = if (instant) snap() else tween(TsuyomiMotion.SWITCH_DURATION_MS, easing = TsuyomiMotion.Easing),
+    val targetContainer = tsuyomiAnimateColorAsState(
+        target = if (selected || targeted) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surface,
+        instant = LocalDisplayEnvironment.current.instantMotion,
         label = "libraryBookCompactTargetContainer",
     )
     ListItem(
         headlineContent = { Text(entry.book.title, maxLines = 1, overflow = TextOverflow.Ellipsis) },
         supportingContent = {
-            val supporting = update?.let { "新增 ${it.newChapterIds.size} 章" }
-                ?: entry.progress?.locator?.bookProgress?.let { "读至 ${(it * 100).toInt()}%" }
-                ?: entry.book.authors.joinToString("、")
+            val supporting = entry.readingStatusLabel() ?: entry.book.authors.joinToString("、")
             if (supporting.isNotBlank()) Text(supporting, maxLines = 1, overflow = TextOverflow.Ellipsis)
         },
         trailingContent = when {
@@ -620,7 +644,7 @@ internal fun ProductionBookCover(
     CoverImage(
         state = coverState(entry),
         modifier = modifier,
-        unresolvedBadge = entry.reconciliation == org.tsuyomi.core.database.RemoteReconciliationState.UNRESOLVED,
+        unresolvedBadge = entry.reconciliation == org.tsuyomi.shared.librarydomain.RemoteReconciliationState.UNRESOLVED,
     )
 }
 

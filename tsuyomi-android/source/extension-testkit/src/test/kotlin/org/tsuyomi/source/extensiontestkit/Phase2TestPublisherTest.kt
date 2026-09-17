@@ -21,4 +21,15 @@ class Phase2TestPublisherTest {
         assertEquals("org.tsuyomi.wenku8", verified.manifest.sourceId.value)
         assertEquals(Phase2TestPublisher.key.fingerprint, verified.publisherFingerprint)
     }
+
+    @Test
+    fun verifiesTheDeterministicMalformedOutputFixture() {
+        val fixture = File("fixtures/wenku8/malformed-output-fixture.hxp")
+        check(fixture.isFile) { "Signed malformed-output fixture is missing" }
+
+        val verified = HxpArchiveVerifier(InMemoryPublisherKeyStore(listOf(Phase2TestPublisher.key))).verify(fixture)
+
+        assertEquals("org.tsuyomi.malformed-output", verified.manifest.sourceId.value)
+        assertEquals(Phase2TestPublisher.key.fingerprint, verified.publisherFingerprint)
+    }
 }

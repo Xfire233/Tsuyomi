@@ -196,7 +196,7 @@ private fun SourceHomeFailureView(
             if (verificationRequired) R.string.source_home_verification_title
             else R.string.source_home_failure_title,
         ),
-        message = stringResource(R.string.source_home_failure_message, failure.safeCode),
+        message = stringResource(R.string.source_home_failure_message),
         actionLabel = stringResource(
             if (verificationRequired) R.string.source_home_open_verification
             else R.string.source_home_retry,

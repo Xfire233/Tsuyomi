@@ -5,7 +5,6 @@
 package org.tsuyomi.feature.book
 
 import androidx.compose.foundation.layout.padding
-import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -21,6 +20,7 @@ import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.unit.dp
 import org.tsuyomi.core.ui.icons.TsuyomiIcons
 import org.tsuyomi.shared.sourcecontract.RemoteTarget
+import org.tsuyomi.core.ui.components.TsuyomiMenuItem
 
 /** One independently selectable local manual-collection destination. */
 data class DetailCollectionDestination(
@@ -123,14 +123,8 @@ private fun DestinationSectionLabel(label: String) {
 
 @Composable
 private fun DestinationStatusRow(message: String) {
-    DropdownMenuItem(
-        text = {
-            Text(
-                text = message,
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-        },
+    TsuyomiMenuItem(
+        label = message,
         onClick = {},
         enabled = false,
     )
@@ -145,17 +139,11 @@ private fun DestinationMenuItem(
     modifier: Modifier = Modifier,
     selectedStateDescription: String = if (selected) "已选择" else "未选择",
 ) {
-    DropdownMenuItem(
-        text = { Text(label, maxLines = 1) },
+    TsuyomiMenuItem(
+        label = label,
         onClick = onClick,
         modifier = modifier.semantics {
             stateDescription = selectedStateDescription
-        },
-        leadingIcon = { Icon(icon, contentDescription = null) },
-        trailingIcon = if (selected) {
-            { Icon(TsuyomiIcons.Selected, contentDescription = null) }
-        } else {
-            null
         },
     )
 }

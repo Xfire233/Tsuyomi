@@ -13,7 +13,7 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
 import androidx.test.ext.junit.runners.AndroidJUnit4
-import org.tsuyomi.core.database.RemoteReconciliationState
+import org.tsuyomi.shared.librarydomain.RemoteReconciliationState
 import org.tsuyomi.shared.sourcecontract.RemoteLibraryPage
 
 @RunWith(AndroidJUnit4::class)

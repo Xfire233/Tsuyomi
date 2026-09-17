@@ -5,11 +5,16 @@
 package org.tsuyomi.source.quickjsruntime
 
 import androidx.test.ext.junit.runners.AndroidJUnit4
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.TimeUnit
 import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withTimeout
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
 
@@ -28,6 +33,48 @@ class QuickJsRuntimeLaneInstrumentedTest {
             )
 
             assertEquals("5", lane.callJson("sum", "[2,3]"))
+        }
+    }
+
+    @Test
+    fun evaluatesUnicodeScriptAndExtensionsThroughJni() = runBlocking {
+        QuickJsRuntimeLane("unicode", QuickJsRuntimeLimits(4L * 1024 * 1024, 1_000)).use { lane ->
+            lane.evaluateModule(
+                source = """
+                    globalThis.tsuyomiExtension = {
+                        script: () => /\p{Script=Latin}/u.test("A") && !/\p{Script=Latin}/u.test("Ж"),
+                        scriptExtensions: () => /\p{Script_Extensions=Latin}/u.test("A"),
+                    };
+                """.trimIndent().encodeToByteArray(),
+                filename = "unicode.mjs",
+            )
+
+            assertEquals("true", lane.callJson("script", "[]"))
+            assertEquals("true", lane.callJson("scriptExtensions", "[]"))
+        }
+    }
+
+    @Test
+    fun sourceIntrinsicsCannotEnableBlockingAtomicsWait() = runBlocking {
+        QuickJsRuntimeLane("atomics-admission", QuickJsRuntimeLimits(4L * 1024 * 1024, 1_000)).use { lane ->
+            lane.evaluateModule(
+                source = """
+                    globalThis.tsuyomiExtension = {
+                        rejectsBlocking: () => {
+                            if (typeof Atomics === "undefined" || typeof SharedArrayBuffer === "undefined") return true;
+                            const values = new Int32Array(new SharedArrayBuffer(4));
+                            try {
+                                Atomics.wait(values, 0, 0, 0);
+                                return false;
+                            } catch (error) {
+                                return error instanceof TypeError;
+                            }
+                        },
+                    };
+                """.trimIndent().encodeToByteArray(),
+                filename = "atomics-admission.mjs",
+            )
+            assertEquals("true", lane.callJson("rejectsBlocking", "[]"))
         }
     }
 
@@ -91,8 +138,17 @@ class QuickJsRuntimeLaneInstrumentedTest {
                 }
             }
             operationArmed.await()
+            val queuedInvocation = async {
+                try {
+                    lane.callJson("state", "[]")
+                    throw AssertionError("Expected a closed lane for the queued operation")
+                } catch (error: QuickJsRuntimeException) {
+                    error
+                }
+            }
             lane.close()
-            assertEquals(QuickJsRuntimeError.CANCELLED, invocation.await().error)
+            assertEquals(QuickJsRuntimeError.CANCELLED, withTimeout(5_000) { invocation.await() }.error)
+            assertEquals(QuickJsRuntimeError.CLOSED, withTimeout(5_000) { queuedInvocation.await() }.error)
 
             val failure = try {
                 lane.callJson("state", "[]")
@@ -102,6 +158,39 @@ class QuickJsRuntimeLaneInstrumentedTest {
             }
             assertEquals(QuickJsRuntimeError.CLOSED, failure.error)
         } finally {
+            lane.close()
+        }
+    }
+
+    @Test
+    fun returnsClosedWhenCloseWinsTheSubmissionRace() = runBlocking {
+        val lane = QuickJsRuntimeLane("submission-race", QuickJsRuntimeLimits(4L * 1024 * 1024, 1_000))
+        val submissionChecked = CountDownLatch(1)
+        val continueSubmission = CountDownLatch(1)
+        try {
+            lane.onNextSubmissionCheckedForTest {
+                submissionChecked.countDown()
+                check(continueSubmission.await(5, TimeUnit.SECONDS)) { "Timed out waiting to continue submission" }
+            }
+            val invocation = async(Dispatchers.Default) {
+                try {
+                    lane.callJson("state", "[]")
+                    throw AssertionError("Expected a closed lane")
+                } catch (error: QuickJsRuntimeException) {
+                    error
+                }
+            }
+            assertTrue("Submission did not reach the close race seam", submissionChecked.await(5, TimeUnit.SECONDS))
+
+            lane.close()
+            continueSubmission.countDown()
+
+            assertEquals(
+                QuickJsRuntimeError.CLOSED,
+                withTimeout(5_000) { invocation.await() }.error,
+            )
+        } finally {
+            continueSubmission.countDown()
             lane.close()
         }
     }

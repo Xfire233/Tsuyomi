@@ -11,9 +11,11 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.selection.toggleable
+import androidx.compose.foundation.selection.triStateToggleable
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
+import androidx.compose.material3.TriStateCheckbox
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
@@ -21,6 +23,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.state.ToggleableState
 import androidx.compose.ui.unit.dp
 import org.tsuyomi.core.ui.theme.TsuyomiSpacing
 
@@ -65,6 +68,42 @@ fun TsuyomiCheckboxRow(
             text = label,
             modifier = Modifier.padding(start = TsuyomiSpacing.Sm).weight(1f),
             style = MaterialTheme.typography.bodyMedium,
+        )
+    }
+}
+
+/** Intrinsic-width aggregate selection, with one labelled all/partial/none action. */
+@Composable
+fun TsuyomiTriStateCheckboxRow(
+    state: ToggleableState,
+    label: String,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+    enabled: Boolean = true,
+) {
+    Row(
+        modifier = modifier
+            .heightIn(min = 48.dp)
+            .triStateToggleable(
+                state = state,
+                enabled = enabled,
+                role = Role.Checkbox,
+                onClick = onClick,
+            )
+            .semantics(mergeDescendants = true) {}
+            .padding(horizontal = TsuyomiSpacing.Xs),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        TriStateCheckbox(
+            state = state,
+            onClick = null,
+            enabled = enabled,
+            modifier = Modifier.clearAndSetSemantics {},
+        )
+        Text(
+            text = label,
+            modifier = Modifier.padding(start = TsuyomiSpacing.Xs),
+            style = MaterialTheme.typography.labelLarge,
         )
     }
 }

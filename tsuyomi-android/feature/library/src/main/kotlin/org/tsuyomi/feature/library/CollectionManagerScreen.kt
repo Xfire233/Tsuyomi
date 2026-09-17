@@ -13,8 +13,6 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.HorizontalDivider
-import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -25,10 +23,12 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
-import org.tsuyomi.core.database.CollectionKind
-import org.tsuyomi.core.database.LibraryCollection
+import org.tsuyomi.shared.librarydomain.CollectionKind
+import org.tsuyomi.shared.librarydomain.LibraryCollection
 import org.tsuyomi.core.ui.components.TsuyomiButton
+import org.tsuyomi.core.ui.components.TsuyomiSwitch
 import org.tsuyomi.core.ui.components.TsuyomiButtonStyle
+import org.tsuyomi.core.ui.components.TsuyomiTextField
 
 enum class SmartField {
     SOURCE,
@@ -104,10 +104,10 @@ fun CollectionManagerScreen(
         }
 
         Text(stringResource(R.string.collection_manual_title))
-        OutlinedTextField(
+        TsuyomiTextField(
             value = manualTitle,
             onValueChange = { manualTitle = it.take(256) },
-            label = { Text(stringResource(R.string.collection_name_label)) },
+            label = stringResource(R.string.collection_name_label),
             modifier = Modifier.fillMaxWidth(),
             singleLine = true,
         )
@@ -121,10 +121,10 @@ fun CollectionManagerScreen(
         HorizontalDivider()
         Text(stringResource(R.string.collection_smart_title))
         Text(stringResource(R.string.collection_smart_notice))
-        OutlinedTextField(
+        TsuyomiTextField(
             value = smartTitle,
             onValueChange = { smartTitle = it.take(256) },
-            label = { Text(stringResource(R.string.collection_name_label)) },
+            label = stringResource(R.string.collection_name_label),
             modifier = Modifier.fillMaxWidth(),
             singleLine = true,
         )
@@ -134,7 +134,7 @@ fun CollectionManagerScreen(
             horizontalArrangement = Arrangement.SpaceBetween,
         ) {
             Text(stringResource(if (matchAll) R.string.collection_match_all else R.string.collection_match_any))
-            Switch(checked = matchAll, onCheckedChange = { matchAll = it })
+            TsuyomiSwitch(checked = matchAll, onCheckedChange = { matchAll = it })
         }
         conditions.forEachIndexed { index, condition ->
             Column(
@@ -153,12 +153,12 @@ fun CollectionManagerScreen(
                     style = TsuyomiButtonStyle.SECONDARY,
                 )
                 if (condition.field.requiresValue()) {
-                    OutlinedTextField(
+                    TsuyomiTextField(
                         value = condition.value,
                         onValueChange = { value ->
                             conditions = conditions.toMutableList().also { it[index] = condition.copy(value = value.take(1024)) }
                         },
-                        label = { Text(stringResource(condition.field.hintResource())) },
+                        label = stringResource(condition.field.hintResource()),
                         modifier = Modifier.fillMaxWidth(),
                     )
                 }
@@ -168,7 +168,7 @@ fun CollectionManagerScreen(
                     horizontalArrangement = Arrangement.SpaceBetween,
                 ) {
                     Text(stringResource(R.string.collection_exclude_condition))
-                    Switch(
+                    TsuyomiSwitch(
                         checked = condition.excluded,
                         onCheckedChange = { excluded ->
                             conditions = conditions.toMutableList().also { it[index] = condition.copy(excluded = excluded) }

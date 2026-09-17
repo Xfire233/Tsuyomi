@@ -45,7 +45,7 @@
 ### [Unreleased] (Phase 4 Standard)
 - **Library 控件与数据保留**：立即生效的统一筛选与排序、固定点按分栏、独立布局选择，以及保留本地数据的移出书架操作。
 - **签名来源目录**：Browse 已安装/可安装分区、插件搜索与详情、明确确认安装和手动更新；本地 `.hxp` 导入继续保留。
-- **生产信任边界**：正式签名目录及 Wenku8 `0.2.31` 已于 2026-09-11 发布；默认构建已固定授权的生产公钥。`tsuyomi.repository.keyId` 与 `tsuyomi.repository.publicKey` 必须成对配置；后者是原始 32 字节 Ed25519 公钥的 Base64，不是私钥。显式未配置的构建仍显示目录不可用，公开测试密钥不能充当生产根。
+- **生产信任边界**：正式签名目录及 Wenku8 `0.2.32` 已发布；默认构建已固定授权的生产公钥。`tsuyomi.repository.keyId` 与 `tsuyomi.repository.publicKey` 必须成对配置；后者是原始 32 字节 Ed25519 公钥的 Base64，不是私钥。显式未配置的构建仍显示目录不可用，公开测试密钥不能充当生产根。
 - **来源生命周期**：可通过显式根公钥链接订阅第三方仓库；仓库根认证只负责发现，非官方包仍须完成签名验证和绑定到精确包摘要的风险确认。卸载来源不删除宿主中的书籍、进度或凭据，也不重置发布者身份、撤销和防回滚记录。
 - **下载失败恢复**：官方或订阅仓库下载会区分网络、仓库、验签和存储错误；连接提前中断只在原总期限内重试一次并丢弃残缺字节，显式重试仍重新校验并进入正常安装审批。
 - **验证边界**：严格依赖校验、针对性测试与隔离设备证据不等于人工批准；不自动接受 goldens 或替换 canonical。
@@ -91,6 +91,8 @@ Tsuyomi Monorepo 包含两个独立版本、独立发布和独立回退的组件
 - Python 与 [REUSE Tool](https://reuse.software/)
 
 仅在显式 **HIGH** 模式下，提交前先完成最小复现和相邻顺序诊断，再运行由 `tools/android_ci_plan.py` 选择的本地 API 29 gate；不要把完整选中矩阵当作重试循环。顺序为有界诊断 → 本地 planned gate → 受保护的 hosted checks。**LOW 模式绝不运行本地 API 29 runner，包括 `--prepare-only`、预检和矩阵；LOW 的 CI 仅由 hosted protected checks 执行。** 有界直接开发编译仍是独立操作，不构成 CI。任何本地结果都不能跳过 hosted 最终验收或授予批准。
+
+线上 Android 重型验证在 PR 上完成，合并到 `main` 后不自动重跑；仓库、协议和固定插件基线的轻量 main 健康检查仍保留。Actions 标题区分 `PR #N admission`、`main health` 和 `manual verification`。需要调查主分支时，可显式手动运行 `android-quality`，没有 PR base 时执行 conservative full plan。五项 protected checks 和 strict base 检查不减少；合并与状态汇报遵循 `docs/process/QUALITY_GATES.md` G4.5/G5。
 
 **Windows 原生优先**（当前没有通用 WSL 发行版时不要为此安装一个）：
 

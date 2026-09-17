@@ -13,6 +13,7 @@ import androidx.navigation.NavHostController
 import org.tsuyomi.core.ui.components.TsuyomiNavigationItem
 import org.tsuyomi.core.ui.icons.TsuyomiIcons
 import org.tsuyomi.shared.model.BookIdentity
+import org.tsuyomi.feature.library.LibraryTagDestination
 
 internal object Routes {
     const val Library = "library"
@@ -21,7 +22,7 @@ internal object Routes {
     const val LibraryCollection = "library/collection/{collectionId}"
     const val LibraryTags = "library/tags"
     const val UpdateSettings = "library/update-settings"
-    const val LibraryTagBooks = "library/tag/{tag}"
+    const val LibraryTagBooks = "library/tag/{ownership}/{sourceId}/{tag}"
     const val Browse = "browse"
     const val Collections = "library/collections"
     const val More = "more"
@@ -51,7 +52,8 @@ internal object Routes {
     fun libraryCollection(collectionId: String): String =
         "library/collection/${Uri.encode(collectionId)}"
 
-    fun libraryTag(tag: String): String = "library/tag/${Uri.encode(tag)}"
+    fun libraryTag(destination: LibraryTagDestination): String =
+        "library/tag/${destination.ownership.name}/${Uri.encode(destination.sourceId ?: "_")}/${Uri.encode(destination.normalizedName)}"
 
     fun libraryMirror(bindingId: String): String = "library/mirror/${Uri.encode(bindingId)}"
     fun libraryMirrorFolder(bindingId: String, targetId: String): String =
@@ -85,6 +87,26 @@ internal fun rootRouteFor(route: String): String = when (route) {
     Routes.RemoteLibrary,
     -> Routes.Browse
     else -> route
+}
+
+internal const val BookCallerRootKey = "book.caller.root"
+internal const val BookCallerEntryKey = "book.caller.entry"
+internal const val BookCallerRouteKey = "book.caller.route"
+
+/** Keep the caller entry's own bounded query, ordering and position state on its back stack. */
+internal fun NavHostController.navigateToBookRoute(route: String) {
+    require(route == Routes.Detail || route == Routes.Directory || route == Routes.Reader)
+    val caller = currentBackStackEntry
+    val callerRoute = caller?.destination?.route
+    val originRoot = caller?.savedStateHandle?.get<String>(BookCallerRootKey)
+        ?: callerRoute?.let(::rootRouteFor)
+        ?: Routes.Library
+    navigate(route)
+    currentBackStackEntry?.savedStateHandle?.apply {
+        set(BookCallerRootKey, originRoot)
+        caller?.id?.let { set(BookCallerEntryKey, it) }
+        callerRoute?.let { set(BookCallerRouteKey, it) }
+    }
 }
 
 internal fun routeOwnsSourceFlow(route: String): Boolean = route == Routes.Browse || rootRouteFor(route) == Routes.Browse

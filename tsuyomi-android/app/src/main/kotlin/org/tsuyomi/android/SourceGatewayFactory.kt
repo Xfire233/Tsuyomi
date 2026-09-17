@@ -22,6 +22,7 @@ import org.tsuyomi.shared.sourcecontract.NetworkMethod
 import org.tsuyomi.core.network.DirectActionTokenRegistry
 import org.tsuyomi.core.network.FileHostNetworkCache
 import org.tsuyomi.core.network.HostHttpResponse
+import org.tsuyomi.core.network.HostResponseHeaders
 import org.tsuyomi.core.network.HostHttpTransport
 import org.tsuyomi.core.network.HostNetworkCache
 import org.tsuyomi.core.network.HostNetworkError
@@ -201,7 +202,7 @@ internal object SourceGatewayFactory {
                 return@HostHttpTransport HostHttpResponse(
                     status = 302,
                     finalUrl = requestUrl,
-                    headers = mapOf("location" to pageUrl.toString()),
+                    headers = HostResponseHeaders.of("location" to pageUrl.toString()),
                     bytes = ByteArray(0),
                 )
             }
@@ -217,7 +218,7 @@ internal object SourceGatewayFactory {
             HostHttpResponse(
                 status = 200,
                 finalUrl = pageUrl,
-                headers = mapOf("content-type" to "text/html; charset=$contentTypeCharset"),
+                headers = HostResponseHeaders.of("content-type" to "text/html; charset=$contentTypeCharset"),
                 bytes = bytes,
             )
         }

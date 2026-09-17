@@ -24,10 +24,13 @@ import org.tsuyomi.core.database.MIGRATION_6_7
 import org.tsuyomi.core.database.MIGRATION_7_8
 import org.tsuyomi.core.database.MIGRATION_8_9
 import org.tsuyomi.core.database.MIGRATION_9_10
+import org.tsuyomi.core.database.MIGRATION_10_11
+import org.tsuyomi.core.database.MIGRATION_11_12
+import org.tsuyomi.core.database.MIGRATION_12_13
 import org.tsuyomi.core.database.RoomLibraryRepository
 import org.tsuyomi.core.database.RoomTransferRepository
 import org.tsuyomi.core.database.TsuyomiDatabase
-import org.tsuyomi.core.display.DataStoreDisplayPreferencesRepository
+import org.tsuyomi.core.preferences.DataStoreDisplayPreferencesRepository
 import org.tsuyomi.core.display.DisplayController
 import org.tsuyomi.core.display.LocalDeviceClassifier
 import org.tsuyomi.core.library.UpdateCoordinator
@@ -76,6 +79,9 @@ class TsuyomiApplication : Application() {
                 MIGRATION_7_8,
                 MIGRATION_8_9,
                 MIGRATION_9_10,
+                MIGRATION_10_11,
+                MIGRATION_11_12,
+                MIGRATION_12_13,
             )
             .build()
     }

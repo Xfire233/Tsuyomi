@@ -33,6 +33,32 @@ class ReaderLocatorTest {
     }
 
     @Test
+    fun bookmarkIdentityKeepsDistinctOffsetsButIgnoresCaptureAndRenderFallbacks() {
+        val firstCapture = ReaderLocator(
+            document = document,
+            blockId = "block-12",
+            textAnchorDigest = "a".repeat(64),
+            characterOffset = 12,
+            chapterProgress = 0.2,
+            bookProgress = 0.1,
+            capturedAt = Instant.EPOCH,
+        )
+        val recapturedPosition = firstCapture.copy(
+            textAnchorDigest = "b".repeat(64),
+            chapterProgress = 0.9,
+            bookProgress = 0.8,
+            capturedAt = Instant.EPOCH.plusSeconds(1),
+        )
+        val laterPosition = firstCapture.copy(characterOffset = 13)
+        val differentRevision = firstCapture.copy(document = document.copy(revision = "revision-2"))
+
+        assertEquals(firstCapture.bookmarkPositionKey(), recapturedPosition.bookmarkPositionKey())
+        assertEquals(true, firstCapture.namesSameBookmarkPositionAs(recapturedPosition))
+        assertEquals(false, firstCapture.namesSameBookmarkPositionAs(laterPosition))
+        assertEquals(false, firstCapture.namesSameBookmarkPositionAs(differentRevision))
+    }
+
+    @Test
     fun strictInvariantsRejectUnanchoredAndInvalidProtocolValues() {
         assertFailsWith<IllegalArgumentException> {
             ReaderLocator(document = document, capturedAt = Instant.EPOCH)

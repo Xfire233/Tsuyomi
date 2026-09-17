@@ -7,8 +7,10 @@ package org.tsuyomi.source.quickjsruntime
 import java.io.Closeable
 import java.util.concurrent.ExecutionException
 import java.util.concurrent.Executors
+import java.util.concurrent.RejectedExecutionException
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicReference
+import kotlinx.coroutines.CancellableContinuation
 import kotlinx.coroutines.suspendCancellableCoroutine
 
 const val QUICKJS_NG_VERSION = "0.16.1"
@@ -52,17 +54,27 @@ class QuickJsRuntimeLane(
     private val limits: QuickJsRuntimeLimits,
 ) : Closeable {
     private val closed = AtomicBoolean(false)
+    private val lifecycleLock = Any()
+    private val executorThread = AtomicReference<Thread?>(null)
     private val executor = Executors.newSingleThreadExecutor { runnable ->
-        Thread(runnable, "tsuyomi-quickjs-$label").apply { isDaemon = true }
+        Thread(runnable, "tsuyomi-quickjs-$label").apply {
+            executorThread.compareAndSet(null, this)
+            isDaemon = true
+        }
     }
     @Volatile
     private var nativeHandle: Long = createInitialHandle()
     private var verifiedModule: VerifiedModule? = null
     private var resetRequired = false
     private val nextOperationArmedObserver = AtomicReference<(() -> Unit)?>(null)
+    private val nextSubmissionCheckedObserver = AtomicReference<(() -> Unit)?>(null)
 
     internal fun onNextOperationArmedForTest(observer: () -> Unit) {
         check(nextOperationArmedObserver.compareAndSet(null, observer)) { "An operation observer is already registered" }
+    }
+
+    internal fun onNextSubmissionCheckedForTest(observer: () -> Unit) {
+        check(nextSubmissionCheckedObserver.compareAndSet(null, observer)) { "A submission observer is already registered" }
     }
 
     suspend fun evaluateModule(source: ByteArray, filename: String) {
@@ -94,44 +106,83 @@ class QuickJsRuntimeLane(
 
     private suspend fun <T> submit(operation: (Long) -> T): T = suspendCancellableCoroutine { continuation ->
         if (closed.get()) {
-            continuation.resumeWith(Result.failure(QuickJsRuntimeException(QuickJsRuntimeError.CLOSED)))
+            resumeClosed(continuation)
             return@suspendCancellableCoroutine
         }
+        nextSubmissionCheckedObserver.getAndSet(null)?.invoke()
         val cancellationTarget = OperationCancellationTarget()
-        val future = executor.submit {
-            if (!continuation.isActive) return@submit
+        val future = synchronized(lifecycleLock) {
             if (closed.get()) {
-                continuation.resumeWith(Result.failure(QuickJsRuntimeException(QuickJsRuntimeError.CLOSED)))
-                return@submit
-            }
-            try {
-                resetIfRequired()
-                if (!continuation.isActive || closed.get()) return@submit
-                val operationHandle = nativeHandle
-                QuickJsNative.prepareOperation(operationHandle, limits.maxExecutionWallTimeMs)
-                if (!continuation.isActive || closed.get()) return@submit
-                cancellationTarget.activate(operationHandle)
-                nextOperationArmedObserver.getAndSet(null)?.invoke()
-                if (!continuation.isActive || closed.get()) return@submit
-                val result = try {
-                    operation(operationHandle)
-                } finally {
-                    cancellationTarget.deactivate()
+                null
+            } else {
+                try {
+                    executor.submit {
+                        if (!continuation.isActive) return@submit
+                        if (closed.get()) {
+                            resumeClosed(continuation)
+                            return@submit
+                        }
+                        try {
+                            resetIfRequired()
+                            if (!continuation.isActive) return@submit
+                            val operationHandle = synchronized(lifecycleLock) {
+                                if (closed.get()) {
+                                    0L
+                                } else {
+                                    val handle = nativeHandle
+                                    if (handle == 0L) {
+                                        0L
+                                    } else {
+                                        QuickJsNative.prepareOperation(handle, limits.maxExecutionWallTimeMs)
+                                        cancellationTarget.activate(handle)
+                                        handle
+                                    }
+                                }
+                            }
+                            if (operationHandle == 0L) {
+                                resumeClosed(continuation)
+                                return@submit
+                            }
+                            nextOperationArmedObserver.getAndSet(null)?.invoke()
+                            if (!continuation.isActive) return@submit
+                            if (closed.get()) {
+                                resumeClosed(continuation)
+                                return@submit
+                            }
+                            val result = try {
+                                operation(operationHandle)
+                            } finally {
+                                cancellationTarget.deactivate()
+                            }
+                            if (continuation.isActive) continuation.resumeWith(Result.success(result))
+                        } catch (error: QuickJsNativeException) {
+                            val mapped = mapNative(error)
+                            if (invalidatesContext(mapped.error)) discardContext()
+                            if (continuation.isActive) continuation.resumeWith(Result.failure(mapped))
+                        } catch (error: Throwable) {
+                            if (continuation.isActive) continuation.resumeWith(Result.failure(error))
+                        } finally {
+                            cancellationTarget.deactivate()
+                        }
+                    }
+                } catch (_: RejectedExecutionException) {
+                    null
                 }
-                if (continuation.isActive) continuation.resumeWith(Result.success(result))
-            } catch (error: QuickJsNativeException) {
-                val mapped = mapNative(error)
-                if (invalidatesContext(mapped.error)) discardContext()
-                if (continuation.isActive) continuation.resumeWith(Result.failure(mapped))
-            } catch (error: Throwable) {
-                if (continuation.isActive) continuation.resumeWith(Result.failure(error))
-            } finally {
-                cancellationTarget.deactivate()
             }
+        }
+        if (future == null) {
+            resumeClosed(continuation)
+            return@suspendCancellableCoroutine
         }
         continuation.invokeOnCancellation {
             cancellationTarget.cancel()
             future.cancel(false)
+        }
+    }
+
+    private fun <T> resumeClosed(continuation: CancellableContinuation<T>) {
+        if (continuation.isActive) {
+            continuation.resumeWith(Result.failure(QuickJsRuntimeException(QuickJsRuntimeError.CLOSED)))
         }
     }
 
@@ -168,17 +219,20 @@ class QuickJsRuntimeLane(
     }
 
     override fun close() {
-        if (!closed.compareAndSet(false, true)) return
-        val activeHandle = nativeHandle
-        if (activeHandle != 0L) QuickJsNative.cancel(activeHandle)
-        try {
+        val closeFuture = synchronized(lifecycleLock) {
+            if (!closed.compareAndSet(false, true)) return
+            val activeHandle = nativeHandle
+            if (activeHandle != 0L) QuickJsNative.cancel(activeHandle)
             executor.submit {
                 val handle = nativeHandle
                 nativeHandle = 0
                 if (handle != 0L) QuickJsNative.close(handle)
-            }.get()
+            }
+        }
+        try {
+            if (Thread.currentThread() !== executorThread.get()) closeFuture.get()
         } finally {
-            executor.shutdownNow()
+            executor.shutdown()
         }
     }
 

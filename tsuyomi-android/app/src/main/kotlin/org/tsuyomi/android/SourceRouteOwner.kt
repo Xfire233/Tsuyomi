@@ -5,29 +5,28 @@
 
 package org.tsuyomi.android
 
-import android.os.Handler
-import android.os.Looper
+import androidx.activity.compose.LocalActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.DisposableEffect
-import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.Stable
-import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
-import org.tsuyomi.feature.library.LibraryDropDestination
 import androidx.compose.ui.platform.LocalContext
+import androidx.lifecycle.ViewModel
+import androidx.lifecycle.ViewModelProvider
+import androidx.lifecycle.ViewModelStoreOwner
 import androidx.navigation.NavHostController
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.launch
-import org.tsuyomi.core.database.LibraryEntry
+import org.tsuyomi.shared.librarydomain.LibraryEntry
 import org.tsuyomi.core.database.RoomLibraryRepository
 import org.tsuyomi.core.webview.CapturedVerifiedPage
 import org.tsuyomi.source.extensionmanager.RemoteOperation
@@ -36,6 +35,7 @@ import org.tsuyomi.shared.sourcecontract.SourceDiagnostic
 import org.tsuyomi.shared.sourcecontract.SourceBookSummary
 import org.tsuyomi.shared.model.BookIdentity
 import org.tsuyomi.feature.book.SourceBookState
+import org.tsuyomi.feature.library.LibraryDropDestination
 import org.tsuyomi.shared.sourcecontract.SourceChapter
 import org.tsuyomi.shared.sourcecontract.SourceException
 
@@ -44,8 +44,6 @@ internal const val VerifiedSearchResultSequenceKey = "source.search.verified-pag
 internal const val VerifiedDetailResultSequenceKey = "source.detail.verified-page-sequence"
 internal const val VerifiedDirectoryResultSequenceKey = "source.directory.verified-page-sequence"
 internal const val VerifiedChapterResultSequenceKey = "source.chapter.verified-page-sequence"
-internal const val ResumeSourceIdKey = "source.resume.source-id"
-internal const val ResumeRemoteBookIdKey = "source.resume.remote-book-id"
 internal const val RemoteBookMembershipKey = "source.detail.remote-book-membership"
 internal const val UpdateFocusChapterIdKey = "updates.detail.focus-chapter-id"
 
@@ -68,12 +66,15 @@ data class VerifiedPageUseResult(
 internal class SourceRouteOwner(
     val installer: SourceInstallController,
     val flow: SourceFlowController,
+    private val coverCache: SourceCoverCache,
     private val navController: NavHostController,
     private val requestImportAction: () -> Unit,
     private val library: RoomLibraryRepository,
     private val onLibraryChanged: suspend () -> Unit,
 ) {
     private val sourceHomeSwitchMutex = Mutex()
+    var credentialGeneration by mutableLongStateOf(0L)
+        private set
 
     val remoteLibraryAvailable: Boolean
         get() = installer.activePackage?.manifest?.capabilities?.remoteLibrary?.policies
@@ -81,13 +82,20 @@ internal class SourceRouteOwner(
     val sourceHomeAvailable: Boolean
         get() = installer.activePackage?.manifest?.capabilities?.home?.enabled == true
 
+    /** The active source's bounded, credential-partitioned cover cache. */
+    fun coverCacheState(): SourceCoverCacheState = coverCache.resolve(installer.activePackage)
+
+    fun navigateBackFromHomeFeature(): Boolean = flow.home.navigateBackFromFeature { filters, cursor ->
+        flow.loadHome(filters, cursor)
+    }
+
 
     fun requestImport() {
         requestImportAction()
     }
     suspend fun navigateToSourceHome() {
         installer.activePackage?.let { packageInfo ->
-            flow.open(packageInfo)
+            flow.commitHomeSource(packageInfo)
             navController.navigate(Routes.SourceHome)
         }
     }
@@ -109,10 +117,12 @@ internal class SourceRouteOwner(
     }
 
     suspend fun uninstallSource(sourceId: String): Boolean = sourceHomeSwitchMutex.withLock {
+        val removedActiveSource = installer.activePackage?.manifest?.sourceId?.value == sourceId
         val removed = installer.uninstall(sourceId) {
             flow.removeSource(sourceId)
         }
         if (removed) {
+            if (removedActiveSource) coverCache.clear()
             if (navController.currentDestination?.route != Routes.Browse) {
                 navController.navigate(Routes.Browse) {
                     popUpTo(Routes.Browse) { inclusive = true }
@@ -166,14 +176,13 @@ internal class SourceRouteOwner(
             }
 
             flow.commitSourceSwitch(selected)
-            val destination = if (selected.manifest.capabilities.home.enabled) Routes.SourceHome else Routes.Search
-            navController.navigate(destination) {
-                popUpTo(Routes.SourceHome) { inclusive = true }
-                launchSingleTop = true
-            }
-            if (destination == Routes.SourceHome) {
+            if (selected.manifest.capabilities.home.enabled) {
                 SourceHomeSwitchResult.OPENED_HOME
             } else {
+                navController.navigate(Routes.Search) {
+                    popUpTo(Routes.SourceHome) { inclusive = true }
+                    launchSingleTop = true
+                }
                 SourceHomeSwitchResult.OPENED_SEARCH
             }
         } finally {
@@ -224,7 +233,7 @@ internal class SourceRouteOwner(
         } else {
             onLibraryChanged()
         }
-        navController.navigate(Routes.Detail)
+        navController.navigateToBookRoute(Routes.Detail)
         return true
     }
 
@@ -233,7 +242,7 @@ internal class SourceRouteOwner(
             val book = resolveUpdateBook(identity) ?: return false
             val chapters = prepareUpdateDirectory(book, focusChapterId) ?: return false
             if (focusChapterId != null && chapters.none { it.chapterId == focusChapterId }) return false
-            navController.navigate(Routes.Detail)
+            navController.navigateToBookRoute(Routes.Detail)
             focusChapterId?.let { chapterId ->
                 navController.currentBackStackEntry?.savedStateHandle?.set(UpdateFocusChapterIdKey, chapterId)
             }
@@ -253,7 +262,7 @@ internal class SourceRouteOwner(
             val chapters = prepareUpdateDirectory(book, targetChapterId) ?: return false
             val target = chapters.firstOrNull { it.chapterId == targetChapterId } ?: return false
             flow.prepareChapter(target)
-            navController.navigate(Routes.Reader)
+            navController.navigateToBookRoute(Routes.Reader)
             true
         } catch (cancelled: CancellationException) {
             throw cancelled
@@ -296,28 +305,12 @@ internal class SourceRouteOwner(
         val packageInfo = installer.activePackage
             ?.takeIf { it.manifest.sourceId.value == entry.book.identity.sourceId }
             ?: return false
-        navController.navigate(Routes.Browse) { launchSingleTop = true }
-        navController.getBackStackEntry(Routes.Browse).savedStateHandle.apply {
-            this[ResumeSourceIdKey] = packageInfo.manifest.sourceId.value
-            this[ResumeRemoteBookIdKey] = entry.book.identity.remoteBookId
-        }
+        flow.open(packageInfo)
+        if (!flow.prepareResume(entry.book.identity)) return false
+        navController.navigateToBookRoute(Routes.Reader)
         return true
     }
-    suspend fun prepareScheduledResume(identity: BookIdentity): Boolean {
-        val packageInfo = installer.activePackage
-            ?.takeIf { it.manifest.sourceId.value == identity.sourceId }
-            ?: return false
-        flow.open(packageInfo)
-        return flow.prepareResume(identity)
-    }
 
-    suspend fun prepareScheduledDetail(identity: BookIdentity): Boolean {
-        val packageInfo = installer.activePackage
-            ?.takeIf { it.manifest.sourceId.value == identity.sourceId }
-            ?: return false
-        flow.open(packageInfo)
-        return flow.prepareDetail(identity)
-    }
 
 
     suspend fun openRemoteLibrary() {
@@ -341,7 +334,7 @@ internal class SourceRouteOwner(
                 canonicalUrl = entry.book.canonicalUrl.orEmpty(),
             ),
         )
-        navController.navigate(Routes.Detail)
+        navController.navigateToBookRoute(Routes.Detail)
         navController.currentBackStackEntry?.savedStateHandle?.apply {
             set(RemoteDestinationTargetIdKey, destination.targetId)
             set(RemoteDestinationRequestKey, (get<Long>(RemoteDestinationRequestKey) ?: 0L) + 1L)
@@ -354,10 +347,6 @@ internal class SourceRouteOwner(
         onLibraryChanged()
     }
 
-    suspend fun addSelectedBook() {
-        flow.addSelectedBook()
-        onLibraryChanged()
-    }
 
     suspend fun removeSelectedBook() {
         flow.removeSelectedBook()
@@ -368,12 +357,16 @@ internal class SourceRouteOwner(
     }
 
     suspend fun completeVerification() {
+        credentialGeneration++
         flow.reopenWithStoredCredentials()
         navController.navigateUp()
     }
 
     suspend fun completeVerifiedPage() {
-        flow.reopenAfterVerifiedPage()
+        credentialGeneration++
+        flow.reopenAfterVerifiedPage(
+            retainVerifiedHome = navController.currentDestination?.route == Routes.VerifiedHomePage,
+        )
         navController.navigateUp()
     }
 
@@ -467,59 +460,64 @@ internal class SourceRouteOwner(
 
 }
 
+private class SourceRuntimeOwner(application: TsuyomiApplication) : ViewModel() {
+    val installer = SourceInstallController(application.applicationContext, application.libraryRepository)
+    val flow = SourceFlowController(
+        context = application.applicationContext,
+        library = application.libraryRepository,
+        snapshotStore = SourceFlowSnapshotStore(application.preferencesDataStore),
+    )
+    val coverCache = SourceCoverCache(application.applicationContext)
+
+    override fun onCleared() {
+        coverCache.clear()
+        flow.close()
+        super.onCleared()
+    }
+}
+
+private class SourceRuntimeOwnerFactory(
+    private val application: TsuyomiApplication,
+) : ViewModelProvider.Factory {
+    override fun <T : ViewModel> create(modelClass: Class<T>): T {
+        require(modelClass == SourceRuntimeOwner::class.java)
+        @Suppress("UNCHECKED_CAST")
+        return SourceRuntimeOwner(application) as T
+    }
+}
+
 @Composable
 internal fun rememberSourceRouteOwner(
     application: TsuyomiApplication,
     navController: NavHostController,
-    currentRoute: String?,
     onLibraryChanged: suspend () -> Unit,
 ): SourceRouteOwner {
     val context = LocalContext.current
-    val scope = rememberCoroutineScope()
-    val installer = remember {
-        SourceInstallController(context.applicationContext, application.libraryRepository)
+    val activity = checkNotNull(LocalActivity.current as? ViewModelStoreOwner) { "Source routes require an activity ViewModel owner" }
+    val runtime = remember(activity, application) {
+        ViewModelProvider(activity, SourceRuntimeOwnerFactory(application)).get(SourceRuntimeOwner::class.java)
     }
+    val scope = rememberCoroutineScope()
+    val installer = runtime.installer
     val extensionPicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         uri?.let { document -> scope.launch { installer.prepare(document, context.contentResolver) } }
     }
     LaunchedEffect(installer) { installer.restoreInstalled() }
-
-    var retainedSourceFlowRoot by remember { mutableStateOf(Routes.Library) }
-    val browseAnchored = runCatching { navController.getBackStackEntry(Routes.Browse) }.isSuccess
-    val observedSourceFlowRoot = when {
-        currentRoute == null -> null
-        currentRoute == Routes.Browse -> Routes.Browse
-        routeOwnsSourceFlow(currentRoute) -> if (
-            browseAnchored || retainedSourceFlowRoot == Routes.Browse
-        ) Routes.Browse else Routes.Library
-        rootRouteFor(currentRoute) == Routes.Library -> if (
-            browseAnchored && retainedSourceFlowRoot == Routes.Browse
-        ) Routes.Browse else Routes.Library
-        else -> null
-    }
-    val sourceFlowRoot = observedSourceFlowRoot ?: retainedSourceFlowRoot
-    SideEffect {
-        if (observedSourceFlowRoot != null && observedSourceFlowRoot != retainedSourceFlowRoot) {
-            retainedSourceFlowRoot = observedSourceFlowRoot
+    LaunchedEffect(installer.activePackage?.packageSha256, installer.trustedInstalledPackages) {
+        if (installer.activePackage == null) {
+            runtime.coverCache.clear()
+            runtime.flow.sourceBecameUnavailable()
+        } else {
+            runtime.flow.revalidateSourceAuthority()
         }
-    }
-    val flow = remember(sourceFlowRoot) {
-        SourceFlowController(
-            context.applicationContext,
-            application.libraryRepository,
-            SourceFlowSnapshotStore(application.preferencesDataStore),
-        )
-    }
-    val mainHandler = remember { Handler(Looper.getMainLooper()) }
-    DisposableEffect(flow) {
-        onDispose { mainHandler.post(flow::close) }
     }
 
     val currentOnLibraryChanged by rememberUpdatedState(onLibraryChanged)
-    val owner = remember(installer, flow, navController) {
+    val owner = remember(installer, runtime, navController) {
         SourceRouteOwner(
             installer = installer,
-            flow = flow,
+            flow = runtime.flow,
+            coverCache = runtime.coverCache,
             navController = navController,
             requestImportAction = { extensionPicker.launch(arrayOf("application/zip", "application/octet-stream")) },
             library = application.libraryRepository,

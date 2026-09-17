@@ -11,12 +11,12 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.tooling.preview.Preview
 import com.android.tools.screenshot.PreviewTest
-import org.tsuyomi.core.display.ColorSchemePreference
+import org.tsuyomi.core.preferences.ColorSchemePreference
 import org.tsuyomi.core.display.DisplayDecisionReason
 import org.tsuyomi.core.display.DisplayEnvironment
 import org.tsuyomi.core.display.DisplayEnvironmentProvider
-import org.tsuyomi.core.display.DisplayPreference
-import org.tsuyomi.core.display.DisplayPreferences
+import org.tsuyomi.core.preferences.DisplayPreference
+import org.tsuyomi.core.preferences.DisplayPreferences
 import org.tsuyomi.core.display.DisplayProfile
 import org.tsuyomi.core.display.MotionPolicy
 import org.tsuyomi.core.ui.theme.TsuyomiTheme
@@ -54,9 +54,15 @@ fun LibraryEmptyStateScreenshots() {
             Surface(Modifier.fillMaxSize()) {
                 LibraryScreen(
                     state = LibraryUiState(loading = false),
+                    primaryTabStates = SystemLibraryFilter.primaryTabs.associateWith { filter ->
+                        LibraryUiState(
+                            loading = false,
+                            filter = filter,
+                            isRootProjection = filter == SystemLibraryFilter.ALL,
+                        )
+                    },
                     collections = emptyList(),
                     showNavigationNodes = true,
-                    onOpenSystemNode = {},
                     onOpenCollection = {},
                     onOpenBook = {},
                     onCreateCollection = {},

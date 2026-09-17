@@ -7,9 +7,6 @@
     <string name="book_status">状态：%1$s</string>
     <string name="book_open_directory">查看目录</string>
     <string name="book_source_failure">来源内容未能加载</string>
-    <string name="book_error_code">错误：%1$s</string>
-    <string name="book_diagnostic_id">诊断编号：%1$s</string>
-    <string name="book_diagnostic_stage">阶段：%1$s · 安全代码：%2$s</string>
     <string name="book_retry">重试网络请求</string>
     <string name="book_offline">使用已有离线缓存</string>
     <string name="book_open_verification">打开手动登录或验证</string>
@@ -17,11 +14,14 @@
     <string name="book_in_library">已在书架</string>
     <string name="book_not_in_library">未加入书架</string>
     <string name="book_remove_from_library">移出书架</string>
-    <string name="book_cache_detail">缓存详情与目录</string>
+    <string name="book_cache_detail">缓存章节</string>
     <string name="book_refresh_detail">刷新来源数据</string>
     <string name="book_move_remote">移动网站收藏</string>
+    <string name="book_keep_default_library">保留在默认书架</string>
+    <string name="book_retry_move_only">继续移至%1$s</string>
     <string name="book_remove_from_remote">从网站收藏移除</string>
     <string name="book_continue_reading">继续阅读</string>
+    <string name="book_start_reading">开始阅读</string>
     <string name="book_quick_to_bottom">快速到底</string>
     <string name="book_quick_to_top">快速到顶</string>
     <string name="book_last_updated">上次更新：%1$s</string>
@@ -31,6 +31,7 @@
     <string name="book_title_collapsed">完整标题已收起</string>
     <string name="book_title_expanded">完整标题已展开</string>
     <string name="book_rating_description">%1$d 星评分</string>
+    <string name="book_tags">标签</string>
     <string name="book_add_tag">添加标签</string>
     <string name="book_tag_name">标签名称</string>
     <string name="book_add_tag_confirm">添加</string>
@@ -59,7 +60,6 @@
     <string name="book_current_badge">当前</string>
     <string name="book_mutation_add">加入书架</string>
     <string name="book_mutation_remove">移出书架</string>
-    <string name="book_mutation_cache">缓存详情与目录</string>
     <string name="book_mutation_refresh">刷新来源数据</string>
     <string name="book_mutation_rating">更新评分</string>
     <string name="book_mutation_tag">添加标签</string>
@@ -69,4 +69,14 @@
     <string name="book_mutation_error">未完成：%1$s（%2$s）</string>
     <string name="book_stop_update_checks">停止检查此书更新（保留书籍与进度）</string>
     <string name="book_resume_update_checks">恢复检查此书更新</string>
+    <string name="book_cache_select_all">全选当前列表</string>
+    <string name="book_cache_deselect_all">清除当前列表选择</string>
+    <string name="book_cache_start_selected">缓存已选章节（%1$d）</string>
+    <string name="book_cache_close_selection">关闭章节缓存选择</string>
+    <string name="book_cache_cancel">取消缓存</string>
+    <string name="book_cache_working">正在缓存已选章节（%1$d）</string>
+    <string name="book_cache_queued">等待缓存</string>
+    <string name="book_cache_caching">正在缓存</string>
+    <string name="book_cache_failed">缓存失败</string>
+    <string name="book_cache_cancelled">缓存已取消</string>
 </resources>

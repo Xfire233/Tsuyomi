@@ -12,6 +12,8 @@ import org.tsuyomi.core.database.room.ReadingProgressEntity
 import org.tsuyomi.shared.locator.DocumentIdentity
 import org.tsuyomi.shared.locator.ReaderLocator
 import org.tsuyomi.shared.model.BookIdentity
+import org.tsuyomi.shared.librarydomain.ReadingProgress
+import org.tsuyomi.shared.librarydomain.ProgressWriteResult
 
 internal class RoomReadingProgressStore(
     private val database: TsuyomiDatabase,

@@ -10,6 +10,11 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
+import org.tsuyomi.core.preferences.ColorSchemePreference
+import org.tsuyomi.core.preferences.DisplayPreference
+import org.tsuyomi.core.preferences.DisplayPreferences
+import org.tsuyomi.core.preferences.DisplayPreferencesRepository
+import org.tsuyomi.shared.model.CoverCardPresentation
 
 /**
  * Coordinates durable preference mutations, fixed local classification, and root redraw requests.
@@ -34,6 +39,8 @@ class DisplayController(
     suspend fun setDynamicColorEnabled(enabled: Boolean) =
         repository.setDynamicColorEnabled(enabled)
 
+    suspend fun setCoverCardPresentation(presentation: CoverCardPresentation) =
+        repository.setCoverCardPresentation(presentation)
 
     /** Requests a fresh stable-root composition; this is not a hardware panel refresh command. */
     fun requestRedraw() {
