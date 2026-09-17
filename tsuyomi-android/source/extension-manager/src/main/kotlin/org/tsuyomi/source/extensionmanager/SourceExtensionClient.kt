@@ -541,9 +541,9 @@ class SourceExtensionClient private constructor(
             fail(mapNetworkError(error.error), networkStage, error.error.name.lowercase(), error.diagnosticId)
         }
         try {
+            Log.i("TsuyomiCache", "attempt stage=$classifyStage state=${response.cacheState} mode=${request.cache}")
             classify(response, classifyStage, operation, remoteBookId, chapterId)
             if (!offlineOnly) gateway.rememberLastGood(grant, request, response)
-            Log.i("TsuyomiCache", "read stage=$classifyStage state=${response.cacheState} mode=${request.cache}")
             return response
         } catch (error: SourceException) {
             if (
