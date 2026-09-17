@@ -557,7 +557,9 @@ internal class LibraryFlowController private constructor(
         state = state.copy(updates = byIdentity, updateOnlyEntries = mirrorOnly, updateSession = session)
     }
 
-    suspend fun setUpdateFilter(filter: LibraryUpdateFilter) {
+    // `reload` snapshots `showUpdatesOnly` before its database phase and re-applies it afterwards, so a
+    // selection that did not wait for the lock could be reverted by a reload already in flight.
+    suspend fun setUpdateFilter(filter: LibraryUpdateFilter) = reloadMutex.withLock {
         state = state.copy(updateFilter = filter)
         preferencesRepository.updateShowUpdatesOnly(filter == LibraryUpdateFilter.UPDATES_ONLY)
     }
