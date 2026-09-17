@@ -164,8 +164,12 @@ def verify(
         [java_executable, "-jar", str(apksigner), "verify", "--verbose", "--print-certs",
          "--min-sdk-version", str(min_sdk), str(apk)]
     )
-    if f"Signer #1 certificate SHA-256 digest: {certificate}" not in verification:
-        raise VerificationError("published artifact is not signed by the pinned release identity")
+    digest_lines = re.findall(r"certificate SHA-256 digest:\s*([0-9a-fA-F]{64})", verification)
+    if certificate not in {line.lower() for line in digest_lines}:
+        raise VerificationError(
+            "published artifact is not signed by the pinned release identity\n"
+            f"apksigner reported: {verification}"
+        )
     schemes = {name: marker in verification for name, marker in SCHEME_MARKERS.items()}
     if schemes["v1"] or schemes["v2"] or not schemes["v3"] or schemes["v4"]:
         raise VerificationError(f"published artifact uses unexpected signature schemes: {schemes}")
