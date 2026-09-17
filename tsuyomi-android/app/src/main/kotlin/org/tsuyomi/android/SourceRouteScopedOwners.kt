@@ -1437,6 +1437,54 @@ internal fun rememberSourceSearchRouteOwner(
     sourceSearchRouteOwner(entry, flow)
 }
 
+private class SourceDetailRouteOwnerHolder(
+    flow: SourceFlowController,
+    private val savedState: SavedStateHandle,
+    private val onLibraryChanged: suspend () -> Unit,
+) : ViewModel() {
+    private var boundFlow = flow
+    private var owner = SourceDetailRouteOwner(flow, savedState, onLibraryChanged)
+
+    fun forFlow(flow: SourceFlowController): SourceDetailRouteOwner {
+        if (boundFlow !== flow) {
+            owner.dispose()
+            owner = SourceDetailRouteOwner(flow, savedState, onLibraryChanged)
+            boundFlow = flow
+        }
+        return owner
+    }
+
+    override fun onCleared() {
+        owner.dispose()
+    }
+}
+
+private class SourceDetailRouteOwnerHolderFactory(
+    private val flow: SourceFlowController,
+    private val savedState: SavedStateHandle,
+    private val onLibraryChanged: suspend () -> Unit,
+) : ViewModelProvider.Factory {
+    override fun <T : ViewModel> create(modelClass: Class<T>): T {
+        require(modelClass == SourceDetailRouteOwnerHolder::class.java)
+        @Suppress("UNCHECKED_CAST")
+        return SourceDetailRouteOwnerHolder(flow, savedState, onLibraryChanged) as T
+    }
+}
+
+/**
+ * The detail owner is held by the navigation entry, not by the composition. Entering the reader
+ * removes the detail destination from composition; owning the load from the entry keeps it running
+ * so returning to a still-loading detail observes that load instead of restarting it.
+ */
+internal fun sourceDetailRouteOwner(
+    entry: NavBackStackEntry,
+    flow: SourceFlowController,
+    onLibraryChanged: suspend () -> Unit,
+): SourceDetailRouteOwner = ViewModelProvider(
+    entry,
+    SourceDetailRouteOwnerHolderFactory(flow, entry.savedStateHandle, onLibraryChanged),
+).get(SourceDetailRouteOwnerHolder::class.java).forFlow(flow)
+
 @Composable
 internal fun rememberSourceDetailRouteOwner(
     entry: NavBackStackEntry,
@@ -1445,14 +1493,7 @@ internal fun rememberSourceDetailRouteOwner(
 ): SourceDetailRouteOwner {
     val notifyLibraryChanged = rememberUpdatedState(sourceRouteOwner::notifyLibraryChanged)
     val owner = remember(entry, flow) {
-        android.util.Log.i("TsuyomiRoute", "detail-owner create entry=${entry.hashCode()}")
-        SourceDetailRouteOwner(flow, entry.savedStateHandle) { notifyLibraryChanged.value.invoke() }
-    }
-    DisposableEffect(owner) {
-        onDispose {
-            android.util.Log.i("TsuyomiRoute", "detail-owner dispose entry=${entry.hashCode()}")
-            owner.dispose()
-        }
+        sourceDetailRouteOwner(entry, flow) { notifyLibraryChanged.value.invoke() }
     }
     LaunchedEffect(owner, owner.directoryState, owner.selectedBook?.identity) {
         owner.refreshCachedChapterStatuses()
