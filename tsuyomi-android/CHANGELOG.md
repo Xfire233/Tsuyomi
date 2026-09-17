@@ -15,6 +15,10 @@ All notable changes use semantic versioning. Future Phase baselines use annotate
 
 - Selecting the Library update filter is no longer reverted by a reload that was already in flight. `reload()` read `showUpdatesOnly` at the start of its database phase and re-applied it at the end, while `setUpdateFilter` published the selection outside `reloadMutex`. A reload that had read the preference before the selection republished the previous value, so the filter chip unmounted and a caller holding that row lost it. `setUpdateFilter` now takes `reloadMutex`. Reproduced at the API 29 gate as `Failed to inject touch input. Reason: Expected exactly '1' node but could not find any node that satisfies: (TestTag = 'library-filter-summary-edit')` on the click that follows a successful wait for that same tag, and as a 45 second `Missing library-filter-summary-edit` timeout when the revert landed earlier; the affected Journey failed in 4 of 7 full-suite runs before the change and 0 of 9 afterwards.
 
+### Removed
+
+- Automated commit attribution no longer appears in the repository contributor graph, and can no longer be merged in. The six default-branch commits carrying `Co-authored-by: CommandCodeBot <noreply@commandcode.ai>` were rewritten message-only (`tree`, author, committer and timestamps preserved), which removed the account from the graph; the rewritten commits are unsigned because the originals were GitHub web-flow signed and cannot be re-signed. `repository-policy` now rejects that trailer across the revision range a protected check owns, resolving the range from the event payload or `GITHUB_BASE_REF` and requiring `fetch-depth: 0`. Genuine human co-author trailers are retained.
+
 ## [0.3.0-beta.4] - 2026-09-17
 
 首个公开发布的 Beta 预发布：tag `android-v0.3.0-beta.4`，`versionCode 6`，资产 `Tsuyomi-0.3.0-beta.4.apk` 为 16 KiB 对齐、仅 v3 签名、非 debug 的发布制品，并已作为 GitHub 预发布发布。预发布不等于稳定版：物理真机验收与稳定版转换仍待完成，发布步骤与密钥托管边界见 [`docs/process/RELEASE_PROCEDURE.md`](docs/process/RELEASE_PROCEDURE.md)。

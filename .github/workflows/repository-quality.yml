@@ -20,6 +20,9 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          persist-credentials: false
+          fetch-depth: 0
       - name: Install REUSE
         run: python -m pip install --disable-pip-version-check reuse==6.2.0
       - name: License compliance

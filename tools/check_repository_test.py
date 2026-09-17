@@ -3,6 +3,7 @@
 
 from pathlib import Path
 import json
+import subprocess
 import tempfile
 import unittest
 
@@ -346,6 +347,75 @@ class ToolingGovernanceTest(unittest.TestCase):
 
     def test_live_repository_documentation_governance_passes(self) -> None:
         self.assertEqual([], check_repository.documentation_governance_violations())
+
+
+    def test_automated_attribution_trailer_is_rejected(self) -> None:
+        self.assertTrue(
+            check_repository.automated_attribution_in(
+                "fix: something\n\nCo-authored-by: CommandCodeBot <noreply@commandcode.ai>\n"
+            )
+        )
+        self.assertTrue(
+            check_repository.automated_attribution_in(
+                "Co-authored-by: commandcodebot <noreply@commandcode.ai>"
+            )
+        )
+        self.assertFalse(
+            check_repository.automated_attribution_in(
+                "fix: something\n\nCo-authored-by: Char Siu <zyb2333@qq.com>\n"
+            )
+        )
+        self.assertFalse(check_repository.automated_attribution_in("fix: something"))
+        self.assertFalse(
+            check_repository.automated_attribution_in("docs: record that commandcode was removed")
+        )
+
+    def test_commit_range_resolution_uses_the_ci_environment(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            event = Path(directory) / "event.json"
+            event.write_text(
+                json.dumps({"pull_request": {"base": {"sha": "a" * 40}}}), encoding="utf-8"
+            )
+            self.assertEqual(
+                "a" * 40 + "..HEAD",
+                check_repository.commit_range_from_environment({"GITHUB_EVENT_PATH": str(event)}),
+            )
+        self.assertEqual(
+            "origin/main..HEAD",
+            check_repository.commit_range_from_environment({"GITHUB_BASE_REF": "main"}),
+        )
+        self.assertIsNone(check_repository.commit_range_from_environment({}))
+
+    def test_only_commits_inside_the_range_are_checked(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            subprocess.run(["git", "init", "-q", str(root)], check=True)
+            for key, value in (("user.email", "t@example.com"), ("user.name", "T")):
+                subprocess.run(["git", "-C", str(root), "config", key, value], check=True)
+            (root / "a.txt").write_text("a", encoding="utf-8")
+            subprocess.run(["git", "-C", str(root), "add", "a.txt"], check=True)
+            subprocess.run(["git", "-C", str(root), "commit", "-q", "-m", "first"], check=True)
+            base = subprocess.run(
+                ["git", "-C", str(root), "rev-parse", "HEAD"],
+                check=True,
+                capture_output=True,
+            ).stdout.decode().strip()
+            (root / "b.txt").write_text("b", encoding="utf-8")
+            subprocess.run(["git", "-C", str(root), "add", "b.txt"], check=True)
+            subprocess.run(
+                [
+                    "git", "-C", str(root), "commit", "-q",
+                    "-m", "second",
+                    "-m", "Co-authored-by: CommandCodeBot <noreply@commandcode.ai>",
+                ],
+                check=True,
+            )
+
+            violations = check_repository.automated_attribution_violations(f"{base}..HEAD", root)
+
+            self.assertEqual(1, len(violations))
+            self.assertEqual([], check_repository.automated_attribution_violations("HEAD..HEAD", root))
+            self.assertEqual([], check_repository.automated_attribution_violations(None, root))
 
 
 if __name__ == "__main__":
