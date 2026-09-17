@@ -8,8 +8,10 @@ import org.tsuyomi.shared.sourcecontract.HttpsOrigin
 
 const val SOURCE_CREDENTIAL_KEY_ALIAS = "org.tsuyomi.android.source-credentials.v1"
 internal const val CREDENTIAL_SCHEMA_VERSION = 1
+internal const val CREDENTIAL_PARTITIONED_SCHEMA_VERSION = 2
 internal const val CREDENTIAL_KEY_VERSION = 1
 internal const val GCM_IV_BYTES = 12
+internal const val CREDENTIAL_CACHE_PARTITION_BYTES = 16
 
 /** A source partition has no ambient/global credential namespace. */
 data class SourceCredentialPartition(

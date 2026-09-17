@@ -6,8 +6,12 @@ package org.tsuyomi.core.security
 
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
+import java.io.DataOutputStream
+import java.io.File
+import java.io.FileOutputStream
 import java.nio.charset.StandardCharsets
 import java.security.KeyStore
+import java.security.MessageDigest
 import org.tsuyomi.shared.sourcecontract.HttpsOrigin
 import org.junit.After
 import org.junit.Assert.assertArrayEquals
@@ -44,6 +48,50 @@ class SourceCredentialStoreInstrumentedTest {
 
         assertTrue(ivs.all { it.size == GCM_IV_BYTES })
         assertEquals(ivs.size, ivs.map { it.joinToString(separator = ",") }.toSet().size)
+    }
+
+    @Test
+    fun cachePartitionSurvivesRefreshesAndOnlyRenewsOnDelete() {
+        store.put(first, "session=one".toByteArray(StandardCharsets.UTF_8))
+        val created = requireNotNull(store.getSnapshot(first)).cachePartitionId
+
+        store.put(first, "session=two".toByteArray(StandardCharsets.UTF_8))
+        val refreshed = requireNotNull(store.getSnapshot(first)).cachePartitionId
+        assertEquals(created, refreshed)
+
+        store.put(first, "session=three".toByteArray(StandardCharsets.UTF_8), renewCachePartition = true)
+        val renewed = requireNotNull(store.getSnapshot(first)).cachePartitionId
+        assertNotEquals(created, renewed)
+
+        assertTrue(store.delete(first))
+        store.put(first, "session=four".toByteArray(StandardCharsets.UTF_8))
+        assertNotEquals(renewed, requireNotNull(store.getSnapshot(first)).cachePartitionId)
+    }
+
+    @Test
+    fun legacyUnpartitionedRecordStillReadsAndUpgradesOnNextWrite() {
+        val aead = AndroidKeyStoreAesGcm()
+        val plaintext = "session=legacy".toByteArray(StandardCharsets.UTF_8)
+        val encrypted = aead.encrypt(plaintext, first.aad())
+        val digest = MessageDigest.getInstance("SHA-256")
+            .digest("${first.sourceId}\u0000${first.origin.value}".toByteArray(StandardCharsets.UTF_8))
+            .joinToString(separator = "") { byte -> "%02x".format(byte) }
+        DataOutputStream(FileOutputStream(File(store.noBackupDirectory(), "$digest.record"))).use { output ->
+            output.writeInt(0x54534352)
+            output.writeShort(1)
+            output.writeShort(1)
+            output.writeByte(encrypted.iv.size)
+            output.writeInt(encrypted.ciphertext.size)
+            output.write(encrypted.iv)
+            output.write(encrypted.ciphertext)
+        }
+
+        assertArrayEquals(plaintext, requireNotNull(store.getSnapshot(first)).plaintext)
+
+        store.put(first, plaintext)
+        val upgraded = requireNotNull(store.getSnapshot(first)).cachePartitionId
+        store.put(first, plaintext)
+        assertEquals(upgraded, requireNotNull(store.getSnapshot(first)).cachePartitionId)
     }
 
     @Test

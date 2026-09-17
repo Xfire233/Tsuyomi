@@ -7,17 +7,21 @@ package org.tsuyomi.core.webview
 import android.annotation.SuppressLint
 import android.content.Context
 import android.os.SystemClock
+import android.util.Log
 import android.webkit.CookieManager
+import android.webkit.WebResourceError
 import android.webkit.WebResourceRequest
 import android.webkit.WebView
 import android.webkit.WebViewClient
 import java.net.URI
 import java.nio.charset.Charset
 import java.nio.charset.StandardCharsets
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
 import org.json.JSONObject
 import org.json.JSONTokener
 import org.tsuyomi.core.network.HostHttpRequest
@@ -47,6 +51,7 @@ class VerifiedBrowserGetTransport(
 ) : HostHttpTransport {
     private val appContext = context.applicationContext
     private val credentials = SourceCredentialStore(appContext)
+    private var warmView: WebView? = null
 
     override suspend fun execute(request: HostHttpRequest): HostHttpResponse {
         if (request.method != NetworkMethod.GET || request.body != null) {
@@ -56,9 +61,12 @@ class VerifiedBrowserGetTransport(
         if (allowedOrigins.none { it.canonical == origin.canonical }) {
             throw HostNetworkException(HostNetworkError.DISALLOWED_ORIGIN)
         }
-        return ControlledWebLoginSession.withIdleBrowser {
+        val startedAt = SystemClock.uptimeMillis()
+        val response = ControlledWebLoginSession.withIdleBrowser {
             withContext(Dispatchers.Main) { fetch(request, origin) }
         } ?: throw HostNetworkException(HostNetworkError.TRANSPORT)
+        Log.i(WEBVIEW_TIMING_TAG, "verified-get ${SystemClock.uptimeMillis() - startedAt}ms ${origin.canonical}")
+        return response
     }
 
     @SuppressLint("SetJavaScriptEnabled")
@@ -67,7 +75,7 @@ class VerifiedBrowserGetTransport(
         val userAgent = sessions.firstOrNull { it.first.canonical == origin.canonical }?.second?.userAgent
             ?: sessions.firstOrNull()?.second?.userAgent
         restoreCookies(sessions)
-        val view = WebView(appContext)
+        val view = warmView ?: createView()
         try {
             view.measure(
                 android.view.View.MeasureSpec.makeMeasureSpec(1080, android.view.View.MeasureSpec.EXACTLY),
@@ -84,14 +92,27 @@ class VerifiedBrowserGetTransport(
                 if (userAgent != null) userAgentString = userAgent
             }
             CookieManager.getInstance().setAcceptThirdPartyCookies(view, false)
+            val finished = CompletableDeferred<Unit>()
             view.webViewClient = object : WebViewClient() {
                 override fun shouldOverrideUrlLoading(view: WebView, webRequest: WebResourceRequest): Boolean {
                     return originOf(URI(webRequest.url.toString()))?.canonical !in allowedOrigins.map { it.canonical }
                 }
+
+                override fun onPageFinished(view: WebView, url: String) {
+                    finished.complete(Unit)
+                }
+
+                override fun onReceivedError(
+                    view: WebView,
+                    request: WebResourceRequest,
+                    error: WebResourceError,
+                ) {
+                    finished.complete(Unit)
+                }
             }
             val extraHeaders = request.referrer?.let { mapOf("Referer" to it.toASCIIString()) }.orEmpty()
             if (extraHeaders.isEmpty()) view.loadUrl(request.url.toString()) else view.loadUrl(request.url.toString(), extraHeaders)
-            awaitSettled(view, request.timeoutMs)
+            awaitSettled(finished, view, request.timeoutMs)
             val html = captureHtml(view, request.maxResponseBytes)
             persistCookies(sessions, view.settings.userAgentString.orEmpty())
             val bytes = encode(html, request.decode)
@@ -102,10 +123,36 @@ class VerifiedBrowserGetTransport(
                 headers = HostResponseHeaders.of("content-type" to "text/html; charset=${charsetName(request.decode)}"),
                 bytes = bytes,
             )
-        } finally {
-            view.stopLoading()
-            view.destroy()
+        } catch (error: Throwable) {
+            releaseView(view)
+            throw error
         }
+    }
+
+    private fun releaseView(view: WebView) {
+        if (warmView === view) warmView = null
+        runCatching { view.stopLoading() }
+        runCatching { view.destroy() }
+    }
+
+    @SuppressLint("SetJavaScriptEnabled")
+    private fun createView(): WebView {
+        val view = WebView(appContext).also { warmView = it }
+        view.measure(
+            android.view.View.MeasureSpec.makeMeasureSpec(1080, android.view.View.MeasureSpec.EXACTLY),
+            android.view.View.MeasureSpec.makeMeasureSpec(1920, android.view.View.MeasureSpec.EXACTLY),
+        )
+        view.layout(0, 0, 1080, 1920)
+        view.settings.apply {
+            javaScriptEnabled = true
+            domStorageEnabled = true
+            allowFileAccess = false
+            allowContentAccess = false
+            mediaPlaybackRequiresUserGesture = true
+            setSupportMultipleWindows(false)
+        }
+        CookieManager.getInstance().setAcceptThirdPartyCookies(view, false)
+        return view
     }
 
     private fun restoreSessions(initial: HttpsOrigin): List<Pair<HttpsOrigin, VerifiedBrowserSession>> {
@@ -143,30 +190,27 @@ class VerifiedBrowserGetTransport(
 
     private fun persistCookies(sessions: List<Pair<HttpsOrigin, VerifiedBrowserSession>>, userAgent: String) {
         val store = VerifiedBrowserSessionStore(credentials)
-        val agent = userAgent.ifBlank { sessions.first().second.userAgent }
-        sessions.forEach { (origin, _) ->
-            CookieManager.getInstance().getCookie(origin.canonical)?.let { rawCookie ->
-                store.put(SourceCredentialPartition(sourceId, origin), VerifiedBrowserSession(rawCookie, agent))
-            }
+        sessions.forEach { (origin, session) ->
+            val rawCookie = CookieManager.getInstance().getCookie(origin.canonical) ?: return@forEach
+            val agent = userAgent.ifBlank { session.userAgent }
+            if (rawCookie == session.requestCookies && agent == session.userAgent) return@forEach
+            store.put(SourceCredentialPartition(sourceId, origin), VerifiedBrowserSession(rawCookie, agent))
         }
     }
 
-    private suspend fun awaitSettled(view: WebView, timeoutMs: Int) {
-        val deadline = SystemClock.uptimeMillis() + timeoutMs.coerceIn(3_000, 25_000)
-        while (SystemClock.uptimeMillis() < deadline) {
-            val title = view.title.orEmpty()
-            if (view.progress >= 100 && title.isNotBlank() && !title.contains("Just a moment", ignoreCase = true)) {
-                delay(350)
-                if (!view.title.orEmpty().contains("Just a moment", ignoreCase = true)) return
-            }
-            delay(250)
-        }
+    private suspend fun awaitSettled(finished: CompletableDeferred<Unit>, view: WebView, timeoutMs: Int) {
+        val budget = timeoutMs.coerceIn(3_000, 25_000).toLong()
+        withTimeoutOrNull(budget) { finished.await() }
+        if (view.title.orEmpty().contains("Just a moment", ignoreCase = true)) return
+        // A page reports finished before late scripts mutate the DOM; keep one bounded settle
+        // instead of the previous progress/title polling loop.
+        delay(SETTLE_MS)
     }
 
     private suspend fun captureHtml(view: WebView, maxBytes: Int): String {
         val rawResult = suspendCancellableCoroutine { continuation ->
             view.evaluateJavascript(
-                """(function(){var root=document.documentElement;var html=root?root.outerHTML:'';var bytes=new Blob([html]).size;return JSON.stringify({html:bytes<=$maxBytes?html:null,oversized:bytes>$maxBytes});})()""",
+                """(function(){var root=document.documentElement;var html=root?root.outerHTML:'';return JSON.stringify({html:html.length<=$maxBytes?html:null,oversized:html.length>$maxBytes});})()""",
             ) { value -> continuation.resume(value) }
         }
         val payload = when (val value = JSONTokener(rawResult).nextValue()) {
@@ -202,5 +246,13 @@ class VerifiedBrowserGetTransport(
         return runCatching {
             HttpsOrigin("https://${uri.host}${if (uri.port in 1..65535 && uri.port != 443) ":${uri.port}" else ""}")
         }.getOrNull()
+    }
+
+    private companion object {
+        /** Bounded settle after onPageFinished so late DOM mutations are still captured. */
+        const val SETTLE_MS = 250L
+
+        /** Diagnostic timing tag: one line per verified fallback fetch. */
+        const val WEBVIEW_TIMING_TAG = "TsuyomiWebView"
     }
 }

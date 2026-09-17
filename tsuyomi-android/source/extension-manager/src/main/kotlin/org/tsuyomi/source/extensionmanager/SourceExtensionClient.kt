@@ -265,14 +265,17 @@ class SourceExtensionClient private constructor(
         }
         val policy = requireNotNull(manifest.capabilities.updateCheck).policy.toNetworkPolicy()
         return try {
-            val response = invokeNetwork(
+            val response = invokeClassified(
                 function = "buildUpdateCheckV2Request",
                 arguments = arrayOf(remoteBookId),
-                stage = "update-check-network",
+                networkStage = "update-check-network",
+                classifyStage = "update-check-classify",
+                operation = "update-check",
                 offlineOnly = false,
+                remoteBookId = remoteBookId,
                 operationContext = updateCheckContext(policy, remoteBookId),
+                allowOfflineFallback = false,
             )
-            classify(response, "update-check-classify", "update-check", remoteBookId)
             val parsed = malformedResponse("update-check-parse", "invalid-update-check") {
                 parseUpdateCheck(
                     call(
@@ -528,6 +531,7 @@ class SourceExtensionClient private constructor(
         remoteBookId: String? = null,
         chapterId: String? = null,
         operationContext: SourceOperationContext? = null,
+        allowOfflineFallback: Boolean = true,
     ): SourceNetworkResponse {
         val request = buildNetworkRequest(function, arguments, networkStage, offlineOnly)
         val response = try {
@@ -562,6 +566,9 @@ class SourceExtensionClient private constructor(
                 } catch (_: SourceException) {
                     Unit
                 }
+            }
+            if (!allowOfflineFallback) {
+                throw error
             }
             val cached = try {
                 gateway.request(grant, request.copy(cache = NetworkCacheMode.OFFLINE_ONLY), operationContext)

@@ -36,6 +36,16 @@ data class VerifiedBrowserSession(
     }
 }
 
+/**
+ * Identity-bearing shape of a cookie jar: the admitted names, never their values. A rotated value
+ * (a refreshed challenge cookie, for example) must not reset credential-bound caches, while a login
+ * or logout changes the name set and therefore legitimately starts a new cache partition.
+ */
+private fun VerifiedBrowserSession.cookieNames(): List<String> = requestCookies
+    .split(';')
+    .mapNotNull { fragment -> fragment.substringBefore('=', "").trim().takeIf(String::isNotEmpty) }
+    .sorted()
+
 data class VerifiedBrowserSessionSnapshot(
     val session: VerifiedBrowserSession,
     val cachePartitionId: String,
@@ -46,7 +56,9 @@ class VerifiedBrowserSessionStore(
     constructor(context: Context) : this(SourceCredentialStore(context))
 
     fun put(partition: SourceCredentialPartition, session: VerifiedBrowserSession) {
-        credentials.put(partition, encode(session))
+        val stored = credentials.getSnapshot(partition)?.plaintext?.let(::decode)
+        val renew = stored == null || stored.cookieNames() != session.cookieNames()
+        credentials.put(partition, encode(session), renewCachePartition = renew)
     }
 
     fun getSnapshot(partition: SourceCredentialPartition): VerifiedBrowserSessionSnapshot? {
