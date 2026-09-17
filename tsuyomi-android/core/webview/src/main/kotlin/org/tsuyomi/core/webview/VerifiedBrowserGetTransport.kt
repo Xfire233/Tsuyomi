@@ -17,8 +17,8 @@ import android.webkit.WebViewClient
 import java.net.URI
 import java.nio.charset.Charset
 import java.nio.charset.StandardCharsets
-import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withContext
@@ -93,14 +93,14 @@ class VerifiedBrowserGetTransport(
                 if (userAgent != null) userAgentString = userAgent
             }
             CookieManager.getInstance().setAcceptThirdPartyCookies(view, false)
-            val finished = CompletableDeferred<Unit>()
+            val finished = Channel<Unit>(Channel.CONFLATED)
             view.webViewClient = object : WebViewClient() {
                 override fun shouldOverrideUrlLoading(view: WebView, webRequest: WebResourceRequest): Boolean {
                     return originOf(URI(webRequest.url.toString()))?.canonical !in allowedOrigins.map { it.canonical }
                 }
 
                 override fun onPageFinished(view: WebView, url: String) {
-                    finished.complete(Unit)
+                    finished.trySend(Unit)
                 }
 
                 override fun onReceivedError(
@@ -108,7 +108,7 @@ class VerifiedBrowserGetTransport(
                     request: WebResourceRequest,
                     error: WebResourceError,
                 ) {
-                    finished.complete(Unit)
+                    finished.trySend(Unit)
                 }
             }
             val extraHeaders = request.referrer?.let { mapOf("Referer" to it.toASCIIString()) }.orEmpty()
@@ -219,13 +219,18 @@ class VerifiedBrowserGetTransport(
         }
     }
 
-    private suspend fun awaitSettled(finished: CompletableDeferred<Unit>, view: WebView, timeoutMs: Int) {
+    private suspend fun awaitSettled(finished: Channel<Unit>, view: WebView, timeoutMs: Int) {
         val budget = timeoutMs.coerceIn(3_000, 25_000).toLong()
-        withTimeoutOrNull(budget) { finished.await() }
-        if (view.title.orEmpty().contains("Just a moment", ignoreCase = true)) return
-        // A page reports finished before late scripts mutate the DOM; keep one bounded settle
-        // instead of the previous progress/title polling loop.
-        delay(SETTLE_MS)
+        // A challenge interstitial reloads itself when it is solved, and a page reports finished
+        // before late scripts mutate the DOM. Keep consuming finish signals inside one bounded
+        // budget instead of polling, and never hand a solved-away challenge back to the caller.
+        withTimeoutOrNull(budget) {
+            while (true) {
+                finished.receive()
+                delay(SETTLE_MS)
+                if (!view.title.orEmpty().contains("Just a moment", ignoreCase = true)) return@withTimeoutOrNull
+            }
+        }
     }
 
     private suspend fun captureHtml(view: WebView, maxBytes: Int): String {
