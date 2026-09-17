@@ -115,6 +115,11 @@ class VerifiedBrowserGetTransport(
             if (extraHeaders.isEmpty()) view.loadUrl(request.url.toString()) else view.loadUrl(request.url.toString(), extraHeaders)
             awaitSettled(finished, view, request.timeoutMs)
             val html = captureHtml(view, request.maxResponseBytes)
+            Log.i(
+                WEBVIEW_TIMING_TAG,
+                "page host=${origin.canonical} title=${view.title.orEmpty().take(40)}" +
+                    " cookies=${cookieNamesOf(sessions)} markers=${pageMarkersOf(html)}",
+            )
             persistCookies(sessions, view.settings.userAgentString.orEmpty())
             val bytes = encode(html, request.decode)
             if (bytes.size > request.maxResponseBytes) throw HostNetworkException(HostNetworkError.RESPONSE_LIMIT)
@@ -175,6 +180,23 @@ class VerifiedBrowserGetTransport(
         Log.i(WEBVIEW_TIMING_TAG, "adopted-session ${origin.canonical}")
         return session
     }
+
+    private fun cookieNamesOf(sessions: List<Pair<HttpsOrigin, VerifiedBrowserSession>>): String = sessions
+        .flatMap { (_, session) ->
+            session.requestCookies.split(';').mapNotNull { fragment ->
+                fragment.substringBefore('=', "").trim().takeIf(String::isNotEmpty)
+            }
+        }
+        .sorted()
+        .joinToString(",")
+
+    private fun pageMarkersOf(html: String): String = buildList {
+        if (html.contains("Just a moment", ignoreCase = true)) add("just-a-moment")
+        if (html.contains("challenge-platform")) add("challenge-platform")
+        if (html.contains("cf_chl_opt")) add("cf-chl-opt")
+        if (html.contains("登录")) add("login-zh")
+        if (html.contains("password", ignoreCase = true)) add("password")
+    }.joinToString(",")
 
     private fun restoreSessions(initial: HttpsOrigin): List<Pair<HttpsOrigin, VerifiedBrowserSession>> {
         val store = VerifiedBrowserSessionStore(credentials)
