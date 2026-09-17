@@ -113,12 +113,20 @@ internal class SourceRemoteLibraryPullInstrumentedTest : SourceFlowInstrumentedT
     @Test
     fun duplicateCursorIsRejectedWithoutLocalWrites() = runBlocking {
         val packageInfo = installFixture()
+        val sourceId = packageInfo.manifest.sourceId.value
+        var page = 0
         val controller = controller {
-            FakeSession(listRemote = { RemoteLibraryPage(emptyList(), "duplicate", false) })
+            FakeSession(
+                listRemote = {
+                    page++
+                    RemoteLibraryPage(listOf(summary(sourceId, "$page", "收藏 $page")), "duplicate", false)
+                },
+            )
         }
         try {
             controller.open(packageInfo)
             assertEquals(RemoteLibraryPullResult.Failure("duplicate-cursor"), controller.pullRemoteLibrary(packageInfo))
+            assertEquals(2, page)
             assertTrue(library.libraryEntries().isEmpty())
         } finally {
             controller.close()
@@ -126,7 +134,7 @@ internal class SourceRemoteLibraryPullInstrumentedTest : SourceFlowInstrumentedT
     }
 
     @Test
-    fun pageLimitIsRejectedWithoutLocalWrites() = runBlocking {
+    fun aSourceThatNeverAddsABookIsStoppedWithoutLocalWrites() = runBlocking {
         val packageInfo = installFixture()
         var page = 0
         val controller = controller {
@@ -134,8 +142,8 @@ internal class SourceRemoteLibraryPullInstrumentedTest : SourceFlowInstrumentedT
         }
         try {
             controller.open(packageInfo)
-            assertEquals(RemoteLibraryPullResult.Failure("page-limit"), controller.pullRemoteLibrary(packageInfo))
-            assertEquals(100, page)
+            assertEquals(RemoteLibraryPullResult.Failure("no-progress"), controller.pullRemoteLibrary(packageInfo))
+            assertEquals(1, page)
             assertTrue(library.libraryEntries().isEmpty())
         } finally {
             controller.close()

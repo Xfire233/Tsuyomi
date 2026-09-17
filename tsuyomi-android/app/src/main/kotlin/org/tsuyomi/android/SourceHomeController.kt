@@ -536,7 +536,7 @@ internal class SourceHomeController : Closeable {
     }
 }
 
-private fun mergeHomePages(current: SourceHomePage, incoming: SourceHomePage): SourceHomePage {
+internal fun mergeHomePages(current: SourceHomePage, incoming: SourceHomePage): SourceHomePage {
     val incomingById = incoming.sections.associateBy { it.id }
     val mergedSections = current.sections.map { existing ->
         val next = incomingById[existing.id] ?: return@map existing

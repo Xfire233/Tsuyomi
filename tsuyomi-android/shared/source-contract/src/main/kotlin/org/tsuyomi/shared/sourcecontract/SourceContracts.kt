@@ -220,7 +220,7 @@ data class SourceHomeSection(
     init {
         require(id.matches(Regex("^[A-Za-z0-9._-]{1,64}$"))) { "Invalid home section ID" }
         require(title.codePointCount(0, title.length) in 1..256) { "Invalid home section title" }
-        require(items.isNotEmpty() && items.size <= 100) { "Invalid home section items" }
+        require(items.isNotEmpty()) { "Invalid home section items" }
     }
 }
 
@@ -243,12 +243,11 @@ data class SourceHomePage(
             val filter = filters.singleOrNull { it.id == id } ?: error("Unknown selected home filter")
             require(filter.options.any { it.value == value }) { "Invalid selected home filter option" }
         }
-        require(sections.isNotEmpty() && sections.size <= 16) { "Invalid source home sections" }
+        require(sections.isNotEmpty()) { "Invalid source home sections" }
         require(sections.map { it.id }.distinct().size == sections.size) { "Duplicate source home section" }
         require(features.size <= 4 && features.map { it.id }.distinct().size == features.size) {
             "Invalid source home features"
         }
-        require(sections.sumOf { it.items.size } <= 100) { "Source home page is too large" }
         require(nextCursor == null || nextCursor.matches(Regex("^[A-Za-z0-9._-]{1,128}$"))) { "Invalid source home cursor" }
         require(complete || nextCursor != null) { "Incomplete source home page requires a cursor" }
     }
@@ -260,7 +259,6 @@ data class RemoteLibraryPage(
     val complete: Boolean,
 ) {
     init {
-        require(items.size <= 100) { "Remote page is too large" }
         require(nextCursor == null || nextCursor.isNotBlank()) { "Invalid remote cursor" }
         require(complete || nextCursor != null) { "Incomplete page requires a cursor" }
     }
