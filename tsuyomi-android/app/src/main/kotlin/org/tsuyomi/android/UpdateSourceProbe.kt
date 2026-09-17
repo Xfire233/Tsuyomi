@@ -178,10 +178,12 @@ internal class UpdateSourceProbe(
         }
         checkedLease.set(candidate.identity to source.lease)
         return try {
-            SourceExtensionClient.open(
+            val (native, verifiedGet) = Phase2SourceGateway.createSession(
+                applicationContext,
                 source.packageInfo,
-                Phase2SourceGateway.create(applicationContext, source.packageInfo, DirectActionTokenRegistry()),
-            ).use { client ->
+                DirectActionTokenRegistry(),
+            )
+            SourceExtensionClient.open(source.packageInfo, native, verifiedGet).use { client ->
                 if (!client.supportsUpdateChecks) {
                     unavailable(candidate, previousAnchor, source.lease, "updates-not-supported")
                 } else {

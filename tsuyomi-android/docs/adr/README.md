@@ -25,5 +25,6 @@ Each ADR records the problem, constraints, options, decision, rejected alternati
 | 0016 | [Many-to-many novel library shelves and deterministic smart collections](0016-novel-library-and-smart-shelves.md) | Accepted |
 | 0017 | [Host-owned source transport, validated cache, and manual WebView verification](0017-source-transport-and-manual-verification.md) | Accepted |
 | 0018 | [Android Keystore AES-GCM source credential partitions](0018-keystore-aead-source-credentials.md) | Accepted |
+| 0019 | [Stable credential-bound cache partitions](0019-stable-credential-bound-cache-partitions.md) | Accepted |
 
 Individual ADRs are written before implementation that depends on them.

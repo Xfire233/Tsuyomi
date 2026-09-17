@@ -50,6 +50,17 @@ The host detects known source login/challenge/error documents only to guide the 
 
 A cache record is scoped by extension ID, active extension version, request method, origin, selected decode mode, and either host-normalized URL or the extension's bounded semantic key. POST is never cacheable. A semantic key may unify declared alternate hosts only inside one source namespace; it is rejected if invalid or used for a non-idempotent request.
 
+Which reads are cacheable is a contract, not a source-local preference. The cacheable reads — search,
+home, detail, directory and chapter — declare cache-first so a repeat read may be served from the
+host cache. The update check and every remote-library operation declare a network-only mode because
+the host enforces it for those operations. Manual caching selects chapters for offline use and is not
+the only path by which a read becomes cacheable; a source that declares network-only for a cacheable
+read silently disables that part of the cache.
+
+A cached response that fails source classification is evicted. A challenge, login or error document
+is therefore never served as content on a later read, and it cannot displace a valid entry by sitting
+in the cache.
+
 The HTTP cache follows response directives where applicable. A separate normalized-document cache stores validated source DTOs and images with content revision/fingerprint. Its eviction is quota/LRU based. Cache lookup state is `fresh`, `validated`, `stale-offline`, `miss`, or `bypassed`; `stale-offline` is visibly labelled and cannot overwrite metadata as a current network result.
 
 Diagnostics contain a correlation ID, stage, response status when safe, origin, redirect count, selected decode, cache state, retry decision, and sanitized parser code. They exclude cookie values, authorization, request body, URL query secrets, raw HTML, account names, and JavaScript stack traces by default.

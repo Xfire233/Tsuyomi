@@ -16,6 +16,7 @@ import java.nio.charset.StandardCharsets
 import java.nio.file.Files
 import java.nio.file.StandardCopyOption
 import java.security.MessageDigest
+import java.security.SecureRandom
 import java.util.UUID
 
 /**
@@ -27,25 +28,57 @@ class SourceCredentialStore(
     private val aead: AeadPort = AndroidKeyStoreAesGcm(),
 ) {
     private val directory: File = File(context.noBackupFilesDir, DIRECTORY_NAME).canonicalFile
+    private val random = SecureRandom()
 
     init {
         require(directory.isDirectory || directory.mkdirs()) { "Credential storage is unavailable" }
         require(isInside(context.noBackupFilesDir.canonicalFile, directory)) { "Credential storage is unavailable" }
     }
 
+    /**
+     * Writes one partition. The record carries a stable cache partition id that every later write
+     * reuses, so a credential refresh (for example a rotated challenge cookie) can no longer orphan
+     * credential-bound caches. [renewCachePartition] mints a fresh id when the credential identity
+     * itself changed, which keeps partitions isolated across logins.
+     */
     @Synchronized
-    fun put(partition: SourceCredentialPartition, plaintext: ByteArray) {
+    fun put(
+        partition: SourceCredentialPartition,
+        plaintext: ByteArray,
+        renewCachePartition: Boolean = false,
+    ) {
         require(plaintext.size <= MAX_PLAINTEXT_BYTES) { "Credential payload exceeds storage limit" }
-        val encrypted = aead.encrypt(plaintext, partition.aad())
+        val reused = if (renewCachePartition) null else existingCachePartitionId(partition)
+        val cachePartitionId = reused ?: ByteArray(CREDENTIAL_CACHE_PARTITION_BYTES).also(random::nextBytes)
+        val encrypted = aead.encrypt(
+            plaintext,
+            partition.aad(CREDENTIAL_PARTITIONED_SCHEMA_VERSION, cachePartitionId),
+        )
         if (encrypted.iv.size != GCM_IV_BYTES || encrypted.ciphertext.size > MAX_CIPHERTEXT_BYTES) {
             throw CredentialStorageException(CredentialStorageError.UNAVAILABLE)
         }
         val destination = fileFor(partition)
         try {
-            writeAtomically(destination, CredentialRecord(encrypted.iv, encrypted.ciphertext).encode())
+            writeAtomically(
+                destination,
+                CredentialRecord(
+                    schemaVersion = CREDENTIAL_PARTITIONED_SCHEMA_VERSION,
+                    iv = encrypted.iv,
+                    ciphertext = encrypted.ciphertext,
+                    cachePartitionId = cachePartitionId,
+                ).encode(),
+            )
         } catch (_: IOException) {
             throw CredentialStorageException(CredentialStorageError.UNAVAILABLE)
         }
+    }
+
+    private fun existingCachePartitionId(partition: SourceCredentialPartition): ByteArray? {
+        val source = fileFor(partition)
+        if (!source.exists()) return null
+        return runCatching { CredentialRecord.decode(source.readBytes()) }
+            .getOrNull()
+            ?.cachePartitionId
     }
 
     /** Returns the decrypted value together with an opaque revision for credential-bound caches. */
@@ -65,7 +98,10 @@ class SourceCredentialStore(
             throw CredentialStorageException(CredentialStorageError.CORRUPT_OR_UNAUTHENTICATED)
         }
         val plaintext = try {
-            aead.decrypt(AeadCiphertext(record.iv, record.ciphertext), partition.aad())
+            aead.decrypt(
+                AeadCiphertext(record.iv, record.ciphertext),
+                partition.aad(record.schemaVersion, record.cachePartitionId),
+            )
         } catch (failure: CredentialStorageException) {
             if (failure.error == CredentialStorageError.CORRUPT_OR_UNAUTHENTICATED) {
                 invalidate(source)
@@ -74,7 +110,7 @@ class SourceCredentialStore(
         }
         return SourceCredentialSnapshot(
             plaintext = plaintext,
-            cachePartitionId = sha256(encoded),
+            cachePartitionId = record.cachePartitionId?.toHex() ?: sha256(encoded),
         )
     }
 
@@ -123,14 +159,20 @@ class SourceCredentialStore(
         }
     }
 
-    private data class CredentialRecord(val iv: ByteArray, val ciphertext: ByteArray) {
+    private data class CredentialRecord(
+        val schemaVersion: Int,
+        val iv: ByteArray,
+        val ciphertext: ByteArray,
+        val cachePartitionId: ByteArray?,
+    ) {
         fun encode(): ByteArray = ByteArrayOutputStream().use { bytes ->
             DataOutputStream(bytes).use { output ->
                 output.writeInt(RECORD_MAGIC)
-                output.writeShort(CREDENTIAL_SCHEMA_VERSION)
+                output.writeShort(schemaVersion)
                 output.writeShort(CREDENTIAL_KEY_VERSION)
                 output.writeByte(iv.size)
                 output.writeInt(ciphertext.size)
+                cachePartitionId?.let(output::write)
                 output.write(iv)
                 output.write(ciphertext)
             }
@@ -142,22 +184,36 @@ class SourceCredentialStore(
                 if (encoded.size !in MIN_RECORD_BYTES..MAX_RECORD_BYTES) throw IOException("Invalid credential record")
                 return DataInputStream(ByteArrayInputStream(encoded)).use { input ->
                     if (input.readInt() != RECORD_MAGIC) throw IOException("Invalid credential record")
-                    if (input.readUnsignedShort() != CREDENTIAL_SCHEMA_VERSION) throw IOException("Invalid credential record")
+                    val schemaVersion = input.readUnsignedShort()
+                    if (schemaVersion != CREDENTIAL_SCHEMA_VERSION &&
+                        schemaVersion != CREDENTIAL_PARTITIONED_SCHEMA_VERSION
+                    ) {
+                        throw IOException("Invalid credential record")
+                    }
                     if (input.readUnsignedShort() != CREDENTIAL_KEY_VERSION) throw IOException("Invalid credential record")
                     val ivLength = input.readUnsignedByte()
                     val ciphertextLength = input.readInt()
                     if (ivLength != GCM_IV_BYTES || ciphertextLength !in 16..MAX_CIPHERTEXT_BYTES) {
                         throw IOException("Invalid credential record")
                     }
-                    if (encoded.size != RECORD_HEADER_BYTES + ivLength + ciphertextLength) {
+                    val cachePartitionId = if (schemaVersion == CREDENTIAL_PARTITIONED_SCHEMA_VERSION) {
+                        ByteArray(CREDENTIAL_CACHE_PARTITION_BYTES).also(input::readFully)
+                    } else {
+                        null
+                    }
+                    if (encoded.size != recordHeaderBytes(schemaVersion) + ivLength + ciphertextLength) {
                         throw IOException("Invalid credential record")
                     }
                     val iv = ByteArray(ivLength).also(input::readFully)
                     val ciphertext = ByteArray(ciphertextLength).also(input::readFully)
                     if (input.read() != -1) throw IOException("Invalid credential record")
-                    CredentialRecord(iv, ciphertext)
+                    CredentialRecord(schemaVersion, iv, ciphertext, cachePartitionId)
                 }
             }
+
+            private fun recordHeaderBytes(schemaVersion: Int): Int =
+                RECORD_HEADER_BYTES +
+                    if (schemaVersion == CREDENTIAL_PARTITIONED_SCHEMA_VERSION) CREDENTIAL_CACHE_PARTITION_BYTES else 0
         }
     }
 
@@ -168,33 +224,39 @@ class SourceCredentialStore(
         const val MIN_RECORD_BYTES = RECORD_HEADER_BYTES + GCM_IV_BYTES + 16
         const val MAX_PLAINTEXT_BYTES = 1024 * 1024
         const val MAX_CIPHERTEXT_BYTES = MAX_PLAINTEXT_BYTES + 16
-        const val MAX_RECORD_BYTES = RECORD_HEADER_BYTES + GCM_IV_BYTES + MAX_CIPHERTEXT_BYTES
+        const val MAX_RECORD_BYTES = RECORD_HEADER_BYTES + CREDENTIAL_CACHE_PARTITION_BYTES +
+            GCM_IV_BYTES + MAX_CIPHERTEXT_BYTES
     }
 }
 
 /**
- * Decrypted source credentials plus a non-secret revision derived from the randomized encrypted
- * record. The revision changes on every explicit credential write without revealing cookie bytes.
+ * Decrypted source credentials plus a non-secret revision for credential-bound caches. The revision
+ * is carried inside the encrypted record, so it stays stable while credentials are only refreshed
+ * and changes when a write explicitly renews the partition or the partition is deleted.
  */
 class SourceCredentialSnapshot internal constructor(
     val plaintext: ByteArray,
     val cachePartitionId: String,
 )
 
-internal fun SourceCredentialPartition.aad(): ByteArray = ByteArrayOutputStream().use { bytes ->
+internal fun SourceCredentialPartition.aad(
+    schemaVersion: Int = CREDENTIAL_SCHEMA_VERSION,
+    cachePartitionId: ByteArray? = null,
+): ByteArray = ByteArrayOutputStream().use { bytes ->
     DataOutputStream(bytes).use { output ->
         output.writeUTF("tsuyomi-source-credentials")
-        output.writeInt(CREDENTIAL_SCHEMA_VERSION)
+        output.writeInt(schemaVersion)
         output.writeInt(CREDENTIAL_KEY_VERSION)
         output.writeUTF(sourceId)
         output.writeUTF(origin.value)
+        if (cachePartitionId != null) output.write(cachePartitionId)
     }
     bytes.toByteArray()
 }
 
-private fun sha256(bytes: ByteArray): String = MessageDigest.getInstance("SHA-256")
-    .digest(bytes)
-    .joinToString(separator = "") { byte -> "%02x".format(byte) }
+private fun ByteArray.toHex(): String = joinToString(separator = "") { byte -> "%02x".format(byte) }
+
+private fun sha256(bytes: ByteArray): String = MessageDigest.getInstance("SHA-256").digest(bytes).toHex()
 
 private fun isInside(parent: File, child: File): Boolean {
     val prefix = parent.path.trimEnd(File.separatorChar) + File.separatorChar

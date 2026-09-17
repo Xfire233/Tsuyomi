@@ -102,6 +102,7 @@ An environment-provided `AGENTS.md` may impose higher-priority agent instruction
 | `tsuyomi-android/docs/adr/0016-novel-library-and-smart-shelves.md` | Many-to-many Library and deterministic smart collections | Collection/membership/rule change | Preserve normalized membership and deterministic rules | Library data model | Membership/rules remain lossless and deterministic | Accepted ADR |
 | `tsuyomi-android/docs/adr/0017-source-transport-and-manual-verification.md` | Host-owned transport, validated cache and manual verification | Network/cache/WebView/redirect/charset change | Apply exact operation/origin/cache boundaries | Source transport security | Every hop/cache/verified page is bounded and validated | Accepted ADR |
 | `tsuyomi-android/docs/adr/0018-keystore-aead-source-credentials.md` | Keystore AES-GCM credential partitions | Credential storage/rotation/backup change | Preserve per-source partition and non-exportability | Credential security | Credential lifecycle remains encrypted, partitioned and erasable | Accepted ADR |
+| `tsuyomi-android/docs/adr/0019-stable-credential-bound-cache-partitions.md` | Stable credential-bound cache partition identity | Credential record format, cache partition identity or credential refresh behaviour change | Apply a stable record-carried partition id bound into the AEAD associated data | Credential-bound cache identity | Partition survives refreshes, renews only on identity change, and legacy records stay readable | Accepted ADR |
 
 ## Protocol and extension contract documents
 

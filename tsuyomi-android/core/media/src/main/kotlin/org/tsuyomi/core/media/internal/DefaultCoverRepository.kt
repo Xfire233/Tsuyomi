@@ -40,15 +40,28 @@ internal class DefaultCoverRepository(
         return try {
             loader.cached(request.transportUrl, request.targetWidthPx, request.targetHeightPx)
                 ?.let(CoverUiState::Ready)
-        } catch (_: MediaLoadException) {
+        } catch (error: MediaLoadException) {
+            reportCoverFailure("cache", request.transportUrl, error.failure.name)
             null
         }
+    }
+
+    private fun reportCoverFailure(stage: String, url: String, reason: String) {
+        val described = runCatching {
+            val uri = java.net.URI(url)
+            buildString {
+                append(uri.scheme).append("://").append(uri.host)
+                if (uri.port != -1) append(':').append(uri.port)
+            }
+        }.getOrDefault("unparsable")
+        android.util.Log.w("TsuyomiCover", "rejected stage=$stage reason=$reason origin=$described")
     }
 
     override fun observe(request: CoverRequest): Flow<CoverUiState> = flow {
         if (request.sourceId != sourceId || request.packageRevision != packageRevision ||
             request.credentialRevision != credentialRevision
         ) {
+            reportCoverFailure("partition", request.transportUrl, CoverFailureReason.INVALID_REFERENCE.name)
             emit(CoverUiState.Failed(CoverFailureReason.INVALID_REFERENCE, request.fallback))
             return@flow
         }
@@ -62,6 +75,7 @@ internal class DefaultCoverRepository(
                 loader.load(request.transportUrl, request.referrerUrl, request.targetWidthPx, request.targetHeightPx),
             )
         } catch (error: MediaLoadException) {
+            reportCoverFailure("fetch", request.transportUrl, error.failure.name)
             CoverUiState.Failed(error.failure.toPublicReason(), request.fallback)
         } catch (error: CancellationException) {
             throw error
@@ -70,6 +84,7 @@ internal class DefaultCoverRepository(
         } catch (error: Error) {
             throw error
         } catch (_: Throwable) {
+            reportCoverFailure("fetch", request.transportUrl, CoverFailureReason.NETWORK.name)
             CoverUiState.Failed(CoverFailureReason.NETWORK, request.fallback)
         }
         emit(state)

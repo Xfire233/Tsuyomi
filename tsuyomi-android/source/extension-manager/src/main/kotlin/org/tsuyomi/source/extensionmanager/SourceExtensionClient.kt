@@ -4,6 +4,7 @@
  */
 package org.tsuyomi.source.extensionmanager
 
+import android.util.Log
 import java.io.Closeable
 import java.net.URI
 import java.net.URLEncoder
@@ -265,14 +266,17 @@ class SourceExtensionClient private constructor(
         }
         val policy = requireNotNull(manifest.capabilities.updateCheck).policy.toNetworkPolicy()
         return try {
-            val response = invokeNetwork(
+            val response = invokeClassified(
                 function = "buildUpdateCheckV2Request",
                 arguments = arrayOf(remoteBookId),
-                stage = "update-check-network",
+                networkStage = "update-check-network",
+                classifyStage = "update-check-classify",
+                operation = "update-check",
                 offlineOnly = false,
+                remoteBookId = remoteBookId,
                 operationContext = updateCheckContext(policy, remoteBookId),
+                allowOfflineFallback = false,
             )
-            classify(response, "update-check-classify", "update-check", remoteBookId)
             val parsed = malformedResponse("update-check-parse", "invalid-update-check") {
                 parseUpdateCheck(
                     call(
@@ -528,6 +532,7 @@ class SourceExtensionClient private constructor(
         remoteBookId: String? = null,
         chapterId: String? = null,
         operationContext: SourceOperationContext? = null,
+        allowOfflineFallback: Boolean = true,
     ): SourceNetworkResponse {
         val request = buildNetworkRequest(function, arguments, networkStage, offlineOnly)
         val response = try {
@@ -540,6 +545,7 @@ class SourceExtensionClient private constructor(
             if (!offlineOnly) gateway.rememberLastGood(grant, request, response)
             return response
         } catch (error: SourceException) {
+            gateway.forgetLastGood(grant, request)
             if (
                 offlineOnly ||
                 error.code != SourceErrorCode.SESSION_REQUIRED &&
@@ -547,10 +553,14 @@ class SourceExtensionClient private constructor(
             ) {
                 throw error
             }
-            val retried = verifiedGet?.let { browser ->
+            val retried = if (verifiedGet == null) {
+                Log.w("TsuyomiWebView", "fallback-unavailable reason=no-verified-transport")
+                null
+            } else {
                 try {
-                    browser.request(grant, request.copy(cache = NetworkCacheMode.NETWORK_ONLY), operationContext)
-                } catch (_: HostNetworkException) {
+                    verifiedGet.request(grant, request.copy(cache = NetworkCacheMode.NETWORK_ONLY), operationContext)
+                } catch (failure: HostNetworkException) {
+                    Log.w("TsuyomiWebView", "fallback-failed code=${failure.error}")
                     null
                 }
             }
@@ -562,6 +572,9 @@ class SourceExtensionClient private constructor(
                 } catch (_: SourceException) {
                     Unit
                 }
+            }
+            if (!allowOfflineFallback) {
+                throw error
             }
             val cached = try {
                 gateway.request(grant, request.copy(cache = NetworkCacheMode.OFFLINE_ONLY), operationContext)
@@ -671,6 +684,7 @@ class SourceExtensionClient private constructor(
     override fun close() = runtime.close()
 
     companion object {
+
         private val JSON = Json { ignoreUnknownKeys = false; isLenient = false }
         // Only bounded host tokens enter the durable report; never exception messages or source payloads.
         private val UPDATE_DIAGNOSTIC_STAGE = Regex("^[a-z][a-z0-9_-]{0,31}$")

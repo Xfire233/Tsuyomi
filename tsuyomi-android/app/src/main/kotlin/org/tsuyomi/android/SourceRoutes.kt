@@ -532,7 +532,13 @@ private fun NavGraphBuilder.detailRoute(
                 entry.savedStateHandle[VerifiedDirectoryResultSequenceKey] = 0L
             }
             if (verifiedDetailSequence == 0L && verifiedDirectorySequence == 0L) {
-                if (detail.state !is SourceBookState.Content && detail.state !is SourceBookState.Failure) {
+                val loadedIdentity = (detail.state as? SourceBookState.Content)?.value?.summary?.identity
+                val staleBook = loadedIdentity != null && loadedIdentity != detail.selectedBook?.identity
+                val needsLoad = staleBook || (
+                    detail.state !is SourceBookState.Content &&
+                        detail.state !is SourceBookState.Failure
+                    )
+                if (needsLoad) {
                     if (packageInfo != null) detail.restore(packageInfo) else detail.loadAll()
                 }
             }
