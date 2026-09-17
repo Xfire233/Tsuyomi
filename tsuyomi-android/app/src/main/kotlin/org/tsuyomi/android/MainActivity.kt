@@ -197,7 +197,7 @@ internal fun TsuyomiApp(
     val sourceOwner = rememberSourceRouteOwner(
         application = application,
         navController = navController,
-        onLibraryChanged = ::reloadLibrary,
+        onLibraryChanged = { scope.launch { reloadLibrary() } },
     )
     val trustedSourcePackages = sourceOwner.installer.trustedInstalledPackages
     val sourceTagLabels = remember(trustedSourcePackages) {
