@@ -567,6 +567,7 @@ class SourceExtensionClient private constructor(
             if (retried != null) {
                 try {
                     classify(retried, classifyStage, operation, remoteBookId, chapterId)
+                    Log.i("TsuyomiCache", "read stage=$classifyStage state=${retried.cacheState} mode=RETRY")
                     gateway.rememberLastGood(grant, request, retried)
                     return retried
                 } catch (_: SourceException) {
