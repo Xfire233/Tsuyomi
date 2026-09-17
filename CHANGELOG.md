@@ -5,6 +5,8 @@
 
 ## Unreleased
 
+- Published the first Android pre-release, `android-v0.3.0-beta.4`, from a reproducible out-of-Gradle signing procedure, the retained release-signing identity and a post-publication workflow that re-derives every fact from the uploaded asset and refuses to let the release body certify itself. Physical-phone acceptance of that exact artifact and independent off-machine signing-key recovery custody remain outstanding and are recorded as pending.
+- Published Wenku8 0.2.33 to the official root-signed catalog. Merging the extension repository is its release trigger: the official-distribution workflow produced the signed package, its source archive and the renewed catalog, and the Android host consumes it through the existing pinned publisher identity.
 - Added identity-keyed portable chapter bookmarks with Room11/transfer v4 compatibility, transactional capacity limits, and independent requested Reader flow; bookmarks do not implicitly pin books or mutate website collections.
 - Restored mounted Reader seek cancellation and adaptive DUAL presentation, connected persisted typography/reset updates to the live viewport, and completed readable Reader theme rendering and native control semantics.
 - Corrected source header/cookie handling, malformed-output and cancellation boundaries, export-preflight recovery, transient catalog recovery, legacy preference migration, and the reachable QuickJS Unicode allocation-failure cleanup.

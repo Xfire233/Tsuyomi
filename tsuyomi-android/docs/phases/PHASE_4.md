@@ -606,3 +606,23 @@ The user subsequently authorized completing and testing G-36 subscriptions, non-
 The user selected portable durable chapter bookmarks and automatic restoration of requested dual-page mode after a narrow-window single-page fallback. Constitution §14.1a owns visible behavior, ADR 0008 owns portable identity/presence/versioning, and Reader architecture owns presentation-transaction integration. These supersede route-only bookmarks, bookmark exclusion from portable transfer, and overwriting requested DUAL with a temporary PAGED layout.
 
 The initial checkpoint recorded contract reconciliation and specification preparation only. The user subsequently authorized implementing the complete remediation plan represented by issues #36 and #35 on 2026-09-12. This supersedes the earlier implementation hold for those repairs, not the independent deployment, website mutation, commit/push/merge, release/tag, canonical replacement or Phase-closure boundaries. Implement and verify the entire accounted scope using isolated evidence owners; EINK remains frozen. Existing five-theme support and the Reader typography minimum are retained rather than reopened as product choices.
+
+### First public Android pre-release — authorized 2026-09-17
+
+The user directed on 2026-09-17 that one already completed physical-phone acceptance be treated as satisfying the pre-release precondition, and explicitly retained the requirement for **further acceptance**. On that basis the user authorized executing every remaining release step except physical-phone acceptance itself. This is a publication authorization, not a Phase-closure, stability or acceptance conclusion.
+
+Authorized and executed: build from the merged `main`; sign outside Gradle with the retained release identity; create the annotated tag `android-v0.3.0-beta.4`; create a **pre-release** GitHub Release carrying the signed APK; and let the post-publication verification workflow re-derive every artifact fact independently.
+
+Not authorized and not performed: any operation on the user's physical phone; clearing application data; replacing the canonical AVD or the canonical Online artifact; moving or recreating any historical tag or already delivered private candidate; EINK restoration; and any stable-release claim. A pre-release is not a stable release: promotion requires a separate, explicit user decision.
+
+Version identity: `versionCode 6`, `versionName 0.3.0-beta.4` (no build-fingerprint suffix; that suffix exists only to distinguish private candidates). The release artifact therefore remains distinguishable from every private candidate the user has already installed.
+
+Procedure ownership: [`RELEASE_PROCEDURE.md`](../process/RELEASE_PROCEDURE.md) owns the reproducible steps; [`REPOSITORY_GOVERNANCE.md`](../process/REPOSITORY_GOVERNANCE.md) owns tag naming and immutability; the distribution channel is [`ADR 0002`](../adr/0002-android-baseline-and-distribution.md).
+
+Outstanding and deliberately not satisfied by this publication:
+
+- the user's explicit, artifact-bound acceptance of the **published** pre-release on their own physical phone (the earlier acceptance is treated as the pre-release precondition only);
+- independent off-machine recovery custody for the release-signing key, since a Windows-user-bound DPAPI backup is same-machine recovery only;
+- human review and golden approval; the Standard profile remains the only blocking profile and EINK stays frozen.
+
+The immutable artifact record for this publication — APK SHA-256, byte count, signer certificate, signature schemes, tag and source revision — is recorded in the `release.json` receipt produced by `tools/Publish-AndroidRelease.ps1`, in the published release body, and in the verification workflow result. The concrete digest values are entered below once the artifact exists, per `G6`.
