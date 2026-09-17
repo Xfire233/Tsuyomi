@@ -5,6 +5,12 @@
 
 All notable changes use semantic versioning. Future Phase baselines use annotated `phase-N-baseline` tags; immutable historical `gate-1-baseline` and `gate-2-baseline` tags retain their published names.
 
+## [Unreleased]
+
+### Changed
+
+- Source pagination is no longer bounded by fixed host limits. `SourceHomeSection`, `SourceHomePage` and `RemoteLibraryPage` no longer cap item or section counts, and `SourceRemoteLibraryCoordinator` no longer caps how many pages it pulls (`MAX_REMOTE_LIBRARY_PAGES = 100`). Those fixed ceilings contradicted the contract they lived in: appending source-home pages past the bound built a page whose own `init` rejected it, and because the append coroutine ran uncaught on the main dispatcher the rejection terminated the process mid-scroll (`java.lang.IllegalArgumentException: Invalid home section items`, reproduced on a physical device at `SourceHomeController.kt:543`). The bound now belongs to the source: the signed extension declares through `nextCursor`/`complete` when it has no further page, and the host keeps pulling until it says so. A pull that adds no new book stops with `no-progress`, so a source that emits endless fresh cursors over empty pages cannot spin. The aggregate-byte and record guards are unchanged.
+
 ## [0.3.0-beta.4] - 2026-09-17
 
 首个公开发布的 Beta 预发布：tag `android-v0.3.0-beta.4`，`versionCode 6`，资产 `Tsuyomi-0.3.0-beta.4.apk` 为 16 KiB 对齐、仅 v3 签名、非 debug 的发布制品，并已作为 GitHub 预发布发布。预发布不等于稳定版：物理真机验收与稳定版转换仍待完成，发布步骤与密钥托管边界见 [`docs/process/RELEASE_PROCEDURE.md`](docs/process/RELEASE_PROCEDURE.md)。
