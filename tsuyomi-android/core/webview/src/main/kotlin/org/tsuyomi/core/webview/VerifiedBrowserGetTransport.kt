@@ -331,8 +331,8 @@ class VerifiedBrowserGetTransport(
         /** Bounded settle after onPageFinished so late DOM mutations are still captured. */
         const val SETTLE_MS = 250L
 
-        /** Minimum interval between verified fetches; the site's WAF rejects faster bursts. */
-        const val MIN_INTERVAL_MS = 1_200L
+        /** Minimum interval between verified fetches; the WAF rejected a 1.2s cadence after four pages. */
+        const val MIN_INTERVAL_MS = 2_500L
 
         /** Upper bound of the exponential backoff applied after a WAF rejection. */
         const val MAX_INTERVAL_MS = 15_000L
