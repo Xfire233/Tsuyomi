@@ -45,6 +45,7 @@
 
 - 宿主、协议和独立插件仓库分别使用 SemVer；0.x 阶段仍必须明确 breaking change。
 - 本仓库 tag 使用 `protocol-vX.Y.Z`、`android-vX.Y.Z`；新的 `extensions-vX.Y.Z` tag 位于插件仓库，历史本仓库标签不移动。
+- Android 预发布使用同一前缀加 SemVer 预发布后缀（例如 `android-v0.3.0-beta.4`）；预发布 tag 与稳定 tag 同等不可移动，`prerelease` 标记也不等于稳定发布。Android 制品的构建、签名、发布与发布后验证由 [`RELEASE_PROCEDURE.md`](RELEASE_PROCEDURE.md) 拥有，tag 只标记制品对应的源提交。
 - Future delivery baselines use one annotated tag named `phase-N-baseline`, pointing to the Monorepo commit that passed every applicable component and admission/release gate.
 - Immutable historical tags `gate-1-baseline` and `gate-2-baseline` remain exact published facts and never move; they are not active naming templates.
 - Annotated tag messages record the owning Phase document, three component versions and artifact digest; tags do not move.

@@ -1,0 +1,48 @@
+# SPDX-FileCopyrightText: 2026 Tsuyomi Contributors
+# SPDX-License-Identifier: Apache-2.0
+
+name: android-release
+run-name: >-
+  Android release verification | ${{ github.event.release.tag_name }}
+
+on:
+  release:
+    types: [published]
+
+
+permissions:
+  contents: read
+
+concurrency:
+  group: android-release-${{ github.event.release.tag_name }}
+  cancel-in-progress: false
+
+jobs:
+  android-release-verification:
+    if: startsWith(github.event.release.tag_name, 'android-v')
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+      - name: Download the published asset
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.event.release.tag_name }}
+        run: |
+          mkdir -p dist
+          gh release download "$TAG" --repo "$GITHUB_REPOSITORY" --pattern '*.apk' --dir dist
+          ls -l dist
+      - name: Write the published release body
+        env:
+          RELEASE_BODY: ${{ github.event.release.body }}
+        run: printf '%s' "$RELEASE_BODY" > dist/release-body.md
+      - name: Verify the published artifact
+        env:
+          TAG: ${{ github.event.release.tag_name }}
+        run: |
+          apk=$(find dist -maxdepth 1 -name '*.apk' -print -quit)
+          python tools/verify_android_release.py \
+            --apk "$apk" \
+            --release-body dist/release-body.md \
+            --tag "$TAG"

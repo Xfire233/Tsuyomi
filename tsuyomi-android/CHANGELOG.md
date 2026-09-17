@@ -5,7 +5,7 @@
 
 All notable changes use semantic versioning. Future Phase baselines use annotated `phase-N-baseline` tags; immutable historical `gate-1-baseline` and `gate-2-baseline` tags retain their published names.
 
-## [Unreleased]
+## [0.3.0-beta.4] - 2026-09-17
 
 ### Changed
 
