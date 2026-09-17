@@ -120,11 +120,11 @@ def main() -> None:
     if arguments.check:
         if not OUTPUT.is_file() or not OUTPUT_DIGEST.is_file():
             raise SystemExit("Malformed-output fixture or checksum is missing; rerun without --check.")
-        if OUTPUT.read_bytes() != bytes_to_write or OUTPUT_DIGEST.read_text(encoding="ascii") != digest_line:
+        if OUTPUT.read_bytes() != bytes_to_write or OUTPUT_DIGEST.read_bytes() != digest_line.encode("ascii"):
             raise SystemExit("Malformed-output fixture is stale; rerun without --check.")
         return
     OUTPUT.write_bytes(bytes_to_write)
-    OUTPUT_DIGEST.write_text(digest_line, encoding="ascii")
+    OUTPUT_DIGEST.write_bytes(digest_line.encode("ascii"))
 
 
 if __name__ == "__main__":

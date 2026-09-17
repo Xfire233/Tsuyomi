@@ -26,9 +26,9 @@
     }
   },
   "files": {
-    "generate_malformed_output_fixture.py": "d906dcb280a77c50e56e3783d1f0d75344d74980710b9f60a14c1c0b1462f8a6",
+    "generate_malformed_output_fixture.py": "c54fda94a92cfbf955043a820433695141ccf093abc432676cb0e0369c722443",
     "wenku8/malformed-output-fixture.hxp": "bd4d1f3a36bdb3ba231a4ca9374e188cca818510efc3dd6ce4745d2e84599f50",
-    "wenku8/malformed-output-fixture.sha256": "640553ef2b0ed48b327ce09d41b17119d2b52aab045f8224500eb4bec021240d",
+    "wenku8/malformed-output-fixture.sha256": "026bb5e88810f1ad881b8a14c1c4eb51192f93d78659e56cf0da312391884330",
     "wenku8/challenge.html": "8895328b7187c53cf525b022429fbc7550da5ac132c7b76b8fe53aea0210be1f",
     "wenku8/chapter-2.html": "fc6893a9c74df65c569e9a8abd5233f4a7876c5913653f34aaf94e061d99bad4",
     "wenku8/chapter-illustrations.html": "b940369f67bbc759a96cc649ff7158582a50b929b2751147327dd420f8747f53",
