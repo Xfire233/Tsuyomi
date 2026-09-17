@@ -297,9 +297,32 @@ class LibraryUpdatesProductionJourneyInstrumentedTest {
                 composeRule.onAllNodesWithTag(tag).fetchSemanticsNodes().isNotEmpty()
             }
         } catch (failure: ComposeTimeoutException) {
-            throw AssertionError("Missing $tag\n" + composeRule.onAllNodes(isRoot(), useUnmergedTree = true).printToString(), failure)
+            throw AssertionError("Missing $tag\n" + filterDiagnostics(), failure)
         }
     }
+
+    /**
+     * A missing-tag timeout used to report only the semantics tree, and that dump came back as a bare
+     * root with no descendants, so the failure carried no evidence at all. These reads answer the two
+     * questions the Library filter cases turn on: whether a selection reached the controller (it
+     * persists `showUpdatesOnly`), and what the filter surface actually rendered.
+     */
+    private fun filterDiagnostics(): String = runBlocking {
+        val persisted = application.libraryPreferencesRepository.preferences.first().showUpdatesOnly
+        buildString {
+            appendLine("persisted showUpdatesOnly = $persisted")
+            appendLine("nodes 'library-filter-summary' = ${nodeCount("library-filter-summary")}")
+            appendLine("nodes 'library-filter-summary-edit' = ${nodeCount("library-filter-summary-edit")}")
+            appendLine("nodes 'library-update-filter' = ${nodeCount("library-update-filter")}")
+            appendLine("nodes 'library-primary-tabs' = ${nodeCount("library-primary-tabs")}")
+            appendLine("nodes text '有更新' = ${composeRule.onAllNodesWithText("有更新").fetchSemanticsNodes().size}")
+            append("root tree:\n")
+            append(composeRule.onAllNodes(isRoot(), useUnmergedTree = true).printToString())
+        }
+    }
+
+    private fun nodeCount(tag: String): Int =
+        composeRule.onAllNodesWithTag(tag, useUnmergedTree = true).fetchSemanticsNodes().size
 
     private fun waitUntil(condition: () -> Boolean) {
         composeRule.waitUntil(timeoutMillis = SESSION_TIMEOUT_MILLIS, condition = condition)
