@@ -35,6 +35,23 @@ Missing fields are governance defects. Availability is runtime state: a register
 
 `~/.agents/skills` is the cross-agent user source. Link it to supported clients with the Skills CLI; do not copy skill directories between Claude Code, Codex, OpenCode, GitHub Copilot, and OMP.
 
+### Local implementation-economy reminder
+
+| Field | Value |
+|---|---|
+| Owner | The local root `AGENTS.md` section `Implementation economy`; OMP's native context/rule loader owns delivery. |
+| Trigger | Apply before code changes; the short reminder remains always-apply in OMP requests. |
+| Preconditions | Root `AGENTS.md` is present in injected context and the native rules provider is enabled. |
+| Method | Use the injected section without rereading unchanged files. Optional local `.omp/RULES.md` points to it and reminds the agent that minimal diffs cannot override explicit scope or correctness/evidence obligations. |
+| Output | Smaller complete root-cause changes using existing owners, patterns and platform facilities; no reduction of required behavior or verification. |
+| Scope | Local agent instructions only. `AGENTS.md` and `.omp/` stay ignored; product, contribution and release contracts remain versioned at their existing owners. |
+| Do not use | No duplicate full ruleset, passive Skill, per-turn prompt-injection extension, mode switch or additional product/authorization authority. No repeated file read merely to acknowledge compliance. |
+| Fallback | If the sticky reminder is absent or shadowed, the injected root context remains the instruction source. If required context is missing, read that section directly; do not install a second injector. |
+| Health check | In a fresh/reset OMP session, check that root context and the short sticky body are each present once. Inspect counts/booleans only, not full provider payloads or secrets. Check root and component launch directories; do not equate delivery with model compliance. |
+| Completion | Instructions are discovered without duplicate bodies, repository policy remains green, and activation limitations are recorded. No A/B performance claim is required or implied. |
+
+OMP rediscovers native rules at session creation/reset; existing sessions need `/new` or `/clear` to pick up this local reminder. Native `RULES` entries are name-deduplicated: a user-level `RULES.md` can shadow the project file, and a nearer non-empty `.omp/` can hide the root sticky file. Diagnose the selected source rather than copying rules into multiple directories. Stable request context is not an accumulating transcript copy; actual token cost and cache discounts depend on the provider. Prompt delivery cannot enforce model compliance or replace tool permissions.
+
 ## Deterministic dispatch
 
 1. Classify the required output: repository fact, symbol fact, current web fact, library API fact, code edit, Android build result, device fact, visual evidence, maintainability report, or issue handoff.
