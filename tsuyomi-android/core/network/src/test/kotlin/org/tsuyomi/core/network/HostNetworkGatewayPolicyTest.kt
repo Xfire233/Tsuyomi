@@ -113,6 +113,71 @@ class HostNetworkGatewayPolicyTest {
     }
 
     @Test
+    fun declared_same_host_http_redirect_is_upgraded_before_transport() = runBlocking {
+        val requests = mutableListOf<URI>()
+        val gateway = HostNetworkGateway(HostHttpTransport { request ->
+            requests += request.url
+            if (requests.size == 1) {
+                HostHttpResponse(
+                    status = 302,
+                    finalUrl = request.url,
+                    headers = responseHeaders(
+                        "location" to "http://www.wenku8.net/login.php?jumpurl=http%3A%2F%2Fwww.wenku8.net%2Findex.php#discard",
+                    ),
+                    bytes = byteArrayOf(),
+                )
+            } else {
+                HostHttpResponse(200, request.url, responseHeaders(), "login".encodeToByteArray())
+            }
+        })
+
+        val response = gateway.request(
+            grant.copy(legacyHttpRedirectOrigins = setOf(HttpsOrigin("https://www.wenku8.net"))),
+            request(url = "https://www.wenku8.net/index.php"),
+        )
+
+        val upgraded = URI(
+            "https://www.wenku8.net/login.php?jumpurl=http%3A%2F%2Fwww.wenku8.net%2Findex.php",
+        )
+        assertEquals(listOf(URI("https://www.wenku8.net/index.php"), upgraded), requests)
+        assertEquals(upgraded.toString(), response.finalUrl)
+        assertTrue(requests.all { it.scheme == "https" })
+    }
+
+    @Test
+    fun unsafe_http_redirect_variants_never_reach_transport() = runBlocking {
+        val declaredGrant = grant.copy(
+            legacyHttpRedirectOrigins = setOf(HttpsOrigin("https://www.wenku8.net")),
+        )
+        val cases = listOf(
+            declaredGrant to "http://outside.example/login.php",
+            declaredGrant to "http://user@www.wenku8.net/login.php",
+            declaredGrant to "http://www.wenku8.net:8080/login.php",
+            grant to "http://www.wenku8.net/login.php",
+        )
+
+        cases.forEach { (activeGrant, location) ->
+            val requests = mutableListOf<URI>()
+            val gateway = HostNetworkGateway(HostHttpTransport { request ->
+                requests += request.url
+                HostHttpResponse(
+                    status = 302,
+                    finalUrl = request.url,
+                    headers = responseHeaders("location" to location),
+                    bytes = byteArrayOf(),
+                )
+            })
+
+            val failure = assertHostFailure {
+                gateway.request(activeGrant, request(url = "https://www.wenku8.net/index.php"))
+            }
+
+            assertEquals(HostNetworkError.REDIRECT_DISALLOWED, failure.error)
+            assertEquals(listOf(URI("https://www.wenku8.net/index.php")), requests)
+        }
+    }
+
+    @Test
     fun host_managed_cookies_are_hidden_and_shared_across_source_versions() = runBlocking {
         val requests = mutableListOf<HostHttpRequest>()
         val gateway = HostNetworkGateway(HostHttpTransport { received ->

@@ -4,12 +4,15 @@
  */
 package org.tsuyomi.core.webview
 
+import android.net.Uri
 import android.webkit.CookieManager
 import android.webkit.WebChromeClient
+import android.webkit.WebResourceRequest
 import android.webkit.WebView
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withTimeout
@@ -42,6 +45,100 @@ class ControlledWebLoginSessionInstrumentedTest {
         clearCookies()
     }
 
+    @Test
+    fun same_host_top_frame_http_navigation_upgrades_to_declared_https_origin() {
+        val upgraded = requireNotNull(
+            upgradeDeclaredHttpsNavigation(
+                Uri.parse("http://allowed.example:80/login.php?jumpurl=http%3A%2F%2Fallowed.example%2Findex.php#ignored"),
+                setOf(origin),
+                isForMainFrame = true,
+            ),
+        )
+
+        assertEquals(
+            "https://allowed.example/login.php?jumpurl=http%3A%2F%2Fallowed.example%2Findex.php",
+            upgraded.toString(),
+        )
+    }
+
+    @Test
+    fun http_navigation_upgrade_rejects_undeclared_or_ambiguous_targets() {
+        val declared = setOf(origin)
+        assertNull(
+            upgradeDeclaredHttpsNavigation(
+                Uri.parse("http://other.example/login"),
+                declared,
+                isForMainFrame = true,
+            ),
+        )
+        assertNull(
+            upgradeDeclaredHttpsNavigation(
+                Uri.parse("http://user@allowed.example/login"),
+                declared,
+                isForMainFrame = true,
+            ),
+        )
+        assertNull(
+            upgradeDeclaredHttpsNavigation(
+                Uri.parse("http://allowed.example:8080/login"),
+                declared,
+                isForMainFrame = true,
+            ),
+        )
+        assertNull(
+            upgradeDeclaredHttpsNavigation(
+                Uri.parse("http://allowed.example/login"),
+                declared,
+                isForMainFrame = false,
+            ),
+        )
+        assertNull(
+            upgradeDeclaredHttpsNavigation(
+                Uri.parse("https://allowed.example/login"),
+                declared,
+                isForMainFrame = true,
+            ),
+        )
+        assertNull(
+            upgradeDeclaredHttpsNavigation(
+                Uri.parse("http://allowed.example/login"),
+                setOf(HttpsOrigin("https://allowed.example:8443")),
+                isForMainFrame = true,
+            ),
+        )
+    }
+
+
+    @Test
+    fun same_host_http_navigation_is_upgraded_without_blocked_feedback() = runBlocking(Dispatchers.Main) {
+        var blocked: Uri? = null
+        val session = ControlledWebLoginSession(
+            context,
+            "fixture.source",
+            setOf(origin),
+            credentials,
+            onBlockedNavigation = { blocked = it },
+        )
+        val view = session.open("https://allowed.example/login")
+        val target = Uri.parse("http://allowed.example/login.php?from=legacy")
+        val request = object : WebResourceRequest {
+            override fun getUrl(): Uri = target
+            override fun isForMainFrame(): Boolean = true
+            override fun isRedirect(): Boolean = true
+            override fun hasGesture(): Boolean = false
+            override fun getMethod(): String = "GET"
+            override fun getRequestHeaders(): Map<String, String> = emptyMap()
+        }
+        try {
+            assertTrue(view.webViewClient.shouldOverrideUrlLoading(view, request))
+            withTimeout(5_000) {
+                while (view.url != "https://allowed.example/login.php?from=legacy") delay(10)
+            }
+            assertNull(blocked)
+        } finally {
+            session.cancel()
+        }
+    }
     @Test
     fun explicit_finish_persists_cookie_and_exact_user_agent() = runBlocking(Dispatchers.Main) {
         val session = ControlledWebLoginSession(context, "fixture.source", setOf(origin), credentials)

@@ -18,6 +18,7 @@ import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.navigation.NavBackStackEntry
+import java.time.Instant
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
@@ -29,6 +30,7 @@ import org.tsuyomi.reader.engine.ReaderDocumentCache
 import org.tsuyomi.core.media.api.CoverRepository
 import org.tsuyomi.core.media.api.CoverRequest
 import org.tsuyomi.core.media.api.CoverUiState
+import org.tsuyomi.core.media.api.MediaKind
 import org.tsuyomi.core.media.api.FallbackSpec
 import org.tsuyomi.feature.book.DetailLocalState
 import org.tsuyomi.feature.book.DetailMutationOperation
@@ -43,6 +45,7 @@ import org.tsuyomi.feature.search.SearchResultState
 import org.tsuyomi.feature.search.SearchLayout
 import org.tsuyomi.feature.library.JitWritebackPrompt
 import org.tsuyomi.feature.library.remoteLibrarySelectionId
+import org.tsuyomi.shared.locator.DocumentIdentity
 import org.tsuyomi.shared.locator.LocatorPrecision
 import org.tsuyomi.shared.locator.ReaderLocator
 import org.tsuyomi.shared.locator.bookmarkPositionKey
@@ -196,29 +199,24 @@ internal class SourceDetailRouteOwner(
         get() = (state as? SourceBookState.Content)?.value
             ?.takeIf { it.summary.identity == selectedBook?.identity }
     val localState: DetailLocalState
-        get() = flow.remoteLibrary.selectedLibraryEntry?.let { entry ->
-            DetailLocalState(
-                inLibrary = entry.localMembership,
+        get() {
+            val entry = flow.remoteLibrary.selectedLibraryEntry
+            val progress = flow.selectedReadingProgress ?: entry?.progress
+            return DetailLocalState(
+                inLibrary = entry?.localMembership == true,
                 localTagsEditable = admittedDetail != null,
-                rating = entry.rating,
-                localTags = entry.localTags.toList(),
-                readLater = entry.readLater,
-                progressChapterId = entry.progress?.locator?.document?.contentId,
-                progressChapterFraction = entry.progress?.locator?.chapterProgress,
+                rating = entry?.rating,
+                localTags = entry?.localTags?.toList().orEmpty(),
+                readLater = entry?.readLater == true,
+                progressChapterId = progress?.locator?.document?.contentId,
+                progressChapterFraction = progress?.locator?.chapterProgress,
                 completedChapterIds = flow.completedChapterIds,
                 reconciliationOperation = flow.remoteLibrary.selectedBookReconciliationOperation,
                 reconciliation = flow.remoteLibrary.selectedBookReconciliation?.name,
                 remoteRemoveEnabled = flow.remoteLibrary.selectedBookRemoveWritesRemote,
                 remoteMoveEnabled = flow.remoteLibrary.selectedBookMoveWritesRemote,
             )
-        } ?: DetailLocalState(
-            localTagsEditable = admittedDetail != null,
-            reconciliation = flow.remoteLibrary.selectedBookReconciliation?.name,
-            reconciliationOperation = flow.remoteLibrary.selectedBookReconciliationOperation,
-            completedChapterIds = flow.completedChapterIds,
-            remoteRemoveEnabled = flow.remoteLibrary.selectedBookRemoveWritesRemote,
-            remoteMoveEnabled = flow.remoteLibrary.selectedBookMoveWritesRemote,
-        )
+        }
 
     fun toggleUnreadOnly() {
         savedState[UnreadOnlyKey] = !unreadOnly.value
@@ -927,6 +925,7 @@ internal class SourceReaderRouteOwner(
             targetWidthPx = 1080,
             targetHeightPx = 2400,
             fallback = FallbackSpec(block.altText ?: currentDocument.title, null),
+            mediaKind = MediaKind.READER_ILLUSTRATION,
         )
         imageJobs[block.blockId] = scope.launch {
             try {
@@ -982,8 +981,27 @@ internal class SourceReaderRouteOwner(
         recordedMountedDocumentGeneration = expectedDocumentGeneration
         var recorded = false
         try {
-            recorded = flow.recordReaderVisit(selectedBook.identity)
-            return recorded
+            if (!flow.recordReaderVisit(selectedBook.identity)) return false
+            if (restoredLocator == null) {
+                val firstBlock = mountedDocument.blocks.first()
+                flow.saveProgress(
+                    ReaderLocator(
+                        document = DocumentIdentity(
+                            sourceId = mountedDocument.sourceId,
+                            remoteBookId = mountedDocument.remoteBookId,
+                            contentId = mountedDocument.contentId,
+                            revision = mountedDocument.revision,
+                        ),
+                        blockId = firstBlock.blockId,
+                        characterOffset = 0,
+                        chapterProgress = 0.0,
+                        capturedAt = Instant.now(),
+                    ),
+                    LocatorPrecision.DEGRADED,
+                )
+            }
+            recorded = true
+            return true
         } finally {
             if (!recorded && recordedMountedDocumentGeneration == expectedDocumentGeneration) {
                 recordedMountedDocumentGeneration = -1L

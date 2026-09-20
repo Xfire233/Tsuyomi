@@ -6,27 +6,43 @@ package org.tsuyomi.core.media.internal
 
 import android.content.Context
 import android.graphics.Bitmap
-import android.graphics.BitmapFactory
+import android.graphics.ImageDecoder
 import android.util.LruCache
 import java.io.ByteArrayOutputStream
 import java.net.HttpURLConnection
 import java.net.URI
 import java.net.URL
+import java.nio.ByteBuffer
 import java.security.MessageDigest
+import java.util.concurrent.atomic.AtomicBoolean
+import kotlin.math.floor
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.CoroutineStart
+import kotlinx.coroutines.Deferred
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.async
+import kotlinx.coroutines.cancel
+import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.Semaphore
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.sync.withPermit
 import kotlinx.coroutines.withContext
 import org.tsuyomi.core.files.QuotaFileStore
 import org.tsuyomi.core.files.StorageQuota
 import org.tsuyomi.core.files.StorageRoot
 import org.tsuyomi.core.files.StorageRoots
-import org.tsuyomi.shared.sourcecontract.HttpsOrigin
 import org.tsuyomi.core.media.api.CoverMediaFetcher
+import org.tsuyomi.core.media.api.MediaKind
+import org.tsuyomi.shared.sourcecontract.HttpsOrigin
 
 private const val DEFAULT_MAX_RESPONSE_BYTES = 8 * 1024 * 1024
 private const val MAX_SOURCE_PIXELS = 50_000_000L
 private const val MAX_REDIRECTS = 3
+private const val COVER_MEMORY_BYTES = 32 * 1024 * 1024
+private const val READER_MEMORY_BYTES = 24 * 1024 * 1024
 
 /** Exact HTTPS-origin grant derived from a verified source manifest. */
 internal class MediaOriginPolicy(origins: Set<HttpsOrigin>) {
@@ -124,15 +140,31 @@ internal class HostCoverLoader(
     private val mediaFetcher: CoverMediaFetcher? = null,
     private val transport: MediaTransport = UrlConnectionMediaTransport(),
 ) {
+    private data class LoadKey(
+        val normalizedUrl: String,
+        val normalizedReferrerUrl: String?,
+        val targetWidthPx: Int,
+        val targetHeightPx: Int,
+        val mediaKind: MediaKind,
+    )
+
+    private class InFlightLoad(
+        val deferred: Deferred<Bitmap>,
+        var observers: Int,
+    )
+
     private val disk = QuotaFileStore(
         roots = StorageRoots.from(context),
         root = StorageRoot.CACHE,
         namespace = cacheNamespace,
         quota = StorageQuota(maxBytes = 128L * 1024L * 1024L, maxEntries = 4_000),
     )
-    private val memory = object : LruCache<String, Bitmap>(32 * 1024 * 1024) {
-        override fun sizeOf(key: String, value: Bitmap): Int = value.allocationByteCount
-    }
+    private val coverMemory = bitmapCache(COVER_MEMORY_BYTES)
+    private val readerMemory = bitmapCache(READER_MEMORY_BYTES)
+    private val closed = AtomicBoolean(false)
+    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+    private val inFlightMutex = Mutex()
+    private val inFlight = mutableMapOf<LoadKey, InFlightLoad>()
     /**
      * Bounds concurrent exchanges with the source. It deliberately covers the network request only:
      * memory hits, decoding and disk writes run outside it, so a slow decode or a cache lookup can
@@ -148,35 +180,99 @@ internal class HostCoverLoader(
         require(maxResponseBytes in 1..16_777_216) { "Invalid media response limit" }
     }
 
-    fun cached(url: String, targetWidthPx: Int, targetHeightPx: Int): Bitmap? {
+    fun cached(
+        url: String,
+        targetWidthPx: Int,
+        targetHeightPx: Int,
+        mediaKind: MediaKind = MediaKind.COVER,
+    ): Bitmap? {
         require(targetWidthPx > 0 && targetHeightPx > 0)
+        if (closed.get()) return null
         val normalized = policy.requireAllowed(url)
-        return memory.get("$normalized#$targetWidthPx:$targetHeightPx")
+        return memoryFor(mediaKind).get(memoryKey(normalized, targetWidthPx, targetHeightPx))
     }
 
     suspend fun load(url: String, targetWidthPx: Int, targetHeightPx: Int): Bitmap =
-        load(url, referrerUrl = null, targetWidthPx = targetWidthPx, targetHeightPx = targetHeightPx)
+        load(
+            url = url,
+            referrerUrl = null,
+            targetWidthPx = targetWidthPx,
+            targetHeightPx = targetHeightPx,
+            mediaKind = MediaKind.COVER,
+        )
 
-    suspend fun load(url: String, referrerUrl: String?, targetWidthPx: Int, targetHeightPx: Int): Bitmap {
+    suspend fun load(
+        url: String,
+        referrerUrl: String?,
+        targetWidthPx: Int,
+        targetHeightPx: Int,
+        mediaKind: MediaKind = MediaKind.COVER,
+    ): Bitmap {
         require(targetWidthPx > 0 && targetHeightPx > 0)
+        if (closed.get()) throw CancellationException("media-loader-closed")
         val normalized = policy.requireAllowed(url)
-        val memoryKey = "$normalized#$targetWidthPx:$targetHeightPx"
-        memory.get(memoryKey)?.let { return it }
-        val diskPath = "${sha256(normalized)}.image"
-        val cached = runCatching { disk.read(diskPath) }.getOrNull()
-        if (cached != null) {
-            runCatching { decodeValidated(cached, targetWidthPx, targetHeightPx) }.getOrNull()?.let { bitmap ->
-                memory.put(memoryKey, bitmap)
-                return bitmap
-            }
-            disk.delete(diskPath)
+        val normalizedReferrer = referrerUrl?.let(policy::requireAllowed)
+        val memoryKey = memoryKey(normalized, targetWidthPx, targetHeightPx)
+        memoryFor(mediaKind).get(memoryKey)?.let { return it }
+        val key = LoadKey(normalized, normalizedReferrer, targetWidthPx, targetHeightPx, mediaKind)
+        return coalescedLoad(key)
+    }
+
+    fun close() {
+        if (!closed.compareAndSet(false, true)) return
+        scope.cancel(CancellationException("media-loader-closed"))
+        coverMemory.evictAll()
+        readerMemory.evictAll()
+    }
+
+    private suspend fun coalescedLoad(key: LoadKey): Bitmap {
+        val entry = inFlightMutex.withLock {
+            if (closed.get()) throw CancellationException("media-loader-closed")
+            inFlight[key]?.also { it.observers += 1 } ?: InFlightLoad(
+                deferred = scope.async(start = CoroutineStart.LAZY) { loadUnshared(key) },
+                observers = 1,
+            ).also { inFlight[key] = it }
         }
-        val response = fetchBoundedToSource(normalized, referrerUrl)
+        entry.deferred.start()
+        try {
+            return entry.deferred.await()
+        } finally {
+            val cancelUnused = withContext(NonCancellable) {
+                inFlightMutex.withLock {
+                    entry.observers -= 1
+                    if (entry.observers == 0) {
+                        if (inFlight[key] === entry) inFlight.remove(key)
+                        entry.deferred.isActive
+                    } else {
+                        false
+                    }
+                }
+            }
+            if (cancelUnused) entry.deferred.cancel(CancellationException("media-load-unobserved"))
+        }
+    }
+
+    private suspend fun loadUnshared(key: LoadKey): Bitmap {
+        val memory = memoryFor(key.mediaKind)
+        val memoryKey = memoryKey(key.normalizedUrl, key.targetWidthPx, key.targetHeightPx)
+        memory.get(memoryKey)?.let { return it }
+        val diskPath = "${sha256(key.normalizedUrl)}.image"
+        val cached = readDisk(diskPath)
+        if (cached != null) {
+            try {
+                return decodeValidated(cached, key.targetWidthPx, key.targetHeightPx).also {
+                    memory.put(memoryKey, it)
+                }
+            } catch (_: MediaLoadException) {
+                deleteDisk(diskPath)
+            }
+        }
+        val response = fetchBoundedToSource(key.normalizedUrl, key.normalizedReferrerUrl)
         if (response.contentType !in setOf("image/jpeg", "image/png")) {
             throw MediaLoadException(MediaFailure.UNSUPPORTED_CONTENT)
         }
-        val bitmap = decodeValidated(response.bytes, targetWidthPx, targetHeightPx)
-        runCatching { disk.write(diskPath, response.bytes) }
+        val bitmap = decodeValidated(response.bytes, key.targetWidthPx, key.targetHeightPx)
+        writeDisk(diskPath, response.bytes)
         memory.put(memoryKey, bitmap)
         return bitmap
     }
@@ -191,26 +287,87 @@ internal class HostCoverLoader(
     private suspend fun decodeValidated(bytes: ByteArray, targetWidthPx: Int, targetHeightPx: Int): Bitmap =
         withContext(Dispatchers.Default) {
             if (bytes.isEmpty() || bytes.size > maxResponseBytes) throw MediaLoadException(MediaFailure.RESPONSE_TOO_LARGE)
-            val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
-            BitmapFactory.decodeByteArray(bytes, 0, bytes.size, bounds)
-            val width = bounds.outWidth
-            val height = bounds.outHeight
-            if (width <= 0 || height <= 0 || width.toLong() * height.toLong() > MAX_SOURCE_PIXELS) {
-                throw MediaLoadException(MediaFailure.DECODE_FAILED)
+            try {
+                ImageDecoder.decodeBitmap(ImageDecoder.createSource(ByteBuffer.wrap(bytes))) { decoder, info, _ ->
+                    val width = info.size.width
+                    val height = info.size.height
+                    if (width <= 0 || height <= 0 || width.toLong() * height.toLong() > MAX_SOURCE_PIXELS) {
+                        throw MediaLoadException(MediaFailure.DECODE_FAILED)
+                    }
+                    val scale = minOf(
+                        targetWidthPx.toDouble() / width.toDouble(),
+                        targetHeightPx.toDouble() / height.toDouble(),
+                        1.0,
+                    )
+                    val decodedWidth = floor(width * scale).toInt().coerceIn(1, targetWidthPx)
+                    val decodedHeight = floor(height * scale).toInt().coerceIn(1, targetHeightPx)
+                    decoder.allocator = ImageDecoder.ALLOCATOR_SOFTWARE
+                    decoder.setTargetSize(decodedWidth, decodedHeight)
+                }
+            } catch (error: MediaLoadException) {
+                throw error
+            } catch (error: java.io.IOException) {
+                throw MediaLoadException(MediaFailure.DECODE_FAILED, error)
+            } catch (error: IllegalArgumentException) {
+                throw MediaLoadException(MediaFailure.DECODE_FAILED, error)
+            } catch (error: IllegalStateException) {
+                throw MediaLoadException(MediaFailure.DECODE_FAILED, error)
             }
-            val options = BitmapFactory.Options().apply {
-                inSampleSize = sampleSize(width, height, targetWidthPx, targetHeightPx)
-                inPreferredConfig = Bitmap.Config.ARGB_8888
-            }
-            BitmapFactory.decodeByteArray(bytes, 0, bytes.size, options)
-                ?: throw MediaLoadException(MediaFailure.DECODE_FAILED)
         }
 
-    private fun sampleSize(width: Int, height: Int, targetWidth: Int, targetHeight: Int): Int {
-        var sample = 1
-        while (width / (sample * 2) >= targetWidth && height / (sample * 2) >= targetHeight) sample *= 2
-        return sample
+    private suspend fun readDisk(path: String): ByteArray? = withContext(Dispatchers.IO) {
+        try {
+            disk.read(path)
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (security: SecurityException) {
+            throw security
+        } catch (error: Error) {
+            throw error
+        } catch (_: Exception) {
+            null
+        }
     }
+
+    private suspend fun writeDisk(path: String, bytes: ByteArray) = withContext(Dispatchers.IO) {
+        try {
+            disk.write(path, bytes)
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (security: SecurityException) {
+            throw security
+        } catch (error: Error) {
+            throw error
+        } catch (_: Exception) {
+            Unit
+        }
+    }
+
+    private suspend fun deleteDisk(path: String) = withContext(Dispatchers.IO) {
+        try {
+            disk.delete(path)
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (security: SecurityException) {
+            throw security
+        } catch (error: Error) {
+            throw error
+        } catch (_: Exception) {
+            Unit
+        }
+    }
+
+    private fun memoryFor(mediaKind: MediaKind): LruCache<String, Bitmap> = when (mediaKind) {
+        MediaKind.COVER -> coverMemory
+        MediaKind.READER_ILLUSTRATION -> readerMemory
+    }
+
+    private fun bitmapCache(maxBytes: Int) = object : LruCache<String, Bitmap>(maxBytes) {
+        override fun sizeOf(key: String, value: Bitmap): Int = value.allocationByteCount
+    }
+
+    private fun memoryKey(normalizedUrl: String, targetWidthPx: Int, targetHeightPx: Int): String =
+        "$normalizedUrl#$targetWidthPx:$targetHeightPx"
 
     private fun sha256(value: String): String = MessageDigest.getInstance("SHA-256")
         .digest(value.toByteArray(Charsets.UTF_8))

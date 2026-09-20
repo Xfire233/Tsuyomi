@@ -137,10 +137,14 @@ internal abstract class SourceFlowInstrumentedTestFixture {
         canonicalUrl = "https://www.wenku8.net/book/$remoteBookId.htm",
     )
 
-    protected fun putCredential(sourceId: String) {
+    protected fun putCredential(
+        sourceId: String,
+        cookieHeader: String = "fixture_session=accepted",
+        userAgent: String = "fixture-webview-agent/1",
+    ) {
         VerifiedBrowserSessionStore(context).put(
             SourceCredentialPartition(sourceId, HttpsOrigin("https://www.wenku8.net")),
-            VerifiedBrowserSession("fixture_session=accepted", "fixture-webview-agent/1"),
+            VerifiedBrowserSession(cookieHeader, userAgent),
         )
     }
 
@@ -340,6 +344,7 @@ internal abstract class SourceFlowInstrumentedTestFixture {
         File(context.noBackupFilesDir, "extensions").deleteRecursively()
         File(context.cacheDir, "hxp-staging").deleteRecursively()
         File(context.cacheDir, "source-network-cache").deleteRecursively()
+        File(context.noBackupFilesDir, "normalized-source-content").deleteRecursively()
         File(context.noBackupFilesDir, "source-credentials").deleteRecursively()
         val application = context.applicationContext as TsuyomiApplication
         File(context.noBackupFilesDir, "package-trust").resetDirectory()

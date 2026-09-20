@@ -91,6 +91,7 @@ fun RemoteLibraryScreen(
             org.tsuyomi.core.media.api.FallbackSpec(book.title, book.identity.sourceId),
         )
     },
+    onCoverVisibility: (SourceBookSummary, Boolean) -> Unit = { _, _ -> },
     targets: List<RemoteTarget> = emptyList(),
     selectedTargetId: String? = null,
     onSelectTarget: (String?) -> Unit = {},
@@ -289,6 +290,7 @@ fun RemoteLibraryScreen(
                     },
                     onRemoveFromWebsite = onRequestRemoveBook,
                     coverState = coverState,
+                    onCoverVisibility = onCoverVisibility,
                     modifier = Modifier.fillMaxSize(),
                 )
             }

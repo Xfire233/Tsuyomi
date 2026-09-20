@@ -30,6 +30,12 @@ import org.tsuyomi.shared.sourcecontract.SourceBookDetail
 import org.tsuyomi.shared.sourcecontract.SourceBookSummary
 import org.tsuyomi.shared.sourcecontract.SourceChapter
 import org.tsuyomi.shared.sourcecontract.SourceDirectory
+import org.tsuyomi.shared.sourcecontract.SourceHomeFeature
+import org.tsuyomi.shared.sourcecontract.SourceHomeFilter
+import org.tsuyomi.shared.sourcecontract.SourceHomeFilterOption
+import org.tsuyomi.shared.sourcecontract.SourceHomePage
+import org.tsuyomi.shared.sourcecontract.SourceHomeSection
+
 
 /**
  * Durable admission point for source data that has already passed extension decoding and host DTO
@@ -69,6 +75,65 @@ internal class NormalizedSourceStore(context: Context) {
     fun readDocument(identity: BookIdentity, contentId: String): ReaderDocument? = runCatching {
         files.read(documentPath(identity, contentId))?.let(SourceValueCodec::decodeDocument)
     }.getOrNull()
+
+    fun writeHome(
+        sourceId: String,
+        packageRevision: String,
+        credentialRevision: String,
+        selectedFilters: Map<String, String>,
+        cursor: String?,
+        page: SourceHomePage,
+    ) {
+        require(page.sections.all { section ->
+            section.items.all { item -> item.identity.sourceId == sourceId }
+        }) { "Source Home page contains a foreign source identity" }
+        files.write(
+            homePath(sourceId, packageRevision, credentialRevision, selectedFilters, cursor),
+            SourceValueCodec.encodeHome(page),
+        )
+    }
+
+    fun readHome(
+        sourceId: String,
+        packageRevision: String,
+        credentialRevision: String,
+        selectedFilters: Map<String, String>,
+        cursor: String?,
+    ): SourceHomePage? = runCatching {
+        files.read(homePath(sourceId, packageRevision, credentialRevision, selectedFilters, cursor))
+            ?.let(SourceValueCodec::decodeHome)
+            ?.takeIf { page ->
+                page.sections.all { section ->
+                    section.items.all { item -> item.identity.sourceId == sourceId }
+                }
+            }
+    }.getOrNull()
+
+
+    private fun homePath(
+        sourceId: String,
+        packageRevision: String,
+        credentialRevision: String,
+        selectedFilters: Map<String, String>,
+        cursor: String?,
+    ): String {
+        val query = buildString {
+            selectedFilters.toSortedMap().forEach { (key, value) ->
+                append(key.length)
+                append(':')
+                append(key)
+                append(value.length)
+                append(':')
+                append(value)
+            }
+        }
+        val digest = MessageDigest.getInstance("SHA-256")
+            .digest(
+                "$sourceId\u0000$packageRevision\u0000$credentialRevision\u0000$query\u0000${cursor.orEmpty()}"
+                    .toByteArray(Charsets.UTF_8),
+            )
+        return "home/${digest.joinToString("") { byte -> "%02x".format(byte.toInt() and 0xff) }}.json"
+    }
 
     /**
      * Records a chapter only when its persisted normalized representation can immediately be read
@@ -210,12 +275,109 @@ private object SourceValueCodec {
         )
     }
 
+    fun encodeHome(value: SourceHomePage): ByteArray = encode(
+        buildJsonObject {
+            put("schema", JsonPrimitive(SCHEMA))
+            put("kind", JsonPrimitive("home"))
+            put("title", JsonPrimitive(value.title))
+            put("homeSchemaVersion", JsonPrimitive(value.schemaVersion))
+            put("filters", buildJsonArray {
+                value.filters.forEach { filter ->
+                    add(buildJsonObject {
+                        put("id", JsonPrimitive(filter.id))
+                        put("label", JsonPrimitive(filter.label))
+                        put("options", buildJsonArray {
+                            filter.options.forEach { option ->
+                                add(buildJsonObject {
+                                    put("value", JsonPrimitive(option.value))
+                                    put("label", JsonPrimitive(option.label))
+                                })
+                            }
+                        })
+                    })
+                }
+            })
+            put("selectedFilters", encodeStringMap(value.selectedFilters))
+            put("sections", buildJsonArray {
+                value.sections.forEach { section ->
+                    add(buildJsonObject {
+                        put("id", JsonPrimitive(section.id))
+                        put("title", JsonPrimitive(section.title))
+                        put("items", buildJsonArray { section.items.forEach { add(encodeSummary(it)) } })
+                    })
+                }
+            })
+            put("features", buildJsonArray {
+                value.features.forEach { feature ->
+                    add(buildJsonObject {
+                        put("id", JsonPrimitive(feature.id))
+                        put("title", JsonPrimitive(feature.title))
+                        putNullableString("supportingText", feature.supportingText)
+                        put("selectedFilters", encodeStringMap(feature.selectedFilters))
+                    })
+                }
+            })
+            putNullableString("nextCursor", value.nextCursor)
+            put("complete", JsonPrimitive(value.complete))
+        },
+    )
+
+    fun decodeHome(bytes: ByteArray): SourceHomePage {
+        val value = decode(bytes, "home")
+        return SourceHomePage(
+            title = value.requiredString("title"),
+            schemaVersion = value.requiredInt("homeSchemaVersion"),
+            filters = value.requiredArray("filters").map { element ->
+                val filter = element.jsonObject
+                SourceHomeFilter(
+                    id = filter.requiredString("id"),
+                    label = filter.requiredString("label"),
+                    options = filter.requiredArray("options").map { optionElement ->
+                        val option = optionElement.jsonObject
+                        SourceHomeFilterOption(
+                            value = option.requiredString("value"),
+                            label = option.requiredString("label"),
+                        )
+                    },
+                )
+            },
+            selectedFilters = decodeStringMap(value.requiredObject("selectedFilters")),
+            sections = value.requiredArray("sections").map { element ->
+                val section = element.jsonObject
+                SourceHomeSection(
+                    id = section.requiredString("id"),
+                    title = section.requiredString("title"),
+                    items = section.requiredArray("items").map { decodeSummary(it.jsonObject) },
+                )
+            },
+            features = value.requiredArray("features").map { element ->
+                val feature = element.jsonObject
+                SourceHomeFeature(
+                    id = feature.requiredString("id"),
+                    title = feature.requiredString("title"),
+                    supportingText = feature.nullableString("supportingText"),
+                    selectedFilters = decodeStringMap(feature.requiredObject("selectedFilters")),
+                )
+            },
+            nextCursor = value.nullableString("nextCursor"),
+            complete = value.requiredBoolean("complete"),
+        )
+    }
+
+    private fun encodeStringMap(value: Map<String, String>): JsonObject = JsonObject(
+        value.toSortedMap().mapValues { (_, entry) -> JsonPrimitive(entry) },
+    )
+
+    private fun decodeStringMap(value: JsonObject): Map<String, String> =
+        value.mapValues { (_, entry) -> entry.jsonPrimitive.content }
+
     private fun encodeSummary(value: SourceBookSummary): JsonObject = buildJsonObject {
         put("identity", encodeIdentity(value.identity))
         put("title", JsonPrimitive(value.title))
         putNullableString("author", value.author)
         putNullableString("coverUrl", value.coverUrl)
         put("canonicalUrl", JsonPrimitive(value.canonicalUrl))
+        putNullableString("remoteTargetId", value.remoteTargetId)
     }
 
     private fun decodeSummary(value: JsonObject): SourceBookSummary = SourceBookSummary(
@@ -224,6 +386,7 @@ private object SourceValueCodec {
         author = value.nullableString("author"),
         coverUrl = value.nullableString("coverUrl"),
         canonicalUrl = value.requiredString("canonicalUrl"),
+        remoteTargetId = value.nullableString("remoteTargetId"),
     )
 
     private fun encodeIdentity(value: BookIdentity): JsonObject = buildJsonObject {
@@ -297,6 +460,8 @@ private fun JsonObject.requiredArray(name: String): JsonArray = getValue(name).j
 private fun JsonObject.requiredString(name: String): String = getValue(name).jsonPrimitive.content
 private fun JsonObject.requiredInt(name: String): Int =
     getValue(name).jsonPrimitive.intOrNull ?: error("Expected integer: $name")
+private fun JsonObject.requiredBoolean(name: String): Boolean =
+    getValue(name).jsonPrimitive.content.toBooleanStrict()
 private fun JsonObject.nullableString(name: String): String? =
     get(name)?.takeUnless { it is JsonNull }?.jsonPrimitive?.contentOrNull
 private fun JsonObject.nullableInt(name: String): Int? =

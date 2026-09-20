@@ -16,6 +16,11 @@ fun interface CoverMediaFetcher {
     suspend fun fetch(url: String, referrerUrl: String?): CoverMediaPayload
 }
 
+enum class MediaKind {
+    COVER,
+    READER_ILLUSTRATION,
+}
+
 data class CoverRequest(
     val sourceId: String,
     val packageRevision: String,
@@ -25,6 +30,7 @@ data class CoverRequest(
     val targetWidthPx: Int,
     val targetHeightPx: Int,
     val fallback: FallbackSpec,
+    val mediaKind: MediaKind = MediaKind.COVER,
 ) {
     init {
         require(sourceId.isNotBlank())
@@ -56,6 +62,7 @@ sealed interface CoverUiState {
 interface CoverRepository {
     fun cached(request: CoverRequest): CoverUiState.Ready?
     fun observe(request: CoverRequest): Flow<CoverUiState>
+    fun close() = Unit
 }
 
 object CoverRepositoryFactory {

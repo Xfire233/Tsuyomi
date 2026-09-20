@@ -11,6 +11,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.foundation.layout.Column
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import org.tsuyomi.core.ui.components.TsuyomiDialog
 import androidx.compose.material3.Text
 import org.tsuyomi.core.ui.components.TsuyomiButton
@@ -32,8 +33,6 @@ import androidx.navigation.compose.composable
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.flow.flowOf
 import org.tsuyomi.core.preferences.RequestedReaderFlow
-import org.tsuyomi.core.media.api.CoverRepository
-import org.tsuyomi.core.media.api.CoverRequest
 import org.tsuyomi.core.media.api.CoverUiState
 import org.tsuyomi.core.media.api.FallbackSpec
 import org.tsuyomi.shared.librarydomain.RemoteReconciliationState
@@ -200,21 +199,29 @@ private fun NavGraphBuilder.sourceHomeRoute(
         val flow = owner.flow
         val packageInfo = owner.installer.activePackage
         val activeRevision = packageInfo?.packageSha256
-        val coverCache = owner.coverCacheState()
-        fun loader(offlineOnly: Boolean): suspend (Map<String, String>, String?) -> Result<org.tsuyomi.shared.sourcecontract.SourceHomePage> =
+        fun loader(
+            offlineOnly: Boolean,
+            useNormalizedCache: Boolean = true,
+        ): suspend (Map<String, String>, String?) -> Result<org.tsuyomi.shared.sourcecontract.SourceHomePage> =
             { filters, cursor ->
                 if (packageInfo == null) {
                     Result.failure(IllegalStateException("source-not-installed"))
                 } else {
-                    flow.loadHome(filters, cursor, offlineOnly)
+                    flow.loadHome(
+                        selectedFilters = filters,
+                        cursor = cursor,
+                        offlineOnly = offlineOnly,
+                        useNormalizedCache = useNormalizedCache,
+                    )
                 }
             }
         val load = loader(offlineOnly = false)
+        val refreshLoad = loader(offlineOnly = false, useNormalizedCache = false)
         val loadOffline = loader(offlineOnly = true)
 
-        LaunchedEffect(packageInfo?.manifest?.sourceId?.value, activeRevision, coverCache.credentialRevision) {
+        LaunchedEffect(packageInfo?.manifest?.sourceId?.value, activeRevision, owner.credentialGeneration) {
             packageInfo?.let { selected ->
-                flow.open(selected)
+                flow.openHome(selected)
                 flow.home.ensureInitial(selected.manifest.sourceId.value, activeRevision, load)
             }
         }
@@ -233,9 +240,9 @@ private fun NavGraphBuilder.sourceHomeRoute(
             verificationAvailable = packageInfo?.manifest?.capabilities?.webLogin?.enabled == true,
             onSelectPrimary = { value -> flow.home.selectPrimary(value, load) },
             onSelectFilters = { filters -> flow.home.selectFilters(filters, load) },
-            onRefresh = { flow.home.refresh(load) },
+            onRefresh = { flow.home.refresh(refreshLoad) },
             onLoadMore = { flow.home.append(load) },
-            onRetryReplacement = { flow.home.retryReplacement(load) },
+            onRetryReplacement = { flow.home.retryReplacement(refreshLoad) },
             onUseOfflineCache = { flow.home.useOfflineCache(loadOffline) },
             onSearch = { scope.launch { owner.openInstalledSource() } },
             onOpenRemoteLibrary = { scope.launch { owner.openRemoteLibrary() } },
@@ -248,14 +255,8 @@ private fun NavGraphBuilder.sourceHomeRoute(
             onOpenFeature = { feature -> flow.home.openFeature(feature, load) },
             onOpenVerification = { navController.navigate(Routes.VerifiedHomePage) },
             onScrollPositionChanged = flow.home::updateScrollPosition,
-            coverState = { book ->
-                rememberSourceCoverState(
-                    book = book,
-                    repository = coverCache.repository,
-                    packageRevision = coverCache.packageRevision,
-                    credentialRevision = coverCache.credentialRevision,
-                )
-            },
+            coverState = { book -> flow.coverState(book) },
+            onCoverVisibility = flow::setCoverVisible,
         )
     }
 }
@@ -268,7 +269,6 @@ private fun NavGraphBuilder.remoteLibraryRoute(
 ) {
     listOf(Routes.RemoteLibrary, Routes.LibraryMirror, Routes.LibraryMirrorFolder).forEach { routePattern ->
         composable(routePattern) { entry ->
-        val coverCache = owner.coverCacheState()
         val scope = rememberCoroutineScope()
         val mirrorBindingId = entry.arguments?.getString("bindingId")
         val mirrorTargetId = entry.arguments?.getString("targetId")
@@ -398,14 +398,8 @@ private fun NavGraphBuilder.remoteLibraryRoute(
             jitPrompt = remote.jitPrompt,
             onConfirmJitPrompt = { scope.launch { remote.confirmJitPrompt() } },
             onDismissJitPrompt = remote::dismissJitPrompt,
-            coverState = { book ->
-                rememberSourceCoverState(
-                    book,
-                    coverCache.repository,
-                    coverCache.packageRevision,
-                    coverCache.credentialRevision,
-                )
-            },
+            coverState = { book -> owner.flow.coverState(book) },
+            onCoverVisibility = owner.flow::setCoverVisible,
         )
         }
     }
@@ -419,7 +413,6 @@ private fun NavGraphBuilder.searchRoute(
         val scope = rememberCoroutineScope()
         val search = rememberSourceSearchRouteOwner(entry, owner.flow)
         val packageInfo = owner.installer.activePackage
-        val coverCache = owner.coverCacheState()
         LaunchedEffect(search, packageInfo?.packageSha256) {
             packageInfo?.let { search.restore(it) }
         }
@@ -449,52 +442,12 @@ private fun NavGraphBuilder.searchRoute(
             onRetry = { scope.launch { search.submit() } },
             onUseOfflineCache = { scope.launch { search.submit(offlineOnly = true) } },
             onOpenVerification = { navController.navigate(Routes.VerifiedPage) },
-            coverState = { book ->
-                rememberSourceCoverState(
-                    book = book,
-                    repository = coverCache.repository,
-                    packageRevision = coverCache.packageRevision,
-                    credentialRevision = coverCache.credentialRevision,
-                )
-            },
+            coverState = { book -> owner.flow.coverState(book) },
+            onCoverVisibility = owner.flow::setCoverVisible,
         )
     }
 }
 
-@Composable
-private fun rememberSourceCoverState(
-    book: org.tsuyomi.shared.sourcecontract.SourceBookSummary,
-    repository: CoverRepository?,
-    packageRevision: String?,
-    credentialRevision: String?,
-): CoverUiState {
-    val fallback = remember(book.title, book.identity.sourceId) {
-        FallbackSpec(book.title, book.identity.sourceId)
-    }
-    val request = remember(book, packageRevision, credentialRevision) {
-        val url = book.coverUrl?.takeIf(String::isNotBlank)
-        if (url == null || packageRevision == null || credentialRevision == null) {
-            null
-        } else {
-            CoverRequest(
-                sourceId = book.identity.sourceId,
-                packageRevision = packageRevision,
-                credentialRevision = credentialRevision,
-                transportUrl = url,
-                referrerUrl = book.canonicalUrl,
-                targetWidthPx = 240,
-                targetHeightPx = 360,
-                fallback = fallback,
-            )
-        }
-    }
-    if (repository == null || request == null) return CoverUiState.Fallback(fallback)
-    val coverFlow = remember(repository, request) { repository.observe(request) }
-    val state by coverFlow.collectAsStateWithLifecycle(
-        initialValue = repository.cached(request) ?: CoverUiState.Loading(fallback),
-    )
-    return state
-}
 
 private fun NavGraphBuilder.detailRoute(
     navController: NavHostController,
@@ -514,7 +467,6 @@ private fun NavGraphBuilder.detailRoute(
         }
         val commandSequence by commandSequenceFlow.collectAsStateWithLifecycle()
         val packageInfo = owner.installer.activePackage
-        val coverCache = owner.coverCacheState()
         val verifiedDetailSequence by entry.savedStateHandle
             .getStateFlow(VerifiedDetailResultSequenceKey, 0L)
             .collectAsStateWithLifecycle()
@@ -565,14 +517,12 @@ private fun NavGraphBuilder.detailRoute(
         val unresolvedUpdate = summary?.identity?.let(libraryFlow.state.updates::get)
         val updatedChapterIds = remember(unresolvedUpdate) { unresolvedUpdate?.newChapterIds?.toSet().orEmpty() }
         val websiteGroupingEnabled = summary?.identity?.sourceId?.let(libraryFlow::isWebsiteGroupingEnabled) == true
-        val coverState = summary?.let {
-            rememberSourceCoverState(
-                book = it,
-                repository = coverCache.repository,
-                packageRevision = coverCache.packageRevision,
-                credentialRevision = coverCache.credentialRevision,
-            )
-        } ?: CoverUiState.Fallback(FallbackSpec("书籍详情", "source"))
+        DisposableEffect(summary?.identity, summary?.coverUrl, summary?.canonicalUrl) {
+            summary?.let { owner.flow.setCoverVisible(it, true) }
+            onDispose { summary?.let { owner.flow.setCoverVisible(it, false) } }
+        }
+        val coverState = summary?.let(owner.flow::coverState)
+            ?: CoverUiState.Fallback(FallbackSpec("书籍详情", "source"))
         fun openChapter(chapter: org.tsuyomi.shared.sourcecontract.SourceChapter) {
             scope.launch {
                 detail.selectChapter(chapter)

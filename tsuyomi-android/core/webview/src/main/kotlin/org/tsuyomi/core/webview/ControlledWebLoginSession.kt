@@ -123,6 +123,37 @@ internal class VerifiedPageNavigationTracker {
     }
 }
 
+/** Maps a legacy HTTP navigation back onto an explicitly declared default-port HTTPS origin. */
+internal fun upgradeDeclaredHttpsNavigation(
+    uri: Uri,
+    allowedOrigins: Set<HttpsOrigin>,
+    isForMainFrame: Boolean,
+): Uri? {
+    val targetPort = uri.port
+    if (!isForMainFrame ||
+        !uri.scheme.equals("http", ignoreCase = true) ||
+        uri.host.isNullOrBlank() ||
+        uri.userInfo != null ||
+        (targetPort != -1 && targetPort != 80)
+    ) {
+        return null
+    }
+    val declared = allowedOrigins
+        .asSequence()
+        .map { Uri.parse(it.canonical) }
+        .firstOrNull { origin ->
+            val originPort = origin.port
+            origin.host?.equals(uri.host, ignoreCase = true) == true &&
+                (originPort == -1 || originPort == 443)
+        }
+        ?: return null
+    return uri.buildUpon()
+        .scheme("https")
+        .encodedAuthority(declared.encodedAuthority)
+        .fragment(null)
+        .build()
+}
+
 /**
  * A user-visible, one-at-a-time login/verification session. Web content is never exposed to an HXP;
  * declared-origin request cookies and the exact current WebView user agent are encrypted into one
@@ -180,6 +211,21 @@ class ControlledWebLoginSession(
             view.webViewClient = object : WebViewClient() {
                 override fun shouldOverrideUrlLoading(view: WebView, request: WebResourceRequest): Boolean {
                     val target = request.url
+                    val upgraded = upgradeDeclaredHttpsNavigation(
+                        target,
+                        allowedOrigins,
+                        request.isForMainFrame,
+                    )
+                    if (upgraded != null) {
+                        val upgradedUrl = normalizedAllowedUrl(upgraded)
+                        verifiedPageNavigation.onMainFrameNavigation(
+                            upgradedUrl,
+                            request.isRedirect,
+                            request.hasGesture(),
+                        )
+                        view.loadUrl(upgradedUrl)
+                        return true
+                    }
                     if (!isAllowed(target)) {
                         if (request.isForMainFrame) verifiedPageNavigation.clear()
                         onBlockedNavigation(target)
@@ -197,6 +243,22 @@ class ControlledWebLoginSession(
 
                 override fun onPageStarted(view: WebView, url: String, favicon: Bitmap?) {
                     val target = Uri.parse(url)
+                    val upgraded = upgradeDeclaredHttpsNavigation(
+                        target,
+                        allowedOrigins,
+                        isForMainFrame = true,
+                    )
+                    if (upgraded != null) {
+                        val upgradedUrl = normalizedAllowedUrl(upgraded)
+                        verifiedPageNavigation.onMainFrameNavigation(
+                            upgradedUrl,
+                            isRedirect = true,
+                            hasGesture = false,
+                        )
+                        view.stopLoading()
+                        view.loadUrl(upgradedUrl)
+                        return
+                    }
                     if (!isAllowed(target)) {
                         verifiedPageNavigation.clear()
                         onBlockedNavigation(target)

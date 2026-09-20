@@ -34,6 +34,7 @@ data class SourceNetworkGrant(
     val origins: Set<HttpsOrigin>,
     val cookieMode: SourceCookieMode,
     val cookieOrigins: Set<HttpsOrigin>,
+    val legacyHttpRedirectOrigins: Set<HttpsOrigin> = emptySet(),
     val maxConcurrentRequests: Int,
     val requestTimeoutMs: Int,
     val maxResponseBytes: Int,
@@ -52,6 +53,10 @@ data class SourceNetworkGrant(
         require(maxResponseBytes in 1_024..16_777_216)
         require(cookieMode != SourceCookieMode.NONE || cookieOrigins.isEmpty())
         require(cookieOrigins.all { cookieOrigin -> origins.any { it.canonical == cookieOrigin.canonical } })
+        require(legacyHttpRedirectOrigins.all { redirectOrigin ->
+            origins.any { it.canonical == redirectOrigin.canonical } &&
+                URI(redirectOrigin.canonical).port in setOf(-1, 443)
+        })
         require(remoteReadPolicy == null || remoteReadPolicy.remoteBookIdParameter == null)
         require(remoteReadPolicy == null || remoteReadPolicy.targetIdParameter == null)
         require(remoteReadPolicy == null || origins.any { it.canonical == remoteReadPolicy.origin.canonical })
@@ -409,10 +414,13 @@ class HostNetworkGateway(
             val location = response.headers.first("location")
                 ?: return response
             if (++redirects > MAX_REDIRECTS) throw HostNetworkException(HostNetworkError.REDIRECT_LIMIT)
+            val redirectTarget = runCatching { url.resolve(location) }
+                .getOrElse { throw HostNetworkException(HostNetworkError.REDIRECT_DISALLOWED) }
             url = try {
-                parseAllowedUri(url.resolve(location).toString(), grant)
+                parseAllowedUri(redirectTarget.toString(), grant)
             } catch (_: HostNetworkException) {
-                throw HostNetworkException(HostNetworkError.REDIRECT_DISALLOWED)
+                upgradeLegacyHttpRedirect(url, redirectTarget, method, grant)
+                    ?: throw HostNetworkException(HostNetworkError.REDIRECT_DISALLOWED)
             }
             if (operationContext != null) {
                 val redirect = operationContext.redirectFor(url)
@@ -431,6 +439,39 @@ class HostNetworkGateway(
         }
     }
 
+    /**
+     * Some legacy sites redirect an HTTPS document to an HTTP login URL on the same host. The host
+     * never sends that HTTP request: a signed default-port HTTPS web-login grant may map it back to
+     * HTTPS before transport. All authority, path and query checks still apply to the upgraded URL.
+     */
+    private fun upgradeLegacyHttpRedirect(
+        current: URI,
+        target: URI,
+        method: NetworkMethod,
+        grant: SourceNetworkGrant,
+    ): URI? {
+        if (method !in setOf(NetworkMethod.GET, NetworkMethod.HEAD) ||
+            !target.isAbsolute ||
+            !target.scheme.equals("http", ignoreCase = true) ||
+            target.userInfo != null ||
+            target.host.isNullOrBlank() ||
+            target.port !in setOf(-1, 80) ||
+            !target.host.equals(current.host, ignoreCase = true)
+        ) {
+            return null
+        }
+        val declared = grant.legacyHttpRedirectOrigins.singleOrNull { origin ->
+            val uri = URI(origin.canonical)
+            uri.port in setOf(-1, 443) && uri.host.equals(target.host, ignoreCase = true)
+        } ?: return null
+        return URI(
+            buildString {
+                append(declared.canonical)
+                append(target.rawPath.orEmpty())
+                target.rawQuery?.let { append('?').append(it) }
+            },
+        )
+    }
     private fun validateOperationBoundary(
         grant: SourceNetworkGrant,
         request: SourceNetworkRequest,

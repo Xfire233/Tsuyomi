@@ -121,7 +121,10 @@
     <string name="browse_failure_verification">包未通过完整性、签名或兼容性验证。</string>
     <string name="browse_failure_install">安装未完成；已保留当前内容源版本。</string>
     <string name="browse_failure_expired_approval">待授权的内容源包已失效，请重新发起安装。</string>
-    <string name="browse_failure_download">无法下载内容源包。</string>
+    <string name="browse_failure_download_network">网络连接失败，无法下载内容源包。请检查网络；若当前网络无法访问插件仓库，可启用系统代理或可信代理工具后重试。</string>
+    <string name="browse_failure_download_timeout">连接插件仓库超时。请检查网络；若当前网络访问受限，可启用系统代理或可信代理工具后重试。</string>
+    <string name="browse_failure_download_server">插件仓库返回错误，暂时无法下载。请稍后重试；若当前网络无法访问该仓库，可尝试系统代理或可信代理工具。</string>
+    <string name="browse_failure_download_cancelled">内容源包下载已取消。</string>
     <string name="browse_failure_repository">仓库目录或安装授权已失效。</string>
     <string name="browse_failure_storage">无法访问内容源安装所需的存储空间。</string>
     <string name="browse_remote_library_action">网站收藏</string>
@@ -130,6 +133,7 @@
     <string name="source_home_loading_message">正在加载 %1$s 的首屏目录和封面</string>
     <string name="source_home_verification_title">来源主页需要登录验证</string>
     <string name="source_home_failure_title">无法读取来源主页</string>
+    <string name="source_home_verification_message">此来源需要先完成登录或安全验证。现有本地内容未改动。</string>
     <string name="source_home_failure_message">本地书架未改动。请稍后重试，或使用已缓存内容。</string>
     <string name="source_home_open_verification">前往登录验证</string>
     <string name="source_home_retry">重新加载</string>
@@ -146,6 +150,7 @@
     <string name="source_home_loading_section_message">首次访问只加载当前栏目的首屏目录。</string>
     <string name="source_home_updating">正在更新目录…</string>
     <string name="source_home_inline_failure">更新失败。现有内容仍可继续浏览。</string>
+    <string name="source_home_inline_verification">登录状态已失效，需要完成验证后才能更新；现有内容仍可继续浏览。</string>
     <string name="source_home_append_failure">续页失败。现有内容仍可继续浏览。</string>
     <string name="source_home_retry_append">重试续页</string>
 </resources>

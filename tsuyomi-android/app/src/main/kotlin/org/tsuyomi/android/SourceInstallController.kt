@@ -558,11 +558,10 @@ class SourceInstallController(
     }
 
     private fun fetchFailure(error: RepositoryFetchException?): BrowseInstallFailure? = when (error?.error) {
-        RepositoryFetchError.NETWORK,
-        RepositoryFetchError.TIMEOUT,
-        RepositoryFetchError.HTTP_STATUS,
-        RepositoryFetchError.CANCELLED,
-        -> BrowseInstallFailure.DOWNLOAD
+        RepositoryFetchError.NETWORK -> BrowseInstallFailure.DOWNLOAD_NETWORK
+        RepositoryFetchError.TIMEOUT -> BrowseInstallFailure.DOWNLOAD_TIMEOUT
+        RepositoryFetchError.HTTP_STATUS -> BrowseInstallFailure.DOWNLOAD_SERVER
+        RepositoryFetchError.CANCELLED -> BrowseInstallFailure.DOWNLOAD_CANCELLED
         RepositoryFetchError.INVALID_REDIRECT,
         RepositoryFetchError.REDIRECT_LIMIT,
         RepositoryFetchError.RESPONSE_TOO_LARGE,

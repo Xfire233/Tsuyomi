@@ -67,6 +67,7 @@ fun RemoteMirrorBookSurface(
     onMoveToTarget: (SourceBookSummary, RemoteTarget) -> Unit,
     onRemoveFromWebsite: (SourceBookSummary) -> Unit,
     coverState: @Composable (SourceBookSummary) -> CoverUiState,
+    onCoverVisibility: (SourceBookSummary, Boolean) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val summariesByIdentity = remember(books) { books.associateBy { it.identity } }
@@ -142,7 +143,9 @@ fun RemoteMirrorBookSurface(
                 if (summary != null) coverState(summary)
                 else CoverUiState.Fallback(FallbackSpec(entry.book.title, entry.book.identity.sourceId))
             },
-            onCoverVisibility = { _, _ -> },
+            onCoverVisibility = { entry, visible ->
+                summariesByIdentity[entry.book.identity]?.let { onCoverVisibility(it, visible) }
+            },
             header = {
                 RemoteMirrorDestinationHeader(
                     sourceId = sourceId,

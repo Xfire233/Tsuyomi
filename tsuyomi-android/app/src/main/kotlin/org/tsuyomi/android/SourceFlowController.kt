@@ -17,6 +17,7 @@ import java.time.Instant
 import org.tsuyomi.shared.librarydomain.LibraryBook
 import org.tsuyomi.shared.librarydomain.LibraryEntry
 import org.tsuyomi.shared.librarydomain.ReadingProgress
+import org.tsuyomi.shared.librarydomain.ProgressWriteResult
 import org.tsuyomi.core.database.RoomLibraryRepository
 import org.tsuyomi.core.files.StorageException
 import org.tsuyomi.core.network.DirectActionTokenRegistry
@@ -51,7 +52,17 @@ internal class SourceFlowController(
         SourceSessionOwner.extensionClientFactory(context, directActionTokens),
     isPackageTrusted: (VerifiedHxpPackage) -> Boolean = OfficialRepositoryConfiguration.admission(context),
 ) : Closeable {
+    private data class HomeCachePartition(
+        val sourceId: String,
+        val packageRevision: String,
+        val credentialRevision: String,
+        val packageInfo: VerifiedHxpPackage,
+    )
+
+    private val applicationContext = context.applicationContext
+    private var homeCachePartition: HomeCachePartition? = null
     private val sessionOwner = SourceSessionOwner(directActionTokens, openSession, isPackageTrusted)
+    private val coverPresenter = SourceCoverPresenter()
 
     val remoteLibrary = SourceRemoteLibraryCoordinator(context, library, sessionOwner)
     val home = SourceHomeController()
@@ -68,11 +79,29 @@ internal class SourceFlowController(
     val homeState: SourceHomeViewState
         get() = home.state
 
+    fun configureCoverRepository(state: SourceCoverCacheState) {
+        coverPresenter.configure(
+            repository = state.repository,
+            sourceId = state.sourceId,
+            packageRevision = state.packageRevision,
+            credentialRevision = state.credentialRevision,
+        )
+    }
+
+    fun setCoverVisible(book: SourceBookSummary, visible: Boolean) {
+        coverPresenter.setVisible(book, visible)
+    }
+
+    fun coverState(book: SourceBookSummary): org.tsuyomi.core.media.api.CoverUiState =
+        coverPresenter.state(book)
+
     var selectedBook: SourceBookSummary? = null
         private set
     var selectedChapter: SourceChapter? = null
         private set
     var completedChapterIds: Set<String> by mutableStateOf(emptySet())
+        private set
+    var selectedReadingProgress: ReadingProgress? by mutableStateOf(null)
         private set
     private var verifiedChapterLoad: SourceReaderLoad? = null
     private var preparedResumeLoad: SourceReaderLoad? = null
@@ -134,8 +163,54 @@ internal class SourceFlowController(
         return result
     }
 
+    suspend fun openHome(packageInfo: VerifiedHxpPackage): SourceSessionOpenResult {
+        val sourceId = packageInfo.manifest.sourceId.value
+        val partition = HomeCachePartition(
+            sourceId = sourceId,
+            packageRevision = packageInfo.packageSha256,
+            credentialRevision = withContext(Dispatchers.IO) {
+                SourceGatewayFactory.mediaCredentialRevision(applicationContext, packageInfo)
+            },
+            packageInfo = packageInfo,
+        )
+        if (homeCachePartition != partition) {
+            home.invalidateSession()
+            homeCachePartition = partition
+        }
+        commitHomeSource(packageInfo)
+        if (home.state is SourceHomeViewState.Idle) {
+            withContext(Dispatchers.IO) {
+                normalizedStore.readHome(
+                    sourceId = partition.sourceId,
+                    packageRevision = partition.packageRevision,
+                    credentialRevision = partition.credentialRevision,
+                    selectedFilters = emptyMap(),
+                    cursor = null,
+                )
+            }?.let(home::acceptVerifiedPage)
+        }
+        val result = open(packageInfo)
+        if (result != SourceSessionOpenResult.UNAVAILABLE) {
+            val activeCredentialRevision = withContext(Dispatchers.IO) {
+                SourceGatewayFactory.mediaCredentialRevision(applicationContext, packageInfo)
+            }
+            if (activeCredentialRevision != partition.credentialRevision) {
+                home.invalidateSession()
+                homeCachePartition = partition.copy(credentialRevision = activeCredentialRevision)
+            }
+        }
+        return result
+    }
+
     fun commitHomeSource(packageInfo: VerifiedHxpPackage) {
-        home.bindSource(packageInfo.manifest.sourceId.value, packageInfo.packageSha256)
+        val sourceId = packageInfo.manifest.sourceId.value
+        if (homeCachePartition?.let { partition ->
+                partition.sourceId != sourceId || partition.packageRevision != packageInfo.packageSha256
+            } == true
+        ) {
+            homeCachePartition = null
+        }
+        home.bindSource(sourceId, packageInfo.packageSha256)
     }
 
     fun commitSourceSwitch(packageInfo: VerifiedHxpPackage) {
@@ -259,10 +334,12 @@ internal class SourceFlowController(
     suspend fun reopenWithStoredCredentials() {
         when (sessionOwner.reopen()) {
             SourceSessionOpenResult.OPENED -> {
+                refreshHomeCredentialPartition(persistCurrentPage = false)
                 home.invalidateSession()
                 searchState = SearchResultState.Idle
             }
             SourceSessionOpenResult.PACKAGE_CHANGED -> {
+                homeCachePartition = null
                 home.invalidateSession()
                 resetReadingState()
                 remoteLibrary.reset()
@@ -277,10 +354,12 @@ internal class SourceFlowController(
         val parsedSearchState = searchState
         when (sessionOwner.reopen()) {
             SourceSessionOpenResult.OPENED -> {
+                refreshHomeCredentialPartition(persistCurrentPage = retainVerifiedHome)
                 if (retainVerifiedHome) home.retainVerifiedPageAfterSessionRenewal() else home.invalidateSession()
                 searchState = parsedSearchState
             }
             SourceSessionOpenResult.PACKAGE_CHANGED -> {
+                homeCachePartition = null
                 home.invalidateSession()
                 resetReadingState()
                 remoteLibrary.reset()
@@ -327,11 +406,38 @@ internal class SourceFlowController(
         selectedFilters: Map<String, String>,
         cursor: String? = null,
         offlineOnly: Boolean = false,
+        useNormalizedCache: Boolean = true,
     ): Result<SourceHomePage> {
+        val partition = homeCachePartition
+        if (useNormalizedCache && partition != null) {
+            val cached = withContext(Dispatchers.IO) {
+                normalizedStore.readHome(
+                    sourceId = partition.sourceId,
+                    packageRevision = partition.packageRevision,
+                    credentialRevision = partition.credentialRevision,
+                    selectedFilters = selectedFilters,
+                    cursor = cursor,
+                )
+            }
+            if (cached != null) return Result.success(cached)
+        }
         val source = sessionOwner.requireClientOrNull()
             ?: return Result.failure(IllegalStateException("source-not-open"))
         return try {
-            Result.success(source.home(selectedFilters, cursor, offlineOnly))
+            val page = source.home(selectedFilters, cursor, offlineOnly)
+            partition?.let { expected -> refreshHomeCredentialPartition(expected) }?.let { activePartition ->
+                writeNormalized {
+                    normalizedStore.writeHome(
+                        sourceId = activePartition.sourceId,
+                        packageRevision = activePartition.packageRevision,
+                        credentialRevision = activePartition.credentialRevision,
+                        selectedFilters = selectedFilters,
+                        cursor = cursor,
+                        page = page,
+                    )
+                }
+            }
+            Result.success(page)
         } catch (error: SourceException) {
             Result.failure(error)
         }
@@ -493,13 +599,18 @@ internal class SourceFlowController(
             directoryState = SourceBookState.Loading
             selectedChapter = null
             completedChapterIds = emptySet()
+            selectedReadingProgress = null
         }
         selectedBook = book
         remoteLibrary.beginSelection(book.identity)
         snapshotStore.saveBook(book)
         remoteLibrary.refreshSelection(book)
+        val persistedProgress = library.progress(book.identity)
         val persistedCompleted = library.completedChapterIds(book.identity)
-        if (selectedBook?.identity == book.identity) completedChapterIds = persistedCompleted
+        if (selectedBook?.identity == book.identity) {
+            selectedReadingProgress = persistedProgress
+            completedChapterIds = persistedCompleted
+        }
     }
 
     suspend fun prepareLocalDetail(book: SourceBookSummary) {
@@ -591,6 +702,7 @@ internal class SourceFlowController(
         remoteLibrary.beginSelection(identity)
         remoteLibrary.refreshSelection(detail.summary)
         prepareChapter(chapter)
+        selectedReadingProgress = entry.progress
         preparedResumeLoad = SourceReaderLoad(document = document, restoredLocator = restoredLocator)
         return true
     }
@@ -758,6 +870,7 @@ internal class SourceFlowController(
 
     suspend fun bookmarks(identity: BookIdentity): List<ReaderLocator> = library.bookmarks(identity)
 
+
     suspend fun removeBookmark(locator: ReaderLocator): Boolean {
         if (selectedBook?.identity != locator.document.book) return false
         return library.removeBookmark(locator)
@@ -783,7 +896,11 @@ internal class SourceFlowController(
             updatedAt = updatedAt,
         )
         library.saveBook(persisted)
-        library.saveProgress(ReadingProgress(book.identity, locator))
+        val progress = ReadingProgress(book.identity, locator)
+        val result = library.saveProgress(progress)
+        if (result == ProgressWriteResult.APPLIED && selectedBook?.identity == book.identity) {
+            selectedReadingProgress = progress
+        }
     }
 
     suspend fun markChapterCompleted(
@@ -918,6 +1035,7 @@ internal class SourceFlowController(
         sessionOwner.closeActiveClient()
         resetReadingState()
         remoteLibrary.reset()
+        homeCachePartition = null
         home.reset()
         searchState = searchFailure(SourceErrorCode.EXTENSION_RUNTIME_FAILURE, "source-session", "source-untrusted")
     }
@@ -930,6 +1048,38 @@ internal class SourceFlowController(
         block()
     } catch (_: SourceException) {
         null
+    }
+
+    private suspend fun refreshHomeCredentialPartition(
+        expected: HomeCachePartition,
+    ): HomeCachePartition? {
+        if (homeCachePartition != expected) return null
+        val updated = expected.copy(
+            credentialRevision = withContext(Dispatchers.IO) {
+                SourceGatewayFactory.mediaCredentialRevision(applicationContext, expected.packageInfo)
+            },
+        )
+        if (homeCachePartition != expected) return null
+        homeCachePartition = updated
+        return updated
+    }
+
+    private suspend fun refreshHomeCredentialPartition(persistCurrentPage: Boolean) {
+        val current = homeCachePartition ?: return
+        val updated = refreshHomeCredentialPartition(current) ?: return
+        if (!persistCurrentPage) return
+        val pageState = (home.state as? SourceHomeViewState.Content)?.activePageState ?: return
+        val page = pageState.page ?: return
+        writeNormalized {
+            normalizedStore.writeHome(
+                sourceId = updated.sourceId,
+                packageRevision = updated.packageRevision,
+                credentialRevision = updated.credentialRevision,
+                selectedFilters = pageState.selectedFilters,
+                cursor = null,
+                page = page,
+            )
+        }
     }
 
     /**
@@ -946,6 +1096,7 @@ internal class SourceFlowController(
     }
 
     suspend fun removeSource(sourceId: String) {
+        if (homeCachePartition?.sourceId == sourceId) homeCachePartition = null
         if (sessionOwner.removeSource(sourceId) || selectedBook?.identity?.sourceId == sourceId) {
             resetReadingState()
             remoteLibrary.reset()
@@ -965,6 +1116,7 @@ internal class SourceFlowController(
         selectedBook = null
         selectedChapter = null
         completedChapterIds = emptySet()
+        selectedReadingProgress = null
         verifiedChapterLoad = null
         preparedResumeLoad = null
     }
@@ -993,6 +1145,7 @@ internal class SourceFlowController(
 
 
     override fun close() {
+        coverPresenter.close()
         home.close()
         sessionOwner.close()
     }

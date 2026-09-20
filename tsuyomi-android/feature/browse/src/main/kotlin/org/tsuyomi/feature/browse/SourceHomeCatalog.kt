@@ -23,6 +23,7 @@ import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.key
 import androidx.compose.runtime.getValue
@@ -88,6 +89,7 @@ internal fun SourceHomeStandardContent(
     onOpenFeature: (SourceHomeFeature) -> Unit,
     onScrollPositionChanged: (primary: String, queryKey: String, index: Int, offset: Int) -> Unit,
     coverState: @Composable (SourceBookSummary) -> CoverUiState,
+    onCoverVisibility: (SourceBookSummary, Boolean) -> Unit,
     modifier: Modifier,
 ) {
     if (state.featureOpen) {
@@ -106,6 +108,7 @@ internal fun SourceHomeStandardContent(
                 onOpenFeature = onOpenFeature,
                 onScrollPositionChanged = onScrollPositionChanged,
                 coverState = coverState,
+                onCoverVisibility = onCoverVisibility,
             )
         }
         return
@@ -182,6 +185,7 @@ internal fun SourceHomeStandardContent(
                 onScrollPositionChanged = onScrollPositionChanged,
                 onOpenFeature = onOpenFeature,
                 coverState = coverState,
+                onCoverVisibility = onCoverVisibility,
             )
         }
     }
@@ -202,6 +206,7 @@ private fun SourceHomeCatalogPage(
     onOpenFeature: (SourceHomeFeature) -> Unit,
     onScrollPositionChanged: (primary: String, queryKey: String, index: Int, offset: Int) -> Unit,
     coverState: @Composable (SourceBookSummary) -> CoverUiState,
+    onCoverVisibility: (SourceBookSummary, Boolean) -> Unit,
 ) {
     val page = pageState.page
     if (page == null) {
@@ -220,8 +225,14 @@ private fun SourceHomeCatalogPage(
             )
             StateView(
                 kind = TsuyomiStateKind.ERROR,
-                title = stringResource(R.string.source_home_failure_title),
-                message = stringResource(R.string.source_home_failure_message),
+                title = stringResource(
+                    if (verificationRequired) R.string.source_home_verification_title
+                    else R.string.source_home_failure_title,
+                ),
+                message = stringResource(
+                    if (verificationRequired) R.string.source_home_verification_message
+                    else R.string.source_home_failure_message,
+                ),
                 actionLabel = stringResource(
                     if (verificationRequired) R.string.source_home_open_verification
                     else R.string.source_home_retry,
@@ -287,6 +298,7 @@ private fun SourceHomeCatalogPage(
                             pageState = pageState,
                             onSelectFilters = onSelectFilters,
                             onRetryReplacement = onRetryReplacement,
+                            onOpenVerification = onOpenVerification,
                         )
                     }
                 }
@@ -301,6 +313,10 @@ private fun SourceHomeCatalogPage(
                         items = section.items,
                         key = { book -> "${section.id}:${book.identity.sourceId}:${book.identity.remoteBookId}" },
                     ) { book ->
+                        DisposableEffect(book.identity, book.coverUrl, book.canonicalUrl, active) {
+                            if (active) onCoverVisibility(book, true)
+                            onDispose { if (active) onCoverVisibility(book, false) }
+                        }
                         TsuyomiCoverGridCard(
                             title = book.title,
                             supportingText = book.author,
@@ -360,6 +376,7 @@ private fun SourceHomePageControls(
     pageState: SourceHomePageViewState,
     onSelectFilters: (Map<String, String>) -> Unit,
     onRetryReplacement: () -> Unit,
+    onOpenVerification: () -> Unit,
 ) {
     val page = requireNotNull(pageState.page)
     val primaryId = page.filters.firstOrNull()?.id
@@ -453,22 +470,34 @@ private fun SourceHomePageControls(
 
         when {
             pageState.replacing -> SourceHomeFooterMessage(stringResource(R.string.source_home_updating))
-            pageState.replacementFailure != null -> Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(TsuyomiSpacing.Sm),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Text(
-                    text = stringResource(R.string.source_home_inline_failure),
-                    modifier = Modifier.weight(1f),
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.error,
+            pageState.replacementFailure != null -> {
+                val verificationRequired = pageState.replacementFailure.code in setOf(
+                    SourceErrorCode.SESSION_REQUIRED,
+                    SourceErrorCode.VERIFICATION_REQUIRED,
                 )
-                TsuyomiButton(
-                    text = stringResource(R.string.source_home_retry),
-                    onClick = onRetryReplacement,
-                    style = TsuyomiButtonStyle.TEXT,
-                )
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(TsuyomiSpacing.Sm),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text(
+                        text = stringResource(
+                            if (verificationRequired) R.string.source_home_inline_verification
+                            else R.string.source_home_inline_failure,
+                        ),
+                        modifier = Modifier.weight(1f),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.error,
+                    )
+                    TsuyomiButton(
+                        text = stringResource(
+                            if (verificationRequired) R.string.source_home_open_verification
+                            else R.string.source_home_retry,
+                        ),
+                        onClick = if (verificationRequired) onOpenVerification else onRetryReplacement,
+                        style = TsuyomiButtonStyle.TEXT,
+                    )
+                }
             }
         }
     }

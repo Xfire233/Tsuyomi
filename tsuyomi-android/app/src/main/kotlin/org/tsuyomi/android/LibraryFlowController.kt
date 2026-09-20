@@ -247,8 +247,8 @@ internal class LibraryFlowController private constructor(
                     credentialRevision = credentialRevision,
                     transportUrl = url,
                     referrerUrl = book.canonicalUrl,
-                    targetWidthPx = 512,
-                    targetHeightPx = 768,
+                    targetWidthPx = 384,
+                    targetHeightPx = 576,
                     fallback = fallback,
                 ),
             ).collect { state -> retainCoverState(identity, state) }
@@ -256,7 +256,8 @@ internal class LibraryFlowController private constructor(
     }
 
     private fun retainCoverState(identity: BookIdentity, coverState: CoverUiState) {
-        coverStates = coverStates + (identity to coverState)
+        val renderableState = preserveRenderableCover(coverStates[identity], coverState)
+        coverStates = coverStates + (identity to renderableState)
         retainedCoverOrder.remove(identity)
         retainedCoverOrder += identity
         trimRetainedCoverStates()
@@ -1097,7 +1098,7 @@ internal class LibraryFlowController private constructor(
     internal fun savedCallerTab(): SystemLibraryFilter = callerTab
 
     internal companion object {
-        private const val MAX_RETAINED_COVER_STATES = 24
+        private const val MAX_RETAINED_COVER_STATES = 32
 
         fun restored(
             repository: RoomLibraryRepository,

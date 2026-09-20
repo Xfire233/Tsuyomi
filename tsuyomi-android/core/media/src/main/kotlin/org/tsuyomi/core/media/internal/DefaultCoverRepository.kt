@@ -7,6 +7,7 @@ package org.tsuyomi.core.media.internal
 import android.content.Context
 import java.security.MessageDigest
 import java.util.concurrent.CancellationException
+import java.util.concurrent.atomic.AtomicBoolean
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flow
 import org.tsuyomi.core.media.api.CoverFailureReason
@@ -32,13 +33,14 @@ internal class DefaultCoverRepository(
         maxResponseBytes = maxResponseBytes,
         mediaFetcher = mediaFetcher,
     )
+    private val closed = AtomicBoolean(false)
 
     override fun cached(request: CoverRequest): CoverUiState.Ready? {
-        if (request.sourceId != sourceId || request.packageRevision != packageRevision ||
+        if (closed.get() || request.sourceId != sourceId || request.packageRevision != packageRevision ||
             request.credentialRevision != credentialRevision
         ) return null
         return try {
-            loader.cached(request.transportUrl, request.targetWidthPx, request.targetHeightPx)
+            loader.cached(request.transportUrl, request.targetWidthPx, request.targetHeightPx, request.mediaKind)
                 ?.let(CoverUiState::Ready)
         } catch (error: MediaLoadException) {
             reportCoverFailure("cache", request.transportUrl, error.failure.name)
@@ -58,7 +60,7 @@ internal class DefaultCoverRepository(
     }
 
     override fun observe(request: CoverRequest): Flow<CoverUiState> = flow {
-        if (request.sourceId != sourceId || request.packageRevision != packageRevision ||
+        if (closed.get() || request.sourceId != sourceId || request.packageRevision != packageRevision ||
             request.credentialRevision != credentialRevision
         ) {
             reportCoverFailure("partition", request.transportUrl, CoverFailureReason.INVALID_REFERENCE.name)
@@ -72,7 +74,13 @@ internal class DefaultCoverRepository(
         emit(CoverUiState.Loading(request.fallback))
         val state = try {
             CoverUiState.Ready(
-                loader.load(request.transportUrl, request.referrerUrl, request.targetWidthPx, request.targetHeightPx),
+                loader.load(
+                    request.transportUrl,
+                    request.referrerUrl,
+                    request.targetWidthPx,
+                    request.targetHeightPx,
+                    request.mediaKind,
+                ),
             )
         } catch (error: MediaLoadException) {
             reportCoverFailure("fetch", request.transportUrl, error.failure.name)
@@ -88,6 +96,10 @@ internal class DefaultCoverRepository(
             CoverUiState.Failed(CoverFailureReason.NETWORK, request.fallback)
         }
         emit(state)
+    }
+
+    override fun close() {
+        if (closed.compareAndSet(false, true)) loader.close()
     }
 
     private fun MediaFailure.toPublicReason(): CoverFailureReason = when (this) {

@@ -27,6 +27,7 @@ import org.tsuyomi.core.media.api.CoverFailureReason
 import org.tsuyomi.core.media.api.CoverRepository
 import org.tsuyomi.core.media.api.CoverRequest
 import org.tsuyomi.core.media.api.CoverUiState
+import org.tsuyomi.core.media.api.MediaKind
 import org.tsuyomi.shared.librarydomain.LibraryBook
 import org.tsuyomi.shared.librarydomain.ReadingProgress
 import org.tsuyomi.shared.sourcecontract.RemoteLibraryPage
@@ -401,6 +402,57 @@ internal class SourceRouteScopedOwnersInstrumentedTest : SourceFlowInstrumentedT
             assertEquals("1", owner.localState.progressChapterId)
         }
     }
+
+    @Test
+    fun unpinned_directory_reader_admission_refreshes_detail_continue_state() = runBlocking {
+        val packageInfo = installFixture()
+        val book = summary(SOURCE_FLOW_TEST_SOURCE_ID, "unpinned-progress", "未入书架进度")
+        val first = SourceChapter("first", "第一章", "https://www.wenku8.net/novel/2/200/first.htm")
+        val selected = SourceChapter("selected", "第二章", "https://www.wenku8.net/novel/2/200/selected.htm")
+        fun session() = FakeSession(
+            detail = { summary -> SourceBookDetail(summary, "简介", emptyList(), "连载") },
+            directoryResult = { SourceDirectory(book.identity, listOf(first, selected)) },
+            chapterResult = { chapter, remoteBookId -> readerDocument(remoteBookId, chapter) },
+        )
+
+        controller { session() }.use { flow ->
+            flow.open(packageInfo)
+            flow.prepareBook(book)
+            val detailOwner = SourceDetailRouteOwner(flow, SavedStateHandle()) {}
+            detailOwner.loadAll()
+
+            assertFalse(detailOwner.localState.inLibrary)
+            assertFalse(detailOwner.localState.readLater)
+            assertNull(detailOwner.localState.progressChapterId)
+
+            flow.prepareChapter(selected)
+            val readerOwner = SourceReaderRouteOwner(flow, SavedStateHandle())
+            readerOwner.load()
+            val mounted = requireNotNull(readerOwner.document)
+            assertTrue(readerOwner.recordMountedDocument(mounted, readerOwner.documentGeneration))
+
+            assertNull(library.libraryEntry(book.identity))
+            assertEquals(selected.chapterId, library.progress(book.identity)?.locator?.document?.contentId)
+
+            assertFalse(detailOwner.localState.inLibrary)
+            assertFalse(detailOwner.localState.readLater)
+            assertEquals(selected.chapterId, detailOwner.localState.progressChapterId)
+
+            val restoredDetailOwner = SourceDetailRouteOwner(flow, SavedStateHandle()) {}
+            assertFalse(restoredDetailOwner.localState.inLibrary)
+            assertEquals(selected.chapterId, restoredDetailOwner.localState.progressChapterId)
+        }
+
+        controller { session() }.use { restoredFlow ->
+            restoredFlow.open(packageInfo)
+            restoredFlow.prepareBook(book)
+            val restoredDetailOwner = SourceDetailRouteOwner(restoredFlow, SavedStateHandle()) {}
+            assertFalse(restoredDetailOwner.localState.inLibrary)
+            assertFalse(restoredDetailOwner.localState.readLater)
+            assertEquals(selected.chapterId, restoredDetailOwner.localState.progressChapterId)
+        }
+    }
+
     @Test
     fun tag_editor_draft_restores_and_failure_preserves_it_without_pinning() = runBlocking {
         val packageInfo = installFixture()
@@ -1115,6 +1167,7 @@ internal class SourceRouteScopedOwnersInstrumentedTest : SourceFlowInstrumentedT
             assertEquals(1, requests.size)
             assertEquals(image.url, requests.single().transportUrl)
             assertEquals(chapter.url, requests.single().referrerUrl)
+            assertEquals(MediaKind.READER_ILLUSTRATION, requests.single().mediaKind)
 
             owner.loadImage(image, repository, "package-revision", "credential-revision", this)
             yield()
@@ -1186,6 +1239,7 @@ internal class SourceRouteScopedOwnersInstrumentedTest : SourceFlowInstrumentedT
             assertEquals(first.chapterId, owner.document?.contentId)
             assertEquals(1, requestedChapters.count { it == second.chapterId })
             assertEquals(images.take(2).map { it.url }, mediaRequests.map { it.transportUrl })
+            assertTrue(mediaRequests.all { it.mediaKind == MediaKind.READER_ILLUSTRATION })
             assertTrue(owner.imageStates.values.none { it is CoverUiState.Failed })
             assertNull(library.progress(book.identity))
 
