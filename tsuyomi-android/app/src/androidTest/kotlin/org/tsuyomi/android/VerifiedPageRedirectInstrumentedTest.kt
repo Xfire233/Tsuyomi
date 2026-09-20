@@ -7,17 +7,26 @@ package org.tsuyomi.android
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import java.io.File
+import java.net.URI
+import java.nio.charset.Charset
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.tsuyomi.shared.sourcecontract.SourceChapter
 import org.junit.runner.RunWith
 import org.tsuyomi.core.network.DirectActionTokenRegistry
+import org.tsuyomi.core.network.HostHttpResponse
+import org.tsuyomi.core.network.HostHttpTransport
+import org.tsuyomi.core.network.HostNetworkGateway
+import org.tsuyomi.core.network.HostResponseHeaders
 import org.tsuyomi.core.webview.CapturedVerifiedPage
 import org.tsuyomi.source.extensionmanager.HxpArchiveVerifier
 import org.tsuyomi.source.extensionmanager.InMemoryPublisherKeyStore
 import org.tsuyomi.source.extensionmanager.SourceExtensionClient
 import org.tsuyomi.source.extensiontestkit.Phase2TestPublisher
+import org.tsuyomi.shared.sourcecontract.SourceErrorCode
+import org.tsuyomi.shared.sourcecontract.SourceException
 
 @RunWith(AndroidJUnit4::class)
 class VerifiedPageRedirectInstrumentedTest {
@@ -179,6 +188,58 @@ class VerifiedPageRedirectInstrumentedTest {
             assertEquals("10001", document.contentId)
             assertEquals("第一章 雾中的灯塔", document.title)
             assertEquals(2, document.blocks.size)
+        } finally {
+            fixture.delete()
+        }
+    }
+
+    @Test
+    fun unauthenticatedHomeRedirectBecomesTypedLoginRecoveryWithoutLoadingHttp() = runBlocking {
+        val context = InstrumentationRegistry.getInstrumentation().targetContext
+        val fixture = File(context.cacheDir, "wenku8-home-login-${System.nanoTime()}.hxp")
+        try {
+            context.assets.open("wenku8-fixture.hxp").use { input ->
+                fixture.outputStream().use(input::copyTo)
+            }
+            val packageInfo = HxpArchiveVerifier(
+                InMemoryPublisherKeyStore(listOf(Phase2TestPublisher.key)),
+            ).verify(fixture)
+            val requests = mutableListOf<URI>()
+            val gateway = HostNetworkGateway(HostHttpTransport { request ->
+                requests += request.url
+                when (request.url.path) {
+                    "/index.php" -> HostHttpResponse(
+                        status = 302,
+                        finalUrl = request.url,
+                        headers = HostResponseHeaders.of(
+                            "location" to "http://www.wenku8.net/login.php?jumpurl=http%3A%2F%2Fwww.wenku8.net%2Findex.php#discard",
+                        ),
+                        bytes = byteArrayOf(),
+                    )
+                    "/login.php" -> HostHttpResponse(
+                        status = 200,
+                        finalUrl = request.url,
+                        headers = HostResponseHeaders.of("content-type" to "text/html; charset=gb18030"),
+                        bytes = "<html><body><form action='/login.php'>用户登录</form></body></html>"
+                            .toByteArray(Charset.forName("GB18030")),
+                    )
+                    else -> error("Unexpected request: ${request.url}")
+                }
+            })
+
+            val failure = SourceExtensionClient.open(packageInfo, gateway).use { client ->
+                runCatching { client.home() }.exceptionOrNull()
+            }
+
+            assertEquals(SourceErrorCode.SESSION_REQUIRED, (failure as SourceException).code)
+            assertEquals(
+                listOf(
+                    URI("https://www.wenku8.net/index.php"),
+                    URI("https://www.wenku8.net/login.php?jumpurl=http%3A%2F%2Fwww.wenku8.net%2Findex.php"),
+                ),
+                requests,
+            )
+            assertTrue(requests.all { it.scheme == "https" })
         } finally {
             fixture.delete()
         }

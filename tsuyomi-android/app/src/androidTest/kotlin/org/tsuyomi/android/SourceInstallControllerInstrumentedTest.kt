@@ -294,7 +294,7 @@ internal class SourceInstallControllerInstrumentedTest : SourceFlowInstrumentedT
     }
 
     @Test
-    fun repositoryDownloadFailureRetriesOnlyToApprovalAndRejectsStaleSubscriptionActions() = runBlocking {
+    fun repositoryDownloadFailuresStayActionableAndRejectStaleSubscriptionActions() = runBlocking {
         val archive = assembleSignedSwitchOverlay("source-user-consent")
         val archiveBytes = archive.readBytes()
         val descriptor = JSONObject(InstrumentationRegistry.getInstrumentation().context.assets
@@ -309,9 +309,12 @@ internal class SourceInstallControllerInstrumentedTest : SourceFlowInstrumentedT
                 RETRY_PACKAGE -> {
                     packageRequests += 1
                     when (packageRequests) {
-                        1, 4 -> throw RepositoryFetchException(RepositoryFetchError.NETWORK)
-                        2 -> archiveBytes
-                        3 -> archiveBytes.copyOf().also { bytes ->
+                        1, 7 -> throw RepositoryFetchException(RepositoryFetchError.NETWORK)
+                        2 -> throw RepositoryFetchException(RepositoryFetchError.TIMEOUT)
+                        3 -> throw RepositoryFetchException(RepositoryFetchError.HTTP_STATUS)
+                        4 -> throw RepositoryFetchException(RepositoryFetchError.CANCELLED)
+                        5 -> archiveBytes
+                        6 -> archiveBytes.copyOf().also { bytes ->
                             bytes[0] = (bytes[0].toInt() xor 1).toByte()
                         }
                         else -> error("Unexpected package request")
@@ -334,10 +337,19 @@ internal class SourceInstallControllerInstrumentedTest : SourceFlowInstrumentedT
             assertEquals(action.repositoryId, install.catalog.state.items.single().repositoryId)
 
             install.catalog.install(action.sourceId, action.repositoryId)
-            val downloadFailure = install.state as BrowseUiState.Failure
-            assertEquals(BrowseInstallFailure.DOWNLOAD, downloadFailure.reason)
-            assertEquals(action, downloadFailure.repositoryInstall)
+            val networkFailure = install.state as BrowseUiState.Failure
+            assertEquals(BrowseInstallFailure.DOWNLOAD_NETWORK, networkFailure.reason)
+            assertEquals(action, networkFailure.repositoryInstall)
             assertEquals(null, install.activePackage)
+
+            install.catalog.install(action.sourceId, action.repositoryId)
+            assertEquals(BrowseInstallFailure.DOWNLOAD_TIMEOUT, (install.state as BrowseUiState.Failure).reason)
+
+            install.catalog.install(action.sourceId, action.repositoryId)
+            assertEquals(BrowseInstallFailure.DOWNLOAD_SERVER, (install.state as BrowseUiState.Failure).reason)
+
+            install.catalog.install(action.sourceId, action.repositoryId)
+            assertEquals(BrowseInstallFailure.DOWNLOAD_CANCELLED, (install.state as BrowseUiState.Failure).reason)
 
             install.catalog.install(action.sourceId, action.repositoryId)
             assertTrue(install.state is BrowseUiState.Approval)
@@ -351,15 +363,15 @@ internal class SourceInstallControllerInstrumentedTest : SourceFlowInstrumentedT
             assertEquals(null, install.activePackage)
 
             install.catalog.install(action.sourceId, action.repositoryId)
-            assertEquals(BrowseInstallFailure.DOWNLOAD, (install.state as BrowseUiState.Failure).reason)
+            assertEquals(BrowseInstallFailure.DOWNLOAD_NETWORK, (install.state as BrowseUiState.Failure).reason)
             install.catalog.setSubscriptionEnabled(action.repositoryId, false)
             install.catalog.install(action.sourceId, action.repositoryId)
-            assertEquals(4, packageRequests)
+            assertEquals(7, packageRequests)
             assertEquals(BrowseInstallFailure.REPOSITORY, (install.state as BrowseUiState.Failure).reason)
 
             install.catalog.removeSubscription(action.repositoryId)
             install.catalog.install(action.sourceId, action.repositoryId)
-            assertEquals(4, packageRequests)
+            assertEquals(7, packageRequests)
             assertEquals(null, install.activePackage)
         } finally {
             archive.delete()

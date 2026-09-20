@@ -983,13 +983,13 @@ class BookDetailInstrumentedTest {
     }
 
     @Test
-    fun readingFabStartsWithoutProgressAndResumesOnlyAValidSavedChapter() {
+    fun readingFabUsesValidPersistedChapterIndependentOfPin() {
         val book = sourceBook()
         val chapters = listOf(
             chapter("c1", "第一章", "第一卷"),
             chapter("c2", "第二章", "第一卷"),
         )
-        var localState by mutableStateOf(DetailLocalState(inLibrary = true))
+        var localState by mutableStateOf(DetailLocalState(inLibrary = false))
         val openedChapterIds = mutableListOf<String>()
         val context = InstrumentationRegistry.getInstrumentation().targetContext
         compose.setContent {

@@ -108,7 +108,10 @@ data class BrowseInstalledSource(
 
 enum class BrowseInstallFailure {
     FILE_ACCESS,
-    DOWNLOAD,
+    DOWNLOAD_NETWORK,
+    DOWNLOAD_TIMEOUT,
+    DOWNLOAD_SERVER,
+    DOWNLOAD_CANCELLED,
     REPOSITORY,
     STORAGE,
     VERIFICATION,
@@ -520,7 +523,7 @@ private fun InstallMutationBanner(
             failure?.let { failed ->
                 val repositoryInstall = failed.repositoryInstall
                 when {
-                    repositoryInstall != null && failed.reason == BrowseInstallFailure.DOWNLOAD -> TsuyomiButton(
+                    repositoryInstall != null && failed.reason.isRetryableDownloadFailure -> TsuyomiButton(
                         text = stringResource(R.string.browse_retry_download_action),
                         onClick = { onCatalogAction(repositoryInstall) },
                         style = TsuyomiButtonStyle.TEXT,
@@ -1557,7 +1560,10 @@ private fun FrozenEInkSourceApprovalScreen(
 private fun installFailureMessage(reason: BrowseInstallFailure): String = stringResource(
     when (reason) {
         BrowseInstallFailure.FILE_ACCESS -> R.string.browse_failure_file_access
-        BrowseInstallFailure.DOWNLOAD -> R.string.browse_failure_download
+        BrowseInstallFailure.DOWNLOAD_NETWORK -> R.string.browse_failure_download_network
+        BrowseInstallFailure.DOWNLOAD_TIMEOUT -> R.string.browse_failure_download_timeout
+        BrowseInstallFailure.DOWNLOAD_SERVER -> R.string.browse_failure_download_server
+        BrowseInstallFailure.DOWNLOAD_CANCELLED -> R.string.browse_failure_download_cancelled
         BrowseInstallFailure.REPOSITORY -> R.string.browse_failure_repository
         BrowseInstallFailure.STORAGE -> R.string.browse_failure_storage
         BrowseInstallFailure.VERIFICATION -> R.string.browse_failure_verification
@@ -1565,6 +1571,11 @@ private fun installFailureMessage(reason: BrowseInstallFailure): String = string
         BrowseInstallFailure.EXPIRED_APPROVAL -> R.string.browse_failure_expired_approval
     }
 )
+
+private val BrowseInstallFailure.isRetryableDownloadFailure: Boolean
+    get() = this == BrowseInstallFailure.DOWNLOAD_NETWORK ||
+        this == BrowseInstallFailure.DOWNLOAD_TIMEOUT ||
+        this == BrowseInstallFailure.DOWNLOAD_SERVER
 
 enum class BrowseResourceLimit {
     MAX_EXECUTION_WALL_TIME_MS,

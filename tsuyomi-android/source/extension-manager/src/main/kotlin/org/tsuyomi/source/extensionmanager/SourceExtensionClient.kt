@@ -98,6 +98,9 @@ class SourceExtensionClient private constructor(
             SourceCookieMode.NONE
         },
         cookieOrigins = manifest.capabilities.cookies.origins,
+        legacyHttpRedirectOrigins = manifest.capabilities.webLogin.origins
+            .takeIf { manifest.capabilities.webLogin.enabled }
+            .orEmpty(),
         maxResponseBytes = manifest.capabilities.network.maxResponseBytes,
         remoteReadPolicy = manifest.capabilities.remoteLibrary.policies[RemoteOperation.READ]?.toNetworkPolicy(),
         remoteTargetsPolicy = manifest.capabilities.remoteLibrary.policies[RemoteOperation.TARGETS]?.toNetworkPolicy(),

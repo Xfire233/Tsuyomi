@@ -28,6 +28,7 @@ import androidx.compose.ui.unit.dp
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import java.util.concurrent.atomic.AtomicInteger
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertTrue
 import kotlin.math.abs
@@ -60,7 +61,8 @@ import org.tsuyomi.shared.sourcecontract.SourceHomeSection
 @RunWith(AndroidJUnit4::class)
 class SourceHomeScreenInstrumentedTest {
     @Test
-    fun verification_failure_offers_explicit_cached_content_action() {
+    fun verification_failure_offers_login_and_cached_content_actions() {
+        var verificationRequested = false
         var cacheRequested = false
         composeRule.setContent {
             DisplayEnvironmentProvider(standardEnvironment) {
@@ -83,7 +85,7 @@ class SourceHomeScreenInstrumentedTest {
                         onOpenRemoteLibrary = {},
                         onOpenBook = {},
                         onOpenFeature = {},
-                        onOpenVerification = {},
+                        onOpenVerification = { verificationRequested = true },
                         onScrollPositionChanged = { _, _, _, _ -> },
                         coverState = { CoverUiState.Fallback(FallbackSpec("缓存", "source")) },
                     )
@@ -92,9 +94,72 @@ class SourceHomeScreenInstrumentedTest {
         }
 
         composeRule.onNodeWithText("verification-required").assertDoesNotExist()
-        composeRule.onNodeWithText("本地书架未改动。请稍后重试，或使用已缓存内容。").assertIsDisplayed()
+        composeRule.onNodeWithText("此来源需要先完成登录或安全验证。现有本地内容未改动。").assertIsDisplayed()
+        composeRule.onNodeWithText("前往登录验证").assertIsDisplayed().performClick()
+        composeRule.runOnIdle { assertTrue(verificationRequested) }
         composeRule.onNodeWithText("使用已缓存内容").assertIsDisplayed().performClick()
         composeRule.runOnIdle { assertTrue(cacheRequested) }
+    }
+
+    @Test
+    fun verification_failure_keeps_cached_home_visible_and_offers_direct_login() {
+        val primary = primaryFilter()
+        val selection = mapOf("view" to "recommend")
+        var verificationRequested = false
+        var retryRequested = false
+        composeRule.setContent {
+            DisplayEnvironmentProvider(standardEnvironment) {
+                TsuyomiTheme(environment = standardEnvironment) {
+                    SourceHomeScreen(
+                        sourceName = "Wenku8",
+                        state = SourceHomeViewState.Content(
+                            title = "Wenku8 书库",
+                            primaryFilter = primary,
+                            selectedPrimary = "recommend",
+                            pages = mapOf(
+                                "recommend" to SourceHomePageViewState(
+                                    queryKey = "recommend-query",
+                                    selectedFilters = selection,
+                                    page = page(
+                                        filters = listOf(primary),
+                                        selectedFilters = selection,
+                                        books = listOf(book(1, "缓存作品")),
+                                        sectionTitle = "缓存推荐",
+                                    ),
+                                    replacementFailure = SourceHomeFailure(
+                                        SourceErrorCode.SESSION_REQUIRED,
+                                        "session-required",
+                                    ),
+                                ),
+                            ),
+                        ),
+                        remoteLibraryAvailable = true,
+                        verificationAvailable = true,
+                        onSelectPrimary = {},
+                        onSelectFilters = {},
+                        onRefresh = {},
+                        onLoadMore = {},
+                        onRetryReplacement = { retryRequested = true },
+                        onUseOfflineCache = {},
+                        onSearch = {},
+                        onOpenRemoteLibrary = {},
+                        onOpenBook = {},
+                        onOpenFeature = {},
+                        onOpenVerification = { verificationRequested = true },
+                        onScrollPositionChanged = { _, _, _, _ -> },
+                        coverState = { CoverUiState.Fallback(FallbackSpec("缓存", "source")) },
+                    )
+                }
+            }
+        }
+
+        composeRule.onNodeWithText("缓存作品 1").assertIsDisplayed()
+        composeRule.onNodeWithText("登录状态已失效", substring = true).assertIsDisplayed()
+        composeRule.onNodeWithText("前往登录验证").performClick()
+        composeRule.runOnIdle {
+            assertTrue(verificationRequested)
+            assertFalse(retryRequested)
+        }
     }
 
     @get:Rule

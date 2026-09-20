@@ -598,7 +598,7 @@ class BrowseScreenInstrumentedTest {
         var pickerRequests = 0
         var failureDismissals = 0
         var state by mutableStateOf<BrowseUiState>(
-            BrowseUiState.Failure(BrowseInstallFailure.DOWNLOAD, action),
+            BrowseUiState.Failure(BrowseInstallFailure.DOWNLOAD_NETWORK, action),
         )
         composeRule.setContent {
             DisplayEnvironmentProvider(standardEnvironment) {
@@ -618,6 +618,7 @@ class BrowseScreenInstrumentedTest {
             }
         }
 
+        composeRule.onNodeWithText("系统代理", substring = true).assertIsDisplayed()
         composeRule.onNodeWithText("重试下载").performClick()
         assertEquals(listOf(action), catalogActions)
         assertEquals(0, pickerRequests)

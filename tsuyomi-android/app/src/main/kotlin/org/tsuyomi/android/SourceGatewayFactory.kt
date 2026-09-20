@@ -127,6 +127,9 @@ internal object SourceGatewayFactory {
             origins = manifest.capabilities.network.origins,
             cookieMode = if (manifest.capabilities.cookies.sourceScoped) SourceCookieMode.SOURCE_SCOPED else SourceCookieMode.NONE,
             cookieOrigins = manifest.capabilities.cookies.origins,
+            legacyHttpRedirectOrigins = manifest.capabilities.webLogin.origins
+                .takeIf { manifest.capabilities.webLogin.enabled }
+                .orEmpty(),
             maxConcurrentRequests = manifest.capabilities.network.maxConcurrentRequests,
             requestTimeoutMs = manifest.capabilities.network.requestTimeoutMs,
             maxResponseBytes = manifest.capabilities.network.maxResponseBytes,

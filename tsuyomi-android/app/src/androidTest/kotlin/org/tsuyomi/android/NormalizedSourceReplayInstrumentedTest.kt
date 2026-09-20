@@ -23,6 +23,11 @@ import org.tsuyomi.shared.sourcecontract.ReaderDocument
 import org.tsuyomi.shared.sourcecontract.SourceBookDetail
 import org.tsuyomi.shared.sourcecontract.SourceChapter
 import org.tsuyomi.shared.sourcecontract.SourceDirectory
+import org.tsuyomi.shared.sourcecontract.SourceHomeFeature
+import org.tsuyomi.shared.sourcecontract.SourceHomeFilter
+import org.tsuyomi.shared.sourcecontract.SourceHomeFilterOption
+import org.tsuyomi.shared.sourcecontract.SourceHomePage
+import org.tsuyomi.shared.sourcecontract.SourceHomeSection
 
 internal class NormalizedSourceReplayInstrumentedTest : SourceFlowInstrumentedTestFixture() {
     @Test
@@ -77,6 +82,165 @@ internal class NormalizedSourceReplayInstrumentedTest : SourceFlowInstrumentedTe
         assertEquals(document, offlineReader.document)
         assertNull(offlineReader.failure)
         offline.close()
+    }
+
+    @Test
+    fun normalized_home_preserves_contract_and_partitions_package_credentials_and_query() {
+        val selectedFilters = linkedMapOf("sort" to "new", "view" to "complete")
+        val page = SourceHomePage(
+            title = "完结精选",
+            schemaVersion = 1,
+            filters = listOf(
+                SourceHomeFilter(
+                    id = "view",
+                    label = "分类",
+                    options = listOf(
+                        SourceHomeFilterOption("recommend", "推荐"),
+                        SourceHomeFilterOption("complete", "完结"),
+                    ),
+                ),
+                SourceHomeFilter(
+                    id = "sort",
+                    label = "排序",
+                    options = listOf(SourceHomeFilterOption("new", "最新")),
+                ),
+            ),
+            selectedFilters = selectedFilters,
+            sections = listOf(
+                SourceHomeSection(
+                    id = "books",
+                    title = "书籍",
+                    items = listOf(
+                        summary(SOURCE_FLOW_TEST_SOURCE_ID, "home-cache", "缓存首页")
+                            .copy(remoteTargetId = "remote-home-cache"),
+                    ),
+                ),
+            ),
+            features = listOf(
+                SourceHomeFeature(
+                    id = "ranking",
+                    title = "排行榜",
+                    supportingText = "查看更多",
+                    selectedFilters = mapOf("view" to "ranking"),
+                ),
+            ),
+            nextCursor = "cursor-2",
+            complete = false,
+        )
+        val store = NormalizedSourceStore(context)
+
+        store.writeHome(
+            sourceId = SOURCE_FLOW_TEST_SOURCE_ID,
+            packageRevision = "package-a",
+            credentialRevision = "credential-a",
+            selectedFilters = selectedFilters,
+            cursor = "cursor-1",
+            page = page,
+        )
+
+        assertEquals(
+            page,
+            store.readHome(
+                sourceId = SOURCE_FLOW_TEST_SOURCE_ID,
+                packageRevision = "package-a",
+                credentialRevision = "credential-a",
+                selectedFilters = linkedMapOf("view" to "complete", "sort" to "new"),
+                cursor = "cursor-1",
+            ),
+        )
+        assertNull(
+            store.readHome(
+                SOURCE_FLOW_TEST_SOURCE_ID,
+                "package-a",
+                "credential-a",
+                mapOf("sort" to "new&view=complete"),
+                "cursor-1",
+            ),
+        )
+        assertNull(
+            store.readHome(
+                SOURCE_FLOW_TEST_SOURCE_ID,
+                "package-b",
+                "credential-a",
+                selectedFilters,
+                "cursor-1",
+            ),
+        )
+        assertNull(
+            store.readHome(
+                SOURCE_FLOW_TEST_SOURCE_ID,
+                "package-a",
+                "credential-b",
+                selectedFilters,
+                "cursor-1",
+            ),
+        )
+        assertNull(
+            store.readHome(
+                SOURCE_FLOW_TEST_SOURCE_ID,
+                "package-a",
+                "credential-a",
+                selectedFilters,
+                "cursor-2",
+            ),
+        )
+    }
+
+    @Test
+    fun process_recreated_home_restores_before_source_request_and_refresh_bypasses_snapshot() = runBlocking {
+        val packageInfo = installFixture()
+        val cachedPage = SourceHomePage(
+            title = "缓存首页",
+            schemaVersion = 1,
+            filters = emptyList(),
+            selectedFilters = emptyMap(),
+            sections = listOf(
+                SourceHomeSection(
+                    id = "books",
+                    title = "书籍",
+                    items = listOf(summary(SOURCE_FLOW_TEST_SOURCE_ID, "cached-home", "缓存书籍")),
+                ),
+            ),
+            nextCursor = null,
+            complete = true,
+        )
+        val refreshedPage = cachedPage.copy(title = "网络刷新首页")
+        var sourceRequests = 0
+        controller { candidate ->
+            putCredential(candidate.manifest.sourceId.value)
+            FakeSession(homeResult = { _, _, _ ->
+                putCredential(
+                    sourceId = candidate.manifest.sourceId.value,
+                    cookieHeader = "fixture_session=refreshed",
+                    userAgent = "fixture-webview-agent/2",
+                )
+                sourceRequests += 1
+                cachedPage
+            })
+        }.use { online ->
+            online.openHome(packageInfo)
+            assertEquals(cachedPage, online.loadHome(emptyMap()).getOrThrow())
+        }
+        assertEquals(1, sourceRequests)
+
+        controller {
+            FakeSession(homeResult = { _, _, _ ->
+                sourceRequests += 1
+                refreshedPage
+            })
+        }.use { recreated ->
+            recreated.openHome(packageInfo)
+            val restored = recreated.homeState as org.tsuyomi.feature.browse.SourceHomeViewState.Content
+            assertEquals(cachedPage, restored.activePage)
+            assertEquals(1, sourceRequests)
+            assertEquals(cachedPage, recreated.loadHome(emptyMap()).getOrThrow())
+            assertEquals(1, sourceRequests)
+            assertEquals(
+                refreshedPage,
+                recreated.loadHome(emptyMap(), useNormalizedCache = false).getOrThrow(),
+            )
+            assertEquals(2, sourceRequests)
+        }
     }
 
     @Test

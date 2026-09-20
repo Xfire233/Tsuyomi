@@ -246,6 +246,7 @@ internal fun TsuyomiApp(
     val coverRepository = coverCache.repository
     val coverCredentialRevision = coverCache.credentialRevision
     LaunchedEffect(coverRepository, coverCache.sourceId, coverCache.packageRevision, coverCredentialRevision) {
+        sourceOwner.flow.configureCoverRepository(coverCache)
         libraryFlow.configureCoverRepository(
             repository = coverRepository,
             sourceId = coverCache.sourceId,

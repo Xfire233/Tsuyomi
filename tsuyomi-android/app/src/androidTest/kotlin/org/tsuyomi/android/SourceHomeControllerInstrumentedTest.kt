@@ -27,6 +27,9 @@ import org.tsuyomi.shared.sourcecontract.SourceHomeFeature
 import org.tsuyomi.shared.sourcecontract.SourceHomeFilterOption
 import org.tsuyomi.shared.sourcecontract.SourceHomePage
 import org.tsuyomi.shared.sourcecontract.SourceHomeSection
+import org.tsuyomi.shared.sourcecontract.SourceDiagnostic
+import org.tsuyomi.shared.sourcecontract.SourceErrorCode
+import org.tsuyomi.shared.sourcecontract.SourceException
 
 @RunWith(AndroidJUnit4::class)
 internal class SourceHomeControllerInstrumentedTest {
@@ -238,7 +241,12 @@ internal class SourceHomeControllerInstrumentedTest {
             when (filters["recommendation"]) {
                 "goodnum" -> {
                     delay(100)
-                    Result.failure(IllegalStateException("replacement-failure"))
+                    Result.failure(
+                        SourceException(
+                            SourceErrorCode.SESSION_REQUIRED,
+                            SourceDiagnostic("replacement-verification", "home", "session-required"),
+                        ),
+                    )
                 }
                 else -> Result.success(recommendPage(filters["recommendation"] ?: "allvote"))
             }
@@ -264,6 +272,7 @@ internal class SourceHomeControllerInstrumentedTest {
             assertNotNull(failed?.page)
             assertEquals("推荐 allvote", failed?.page?.sections?.single()?.title)
             assertNotNull(failed?.replacementFailure)
+            assertEquals(SourceErrorCode.SESSION_REQUIRED, failed?.replacementFailure?.code)
             assertEquals(2, requests.get())
         } finally {
             controller.close()

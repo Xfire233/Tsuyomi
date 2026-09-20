@@ -8,15 +8,20 @@ import android.graphics.Bitmap
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import java.io.ByteArrayOutputStream
 import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.awaitCancellation
 import kotlinx.coroutines.async
 import kotlinx.coroutines.withTimeout
 import kotlinx.coroutines.flow.collect
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertSame
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
+import org.tsuyomi.core.media.api.CoverRepository
 import org.tsuyomi.core.media.api.CoverRequest
 import org.tsuyomi.core.media.api.CoverUiState
 import org.tsuyomi.core.media.api.FallbackSpec
@@ -111,7 +116,8 @@ internal class SourceCoverCacheInstrumentedTest : SourceFlowInstrumentedTestFixt
             trusted.set(true)
             val currentRepository = requireNotNull(cache.resolve(packageInfo).repository)
             release.complete(Unit)
-            withTimeout(5_000) { pending.await() }
+            val cancellation = runCatching { withTimeout(5_000) { pending.await() } }.exceptionOrNull()
+            assertTrue(cancellation is CancellationException)
             assertTrue(oldStates.none { it is CoverUiState.Ready })
             val staleStates = mutableListOf<CoverUiState>()
             oldRepository.observe(request.copy(transportUrl = "${request.transportUrl}?stale=1"))
@@ -127,6 +133,49 @@ internal class SourceCoverCacheInstrumentedTest : SourceFlowInstrumentedTestFixt
             cache.clear()
             Phase2SourceGateway.clearCredentialCoverFixture()
             clearCoverCaches()
+        }
+    }
+
+    @Test
+    fun presenter_keeps_ready_cover_during_recycled_item_reload() = runBlocking {
+        val bitmap = Bitmap.createBitmap(4, 6, Bitmap.Config.ARGB_8888)
+        val secondObservationStarted = CompletableDeferred<Unit>()
+        var observations = 0
+        val repository = object : CoverRepository {
+            override fun cached(request: CoverRequest): CoverUiState.Ready? = null
+
+            override fun observe(request: CoverRequest): Flow<CoverUiState> = flow {
+                observations += 1
+                if (observations == 1) {
+                    emit(CoverUiState.Ready(bitmap))
+                } else {
+                    emit(CoverUiState.Loading(request.fallback))
+                    secondObservationStarted.complete(Unit)
+                    awaitCancellation()
+                }
+            }
+        }
+        val presenter = SourceCoverPresenter()
+        val book = summary("fixture.cover", "recycled", "回收后封面").copy(
+            coverUrl = "https://example.com/recycled.png",
+            canonicalUrl = "https://example.com/book/recycled",
+        )
+        try {
+            presenter.setVisible(book, true)
+            presenter.configure(repository, "fixture.cover", "package", "credential")
+            withTimeout(5_000) {
+                while (presenter.state(book) !is CoverUiState.Ready) kotlinx.coroutines.yield()
+            }
+            presenter.setVisible(book, false)
+            presenter.setVisible(book, true)
+            withTimeout(5_000) { secondObservationStarted.await() }
+
+            val retained = presenter.state(book)
+            assertTrue(retained is CoverUiState.StaleReady)
+            assertSame(bitmap, (retained as CoverUiState.StaleReady).bitmap)
+        } finally {
+            presenter.close()
+            bitmap.recycle()
         }
     }
 

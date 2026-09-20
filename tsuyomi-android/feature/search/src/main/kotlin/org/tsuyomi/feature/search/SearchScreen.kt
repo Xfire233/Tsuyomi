@@ -26,6 +26,7 @@ import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalDensity
@@ -113,6 +114,7 @@ fun SearchScreen(
     coverState: @Composable (SourceBookSummary) -> CoverUiState = { book ->
         CoverUiState.Fallback(FallbackSpec(book.title, book.identity.sourceId))
     },
+    onCoverVisibility: (SourceBookSummary, Boolean) -> Unit = { _, _ -> },
 ) {
     if (LocalDisplayEnvironment.current.effectiveProfile == DisplayProfile.EINK) {
         FrozenEInkSearchScreen(
@@ -179,6 +181,7 @@ fun SearchScreen(
                     layout = layout,
                     onSelectBook = onSelectBook,
                     coverState = coverState,
+                    onCoverVisibility = onCoverVisibility,
                     modifier = Modifier.weight(1f),
                 )
             }
@@ -199,11 +202,13 @@ private fun SearchResults(
     layout: SearchLayout,
     onSelectBook: (SourceBookSummary) -> Unit,
     coverState: @Composable (SourceBookSummary) -> CoverUiState,
+    onCoverVisibility: (SourceBookSummary, Boolean) -> Unit,
     modifier: Modifier,
 ) {
     when (layout) {
         SearchLayout.LIST -> LazyColumn(modifier) {
             listItems(books, key = ::bookKey) { book ->
+                SearchCoverVisibility(book, onCoverVisibility)
                 SearchListRow(book, onSelectBook, coverState(book))
                 HorizontalDivider()
             }
@@ -222,9 +227,21 @@ private fun SearchResults(
             horizontalArrangement = Arrangement.spacedBy(TsuyomiSpacing.Md),
         ) {
             gridItems(books, key = ::bookKey) { book ->
+                SearchCoverVisibility(book, onCoverVisibility)
                 SearchGridCard(book, onSelectBook, coverState(book))
             }
         }
+    }
+}
+
+@Composable
+private fun SearchCoverVisibility(
+    book: SourceBookSummary,
+    onCoverVisibility: (SourceBookSummary, Boolean) -> Unit,
+) {
+    DisposableEffect(book.identity, book.coverUrl, book.canonicalUrl) {
+        onCoverVisibility(book, true)
+        onDispose { onCoverVisibility(book, false) }
     }
 }
 

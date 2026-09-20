@@ -30,9 +30,14 @@ import androidx.compose.ui.test.performTouchInput
 import androidx.compose.ui.test.performTextReplacement
 import androidx.compose.ui.test.performSemanticsAction
 import androidx.test.ext.junit.runners.AndroidJUnit4
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.awaitCancellation
 import kotlinx.coroutines.flow.first
 import java.time.Instant
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.flow
+import kotlinx.coroutines.withTimeout
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.yield
 import kotlinx.coroutines.CoroutineScope
@@ -45,6 +50,7 @@ import java.util.UUID
 import kotlin.math.abs
 import org.junit.After
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertSame
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Before
@@ -785,7 +791,7 @@ class LibraryProductionJourneyInstrumentedTest {
                 credentialRevision = "credential-revision",
                 scope = this,
             )
-            val entries = (0 until 25).map { index ->
+            val entries = (0 until 33).map { index ->
                 LibraryEntry(
                     book = book(BookIdentity("fixture.cover", "cover-$index"), "封面 $index").copy(
                         coverUrl = "https://example.com/cover-$index.png",
@@ -804,8 +810,65 @@ class LibraryProductionJourneyInstrumentedTest {
                 controller.setCoverVisible(entry, false)
             }
             assertTrue(controller.coverState(entries.last()) is CoverUiState.Ready)
-            assertTrue(controller.coverStates.size <= 24)
+            assertTrue(controller.coverStates.size <= 32)
         } finally {
+            bitmap.recycle()
+        }
+    }
+
+    @Test
+    fun library_controller_keeps_ready_cover_while_visibility_restarts() = runBlocking {
+        val repository = (composeRule.activity.application as TsuyomiApplication).libraryRepository
+        val controller = LibraryFlowController(repository, libraryPreferences)
+        val bitmap = Bitmap.createBitmap(4, 4, Bitmap.Config.ARGB_8888)
+        val secondObservationStarted = CompletableDeferred<Unit>()
+        var observations = 0
+        val coverRepository = object : CoverRepository {
+            override fun cached(request: CoverRequest): CoverUiState.Ready? = null
+
+            override fun observe(request: CoverRequest): Flow<CoverUiState> = flow {
+                observations += 1
+                if (observations == 1) {
+                    emit(CoverUiState.Ready(bitmap))
+                } else {
+                    emit(CoverUiState.Loading(request.fallback))
+                    secondObservationStarted.complete(Unit)
+                    awaitCancellation()
+                }
+            }
+        }
+        val entry = LibraryEntry(
+            book = book(BookIdentity("fixture.cover", "foreground"), "前后台封面").copy(
+                coverUrl = "https://example.com/foreground.png",
+                canonicalUrl = "https://example.com/book/foreground",
+            ),
+            libraryAddedAt = Instant.EPOCH,
+            rating = null,
+            localTags = emptySet(),
+            sourceAvailable = true,
+            reconciliation = null,
+        )
+        try {
+            controller.configureCoverRepository(
+                repository = coverRepository,
+                sourceId = "fixture.cover",
+                packageRevision = "package",
+                credentialRevision = "credential",
+                scope = this,
+            )
+            controller.setCoverVisible(entry, true)
+            withTimeout(5_000) {
+                while (controller.coverState(entry) !is CoverUiState.Ready) yield()
+            }
+            controller.setCoverVisible(entry, false)
+            controller.setCoverVisible(entry, true)
+            withTimeout(5_000) { secondObservationStarted.await() }
+
+            val retained = controller.coverState(entry)
+            assertTrue(retained is CoverUiState.StaleReady)
+            assertSame(bitmap, (retained as CoverUiState.StaleReady).bitmap)
+        } finally {
+            controller.setCoverVisible(entry, false)
             bitmap.recycle()
         }
     }

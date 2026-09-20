@@ -22,6 +22,7 @@ import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
@@ -105,6 +106,7 @@ fun SourceHomeScreen(
     onScrollPositionChanged: (primary: String, queryKey: String, index: Int, offset: Int) -> Unit,
     coverState: @Composable (SourceBookSummary) -> CoverUiState,
     modifier: Modifier = Modifier,
+    onCoverVisibility: (SourceBookSummary, Boolean) -> Unit = { _, _ -> },
 ) {
     when (state) {
         SourceHomeViewState.Idle,
@@ -155,6 +157,7 @@ fun SourceHomeScreen(
                     onOpenVerification = onOpenVerification,
                     onOpenBook = onOpenBook,
                     coverState = coverState,
+                    onCoverVisibility = onCoverVisibility,
                     modifier = modifier,
                 )
             }
@@ -172,6 +175,7 @@ fun SourceHomeScreen(
                 onOpenFeature = onOpenFeature,
                 onScrollPositionChanged = onScrollPositionChanged,
                 coverState = coverState,
+                onCoverVisibility = onCoverVisibility,
                 modifier = modifier,
             )
         }
@@ -196,7 +200,10 @@ private fun SourceHomeFailureView(
             if (verificationRequired) R.string.source_home_verification_title
             else R.string.source_home_failure_title,
         ),
-        message = stringResource(R.string.source_home_failure_message),
+        message = stringResource(
+            if (verificationRequired) R.string.source_home_verification_message
+            else R.string.source_home_failure_message,
+        ),
         actionLabel = stringResource(
             if (verificationRequired) R.string.source_home_open_verification
             else R.string.source_home_retry,
@@ -222,6 +229,7 @@ private fun FrozenEInkSourceHomeContent(
     onOpenVerification: () -> Unit,
     onOpenBook: (SourceBookSummary) -> Unit,
     coverState: @Composable (SourceBookSummary) -> CoverUiState,
+    onCoverVisibility: (SourceBookSummary, Boolean) -> Unit,
     modifier: Modifier,
 ) {
     val page = requireNotNull(pageState.page)
@@ -314,7 +322,7 @@ private fun FrozenEInkSourceHomeContent(
                     )
                 }
                 items(section.items, key = { "${section.id}:${it.identity.sourceId}:${it.identity.remoteBookId}" }) { book ->
-                    SourceHomeBookRow(book, coverState(book), onOpenBook)
+                    SourceHomeBookRow(book, coverState(book), onOpenBook, onCoverVisibility)
                 }
             }
             if (!page.complete) {
@@ -347,7 +355,12 @@ private fun SourceHomeBookRow(
     book: SourceBookSummary,
     coverState: CoverUiState,
     onOpenBook: (SourceBookSummary) -> Unit,
+    onCoverVisibility: (SourceBookSummary, Boolean) -> Unit,
 ) {
+    DisposableEffect(book.identity, book.coverUrl, book.canonicalUrl) {
+        onCoverVisibility(book, true)
+        onDispose { onCoverVisibility(book, false) }
+    }
     Row(
         modifier = Modifier
             .fillMaxWidth()
