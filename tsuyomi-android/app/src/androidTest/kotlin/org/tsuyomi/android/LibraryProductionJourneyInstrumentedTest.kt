@@ -183,7 +183,7 @@ class LibraryProductionJourneyInstrumentedTest {
             composeRule.onNodeWithText("新建收藏夹").performClick()
             waitForText("收藏夹名称")
             composeRule.onNodeWithText("选择书籍（已选 0 本）").assertIsDisplayed()
-            composeRule.onNode(hasSetTextAction()).performTextReplacement(title)
+            composeRule.onNode(hasSetTextAction() and hasText("收藏夹名称")).performTextReplacement(title)
             composeRule.onNodeWithText("选择书籍（已选 0 本）").performClick()
             composeRule.onNodeWithText("待选书").performClick()
             composeRule.onNodeWithContentDescription("完成选择").performClick()
@@ -232,7 +232,7 @@ class LibraryProductionJourneyInstrumentedTest {
             assertTrue(runBlocking { repository.collections().none { it.title == title } })
             composeRule.onNodeWithText("高级选项", substring = true).performClick()
             composeRule.onNodeWithText("按来源未安装筛选").assertExists()
-            composeRule.onNode(hasSetTextAction()).performTextReplacement(title)
+            composeRule.onNode(hasSetTextAction() and hasText("收藏夹名称")).performTextReplacement(title)
             saveVisibleRule()
             composeRule.waitUntil(10_000) { runBlocking { repository.collections().any { it.title == title } } }
             val created = runBlocking { repository.collections().single { it.title == title } }
@@ -380,9 +380,9 @@ class LibraryProductionJourneyInstrumentedTest {
             composeRule.onNodeWithContentDescription("更多操作").performClick()
             composeRule.onNodeWithText("编辑规则").performClick()
             composeRule.waitUntil(30_000) {
-                composeRule.onAllNodes(hasSetTextAction()).fetchSemanticsNodes().isNotEmpty()
+                composeRule.onAllNodes(hasSetTextAction() and hasText("收藏夹名称")).fetchSemanticsNodes().isNotEmpty()
             }
-            composeRule.onNode(hasSetTextAction()).performTextReplacement(changedTitle)
+            composeRule.onNode(hasSetTextAction() and hasText("收藏夹名称")).performTextReplacement(changedTitle)
             composeRule.activityRule.scenario.recreate()
             composeRule.waitUntil(30_000) {
                 composeRule.onAllNodes(hasSetTextAction() and hasText(changedTitle))
@@ -579,7 +579,7 @@ class LibraryProductionJourneyInstrumentedTest {
             composeRule.onNodeWithContentDescription("更多操作").performClick()
             composeRule.onNodeWithText("新建收藏夹").performClick()
             composeRule.onNodeWithText("高级选项", substring = true).performClick()
-            composeRule.onNode(hasSetTextAction()).performTextReplacement(title)
+            composeRule.onNode(hasSetTextAction() and hasText("收藏夹名称")).performTextReplacement(title)
             composeRule.onNodeWithText("选择已有标签").performScrollTo().performClick()
             composeRule.onNodeWithText("本地乙").performClick()
             composeRule.onNodeWithText("来源甲").performClick()
@@ -682,7 +682,7 @@ class LibraryProductionJourneyInstrumentedTest {
             composeRule.onNodeWithContentDescription("更多操作").performClick()
             composeRule.onNodeWithText("新建收藏夹").performClick()
             composeRule.onNodeWithText("高级选项", substring = true).performClick()
-            composeRule.onAllNodes(hasSetTextAction())[0].performTextReplacement(title)
+            composeRule.onNode(hasSetTextAction() and hasText("收藏夹名称")).performTextReplacement(title)
             if (composeRule.onAllNodes(hasSetTextAction()).fetchSemanticsNodes().size == 1) {
                 composeRule.onNodeWithText("输入其他标签").performScrollTo().performClick()
             }
