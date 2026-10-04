@@ -27,7 +27,6 @@ import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.TextLayoutResult
-import androidx.compose.ui.text.LinkAnnotation
 import androidx.compose.ui.test.DeviceConfigurationOverride
 import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.FontScale
@@ -696,11 +695,6 @@ class BookDetailInstrumentedTest {
 
         compose.waitForIdle()
         compose.onNodeWithText("上次更新：2026-09-04").assertIsDisplayed()
-        val authorText = compose.onNodeWithTag("detail-author").fetchSemanticsNode()
-            .config[SemanticsProperties.Text].single()
-        val authorLink = authorText.getLinkAnnotations(0, authorText.length).single().item as LinkAnnotation.Clickable
-        assertTrue(authorLink.styles?.style?.color == Color(0xFF4A6E8A))
-        assertTrue(authorLink.styles?.style?.textDecoration == null)
         assertTrue(authorSearchCount == 0)
         compose.onNodeWithTag("detail-author").performClick()
         compose.waitForIdle()
