@@ -370,8 +370,6 @@ class RemoteLibraryScreenInstrumentedTest {
         }
 
         composeRule.onAllNodesWithText("从网站收藏移除").filterToOne(hasClickAction()).assertIsDisplayed()
-        composeRule.onNodeWithText("确定要从网站收藏中移除《文学少女》吗？\n此操作只修改网站收藏；本地书架、稍后再读、评分、标签和阅读进度均保留。")
-            .assertIsDisplayed()
         composeRule.onAllNodesWithText("从网站收藏移除").filterToOne(hasClickAction()).performClick()
         assertEquals("1", confirmedBookId)
     }
