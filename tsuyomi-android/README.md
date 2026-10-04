@@ -3,7 +3,7 @@
 
 # Tsuyomi Android
 
-<img src="app/src/main/res/drawable-nodpi/ic_launcher.png" alt="Tsuyomi F6R 应用图标" width="112" height="112">
+<img src="app/src/main/res/drawable-nodpi/tsuyomi_launcher_artwork.png" alt="Tsuyomi F6R 应用图标" width="112" height="112">
 
 本地优先的原生 Android 轻小说阅读器。使用 Kotlin 与 Jetpack Compose 构建，目标平台为 Android 10 及以上版本（`minSdk 29`）；当前维护重点是 Standard 界面，E-ink 保留但冻结。
 

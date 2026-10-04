@@ -19,6 +19,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -203,13 +204,13 @@ fun CollectionRuleScreen(
     nameError: Boolean,
     invalidConditions: Set<List<Int>>,
     saving: Boolean,
-    saveFailure: String? = null,
     onTitleChange: (String) -> Unit,
     onTreeChange: (SmartDraftNode.Group) -> Unit,
-    focusedPath: List<Int> = emptyList(),
-    onFocusChange: (List<Int>) -> Unit = {},
     onSave: () -> Unit,
     modifier: Modifier = Modifier,
+    saveFailure: String? = null,
+    focusedPath: List<Int> = emptyList(),
+    onFocusChange: (List<Int>) -> Unit = {},
     creation: Boolean = false,
     advancedExpanded: Boolean = false,
     selectedBookCount: Int = 0,
@@ -486,7 +487,7 @@ private fun RuleConditionEditor(
                 }
                 var expanded by remember(path) { mutableStateOf(false) }
                 var tagFilter by rememberSaveable(path) { mutableStateOf("") }
-                var visibleCount by rememberSaveable(path) { mutableStateOf(40) }
+                var visibleCount by rememberSaveable(path) { mutableIntStateOf(40) }
                 var customInput by rememberSaveable(path) {
                     mutableStateOf(selectedTags == null || selectedTags.any { it !in tagChoices })
                 }

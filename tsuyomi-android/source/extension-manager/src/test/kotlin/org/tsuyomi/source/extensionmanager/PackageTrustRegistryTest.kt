@@ -46,6 +46,31 @@ class PackageTrustRegistryTest {
 
         assertEquals(ExtensionInstallError.PACKAGE_GRANT_REQUIRED, rejection.error)
         assertEquals(installed.candidate.packageSha256, installer.readVerifiedActive(installed.candidate.manifest.sourceId)?.packageSha256)
+
+        val failingTrust = object : PackageActivationTrust by trust {
+            override fun activationSucceeded(prepared: PreparedExtensionInstall) {
+                throw PackageTrustException(PackageTrustError.STORAGE_UNAVAILABLE)
+            }
+        }
+        trust.approve(declined, userPublisher)
+        assertEquals(PackageTrustError.STORAGE_UNAVAILABLE, assertThrows(PackageTrustException::class.java) {
+            newInstaller(root, HxpArchiveVerifier(InMemoryPublisherKeyStore(listOf(userPublisher))), failingTrust)
+                .activate(declined, ExtensionInstallApproval.approve(declined))
+        }.error)
+        val afterFailure = PackageTrustRegistry(File(root, "package-trust"))
+        assertTrue(afterFailure.isApproved(installed.candidate))
+        assertFalse(afterFailure.isApproved(declined.candidate))
+        assertEquals(userPublisher.fingerprint, afterFailure.publisherKeys.resolve(userPublisher.keyId)?.fingerprint)
+        assertEquals(installed.candidate.packageSha256, installer.readVerifiedActive(installed.candidate.manifest.sourceId)?.packageSha256)
+
+        trust.approve(declined, userPublisher)
+        installer.activate(declined, ExtensionInstallApproval.approve(declined))
+        val afterUpdate = PackageTrustRegistry(File(root, "package-trust"))
+        assertTrue(afterUpdate.isApproved(declined.candidate))
+        assertEquals(userPublisher.fingerprint, afterUpdate.publisherKeys.resolve(userPublisher.keyId)?.fingerprint)
+        assertEquals(declined.candidate.packageSha256,
+            newInstaller(root, HxpArchiveVerifier(afterUpdate.publisherKeys), afterUpdate)
+                .readVerifiedActive(declined.candidate.manifest.sourceId)?.packageSha256)
     }
 
     @Test
@@ -261,6 +286,49 @@ class PackageTrustRegistryTest {
         assertEquals(ExtensionInstallError.PACKAGE_GRANT_REQUIRED, assertThrows(ExtensionInstallException::class.java) {
             installer.activate(prepared, ExtensionInstallApproval.approve(prepared))
         }.error)
+    }
+
+    @Test
+    fun failedSignedActivationDoesNotRetainUnknownKeyOrGrant() {
+        for (postWriteFailure in listOf(false, true)) {
+            val root = Files.createTempDirectory("signed-activation-failure").toFile()
+            try {
+                val fixture = signedFixture()
+                val publisher = PublisherKey(fixture.publisher.keyId, fixture.publisher.publicKey, PublisherTrust.USER_ADDED)
+                val trustDirectory = File(root, "trust")
+                val trust = PackageTrustRegistry(trustDirectory)
+                val activationTrust = if (postWriteFailure) object : PackageActivationTrust by trust {
+                    override fun activationSucceeded(prepared: PreparedExtensionInstall) {
+                        throw PackageTrustException(PackageTrustError.STORAGE_UNAVAILABLE)
+                    }
+                } else trust
+                val installer = newInstaller(root, HxpArchiveVerifier(InMemoryPublisherKeyStore(listOf(publisher))), activationTrust)
+                val archive = fixture.writeToTemporaryFile()
+                val prepared = try { installer.prepare(archive) } finally { archive.delete() }
+                if (!postWriteFailure) {
+                    repeat(16) { File(root, "no-backup/extensions/occupied-$it").writeText("occupied") }
+                }
+                trust.approve(prepared, publisher, retainPublisherKey = true)
+                if (postWriteFailure) {
+                    assertEquals(PackageTrustError.STORAGE_UNAVAILABLE, assertThrows(PackageTrustException::class.java) {
+                        installer.activate(prepared, ExtensionInstallApproval.approve(prepared))
+                    }.error)
+                } else {
+                    assertEquals(ExtensionInstallError.STORAGE_UNAVAILABLE, assertThrows(ExtensionInstallException::class.java) {
+                        installer.activate(prepared, ExtensionInstallApproval.approve(prepared))
+                    }.error)
+                }
+                val restarted = PackageTrustRegistry(trustDirectory)
+                assertEquals(null, restarted.publisherKeys.resolve(publisher.keyId))
+                assertFalse(restarted.isApproved(prepared.candidate))
+                assertEquals(null, installer.readVerifiedActive(prepared.candidate.manifest.sourceId))
+                assertEquals(ExtensionInstallError.PACKAGE_GRANT_REQUIRED, assertThrows(ExtensionInstallException::class.java) {
+                    trust.requireExecutable(prepared.candidate)
+                }.error)
+            } finally {
+                root.deleteRecursively()
+            }
+        }
     }
 
 }

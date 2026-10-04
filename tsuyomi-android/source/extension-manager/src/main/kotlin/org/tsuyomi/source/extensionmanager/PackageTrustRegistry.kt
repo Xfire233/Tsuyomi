@@ -98,12 +98,12 @@ class PackageTrustRegistry(storageDirectory: File) : PackageActivationTrust {
     private val lockFile: File
     /** In-memory only until the approved local archive replaces the active bytes. */
     private val pendingUnsigned = IdentityHashMap<PreparedExtensionInstall, LocalUnsignedExecutionGrant>()
-    private val pendingSigned = IdentityHashMap<PreparedExtensionInstall, PendingSignedReturn>()
+    private val pendingSigned = IdentityHashMap<PreparedExtensionInstall, PendingSignedApproval>()
 
     @Volatile
     private var snapshot = Snapshot.empty()
 
-    /** User-entered keys retained only after a verified package receives an explicit grant. */
+    /** User-entered keys retained only after the explicitly approved archive activates. */
     val publisherKeys: PublisherKeyResolver = object : PublisherKeyResolver {
         override fun resolve(keyId: String): PublisherKey? = snapshot.keys[keyId]?.let(::copyPublisherKey)
         override fun isRevokedFingerprint(fingerprint: String): Boolean = false
@@ -258,7 +258,7 @@ class PackageTrustRegistry(storageDirectory: File) : PackageActivationTrust {
             if (checked.packageSha256 != candidate.packageSha256 || checked.manifest != candidate.manifest ||
                 checked.publisherFingerprint != candidate.publisherFingerprint
             ) throw PackageTrustException(PackageTrustError.INVALID_STATE)
-            synchronized(pendingSigned) { pendingSigned[prepared] = PendingSignedReturn(grant, copyPublisherKey(publisher), retainPublisherKey) }
+            synchronized(pendingSigned) { pendingSigned[prepared] = PendingSignedApproval(grant, copyPublisherKey(publisher), retainPublisherKey) }
             return grant
         }
         snapshot = transaction { state ->
@@ -276,6 +276,12 @@ class PackageTrustRegistry(storageDirectory: File) : PackageActivationTrust {
             ) {
                 throw PackageTrustException(PackageTrustError.SOURCE_IDENTITY_CONFLICT)
             }
+            if (candidate.publisherTrust == PublisherTrust.USER_ADDED) {
+                synchronized(pendingSigned) {
+                    pendingSigned[prepared] = PendingSignedApproval(grant, copyPublisherKey(publisher), retainPublisherKey)
+                }
+                return@transaction state.toSnapshot()
+            }
             val migrationReceipt = if (pinChangesPublisher) {
                 StoredMigrationReceipt(
                     sourceId = grant.sourceId,
@@ -289,16 +295,6 @@ class PackageTrustRegistry(storageDirectory: File) : PackageActivationTrust {
                 null
             }
             val next = state.copy(
-                keys = if (retainPublisherKey && candidate.publisherTrust == PublisherTrust.USER_ADDED && existingKey == null) {
-                    state.keys + StoredUserPublisherKey(publisher.keyId, encodedKey)
-                } else {
-                    state.keys
-                },
-                grants = if (candidate.publisherTrust == PublisherTrust.USER_ADDED && state.grants.none { it.matches(grant) }) {
-                    state.grants + StoredPackageGrant.from(grant)
-                } else {
-                    state.grants
-                },
                 migrationReceipts = if (migrationReceipt != null && state.migrationReceipts.none { it == migrationReceipt }) {
                     state.migrationReceipts + migrationReceipt
                 } else {
@@ -333,9 +329,9 @@ class PackageTrustRegistry(storageDirectory: File) : PackageActivationTrust {
                 return@transaction next.toSnapshot()
             }
             val signedReturn = candidate.manifest.sourceId.value in state.unsignedPins
-            val pendingReturn = if (signedReturn) synchronized(pendingSigned) { pendingSigned[prepared] } else null
-            if (signedReturn && (pendingReturn == null || pendingReturn.grant.packageSha256 != candidate.packageSha256 ||
-                pendingReturn.grant.publisherFingerprint != candidate.publisherFingerprint)
+            val pendingApproval = synchronized(pendingSigned) { pendingSigned[prepared] }
+            if (signedReturn && (pendingApproval == null || pendingApproval.grant.packageSha256 != candidate.packageSha256 ||
+                pendingApproval.grant.publisherFingerprint != candidate.publisherFingerprint)
             ) throw PackageTrustException(PackageTrustError.SOURCE_IDENTITY_CONFLICT)
             val pin = state.pins.singleOrNull { it.sourceId == candidate.manifest.sourceId.value }
             val changesPublisher = pin != null &&
@@ -343,28 +339,29 @@ class PackageTrustRegistry(storageDirectory: File) : PackageActivationTrust {
             if (changesPublisher && !state.migrationReceipts.any { it.matches(pin, candidate) }) {
                 throw PackageTrustException(PackageTrustError.SOURCE_IDENTITY_CONFLICT)
             }
-            if (pin == null || changesPublisher) {
+            if (pin == null || changesPublisher || pendingApproval != null) {
                 val next = state.copy(
                     pins = state.pins.filterNot { it.sourceId == candidate.manifest.sourceId.value } + StoredSourcePin(
                         sourceId = candidate.manifest.sourceId.value,
                         publisherKeyId = requireNotNull(candidate.manifest.publisherKeyId),
                         publisherFingerprint = requireNotNull(candidate.publisherFingerprint),
                     ),
-                    keys = if (pendingReturn?.retainPublisherKey == true && candidate.publisherTrust == PublisherTrust.USER_ADDED) {
-                        val encoded = Base64.getEncoder().encodeToString(pendingReturn.publisher.publicKey)
-                        val previous = state.keys.singleOrNull { it.keyId == pendingReturn.publisher.keyId }
+                    keys = if (pendingApproval?.retainPublisherKey == true && candidate.publisherTrust == PublisherTrust.USER_ADDED) {
+                        val encoded = Base64.getEncoder().encodeToString(pendingApproval.publisher.publicKey)
+                        val previous = state.keys.singleOrNull { it.keyId == pendingApproval.publisher.keyId }
                         if (previous != null && previous.publicKey != encoded) throw PackageTrustException(PackageTrustError.PUBLISHER_KEY_CONFLICT)
-                        if (previous == null) state.keys + StoredUserPublisherKey(pendingReturn.publisher.keyId, encoded) else state.keys
+                        if (previous == null) state.keys + StoredUserPublisherKey(pendingApproval.publisher.keyId, encoded) else state.keys
                     } else state.keys,
-                    grants = if (pendingReturn != null && candidate.publisherTrust == PublisherTrust.USER_ADDED &&
-                        state.grants.none { it.matches(pendingReturn.grant) }
-                    ) state.grants + StoredPackageGrant.from(pendingReturn.grant) else state.grants,
+                    grants = if (pendingApproval != null && candidate.publisherTrust == PublisherTrust.USER_ADDED &&
+                        state.grants.none { it.matches(pendingApproval.grant) }
+                    ) state.grants + StoredPackageGrant.from(pendingApproval.grant) else state.grants,
                     pinHistory = if (changesPublisher && pin != null && pin !in state.pinHistory) state.pinHistory + pin else state.pinHistory,
                     unsignedPins = state.unsignedPins - candidate.manifest.sourceId.value,
                     unsignedHistory = if (signedReturn) state.unsignedHistory + candidate.manifest.sourceId.value else state.unsignedHistory,
                     migrationReceipts = state.migrationReceipts.filterNot { it.matchesCandidate(candidate) },
                 ).validated()
                 writeState(next)
+                synchronized(pendingSigned) { pendingSigned.remove(prepared) }
                 next.toSnapshot()
             } else {
                 state.toSnapshot()
@@ -733,7 +730,7 @@ class PackageTrustRegistry(storageDirectory: File) : PackageActivationTrust {
     }
 
 
-    private data class PendingSignedReturn(
+    private data class PendingSignedApproval(
         val grant: PackageExecutionGrant,
         val publisher: PublisherKey,
         val retainPublisherKey: Boolean,

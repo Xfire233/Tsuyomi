@@ -63,8 +63,6 @@
     <string name="remote_library_pending_remove_description">从网站收藏移除结果待确认</string>
     <string name="remote_library_pending_other_description">网站收藏操作结果待确认</string>
     <string name="library_reconciliation_cancelled">同步已取消</string>
-    <string name="collection_existing_title">本地收藏夹</string>
-    <string name="collection_existing_empty">尚未创建收藏夹。</string>
     <string name="collection_kind_manual">手动收藏夹</string>
     <string name="collection_kind_smart">智能收藏夹</string>
     <string name="collection_kind_disabled_draft">禁用的订阅/兼容性草稿</string>
@@ -89,11 +87,9 @@
     <string name="collection_rule_invalid_name">请输入 1–512 字的收藏夹名称</string>
     <string name="collection_create_invalid_name">请输入 1–256 字的收藏夹名称</string>
     <string name="collection_rule_invalid_condition">请修正此条件</string>
-    <string name="collection_rule_select_field">选择条件</string>
     <string name="collection_rule_select_value">选择值</string>
     <string name="smart_rating_min">最低评分：%1$s</string>
     <string name="smart_rating_max">最高评分：%1$s</string>
-    <string name="collection_rule_saved">已保存</string>
     <string name="collection_match_all">匹配全部</string>
     <string name="collection_match_any">匹配任一</string>
     <string name="collection_rule_match_all_hint">同时符合以下条件</string>

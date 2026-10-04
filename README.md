@@ -3,7 +3,7 @@
 
 # Tsuyomi
 
-<img src="tsuyomi-android/app/src/main/res/drawable-nodpi/ic_launcher.png" alt="Tsuyomi 图标：珊瑚红的开放式つ与奶油色书页" width="112" height="112">
+<img src="tsuyomi-android/app/src/main/res/drawable-nodpi/tsuyomi_launcher_artwork.png" alt="Tsuyomi 图标：珊瑚红的开放式つ与奶油色书页" width="112" height="112">
 
 Tsuyomi 是一个本地优先的 Android 轻小说阅读器，使用 Kotlin 和 Jetpack Compose 开发。
 

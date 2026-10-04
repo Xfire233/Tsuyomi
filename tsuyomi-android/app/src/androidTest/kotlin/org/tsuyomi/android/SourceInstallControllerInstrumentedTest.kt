@@ -102,6 +102,34 @@ internal class SourceInstallControllerInstrumentedTest : SourceFlowInstrumentedT
             assertEquals(null, application.packageTrust.publisherKeys.resolve("tsuyomi-user-consent-test"))
             install.prepare(Uri.fromFile(archive), context.contentResolver)
             install.providePublisherKey(publicKey)
+            val occupied = List(16) { File(context.noBackupFilesDir, "extensions/occupied-$it") }
+            try {
+                occupied.forEach { it.writeText("occupied") }
+                install.approve(allowDowngrade = false, allowNonOfficial = true)
+                assertEquals(BrowseInstallFailure.STORAGE, (install.state as BrowseUiState.Failure).reason)
+                assertEquals(null, install.activePackage)
+                assertEquals(null, application.packageTrust.publisherKeys.resolve("tsuyomi-user-consent-test"))
+                val afterFailure = PackageTrustRegistry(trustDirectory)
+                assertEquals(null, afterFailure.publisherKeys.resolve("tsuyomi-user-consent-test"))
+                val candidate = org.tsuyomi.source.extensionmanager.HxpArchiveVerifier(
+                    org.tsuyomi.source.extensionmanager.InMemoryPublisherKeyStore(listOf(PublisherKey(
+                        "tsuyomi-user-consent-test", Base64.getDecoder().decode(publicKey), PublisherTrust.USER_ADDED,
+                    ))),
+                ).verify(archive)
+                assertFalse(afterFailure.isApproved(candidate))
+                val retry = SourceInstallController(context, library, packageTrust = afterFailure)
+                retry.restoreInstalled()
+                assertEquals(null, retry.activePackage)
+                retry.prepare(Uri.fromFile(archive), context.contentResolver)
+                assertTrue(retry.state is BrowseUiState.PublisherKeyRequired)
+                retry.dismissApproval()
+            } finally {
+                occupied.forEach { it.delete() }
+            }
+            install.dismissFailure()
+            install.prepare(Uri.fromFile(archive), context.contentResolver)
+            assertTrue(install.state is BrowseUiState.PublisherKeyRequired)
+            install.providePublisherKey(publicKey)
             install.approve(allowDowngrade = false, allowNonOfficial = true)
             val active = requireNotNull(install.activePackage)
             assertTrue(application.packageTrust.isApproved(active))

@@ -10,7 +10,7 @@ path = [
   "tsuyomi-android/README.md",
   "tsuyomi-android/app/src/main/res/values/strings.xml",
   "tsuyomi-android/feature/browse/src/main/res/values/strings.xml",
-  "tsuyomi-android/app/src/main/res/drawable-nodpi/ic_launcher.png",
+  "tsuyomi-android/app/src/main/res/drawable-nodpi/tsuyomi_launcher_artwork.png",
   "tsuyomi-android/feature/settings/src/main/res/raw/apache_license_2_0.txt",
   "tsuyomi-android/reader/ui/src/main/res/values/strings.xml",
   "tsuyomi-protocol/package.json",

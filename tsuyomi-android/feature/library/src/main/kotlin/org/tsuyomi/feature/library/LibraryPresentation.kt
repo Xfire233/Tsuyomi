@@ -48,7 +48,6 @@ internal fun LibraryPresentation(
     state: LibraryUiState,
     primaryTabStates: Map<SystemLibraryFilter, LibraryUiState>,
     collections: List<LibraryCollection>,
-    currentCollectionId: String? = null,
     showNavigationNodes: Boolean,
     onSelectTab: suspend (SystemLibraryFilter) -> Unit,
     onOpenCollection: (LibraryCollection) -> Unit,
@@ -73,6 +72,7 @@ internal fun LibraryPresentation(
     onViewportSettled: suspend (Int, Int) -> Unit,
     reorderEnabled: Boolean,
     modifier: Modifier = Modifier,
+    currentCollectionId: String? = null,
 ) {
     val scope = rememberCoroutineScope()
     val snackbarHostState = rememberTsuyomiSnackbarState()
