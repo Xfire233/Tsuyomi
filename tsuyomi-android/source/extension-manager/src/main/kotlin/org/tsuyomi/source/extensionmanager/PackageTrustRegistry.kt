@@ -779,6 +779,9 @@ class CompositePublisherKeyResolver(
     override val hasGlobalRevocationAuthority: Boolean
         get() = resolvers.any { it.hasGlobalRevocationAuthority }
 
+    override fun isGloballyRevokedPackage(packageSha256: String): Boolean =
+        resolvers.any { it.isGloballyRevokedPackage(packageSha256) }
+
     override fun resolve(keyId: String): PublisherKey? {
         val candidates = resolvers.mapNotNull { it.resolve(keyId) }
         val trust = when {

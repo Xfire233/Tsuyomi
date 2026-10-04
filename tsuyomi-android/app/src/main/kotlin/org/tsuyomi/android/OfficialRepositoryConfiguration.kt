@@ -44,7 +44,7 @@ internal object OfficialRepositoryConfiguration {
 
     fun isTrusted(packageInfo: VerifiedHxpPackage, keys: PublisherKeyResolver, packageTrust: PackageTrustRegistry): Boolean {
         if (packageInfo.publisherTrust == PublisherTrust.LOCAL_UNSIGNED) {
-            return (!keys.hasGlobalRevocationAuthority || !keys.isRevokedPackage(packageInfo.packageSha256)) &&
+            return !keys.isGloballyRevokedPackage(packageInfo.packageSha256) &&
                 packageTrust.isApproved(packageInfo)
         }
         val keyId = packageInfo.manifest.publisherKeyId ?: return false

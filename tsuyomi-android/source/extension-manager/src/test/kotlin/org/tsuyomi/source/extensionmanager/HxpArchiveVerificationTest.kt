@@ -226,6 +226,28 @@ class HxpArchiveVerificationTest {
     }
 
     @Test
+    fun unsignedRevocationIsScopedToGlobalAuthoritiesThroughNestedResolvers() {
+        val unsigned = unsignedFixture()
+        val digest = sha256(unsigned.bytes)
+        val officialKeys = InMemoryPublisherKeyStore(emptyList())
+        val official = object : PublisherKeyResolver by officialKeys {
+            override val hasGlobalRevocationAuthority = true
+        }
+        val subscription = InMemoryPublisherKeyStore(emptyList()).also { it.revokePackage(digest) }
+        val resolver = CompositePublisherKeyResolver(listOf(
+            CompositePublisherKeyResolver(listOf(official, subscription)),
+            CompositePublisherKeyResolver(listOf(subscription)),
+        ))
+        val verifier = HxpArchiveVerifier(resolver)
+        assertEquals(digest, verifier.verify(unsigned.bytes).packageSha256)
+
+        officialKeys.revokePackage(digest)
+        assertEquals(HxpVerificationError.REVOKED_PACKAGE, assertThrows(HxpVerificationException::class.java) {
+            verifier.verify(unsigned.bytes)
+        }.error)
+    }
+
+    @Test
     fun unsignedPayloadIntegrityFailsClosedWithoutPublisherKey() {
         val tampered = unsignedFixture(payload = "export const modified = true;".toByteArray(), indexedPayload = ENTRY_BYTES)
         assertEquals(HxpVerificationError.INTEGRITY_MISMATCH, assertThrows(HxpVerificationException::class.java) {

@@ -660,6 +660,22 @@ class LibraryProductionJourneyInstrumentedTest {
         val application = composeRule.activity.application as TsuyomiApplication
         val title = "智能草稿-${UUID.randomUUID()}"
         val repository = application.libraryRepository
+        fun editCompletionCondition() {
+            val field = hasSetTextAction() and hasText("完结")
+            val disclosure = hasText("输入其他标签") and !hasSetTextAction()
+            composeRule.waitUntil(10_000) {
+                composeRule.onAllNodes(field).fetchSemanticsNodes().isNotEmpty() ||
+                    composeRule.onAllNodes(disclosure).fetchSemanticsNodes().isNotEmpty()
+            }
+            if (composeRule.onAllNodes(field).fetchSemanticsNodes().isEmpty()) {
+                val disclosures = composeRule.onAllNodes(disclosure)
+                disclosures[disclosures.fetchSemanticsNodes().lastIndex].performScrollTo().performClick()
+            }
+            composeRule.waitUntil(10_000) {
+                composeRule.onAllNodes(field).fetchSemanticsNodes().size == 1
+            }
+            composeRule.onNode(field).performScrollTo().performTextReplacement("科幻")
+        }
         try {
             runBlocking { application.displayController.setDisplayPreference(DisplayPreference.STANDARD) }
             waitForText("书架")
@@ -718,13 +734,7 @@ class LibraryProductionJourneyInstrumentedTest {
             composeRule.onNodeWithContentDescription("更多操作").performClick()
             composeRule.onNodeWithText("编辑规则").performClick()
             waitForText("编辑智能收藏夹")
-            if (composeRule.onAllNodes(hasSetTextAction()).fetchSemanticsNodes().size == 1) {
-                composeRule.onNodeWithText("输入其他标签").performScrollTo().performClick()
-            }
-            composeRule.waitUntil(10_000) {
-                composeRule.onAllNodes(hasSetTextAction()).fetchSemanticsNodes().size >= 2
-            }
-            composeRule.onAllNodes(hasSetTextAction())[1].performTextReplacement("科幻")
+            editCompletionCondition()
             closeSoftKeyboard()
             composeRule.runOnUiThread { composeRule.activity.onBackPressedDispatcher.onBackPressed() }
             waitForText("放弃修改？")
@@ -740,10 +750,7 @@ class LibraryProductionJourneyInstrumentedTest {
             composeRule.onNodeWithContentDescription("更多操作").performClick()
             composeRule.onNodeWithText("编辑规则").performClick()
             waitForText("编辑智能收藏夹")
-            composeRule.waitUntil(10_000) {
-                composeRule.onAllNodes(hasSetTextAction()).fetchSemanticsNodes().size >= 2
-            }
-            composeRule.onAllNodes(hasSetTextAction())[1].performTextReplacement("科幻")
+            editCompletionCondition()
             saveVisibleRule()
             composeRule.waitUntil(10_000) {
                 runBlocking {

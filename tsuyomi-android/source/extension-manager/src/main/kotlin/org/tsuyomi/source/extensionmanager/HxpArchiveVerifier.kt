@@ -170,7 +170,7 @@ class HxpArchiveVerifier(
             if (sha256(canonicalFiles) != manifest.contentDigest) fail(HxpVerificationError.INTEGRITY_MISMATCH)
 
             if (manifest.publisherKeyId == null) {
-                if (publisherKeys.hasGlobalRevocationAuthority && publisherKeys.isRevokedPackage(packageSha256)) {
+                if (publisherKeys.isGloballyRevokedPackage(packageSha256)) {
                     fail(HxpVerificationError.REVOKED_PACKAGE)
                 }
                 return VerifiedHxpPackage(

@@ -94,6 +94,7 @@ class SourceInstallController(
     private var preparedRepository: OfficialRepositoryClient? = null
     private var preparedPublisher: org.tsuyomi.source.extensionmanager.PublisherKey? = null
     private var preparedPublisherFromInput = false
+    private var preparedInstaller: ExtensionInstaller? = null
     private var pendingLocalArchive: File? = null
     private var installedLoaded = false
     var installedPackages: List<VerifiedHxpPackage> by mutableStateOf(emptyList())
@@ -315,10 +316,12 @@ class SourceInstallController(
                     override fun isRevokedFingerprint(fingerprint: String) = false
                     override fun isRevokedPackage(packageSha256: String) = false
                 }
-                ExtensionInstaller(
+                val localInstaller = ExtensionInstaller(
                     HxpArchiveVerifier(org.tsuyomi.source.extensionmanager.CompositePublisherKeyResolver(listOf(publisherKeys, ephemeral))),
                     store, stagingDirectory, packageExecutionTrust = packageTrust,
-                ).prepare(archive)
+                )
+                preparedInstaller = localInstaller
+                localInstaller.prepare(archive)
             } finally {
                 archive.delete()
             }
@@ -434,7 +437,7 @@ class SourceInstallController(
                             allowPublisherTransition = allowLegacyMigration,
                         )
                     }
-                    installer.activate(candidate, ExtensionInstallApproval.approve(candidate, allowDowngrade, allowLegacyMigration))
+                    (preparedInstaller ?: installer).activate(candidate, ExtensionInstallApproval.approve(candidate, allowDowngrade, allowLegacyMigration))
                 }
                 activePackage = candidate.candidate
                 persistActiveSource(candidate.candidate.manifest.sourceId.value)
@@ -569,6 +572,7 @@ class SourceInstallController(
         preparedRepository = null
         preparedPublisher = null
         preparedPublisherFromInput = false
+        preparedInstaller = null
         pendingLocalArchive?.delete()
         pendingLocalArchive = null
     }

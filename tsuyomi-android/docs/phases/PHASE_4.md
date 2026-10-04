@@ -745,6 +745,19 @@ F-014 `app/SourceRouteScopedOwners.kt` mutation status and `feature/book/BookDet
 ### PR admission continuation — 2026-10-05
 
 - After the completed dual-repository source delivery, the maintainer directed continuation. The next bounded stage is creating the corresponding main/provider PRs, final-head independent Adviser review, and the existing strict hosted admission checks. Record the exact PR heads, bases, run IDs and actual step results; earlier local proof and package acceptance do not replace them.
-- Main admission retains `repository-policy`, `protocol-conformance`, `extensions-baseline`, `android-build-test-lint-goldens` and `android-api29-instrumentation`; provider admission retains `verify`, strict base freshness and resolved conversations. This continuation does not relax protection, upgrade LOW to local HIGH CI, authorize golden updates, merge either PR, publish/sign/tag a release, replace the canonical artifact/device, restore EINK or perform website writes.
+- Main admission retains `repository-policy`, `protocol-conformance`, `extensions-baseline`, `android-build-test-lint-goldens` and `android-api29-instrumentation`; provider admission retains `verify`, strict base freshness and resolved conversations. This continuation does not relax protection, authorize golden updates outside the explicitly approved Standard set below, merge either PR, publish/sign/tag a release, replace the canonical artifact/device, restore EINK or perform website writes.
+
+### Explicit HIGH local-first admission order — 2026-10-05
+
+- After observing the hosted failures, the maintainer explicitly directed HIGH mode and required the full local CI gate to pass before the next hosted CI run. This supersedes the preceding LOW-only verification boundary for this admission package, not the independent human/golden or release boundaries.
+- Apply the existing diagnostic order: fix an evidenced failure, exercise its focused scenario and adjacent sequence, then run the complete planner-selected local gate with `tools/android_api29.py --mode high --build` and the current immutable base/head plus recorded worktree overlay. A focused task/class result is not the full gate. Do not push a new PR head or trigger another hosted run before the complete local gate passes; retain diagnostics for any failure. Canonical APK/AVD, website data and frozen EINK remain untouched.
+
+### Maintainer-approved Standard golden replacement — 2026-10-05
+
+- After the complete local HIGH gate produced28 real screenshot-comparison failures, the maintainer explicitly approved replacement of the28 Standard references inspected against their current render/diff pairs. This is the human's bounded baseline decision, not an agent-generated approval; it supersedes the no-golden-update hold only for this exact set.
+- Approved input: local run `tsuyomi-ci-20261004T190355Z-4953fc6e`, base `930324d897909f42f1b56d31e5b417db0e299d5d`, resolved head `aac2ad09cb199c35d4bdc24e58c0b287fcd39826` plus recorded tracked overlay, review build identity `087081272466f231d59c7eccc3939ceda195401365d971b9f36d330a7c2ac84a`. The frozen28-pair manifest SHA-256 is `469f37655094a49a669c170ee2b60b6f189648f92b73e75b95d2ec02a8d28685`; it binds each reference/current/diff path, dimensions and SHA-256. Scope: `:core:ui`11, `:feature:browse`1, `:feature:library`7 and `:feature:settings`9 current Standard references, including the retained explicit Dynamic Color previews. No EINK reference, test, profile or authority is changed.
+- Preserve production visuals, screenshot inputs/assertions/tolerances and retained frozen references. Update only the approved files; validate the exact four screenshot tasks, then rerun the complete planner-selected HIGH local gate. Only a full local PASS permits the new PR-head push and hosted checks; focused screenshot success does not. Independent final-head Adviser and protected hosted checks remain mandatory, with merge/release/canonical/website permissions unchanged.
+
+
 
 

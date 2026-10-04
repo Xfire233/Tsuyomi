@@ -1131,22 +1131,24 @@ class ManualVerificationHandoffInstrumentedTest {
         composeRule.onNodeWithContentDescription("复制所选到本地书架").performClick()
         waitForText("复制网站收藏到本地书架")
         composeRule.onNodeWithText("确认复制到本地书架").performClick()
-        waitForText("已复制 1 本，新增 1 本到本地书架；未向网站写入。")
+        composeRule.waitUntil(15_000) {
+            runBlocking {
+                (composeRule.activity.application as TsuyomiApplication).libraryRepository.libraryEntries()
+                    .filter { it.book.identity.sourceId == WENKU8_SOURCE_ID }
+                    .map { it.book.identity.remoteBookId }.toSet() == setOf("1234")
+            }
+        }
         assertEquals(0, Phase2SourceGateway.websiteMutationCount())
 
         composeRule.onNodeWithContentDescription("更多操作").performClick()
         composeRule.onNodeWithText("全部复制到本地书架").performClick()
-        waitForText("已复制 2 本，新增 1 本到本地书架；未向网站写入。")
         assertEquals(0, Phase2SourceGateway.websiteMutationCount())
-        runBlocking {
-            val application = composeRule.activity.application as TsuyomiApplication
-            assertEquals(
-                setOf("1234", "5678"),
-                application.libraryRepository.libraryEntries()
+        composeRule.waitUntil(15_000) {
+            runBlocking {
+                (composeRule.activity.application as TsuyomiApplication).libraryRepository.libraryEntries()
                     .filter { it.book.identity.sourceId == WENKU8_SOURCE_ID }
-                    .map { it.book.identity.remoteBookId }
-                    .toSet(),
-            )
+                    .map { it.book.identity.remoteBookId }.toSet() == setOf("1234", "5678")
+            }
         }
 
         composeRule.activityRule.scenario.recreate()

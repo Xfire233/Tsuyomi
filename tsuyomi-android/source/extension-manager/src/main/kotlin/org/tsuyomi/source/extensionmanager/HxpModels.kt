@@ -184,6 +184,10 @@ interface PublisherKeyResolver {
     fun isRevokedFingerprint(fingerprint: String): Boolean
     fun isRevokedPackage(packageSha256: String): Boolean
 
+    /** Digest-only revocation must come from the same globally authorized resolver. */
+    fun isGloballyRevokedPackage(packageSha256: String): Boolean =
+        hasGlobalRevocationAuthority && isRevokedPackage(packageSha256)
+
     /** Scoped overloads preserve publisher provenance and explicitly configured root authority. */
     fun isRevokedPublisher(keyId: String, fingerprint: String): Boolean = isRevokedFingerprint(fingerprint)
     fun isRevokedPackage(packageSha256: String, keyId: String, fingerprint: String): Boolean =
