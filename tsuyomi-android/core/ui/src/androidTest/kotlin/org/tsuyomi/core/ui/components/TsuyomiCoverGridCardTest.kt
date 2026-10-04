@@ -196,21 +196,25 @@ class TsuyomiCoverGridCardTest {
         }
     }
 
+    @OptIn(ExperimentalTestApi::class)
     @Test
-    fun shortCjkCoverTitleUsesBalancedTwoLineBreaking() {
-        val title = "邻家的天使大人不知不觉把我惯成废人"
+    fun standardThreeColumnTitleUsesAvailableLineWidth() {
+        // 1080px / 420dpi = 411dp; the Home grid's 16dp gutters and 8dp gaps leave ~121dp per card.
+        val title = "奇招百出的维多利亚"
         composeRule.setContent {
-            DisplayEnvironmentProvider(standardEnvironment) {
-                TsuyomiTheme(environment = standardEnvironment) {
-                    Box(Modifier.width(140.dp)) {
-                        TsuyomiCoverGridCard(
-                            title = title,
-                            supportingText = "阅读中",
-                            onClick = {},
-                            cover = { Box(Modifier.fillMaxSize()) },
-                            modifier = Modifier.testTag("balanced-cover-card"),
-                            titleInsideCover = true,
-                        )
+            DeviceConfigurationOverride(DeviceConfigurationOverride.FontScale(1f)) {
+                DisplayEnvironmentProvider(standardEnvironment) {
+                    TsuyomiTheme(environment = standardEnvironment) {
+                        Box(Modifier.width(121.dp)) {
+                            TsuyomiCoverGridCard(
+                                title = title,
+                                supportingText = null,
+                                onClick = {},
+                                cover = { Box(Modifier.fillMaxSize()) },
+                                modifier = Modifier.testTag("three-column-cover-card"),
+                                titleInsideCover = true,
+                            )
+                        }
                     }
                 }
             }
@@ -220,11 +224,53 @@ class TsuyomiCoverGridCardTest {
         composeRule.onNodeWithText(title, useUnmergedTree = true)
             .performSemanticsAction(SemanticsActions.GetTextLayoutResult) { it(layouts) }
         val layout = layouts.single()
-        assertTrue("Expected a two-line title, found ${layout.lineCount}", layout.lineCount == 2)
-        val firstWidth = layout.getLineRight(0) - layout.getLineLeft(0)
-        val secondWidth = layout.getLineRight(1) - layout.getLineLeft(1)
-        val balance = minOf(firstWidth, secondWidth) / maxOf(firstWidth, secondWidth)
-        assertTrue("CJK title lines are visibly unbalanced: $firstWidth vs $secondWidth", balance >= 0.8f)
+        assertTrue("Expected two title lines at actual width: ${layout.lineCount}", layout.lineCount == 2)
+        val firstLineEnd = layout.getLineEnd(0, visibleEnd = true)
+        assertTrue("First line unexpectedly contains the whole title", firstLineEnd < title.length)
+        val trailingSlack = layout.size.width - layout.getLineRight(0)
+        val nextGlyphWidth = layout.getBoundingBox(firstLineEnd).width
+        val card = composeRule.onNodeWithTag("three-column-cover-card").fetchSemanticsNode().boundsInRoot
+        val symmetricInset = with(composeRule.density) { 8.dp.toPx() }
+        assertTrue("Unexpected three-column card width ${card.width}px", kotlin.math.abs(card.width - with(composeRule.density) { 121.dp.toPx() }) <= 2f)
+        assertTrue("Unexpected title viewport ${layout.size.width}px in ${card.width}px card", kotlin.math.abs(layout.size.width - (card.width - symmetricInset * 2)) <= 2f)
+        assertTrue("First line breaks at $firstLineEnd with ${trailingSlack}px unused (next glyph ${nextGlyphWidth}px)",
+            firstLineEnd >= 7 && trailingSlack < nextGlyphWidth + 1f)
+    }
+
+    @OptIn(ExperimentalTestApi::class)
+    @Test
+    fun standardThreeColumnTitleKeepsClosingPunctuationWithItsPrecedingGlyph() {
+        val title = "暴怒千金发誓复仇。～凭借魔导书之力打垮祖国～"
+        composeRule.setContent {
+            DeviceConfigurationOverride(DeviceConfigurationOverride.FontScale(1f)) {
+                DisplayEnvironmentProvider(standardEnvironment) {
+                    TsuyomiTheme(environment = standardEnvironment) {
+                        Box(Modifier.width(121.dp)) {
+                            TsuyomiCoverGridCard(
+                                title = title,
+                                supportingText = null,
+                                onClick = {},
+                                cover = { Box(Modifier.fillMaxSize()) },
+                                titleInsideCover = true,
+                            )
+                        }
+                    }
+                }
+            }
+        }
+
+        val layouts = mutableListOf<TextLayoutResult>()
+        composeRule.onNodeWithText(title, useUnmergedTree = true)
+            .performSemanticsAction(SemanticsActions.GetTextLayoutResult) { it(layouts) }
+        val layout = layouts.single()
+        val firstLineEnd = layout.getLineEnd(0, visibleEnd = true)
+        val slack = layout.size.width - layout.getLineRight(0)
+        val firstGlyphWidth = layout.getBoundingBox(firstLineEnd).width
+        val closingPunctuationWidth = layout.getBoundingBox(firstLineEnd + 1).width
+
+        assertTrue("Closing punctuation must not start a new line", firstLineEnd == title.indexOf("仇。"))
+        assertTrue("A single glyph fits but the legal glyph/punctuation pair does not: slack=$slack",
+            slack >= firstGlyphWidth && slack < firstGlyphWidth + closingPunctuationWidth)
     }
 
     private companion object {

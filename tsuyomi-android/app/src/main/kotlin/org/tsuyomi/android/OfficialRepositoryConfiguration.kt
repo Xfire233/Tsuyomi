@@ -10,6 +10,7 @@ import java.util.Base64
 import org.tsuyomi.source.extensionmanager.OfficialRepositoryClient
 import org.tsuyomi.source.extensionmanager.PublisherKey
 import org.tsuyomi.source.extensionmanager.PublisherTrust
+import org.tsuyomi.source.extensionmanager.PackageTrustRegistry
 import org.tsuyomi.source.extensionmanager.RepositoryRoot
 import org.tsuyomi.source.extensionmanager.PublisherKeyResolver
 import org.tsuyomi.source.extensionmanager.VerifiedHxpPackage
@@ -41,18 +42,24 @@ internal object OfficialRepositoryConfiguration {
         ),
     )
 
-    fun isTrusted(packageInfo: VerifiedHxpPackage, keys: PublisherKeyResolver): Boolean =
-        !keys.isRevokedPublisher(packageInfo.manifest.publisherKeyId, packageInfo.publisherFingerprint) &&
-            !keys.isRevokedPackage(packageInfo.packageSha256, packageInfo.manifest.publisherKeyId, packageInfo.publisherFingerprint) &&
-            keys.resolve(packageInfo.manifest.publisherKeyId)?.fingerprint == packageInfo.publisherFingerprint
+    fun isTrusted(packageInfo: VerifiedHxpPackage, keys: PublisherKeyResolver, packageTrust: PackageTrustRegistry): Boolean {
+        if (packageInfo.publisherTrust == PublisherTrust.LOCAL_UNSIGNED) {
+            return (!keys.hasGlobalRevocationAuthority || !keys.isRevokedPackage(packageInfo.packageSha256)) &&
+                packageTrust.isApproved(packageInfo)
+        }
+        val keyId = packageInfo.manifest.publisherKeyId ?: return false
+        val fingerprint = packageInfo.publisherFingerprint ?: return false
+        return !keys.isRevokedPublisher(keyId, fingerprint) &&
+            !keys.isRevokedPackage(packageInfo.packageSha256, keyId, fingerprint) &&
+            keys.resolve(keyId)?.fingerprint == fingerprint && packageTrust.isApproved(packageInfo)
+    }
 
     fun admission(context: Context): (VerifiedHxpPackage) -> Boolean {
         val application = context.applicationContext as TsuyomiApplication
         val keys = publisherKeys(application.officialRepository, application)
         return { packageInfo ->
-            isTrusted(packageInfo, keys) &&
-                (keys.resolve(packageInfo.manifest.publisherKeyId)?.trust != PublisherTrust.USER_ADDED ||
-                    application.packageTrust.isApproved(packageInfo)) &&
+            isTrusted(packageInfo, keys, application.packageTrust) &&
+                (packageInfo.publisherTrust != PublisherTrust.USER_ADDED || application.packageTrust.isApproved(packageInfo)) &&
                 File(context.noBackupFilesDir, "extensions/active/${packageInfo.manifest.sourceId.value}.hxp").isFile
         }
     }

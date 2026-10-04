@@ -12,7 +12,6 @@ import androidx.compose.ui.res.stringResource
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.navigation.NavGraphBuilder
 import androidx.navigation.NavHostController
-import androidx.navigation.compose.composable
 import kotlinx.coroutines.launch
 import org.tsuyomi.core.display.DisplayController
 import org.tsuyomi.core.display.DisplayEnvironment
@@ -39,7 +38,7 @@ internal fun NavGraphBuilder.settingsRoutes(
     dependencies: SettingsRouteDependencies,
     onImportConfirmed: suspend () -> Unit,
 ) {
-    composable(Routes.More) {
+    appDestination(Routes.More) {
         MoreScreen(
             onOpenDisplaySettings = { navController.navigate(Routes.Display) },
             onOpenReaderSettings = { navController.navigate(Routes.ReaderSettings) },
@@ -48,13 +47,13 @@ internal fun NavGraphBuilder.settingsRoutes(
             onOpenAbout = { navController.navigate(Routes.About) },
         )
     }
-    composable(Routes.Display) {
+    appDestination(Routes.Display) {
         DisplaySettingsRoute(
             environment = dependencies.environment,
             controller = dependencies.displayController,
         )
     }
-    composable(Routes.ReaderSettings) {
+    appDestination(Routes.ReaderSettings) {
         val scope = rememberCoroutineScope()
         val preferences by dependencies.application.readerPreferencesRepository.preferences
             .collectAsStateWithLifecycle(initialValue = dependencies.readerPreferences)
@@ -66,7 +65,7 @@ internal fun NavGraphBuilder.settingsRoutes(
             },
         )
     }
-    composable(Routes.Transfer) {
+    appDestination(Routes.Transfer) {
         TransferRoute(
             coordinator = dependencies.transferCoordinator,
             readerPreferences = dependencies.readerPreferences,
@@ -77,7 +76,7 @@ internal fun NavGraphBuilder.settingsRoutes(
             },
         )
     }
-    composable(Routes.Help) { entry ->
+    appDestination(Routes.Help) { entry ->
         val scope = rememberCoroutineScope()
         val preferences by dependencies.application.featureIntroductionPreferencesRepository.preferences
             .collectAsStateWithLifecycle(initialValue = FeatureIntroductionPreferences())
@@ -100,7 +99,7 @@ internal fun NavGraphBuilder.settingsRoutes(
             },
         )
     }
-    composable(Routes.About) { entry ->
+    appDestination(Routes.About) { entry ->
         val resources = LocalResources.current
         val licenseText = remember(resources) {
             resources.openRawResource(org.tsuyomi.feature.settings.R.raw.apache_license_2_0)

@@ -23,6 +23,7 @@ import org.erdtman.jcs.JsonCanonicalizer
 import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertThrows
 import org.junit.Test
 import org.tsuyomi.core.files.QuotaFileStore
@@ -201,6 +202,37 @@ class HxpArchiveVerificationTest {
         }
         assertEquals(HxpVerificationError.REVOKED_PACKAGE, packageRevoked.error)
     }
+    @Test
+    fun unsignedV2VerifiesWithoutInventingPublisherAndRejectsSignatureAndKeyClaims() {
+        val verifier = HxpArchiveVerifier(InMemoryPublisherKeyStore(emptyList()))
+        val unsigned = unsignedFixture()
+        val verified = verifier.verify(unsigned.writeToTemporaryFile())
+        assertEquals(PublisherTrust.LOCAL_UNSIGNED, verified.publisherTrust)
+        assertEquals(HxpPublisherIdentity.LocalUnsigned, verified.publisherIdentity)
+        assertNull(verified.manifest.publisherKeyId)
+        assertNull(verified.publisherFingerprint)
+        assertArrayEquals(ENTRY_BYTES, verified.readVerifiedEntryModule())
+
+        val claimedKey = unsignedFixture(signing = JsonObject(mapOf(
+            "algorithm" to JsonPrimitive("none"), "keyId" to JsonPrimitive("fake-publisher-key"),
+        )))
+        assertEquals(HxpVerificationError.INVALID_MANIFEST, assertThrows(HxpVerificationException::class.java) {
+            verifier.verify(claimedKey.writeToTemporaryFile())
+        }.error)
+        val signature = unsignedFixture(extraEntries = mapOf("signature.ed25519" to ByteArray(64)))
+        assertEquals(HxpVerificationError.INTEGRITY_MISMATCH, assertThrows(HxpVerificationException::class.java) {
+            verifier.verify(signature.writeToTemporaryFile())
+        }.error)
+    }
+
+    @Test
+    fun unsignedPayloadIntegrityFailsClosedWithoutPublisherKey() {
+        val tampered = unsignedFixture(payload = "export const modified = true;".toByteArray(), indexedPayload = ENTRY_BYTES)
+        assertEquals(HxpVerificationError.INTEGRITY_MISMATCH, assertThrows(HxpVerificationException::class.java) {
+            HxpArchiveVerifier(InMemoryPublisherKeyStore(emptyList())).verify(tampered.writeToTemporaryFile())
+        }.error)
+    }
+
 
 
 }

@@ -114,6 +114,7 @@ private fun BrowsePreview(profile: DisplayProfile, state: BrowseUiState = Browse
                     catalog = BrowseCatalogState(),
                     onRequestImport = {},
                     onApproveInstall = { _, _, _ -> },
+                    onApproveUnsigned = { _, _, _ -> error("Unexpected unsigned approval in preview") },
                     onDismissApproval = {},
                     onDismissFailure = {},
                     onCatalogAction = {},

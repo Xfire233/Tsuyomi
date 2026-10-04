@@ -159,6 +159,7 @@ Rules:
 ### UI-R2 — One build, one deploy, evidence by owner
 
 When UI-R1 requires runtime evidence:
+Before changing a device display, bind its serial to `adb -s <serial> emu avd name` and record `adb -s <serial> shell wm size` **both physical and override** values. The active profile requires the prescribed *physical* size; `wm size` overrides cannot make a differently sized AVD equivalent. For a temporary narrow/large-type pass, restore the recorded pre-pass override (`wm size reset` if none, otherwise the exact prior override) and verify it again. Never infer restoration from a screenshot or hard-code `1080x2400`: an override of 1080x2400 on a physical 1080x1920 Pixel 2 previously left the bottom and right of the host emulator unclickable. Before a human touch handoff, verify real mouse input on the affected lower/right controls; ADB-injected taps and Windows hit tests cannot prove emulator mouse mapping.
 
 1. Build the affected production APK/test target once with Gradle.
 2. Deploy once to each active isolated profile device with Android CLI delta install/run. Never replace the canonical package as part of routine review.

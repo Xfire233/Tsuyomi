@@ -252,10 +252,9 @@ class RepositoryCatalogTest {
             override fun isRevokedPackage(packageSha256: String): Boolean =
                 client.publisherKeys.isRevokedPackage(packageSha256) || localKeys.isRevokedPackage(packageSha256)
         }
-        val installer = newInstaller(
-            Files.createTempDirectory("repository-migration-installer").toFile(),
-            HxpArchiveVerifier(resolver),
-        )
+        val installerRoot = Files.createTempDirectory("repository-migration-installer").toFile()
+        val trust = PackageTrustRegistry(File(installerRoot, "trust"))
+        val installer = newInstaller(installerRoot, HxpArchiveVerifier(resolver), trust)
         val previousPrepared = installer.prepare(previous.writeToTemporaryFile())
         installer.activate(previousPrepared, ExtensionInstallApproval.approve(previousPrepared))
         client.refresh()
@@ -281,6 +280,9 @@ class RepositoryCatalogTest {
         val prepared = client.prepare("org.tsuyomi.wenku8", installer)
         client.validatePreparedRepositoryInstall(prepared)
         assertTrue(prepared.isLegacyMigration)
+        assertFalse(prepared.requiresPublisherTransition)
+        val newPublisher = requireNotNull(client.publisherKeys.resolve(replacement.publisher.keyId))
+        trust.approve(prepared, newPublisher)
         val rejected = assertThrows(ExtensionInstallException::class.java) {
             installer.activate(prepared, ExtensionInstallApproval.approve(prepared))
         }
@@ -288,6 +290,9 @@ class RepositoryCatalogTest {
         assertEquals(previousPrepared.candidate.packageSha256, installer.readVerifiedActive(SourceId("org.tsuyomi.wenku8"))?.packageSha256)
 
         installer.activate(prepared, ExtensionInstallApproval.approve(prepared, allowLegacyMigration = true))
+        val restartedTrust = PackageTrustRegistry(File(installerRoot, "trust"))
+        assertTrue(restartedTrust.isApproved(prepared.candidate))
+        assertFalse(restartedTrust.isApproved(previousPrepared.candidate))
         assertEquals(prepared.candidate.packageSha256, installer.readVerifiedActive(SourceId("org.tsuyomi.wenku8"))?.packageSha256)
     }
 

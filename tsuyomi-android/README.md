@@ -3,19 +3,31 @@
 
 # Tsuyomi Android
 
-本地优先、面向墨水屏的原生 Android 轻小说阅读器。使用 Kotlin 与 Jetpack Compose 构建，目标平台为 Android 10 及以上版本（`minSdk 29`）。
+<img src="app/src/main/res/drawable-nodpi/ic_launcher.png" alt="Tsuyomi F6R 应用图标" width="112" height="112">
+
+本地优先的原生 Android 轻小说阅读器。使用 Kotlin 与 Jetpack Compose 构建，目标平台为 Android 10 及以上版本（`minSdk 29`）；当前维护重点是 Standard 界面，E-ink 保留但冻结。
 
 > [!NOTE]
-> 项目已完成 **Phase 0 到 Phase 3** 的基础设施、数据与契约；**Phase 4 Standard 功能已完成主要实现并进入验收收口**。在线搜索、阅读、Library、远端书架镜像与显式回写、更新协调，以及独立签名来源仓库的发现、安装、更新、卸载和订阅均已接通。**首个公开 Beta 预发布 `android-v0.3.0-beta.4` 已发布**：它是预发布而非稳定版，物理真机验收与人工视觉、辅助技术、完整真实在线验收仍待完成；墨水屏全局适配（E-ink）保持冻结。
+> 项目已完成 **Phase 0 到 Phase 3** 的基础设施、数据与契约；**Phase 4 Standard 功能已完成主要实现，本轮预发布修正包已于 2026-10-05 由维护者验收**。在线搜索、阅读、Library、远端书架镜像与显式回写、更新协调，以及独立签名来源仓库的发现、安装、更新、卸载和订阅均已接通。首个公开 Beta [`android-v0.3.0-beta.4`](https://github.com/Xfire233/Tsuyomi/releases/tag/android-v0.3.0-beta.4) 仍是旧的预发布制品，不包含全部最新改动；新版本尚未公开发布。未执行的辅助技术、完整真实在线与正式准入检查保留各自状态，E-ink 全局适配保持冻结。验收范围和精确制品身份由 [Phase 4](docs/phases/PHASE_4.md#standard-prerelease-acceptance-and-cleanuppublication-authorization--2026-10-05) 记录。
 
 ## 项目目标
 
 - **本地优先**：不要求 Tsuyomi 账号，不依赖 Google Play Services，不接入遥测、远程 feature flag 或自动崩溃上报。
 - **原生 Android**：Kotlin、Jetpack Compose、Room、DataStore；不继承 Flutter 页面树或组件实现。
 - **全局墨水屏模式**：Standard 与 E-ink 复用同一路由、业务状态和持久数据；E-ink 是应用根级显示配置，不是阅读器内的局部开关。
-- **来源与宿主分离**：内容来源以签名、平台无关的 `.hxp` 包交付，通过版本化 Host API 运行；不是 Android APK 插件。维护源码位于独立的 [tsuyomi-extensions](https://github.com/Chachaanteng/tsuyomi-extensions) 仓库。
+- **来源与宿主分离**：官方内容来源以签名、平台无关的 `.hxp` 包交付，通过版本化 Host API 运行；不是 Android APK 插件。本地文件还可使用需精确文件风险确认的未签名 manifest v2，不能用于官方目录或自动更新。维护源码位于独立的 [tsuyomi-extensions](https://github.com/Chachaanteng/tsuyomi-extensions) 仓库。
 - **语义阅读进度**：持久化章节与文本语义位置，而不是依赖易失效的页码、像素偏移或滚动百分比。
 - **可审计发布**：面向 GitHub Releases 与 F-Droid；依赖锁、校验元数据、第三方声明、REUSE、Phase 证据和 gate 判定随代码版本化。
+
+## 当前视觉与交互
+
+- **同源图标**：README 直接引用安装图标的 F6R 原图，保持珊瑚封面、奶油书页、连续右上立体深度和羊皮纸底色，不维护第二套标记。
+- **中性主题**：Standard 默认浅/深色表面、普通操作与未选中图标使用黑白灰。`activeAccent` 仅用于激活或选中的前景，浅色为 `#CC2B46`、深色为 `#FF6B7A`；错误角色保留自己的语义。
+- **Material 3 与定制边界**：共享按钮、菜单、筛选芯片等采用 Material 3。固定单选的 `SegmentedSelector` 是基于 Material 3 Theme 的定制连续灰轨与移动选中实面，带轻阴影和选中语义，不冒充官方默认分段按钮。分类单选仍为独立 FilterChip，珊瑚描边/文字、无勾；多选保留必要的勾。
+- **不同表面的不同 chrome**：根 Library 的三分栏固定；Source Home 主分栏与页内 Tag/排序共用 Material enter-always 收起状态，反向拖动在当前目录位置召回。Tab/Pager 返回展开并显露当前选中 Tag，保留目录锚点与有效缓存，不用回顶替代召回。展开选项面板独占其滚动手势。
+- **稳定可读的反馈**：来源标签保持稳定顺序和原生边缘裁切，停止拖动不隐藏半颗标签、不吸附。加载/空/错以单色颜文字和明确文本呈现；加载动作低频循环，系统减弱动效与 E-ink 保持静态。窗口、字号、键盘焦点与至少 48dp 触区按共享约定适配。
+
+唯一产品界面权威是 [`UI_CONSTITUTION.md`](docs/design/UI_CONSTITUTION.md)。显式 Dynamic Color 和阅读器内容主题保留各自范围；冻结 E-ink 的实现、契约与验收不能由 Standard 结果替代。
 
 ## 当前状态与项目进度
 

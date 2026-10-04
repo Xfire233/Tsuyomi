@@ -29,6 +29,7 @@ import org.tsuyomi.core.ui.theme.TsuyomiEInkPalette
 import org.tsuyomi.core.ui.theme.TsuyomiMotion
 import org.tsuyomi.core.ui.theme.instantMotion
 
+import org.tsuyomi.core.ui.theme.activeAccent
 private val TrackWidth = 52.dp
 private val TrackHeight = 32.dp
 private val ThumbRadius = 12.dp
@@ -115,9 +116,9 @@ fun TsuyomiSwitchVisual(
             thumbColor = scheme.outlineVariant
         }
         checked -> {
-            trackColor = scheme.primary
-            trackBorderColor = scheme.primary
-            thumbColor = scheme.onPrimary
+            trackColor = scheme.secondaryContainer
+            trackBorderColor = scheme.outline
+            thumbColor = scheme.activeAccent
         }
         else -> {
             trackColor = scheme.surfaceVariant

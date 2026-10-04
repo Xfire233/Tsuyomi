@@ -124,8 +124,15 @@ class RoomLibraryRepository(database: TsuyomiDatabase) {
         collections.collectionEntries(collectionId, now)
     suspend fun createSmartCollection(collection: LibraryCollection, rule: SmartRule) =
         collections.createSmartCollection(collection, rule)
+    suspend fun smartRule(collectionId: String): SmartRule? = collections.smartRule(collectionId)
+    suspend fun updateSmartCollection(collectionId: String, title: String, rule: SmartRule) =
+        collections.updateSmartCollection(collectionId, title, rule)
+
     suspend fun renameCollection(collectionId: String, title: String, updatedAt: Instant = Instant.now()) =
         collections.renameCollection(collectionId, title, updatedAt)
+    suspend fun previewCollectionDeletion(ids: Set<String>, policy: CollectionDeletionPolicy): CollectionDeletionPlan =
+        collections.previewDeletion(ids, policy)
+    suspend fun deleteCollections(plan: CollectionDeletionPlan): Boolean = collections.deleteCollections(plan)
     suspend fun deleteCollection(collectionId: String): Boolean = collections.deleteCollection(collectionId)
     suspend fun createCollection(collection: LibraryCollection) = collections.createCollection(collection)
     suspend fun updateCollectionPresentation(

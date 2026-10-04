@@ -82,7 +82,6 @@ enum class DetailMutationOperation {
     REMOVE_FROM_REMOTE,
     MOVE_REMOTE,
     RECONCILE_RETRY,
-    RECONCILE_ACKNOWLEDGE,
 }
 
 enum class DetailMutationPhase { WORKING, SUCCESS, ERROR }
@@ -175,25 +174,33 @@ internal fun StandardBookDetailScreen(
     onRetryMoveOnly: () -> Unit = {},
     onKeepDefaultLibrary: () -> Unit,
     onRetryRemoteReconciliation: () -> Unit = {},
-    onAcknowledgeRemoteReconciliation: () -> Unit = {},
+    onResyncRemoteLibrary: () -> Unit = {},
+    resyncMessage: String? = null,
     focusChapterId: String? = null,
     onFocusHandled: () -> Unit = {},
 ) {
     Column(modifier.fillMaxSize()) {
-        mutation?.let { DetailMutationBanner(it) }
-        destinationMessage?.let {
-            DestinationFeedbackBanner(
-                message = it,
-                partialMoveTargetName = partialMoveTargetName,
-                onRetryMoveOnly = onRetryMoveOnly,
-                onKeepDefaultLibrary = onKeepDefaultLibrary,
-            )
+        val unresolvedMutation = mutation?.operation == DetailMutationOperation.REMOVE_FROM_REMOTE ||
+            mutation?.operation == DetailMutationOperation.MOVE_REMOTE ||
+            mutation?.operation == DetailMutationOperation.RECONCILE_RETRY
+        if (localState.reconciliation != "UNRESOLVED" || !unresolvedMutation) {
+            mutation?.let { DetailMutationBanner(it) }
         }
-        if (localState.reconciliation == "UNRESOLVED") {
+        if (localState.reconciliation != "UNRESOLVED") {
+            destinationMessage?.let {
+                DestinationFeedbackBanner(
+                    message = it,
+                    partialMoveTargetName = partialMoveTargetName,
+                    onRetryMoveOnly = onRetryMoveOnly,
+                    onKeepDefaultLibrary = onKeepDefaultLibrary,
+                )
+            }
+        } else {
             UnresolvedReconciliationBanner(
                 operation = localState.reconciliationOperation,
+                resyncMessage = resyncMessage,
+                onResync = onResyncRemoteLibrary,
                 onRetry = onRetryRemoteReconciliation,
-                onAcknowledge = onAcknowledgeRemoteReconciliation,
             )
         }
         when (state) {
@@ -560,7 +567,8 @@ private fun DetailContent(
 private fun UnresolvedReconciliationBanner(
     operation: String?,
     onRetry: () -> Unit,
-    onAcknowledge: () -> Unit,
+    resyncMessage: String?,
+    onResync: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val operationKey = operation?.uppercase()
@@ -570,12 +578,12 @@ private fun UnresolvedReconciliationBanner(
         "REMOVE" -> "从网站收藏移除"
         else -> "网站收藏操作"
     }
-    val canAcknowledge = operationKey != "ADD"
     Card(
         modifier = modifier
             .fillMaxWidth()
             .padding(horizontal = 16.dp, vertical = 8.dp)
-            .testTag("book-detail-unresolved-banner"),
+            .testTag("book-detail-unresolved-banner")
+            .semantics { liveRegion = LiveRegionMode.Polite },
         colors = CardDefaults.cardColors(
             containerColor = MaterialTheme.colorScheme.errorContainer,
             contentColor = MaterialTheme.colorScheme.onErrorContainer,
@@ -588,26 +596,21 @@ private fun UnresolvedReconciliationBanner(
                 color = MaterialTheme.colorScheme.error,
             )
             Text(
-                text = if (canAcknowledge) {
-                    "上次${operationLabel}已发送，但服务器结果未能确认。重试会继续同一操作；解除锁定只允许再次操作，不代表网站已成功更新。"
-                } else {
-                    "上次${operationLabel}已发送，但服务器结果未能确认。请重试同一幂等操作；在网站状态确认前不会解除锁定。"
-                },
+                text = stringResource(R.string.book_reconciliation_resync_note),
                 style = MaterialTheme.typography.bodySmall,
             )
+            resyncMessage?.let { Text(it, style = MaterialTheme.typography.bodySmall) }
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.End,
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                if (canAcknowledge) {
-                    TsuyomiButton(
-                        text = "仅解除锁定",
-                        onClick = onAcknowledge,
-                        style = TsuyomiButtonStyle.TEXT,
-                    )
-                    Spacer(Modifier.width(8.dp))
-                }
+                TsuyomiButton(
+                    text = stringResource(R.string.book_reconciliation_resync),
+                    onClick = onResync,
+                    style = TsuyomiButtonStyle.TEXT,
+                )
+                Spacer(Modifier.width(8.dp))
                 TsuyomiButton(
                     text = "重试${operationLabel}",
                     onClick = onRetry,

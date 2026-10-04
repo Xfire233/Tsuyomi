@@ -17,18 +17,18 @@ Bypass for a precise known-file edit, a known symbol lookup, a bounded reproduct
 
 ## Required inputs
 
-Use the current request and already-read repository context. WORKSPACE.md owns component/object classification, DOCUMENTATION.md owns document routing, and TOOLING.md owns tool dispatch. Read their relevant sections only if not already available and unchanged. Private memory and local handoff are supplemental; absence must not prevent repository-only navigation.
+Use the current request and already-read repository context. WORKSPACE.md owns component/object classification, DOCUMENTATION.md owns document routing, and TOOLING.md owns tool dispatch. Read their relevant sections only if not already available and unchanged. For cross-session state validation, follow the reconciliation rules in `tsuyomi-android/docs/process/DESIGN_MEMORY_WORKFLOW.md`; private memory and local handoff remain supplemental, and their absence must not prevent repository-only navigation.
 
 ## Route
 
 1. Identify the requested deliverable and unresolved questions, not a universal checklist. Classify each question using the governance objects in WORKSPACE.md; distinguish required behavior, current implementation, evidence, and authorization.
-2. Find the matching responsibility rows in DOCUMENTATION.md. Search the registry for topic/owner terms first and read the surrounding rows. Do not load the full registry when a bounded section answers the question. If the registry itself is under audit, inspect every row required by that audit rather than sampling.
+2. Use an already-known owner directly; the registry is for unresolved ownership, not a mandatory detour. Otherwise search DOCUMENTATION.md for the requested topic and read only matching responsibility rows. Full-registry reads are for registry audits or genuinely unresolved ownership after scoped lookup.
 3. Use TOOLING.md only for an unresolved tool-dispatch question. Reuse already-known tool ownership. Follow a link only when its trigger or a necessary dependency matches this request; do not recursively traverse references for completeness theater.
-4. Read the owning source's complete relevant section, including applicable global constraints and exceptions. A registry row, heading, generated summary, or search hit is navigation, never sufficient evidence of detailed behavior.
+4. Retrieve the complete relevant source section and applicable global constraints/exceptions. Search exact task terms or a known invariant/heading within that owner, then read the resulting bounded range. For long paragraphs use a bounded verbatim read (`:raw` when supported) to avoid truncated-preview/re-read cycles. Do not start with all-heading searches, whole contracts, or whole-tree globs; widen only after a scoped miss. Navigation hints never replace source evidence.
 5. For implementation questions, use existing module boundaries to narrow scope, then semantic code tools for symbols where available and scoped search for text. Read implementation and the highest relevant observable evidence seam. Do not replace specialist test selection or run tests merely to select an owner.
 6. Treat search misses as incomplete evidence: try domain synonyms, adjacent ownership rows, or one wider relevant scope. Never invent an authority or silently omit a facet to save tokens.
 7. Resolve conflicts using the repository authority order. Historical relevance is not current authority; timestamps alone do not authorize behavior. If unresolved, report the exact conflicting sources and missing decision; do not implement either interpretation.
-8. Stop routing once every requested facet has an owner, required section, downstream action, and known authorization boundary. Continue the actual user task immediately with the selected specialist/tool; do not yield just because routing finished.
+8. Stop routing once every requested facet has its owner, complete supporting section, next action and authorization boundary. Do not prepare downstream builds, reviews or deployment merely to answer a read-only recovery question; mandatory bootstrap and specialist prerequisites still apply. Continue the requested task immediately, not a new universal recovery checklist.
 
 ## Minimal trace
 

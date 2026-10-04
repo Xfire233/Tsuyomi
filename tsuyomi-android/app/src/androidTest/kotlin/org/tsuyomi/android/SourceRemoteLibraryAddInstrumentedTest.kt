@@ -4,6 +4,7 @@
  */
 package org.tsuyomi.android
 
+import androidx.lifecycle.SavedStateHandle
 import java.io.File
 import org.tsuyomi.feature.book.SourceBookState
 import java.util.concurrent.atomic.AtomicInteger
@@ -21,6 +22,7 @@ import androidx.test.ext.junit.runners.AndroidJUnit4
 import org.tsuyomi.shared.librarydomain.RemoteReconciliationState
 import org.tsuyomi.shared.sourcecontract.RemoteLibraryAddOutcome
 import org.tsuyomi.shared.sourcecontract.RemoteLibraryAddResult
+import org.tsuyomi.shared.sourcecontract.RemoteLibraryPage
 import org.tsuyomi.shared.sourcecontract.RemoteLibraryMoveOutcome
 import org.tsuyomi.shared.sourcecontract.RemoteLibraryMoveResult
 import org.tsuyomi.shared.sourcecontract.SourceBookDetail
@@ -297,9 +299,14 @@ internal class SourceRemoteLibraryAddInstrumentedTest : SourceFlowInstrumentedTe
         val selected = summary(sourceId, "7001", "重试收藏")
         putCredential(sourceId)
         var calls = 0
+        var reads = 0
         val acceptedReconciliationIds = mutableListOf<String>()
         val session = FakeSession(
             detail = { SourceBookDetail(it, "fixture", emptyList(), "连载中") },
+            listRemote = {
+                reads++
+                RemoteLibraryPage(listOf(selected), null, true)
+            },
             addRemote = { remoteBookId, token ->
                 calls += 1
                 if (calls == 2) error("preaccept retry failure")
@@ -318,7 +325,15 @@ internal class SourceRemoteLibraryAddInstrumentedTest : SourceFlowInstrumentedTe
             controller.selectBook(selected)
 
             assertEquals(RemoteAddUiResult.Unresolved, controller.addSelectedBookToWebsite(SOURCE_FLOW_TEST_TIME))
+            val detail = SourceDetailRouteOwner(controller, SavedStateHandle()) {}
+            assertTrue(detail.resyncRemoteLibrary(packageInfo))
+            assertEquals(1, reads)
+            assertEquals(1, calls)
             assertEquals(RemoteReconciliationState.UNRESOLVED, controller.remoteLibrary.selectedBookReconciliation)
+            assertEquals(RemoteReconciliationState.UNRESOLVED, library.libraryEntry(selected.identity)?.reconciliation)
+            assertEquals(1, requireNotNull(controller.remoteMirrorSnapshot(sourceId)).books.size)
+            assertEquals(1, reads)
+            assertEquals(1, calls)
             File(context.noBackupFilesDir, "source-credentials").deleteRecursively()
             assertEquals(
                 RemoteAddUiResult.Failure("remote-add-not-authorized"),

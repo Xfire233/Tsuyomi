@@ -73,6 +73,8 @@ import org.tsuyomi.core.ui.components.TsuyomiTopBarAction
 import org.tsuyomi.core.ui.icons.TsuyomiIcons
 import org.tsuyomi.core.ui.theme.TsuyomiSpacing
 
+enum class BrowsePublisherIdentity { SIGNED, LOCAL_UNSIGNED }
+
 sealed interface BrowseUiState {
     data object Empty : BrowseUiState
     data class Preparing(val fileName: String) : BrowseUiState
@@ -80,16 +82,23 @@ sealed interface BrowseUiState {
         val sourceName: String,
         val sourceId: String,
         val version: String,
-        val publisherFingerprint: String,
+        val publisherFingerprint: String?,
         val capabilities: List<String>,
         val resourceLimitIncreases: List<BrowseResourceLimitIncrease>,
         val isDowngrade: Boolean,
         val isLegacyMigration: Boolean = false,
         val requiresNonOfficialConsent: Boolean = false,
         val packageSha256: String = "",
+        val publisherIdentity: BrowsePublisherIdentity = BrowsePublisherIdentity.SIGNED,
+        val requiresUnsignedIdentityTransition: Boolean = false,
+        val requiresSignedIdentityTransition: Boolean = false,
     ) : BrowseUiState
     data class PublisherKeyRequired(val keyId: String, val problem: String? = null) : BrowseUiState
-    data class Installed(val sourceName: String, val version: String) : BrowseUiState
+    data class Installed(
+        val sourceName: String,
+        val version: String,
+        val publisherIdentity: BrowsePublisherIdentity = BrowsePublisherIdentity.SIGNED,
+    ) : BrowseUiState
     data class Failure(
         val reason: BrowseInstallFailure,
         val repositoryInstall: BrowseCatalogAction.Install? = null,
@@ -104,6 +113,7 @@ data class BrowseInstalledSource(
     val homeAvailable: Boolean,
     val remoteLibraryAvailable: Boolean,
     val verificationAvailable: Boolean,
+    val publisherIdentity: BrowsePublisherIdentity = BrowsePublisherIdentity.SIGNED,
 )
 
 enum class BrowseInstallFailure {
@@ -115,6 +125,7 @@ enum class BrowseInstallFailure {
     REPOSITORY,
     STORAGE,
     VERIFICATION,
+    IDENTITY_CONFLICT,
     INSTALL,
     EXPIRED_APPROVAL,
 }
@@ -172,6 +183,7 @@ data class BrowseCatalogItem(
     val repositoryName: String = "官方仓库",
     val official: Boolean = true,
     val installable: Boolean = true,
+    val identityConflict: Boolean = false,
 )
 
 sealed interface BrowseCatalogAction {
@@ -239,6 +251,7 @@ fun BrowseScreen(
     state: BrowseUiState,
     onRequestImport: () -> Unit,
     onApproveInstall: (allowDowngrade: Boolean, allowLegacyMigration: Boolean, allowNonOfficial: Boolean) -> Unit,
+    onApproveUnsigned: (allowDowngrade: Boolean, allowRisk: Boolean, allowIdentityTransition: Boolean) -> Unit,
     onDismissApproval: () -> Unit,
     onDismissFailure: () -> Unit,
     installedSources: List<BrowseInstalledSource>,
@@ -251,6 +264,15 @@ fun BrowseScreen(
     onDismissPublisherKey: () -> Unit = {},
 ) {
     val activeSource = installedSources.firstOrNull { it.sourceId == activeSourceId } ?: installedSources.firstOrNull()
+    if (LocalDisplayEnvironment.current.effectiveProfile == DisplayProfile.EINK &&
+        state is BrowseUiState.Approval &&
+        (state.publisherIdentity == BrowsePublisherIdentity.LOCAL_UNSIGNED || state.requiresSignedIdentityTransition)
+    ) {
+        Column(modifier.fillMaxSize().verticalScroll(rememberScrollState())) {
+            ApprovalSourceCard(state, onApproveInstall, onApproveUnsigned, onDismissApproval)
+        }
+        return
+    }
     if (LocalDisplayEnvironment.current.effectiveProfile == DisplayProfile.EINK) {
         FrozenEInkBrowseScreen(
             state = state,
@@ -279,6 +301,7 @@ fun BrowseScreen(
         onCatalogAction = onCatalogAction,
         onSourceAction = onSourceAction,
         onApproveInstall = onApproveInstall,
+        onApproveUnsigned = onApproveUnsigned,
         onDismissApproval = onDismissApproval,
         onDismissFailure = onDismissFailure,
         onProvidePublisherKey = onProvidePublisherKey,
@@ -296,6 +319,7 @@ private fun BrowseScreenContent(
     onCatalogAction: (BrowseCatalogAction) -> Unit,
     onSourceAction: (BrowseSourceAction) -> Unit,
     onApproveInstall: (Boolean, Boolean, Boolean) -> Unit,
+    onApproveUnsigned: (Boolean, Boolean, Boolean) -> Unit,
     onDismissApproval: () -> Unit,
     onDismissFailure: () -> Unit,
     onProvidePublisherKey: (String) -> Unit,
@@ -336,7 +360,7 @@ private fun BrowseScreenContent(
         )
         when (state) {
             is BrowseUiState.Approval -> Column(Modifier.weight(1f).verticalScroll(rememberScrollState())) {
-                ApprovalSourceCard(state, onApproveInstall, onDismissApproval)
+                ApprovalSourceCard(state, onApproveInstall, onApproveUnsigned, onDismissApproval)
                 Spacer(Modifier.height(TsuyomiSpacing.Lg))
             }
             is BrowseUiState.PublisherKeyRequired -> PublisherKeyRequiredCard(
@@ -528,6 +552,11 @@ private fun InstallMutationBanner(
                         onClick = { onCatalogAction(repositoryInstall) },
                         style = TsuyomiButtonStyle.TEXT,
                     )
+                    failed.reason == BrowseInstallFailure.IDENTITY_CONFLICT -> TsuyomiButton(
+                        text = stringResource(R.string.browse_dismiss_failure_action),
+                        onClick = onDismissFailure,
+                        style = TsuyomiButtonStyle.TEXT,
+                    )
                     repositoryInstall != null -> TsuyomiButton(
                         text = stringResource(R.string.browse_return_to_catalog_action),
                         onClick = onDismissFailure,
@@ -578,7 +607,11 @@ private fun InstalledSourceRow(
                 overflow = TextOverflow.Ellipsis,
             )
             Text(
-                source.version,
+                if (source.publisherIdentity == BrowsePublisherIdentity.LOCAL_UNSIGNED) {
+                    stringResource(R.string.browse_installed_unsigned_version, source.version)
+                } else {
+                    source.version
+                },
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 maxLines = 1,
@@ -644,6 +677,12 @@ private fun InstalledSourceDetailsDialog(source: BrowseInstalledSource, onDismis
             SourceDetailField(stringResource(R.string.browse_source_details_id), source.sourceId)
             SourceDetailField(stringResource(R.string.browse_source_details_version), source.version)
             SourceDetailField(stringResource(R.string.browse_source_details_summary), source.summary)
+            if (source.publisherIdentity == BrowsePublisherIdentity.LOCAL_UNSIGNED) {
+                SourceDetailField(
+                    stringResource(R.string.browse_source_details_origin),
+                    stringResource(R.string.browse_source_details_unsigned_origin),
+                )
+            }
             Text(
                 stringResource(R.string.browse_source_details_capabilities),
                 modifier = Modifier.padding(top = TsuyomiSpacing.Sm),
@@ -1065,6 +1104,7 @@ private fun catalogItemAction(
     installationAllowed: Boolean,
 ): CatalogItemAction = when {
     busy -> CatalogItemAction(R.string.browse_catalog_preparing, false, TsuyomiButtonStyle.TEXT)
+    item.identityConflict -> CatalogItemAction(R.string.browse_catalog_identity_conflict, false, TsuyomiButtonStyle.TEXT)
     !item.installable -> CatalogItemAction(
         R.string.browse_catalog_repository_unavailable,
         false,
@@ -1113,6 +1153,13 @@ private fun BrowseCatalogDetailsDialog(
                 ),
             )
             CatalogDetailField(stringResource(R.string.browse_catalog_publisher), item.publisherFingerprint)
+            if (item.identityConflict) {
+                Text(
+                    stringResource(R.string.browse_catalog_identity_conflict_message),
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.error,
+                )
+            }
             CatalogDetailField(stringResource(R.string.browse_catalog_license), item.license)
             CatalogDetailField(stringResource(R.string.browse_catalog_source_revision), item.sourceRevision)
             CatalogDetailField(stringResource(R.string.browse_catalog_source_url), item.sourceUrl)
@@ -1257,12 +1304,16 @@ private fun PublisherKeyRequiredCard(
 private fun ApprovalSourceCard(
     state: BrowseUiState.Approval,
     onApprove: (Boolean, Boolean, Boolean) -> Unit,
+    onApproveUnsigned: (Boolean, Boolean, Boolean) -> Unit,
     onDismiss: () -> Unit,
 ) {
+    val unsigned = state.publisherIdentity == BrowsePublisherIdentity.LOCAL_UNSIGNED
     var expanded by rememberSaveable(state.sourceId, state.version) { mutableStateOf(false) }
     var downgradeConfirmed by remember(state.sourceId, state.packageSha256, state.publisherFingerprint) { mutableStateOf(false) }
     var legacyMigrationConfirmed by remember(state.sourceId, state.packageSha256, state.publisherFingerprint) { mutableStateOf(false) }
     var nonOfficialConfirmed by remember(state.sourceId, state.packageSha256, state.publisherFingerprint) { mutableStateOf(false) }
+    var unsignedRiskConfirmed by remember(state.sourceId, state.packageSha256) { mutableStateOf(false) }
+    var identityTransitionConfirmed by remember(state.sourceId, state.packageSha256) { mutableStateOf(false) }
     Surface(
         modifier = Modifier.fillMaxWidth().padding(horizontal = TsuyomiSpacing.Md),
         shape = MaterialTheme.shapes.medium,
@@ -1271,9 +1322,26 @@ private fun ApprovalSourceCard(
         Column(Modifier.padding(TsuyomiSpacing.Md)) {
             Text("${state.sourceName} ${state.version}", style = MaterialTheme.typography.titleMedium)
             Text(
-                stringResource(R.string.browse_install_candidate_summary, state.sourceId),
+                stringResource(
+                    if (unsigned) R.string.browse_install_unsigned_candidate_summary
+                    else R.string.browse_install_candidate_summary,
+                    state.sourceId,
+                ),
                 style = MaterialTheme.typography.bodySmall,
             )
+            if (unsigned) {
+                Text(
+                    stringResource(R.string.browse_install_unsigned_warning),
+                    modifier = Modifier.padding(top = TsuyomiSpacing.Sm),
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.error,
+                )
+                Text(
+                    stringResource(R.string.browse_install_unsigned_digest, state.packageSha256),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
             Row(
                 Modifier
                     .fillMaxWidth()
@@ -1305,15 +1373,17 @@ private fun ApprovalSourceCard(
                 enterFrom = TsuyomiVisibilityEdge.BOTTOM,
             ) {
                 Column {
-                    Text(
-                        stringResource(R.string.browse_install_publisher),
-                        style = MaterialTheme.typography.labelMedium,
-                    )
-                    Text(
-                        state.publisherFingerprint,
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
+                    if (!unsigned) {
+                        Text(
+                            stringResource(R.string.browse_install_publisher),
+                            style = MaterialTheme.typography.labelMedium,
+                        )
+                        Text(
+                            requireNotNull(state.publisherFingerprint),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
                     state.capabilities.forEach { capability ->
                         Text(stringResource(R.string.browse_install_added_capability, capability))
                     }
@@ -1334,11 +1404,14 @@ private fun ApprovalSourceCard(
                     label = stringResource(R.string.browse_approval_downgrade),
                 )
             }
-            if (state.isLegacyMigration) {
+            if (state.isLegacyMigration || state.requiresSignedIdentityTransition) {
                 TsuyomiCheckboxRow(
                     checked = legacyMigrationConfirmed,
                     onCheckedChange = { legacyMigrationConfirmed = it },
-                    label = stringResource(R.string.browse_approval_legacy_migration),
+                    label = stringResource(
+                        if (state.requiresSignedIdentityTransition) R.string.browse_approval_signed_transition
+                        else R.string.browse_approval_legacy_migration,
+                    ),
                 )
             }
             if (state.requiresNonOfficialConsent) {
@@ -1349,14 +1422,33 @@ private fun ApprovalSourceCard(
                     modifier = Modifier.testTag("browse-approval-nonofficial"),
                 )
             }
+            if (unsigned) {
+                TsuyomiCheckboxRow(
+                    checked = unsignedRiskConfirmed,
+                    onCheckedChange = { unsignedRiskConfirmed = it },
+                    label = stringResource(R.string.browse_approval_unsigned_risk),
+                    modifier = Modifier.testTag("browse-approval-unsigned-risk"),
+                )
+                if (state.requiresUnsignedIdentityTransition) {
+                    TsuyomiCheckboxRow(
+                        checked = identityTransitionConfirmed,
+                        onCheckedChange = { identityTransitionConfirmed = it },
+                        label = stringResource(R.string.browse_approval_unsigned_transition),
+                        modifier = Modifier.testTag("browse-approval-unsigned-transition"),
+                    )
+                }
+            }
             TsuyomiButton(
                 text = stringResource(R.string.browse_approval_install_action),
                 onClick = {
-                    onApprove(downgradeConfirmed, legacyMigrationConfirmed, nonOfficialConfirmed)
+                    if (unsigned) onApproveUnsigned(downgradeConfirmed, unsignedRiskConfirmed, identityTransitionConfirmed)
+                    else onApprove(downgradeConfirmed, legacyMigrationConfirmed, nonOfficialConfirmed)
                 },
                 enabled = (!state.isDowngrade || downgradeConfirmed) &&
-                    (!state.isLegacyMigration || legacyMigrationConfirmed) &&
-                    (!state.requiresNonOfficialConsent || nonOfficialConfirmed),
+                    (!(state.isLegacyMigration || state.requiresSignedIdentityTransition) || legacyMigrationConfirmed) &&
+                    (!state.requiresNonOfficialConsent || nonOfficialConfirmed) &&
+                    (!unsigned || unsignedRiskConfirmed) &&
+                    (!state.requiresUnsignedIdentityTransition || identityTransitionConfirmed),
                 style = TsuyomiButtonStyle.SECONDARY,
             )
             TsuyomiButton(
@@ -1450,7 +1542,11 @@ private fun FrozenEInkInstalledSourceScreen(
     ) {
         Text(text = stringResource(R.string.browse_installed_title, state.sourceName))
         Text(
-            text = stringResource(R.string.browse_installed_message, state.version),
+            text = stringResource(
+                if (state.publisherIdentity == BrowsePublisherIdentity.LOCAL_UNSIGNED) R.string.browse_installed_unsigned_message
+                else R.string.browse_installed_message,
+                state.version,
+            ),
             modifier = Modifier.padding(top = 12.dp, bottom = 24.dp),
         )
         TsuyomiButton(
@@ -1489,11 +1585,13 @@ private fun FrozenEInkFailureSourceScreen(
     ) {
         Text(text = stringResource(R.string.browse_install_failed_title))
         Text(text = installFailureMessage(state.reason), modifier = Modifier.padding(vertical = 12.dp))
-        TsuyomiButton(
-            text = stringResource(R.string.browse_try_again_action),
-            onClick = onRequestImport,
-            style = TsuyomiButtonStyle.PRIMARY,
-        )
+        if (state.reason != BrowseInstallFailure.IDENTITY_CONFLICT) {
+            TsuyomiButton(
+                text = stringResource(R.string.browse_try_again_action),
+                onClick = onRequestImport,
+                style = TsuyomiButtonStyle.PRIMARY,
+            )
+        }
         TsuyomiButton(
             text = stringResource(R.string.browse_dismiss_action),
             onClick = onDismiss,
@@ -1520,7 +1618,7 @@ private fun FrozenEInkSourceApprovalScreen(
     ) {
         Text(text = stringResource(R.string.browse_approval_title, state.sourceName))
         Text(text = stringResource(R.string.browse_approval_identity, state.sourceId, state.version))
-        Text(text = stringResource(R.string.browse_approval_publisher, state.publisherFingerprint))
+        Text(text = stringResource(R.string.browse_approval_publisher, requireNotNull(state.publisherFingerprint)))
         HorizontalDivider()
         if (state.capabilities.isNotEmpty()) {
             Text(text = stringResource(R.string.browse_approval_capabilities))
@@ -1567,6 +1665,7 @@ private fun installFailureMessage(reason: BrowseInstallFailure): String = string
         BrowseInstallFailure.REPOSITORY -> R.string.browse_failure_repository
         BrowseInstallFailure.STORAGE -> R.string.browse_failure_storage
         BrowseInstallFailure.VERIFICATION -> R.string.browse_failure_verification
+        BrowseInstallFailure.IDENTITY_CONFLICT -> R.string.browse_failure_identity_conflict
         BrowseInstallFailure.INSTALL -> R.string.browse_failure_install
         BrowseInstallFailure.EXPIRED_APPROVAL -> R.string.browse_failure_expired_approval
     }

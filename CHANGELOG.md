@@ -5,6 +5,9 @@
 
 ## Unreleased
 
+- Recorded maintainer acceptance of the current Standard prerelease correction package, synchronized README visuals with the production F6R icon, and prepared caller-proven Library/extension-packaging cleanup plus a pinned local-only unsigned HXP v2 contract. Public releases, E-ink restoration and protected-main admission remain separate.
+
+- Refined cold-context recovery with direct-owner bounded reads, complete verbatim contract sections, action-scoped evidence prerequisites, explicit issue lifecycle state and a concise current handoff with preserved history. A frozen 18-pair replay passed all candidate correctness checks with lower token usage and elapsed time; this is a scoped result, not universal model compliance or new execution authority.
 - Documented local implementation-economy instruction ownership and a short native OMP sticky reminder, preserving existing scope, correctness, verification and authorization boundaries without an additional Skill or prompt-injection extension.
 - Hardened post-Beta Android state and recovery: unpinned Reader visits now establish truthful Detail continuation; bounded media ownership retains visible covers across lifecycle and deep-scroll gaps; validated normalized Source Home pages replay across process death; installation, Home and login failures expose typed recovery; and declared same-host legacy Wenku8 login redirects are upgraded to HTTPS before transport without weakening origin, credential or request-method policy.
 - Recorded physical-device acceptance of the exact private `0.3.0-beta.4+fixes5` stabilization candidate before committing the remediation. This acceptance applies only to that digest-bound private candidate; it does not retroactively certify the previously published `android-v0.3.0-beta.4` asset or create a new public release.

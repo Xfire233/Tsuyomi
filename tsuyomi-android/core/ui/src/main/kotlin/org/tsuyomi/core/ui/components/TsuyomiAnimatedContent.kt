@@ -24,6 +24,10 @@ import org.tsuyomi.core.ui.theme.instantMotion
 import org.tsuyomi.core.ui.theme.rememberSystemReducedMotion
 import org.tsuyomi.core.ui.theme.policyMotionSpec
 
+/** Instant destination transitions for routes whose header and content must arrive together. */
+val TsuyomiInstantEnter = EnterTransition.None
+val TsuyomiInstantExit = ExitTransition.None
+
 /** Content swap honoring the global and platform instant-motion policies. */
 @Composable
 fun <T> TsuyomiAnimatedContent(

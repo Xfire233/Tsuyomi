@@ -68,6 +68,7 @@ import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import org.junit.Rule
+import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -266,6 +267,9 @@ class BookDetailInstrumentedTest {
     fun unresolvedAddCannotBeLocallyUnlocked() {
         val book = sourceBook()
         var operation by mutableStateOf("ADD")
+        var resyncCalls = 0
+        var retryCalls = 0
+        var resyncMessage by mutableStateOf<String?>(null)
         compose.setContent {
             DisplayEnvironmentProvider(standardTestEnvironment) {
                 MaterialTheme {
@@ -275,7 +279,7 @@ class BookDetailInstrumentedTest {
                         reconciliationOperation = operation,
                         reconciliation = "UNRESOLVED",
                     ),
-                    mutation = null,
+                    mutation = DetailMutationStatus(DetailMutationOperation.RECONCILE_RETRY, DetailMutationPhase.ERROR, "remote-result-unresolved"),
                     coverState = CoverUiState.Fallback(FallbackSpec(book.title, null)),
                     unreadOnly = false,
                     descending = false,
@@ -295,17 +299,31 @@ class BookDetailInstrumentedTest {
                     onUseOfflineCache = {},
                     onOpenVerification = {},
                     onKeepDefaultLibrary = {},
+                    resyncMessage = resyncMessage,
+                    onResyncRemoteLibrary = { resyncCalls++; resyncMessage = "已重新读取网站收藏，操作结果仍待确认。" },
+                    onRetryRemoteReconciliation = { retryCalls++ },
                     )
                 }
             }
         }
 
-        compose.onNodeWithText("重试加入网站收藏").assertIsDisplayed()
+        compose.onAllNodesWithTag("book-detail-unresolved-banner").assertCountEquals(1)
+        compose.onNodeWithText("remote-result-unresolved").assertDoesNotExist()
+        compose.onNodeWithText("加入网站收藏结果待确认").assertIsDisplayed()
+        compose.onAllNodesWithTag("cover-unresolved-badge", useUnmergedTree = true).assertCountEquals(0)
+        compose.onNodeWithText("重新校准").performClick()
+        assertEquals(1, resyncCalls)
+        assertEquals(0, retryCalls)
+        compose.onNodeWithText("已重新读取网站收藏，操作结果仍待确认。").assertIsDisplayed()
+        compose.onAllNodesWithTag("book-detail-unresolved-banner").assertCountEquals(1)
+        compose.onNodeWithText("重试加入网站收藏").performClick()
+        assertEquals(1, retryCalls)
         compose.onNodeWithText("仅解除锁定").assertDoesNotExist()
 
         operation = "MOVE"
+        compose.onNodeWithContentDescription("网站收藏移动结果待确认", useUnmergedTree = true).assertIsDisplayed()
         compose.onNodeWithText("重试移动网站收藏").assertIsDisplayed()
-        compose.onNodeWithText("仅解除锁定").assertIsDisplayed()
+        compose.onNodeWithText("仅解除锁定").assertDoesNotExist()
     }
 
     @OptIn(ExperimentalTestApi::class)

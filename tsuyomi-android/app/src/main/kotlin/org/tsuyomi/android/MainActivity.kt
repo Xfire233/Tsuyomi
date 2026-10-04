@@ -14,10 +14,12 @@ import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.fillMaxSize
 import org.tsuyomi.core.ui.components.TsuyomiDialog
+import org.tsuyomi.core.ui.components.TsuyomiTextField
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.SideEffect
@@ -31,15 +33,21 @@ import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.platform.LocalResources
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.LiveRegionMode
+import androidx.compose.ui.semantics.error
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.liveRegion
 import androidx.core.view.WindowCompat
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.navigation.compose.NavHost
-import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import java.time.Instant
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.collect
@@ -50,7 +58,6 @@ import org.tsuyomi.core.display.DisplayEnvironment
 import org.tsuyomi.core.display.DisplayEnvironmentProvider
 import org.tsuyomi.core.display.DisplayEnvironmentResolver
 import org.tsuyomi.core.display.displayRedrawLayer
-import org.tsuyomi.core.ui.components.AppScaffold
 import org.tsuyomi.core.ui.components.TsuyomiNavigation
 import org.tsuyomi.core.ui.components.TsuyomiTopBar
 import org.tsuyomi.core.ui.components.TsuyomiTopBarAction
@@ -178,14 +185,11 @@ internal fun TsuyomiApp(
     val currentEntry by navController.currentBackStackEntryAsState()
     val observedRoute = currentEntry?.destination?.route
     val currentRoute = observedRoute ?: navController.currentDestination?.route ?: Routes.Library
-    val searchLayoutFlow = remember(currentEntry) {
-        currentEntry
-            ?.takeIf { it.destination.route == Routes.Search }
-            ?.savedStateHandle
-            ?.getStateFlow(SourceSearchRouteOwner.LayoutKey, SearchLayout.LIST)
-            ?: MutableStateFlow(SearchLayout.LIST)
+    val bookPickerOwner = remember(currentEntry) {
+        if (currentRoute == Routes.CollectionBookPicker) {
+            navController.previousBackStackEntry?.let { collectionRuleDraftOwner(it, context) }
+        } else null
     }
-    val searchLayout by searchLayoutFlow.collectAsStateWithLifecycle()
     val detailRemoteMembershipFlow = remember(currentEntry) {
         currentEntry
             ?.takeIf { it.destination.route == Routes.Detail }
@@ -210,7 +214,7 @@ internal fun TsuyomiApp(
     var pendingIntroductionId by rememberSaveable { mutableStateOf<String?>(null) }
     val introductionRouteId = when (currentRoute) {
         Routes.LibraryMirror, Routes.LibraryMirrorFolder -> "website-mirror"
-        Routes.Collections -> "smart-collection"
+        Routes.CollectionRule -> "smart-collection"
         Routes.RemoteLibrary -> "website-writeback"
         Routes.Transfer -> "data-transfer"
         else -> null
@@ -278,23 +282,11 @@ internal fun TsuyomiApp(
         }
     }
 
-    val selectedRoot = currentEntry?.savedStateHandle?.get<String>(BookCallerRootKey)
-        ?: rootRouteFor(currentRoute)
     val appNavigationItems = navigationItems()
-    val title = if (currentRoute == Routes.LibrarySystem || currentRoute == Routes.LibraryCollection) {
-        libraryNodeRouteTitle(
-            filterName = currentEntry?.arguments?.getString("filter"),
-            collectionId = currentEntry?.arguments?.getString("collectionId"),
-            collections = libraryFlow.collections,
-        ) ?: routeTitle(currentRoute)
-    } else {
-        routeTitle(currentRoute)
-    }
     val sourceHomeContent = sourceOwner.flow.homeState as? SourceHomeViewState.Content
     val sourceHomeSourceName = activeSourcePackage?.manifest?.displayName.orEmpty()
     val sourceHomeSources = sourceOwner.installer.trustedInstalledPackages
     var sourceSwitchUnavailable by remember(currentRoute) { mutableStateOf(false) }
-    val isRoot = currentRoute in setOf(Routes.Library, Routes.Browse, Routes.More)
     val settingsDependencies = remember(environment, controller, transferCoordinator, readerPreferences, application) {
         SettingsRouteDependencies(
             environment = environment,
@@ -336,22 +328,158 @@ internal fun TsuyomiApp(
             )
         }
     }
+    val libraryChrome: @Composable (String, androidx.navigation.NavBackStackEntry, org.tsuyomi.feature.library.LibraryUiState?) -> Unit = { chromeRoute, chromeEntry, routeState ->
+        val chromeTitle = if (chromeRoute == Routes.LibraryCollection || chromeRoute == Routes.LibrarySystem) {
+            libraryNodeRouteTitle(
+                filterName = chromeEntry.arguments?.getString("filter"),
+                collectionId = chromeEntry.arguments?.getString("collectionId"),
+                collections = libraryFlow.collections,
+            ) ?: routeTitle(chromeRoute)
+        } else routeTitle(chromeRoute)
+        val chromeState = routeState ?: if (chromeRoute == Routes.Library) libraryFlow.rootScreenState()
+            else libraryFlow.state
+        LibraryTopBar(
+            title = chromeTitle,
+            bookCount = chromeState.projectedEntries().size,
+            layout = chromeState.layout,
+            sortMode = chromeState.sortMode,
+            sortDescending = chromeState.sortDescending,
+            root = chromeRoute == Routes.Library && chromeState.filter == SystemLibraryFilter.ALL,
+            refreshing = if (
+                chromeRoute == Routes.Library && chromeState.filter == SystemLibraryFilter.ALL
+            ) {
+                chromeState.updateSession?.state in setOf(
+                    org.tsuyomi.shared.librarydomain.UpdateSessionStates.QUEUED,
+                    org.tsuyomi.shared.librarydomain.UpdateSessionStates.RUNNING,
+                )
+            } else {
+                chromeState.refreshing
+            },
+            updateFilter = chromeState.updateFilter,
+            filterSortPanelExpanded = libraryFlow.filterSortPanelExpanded,
+            onFilterSortPanelExpandedChange = libraryFlow::setFilterAndSortPanelExpanded,
+            onSetUpdateFilter = { filter -> scope.launch { libraryFlow.setUpdateFilter(filter) } },
+            onNavigateUp = if (chromeRoute == Routes.Library) null else ({ navController.navigateUp() }),
+            onSearch = { navController.navigate(Routes.LibrarySearch) },
+            onCycleLayout = { scope.launch { libraryFlow.cycleLayout() } },
+            onCheckUpdates = ::requestManualUpdate,
+            onRefresh = { scope.launch { reloadLibrary() } },
+            onOpenUpdateSettings = { navController.navigate(Routes.UpdateSettings) },
+            onSelectSort = { mode -> scope.launch { libraryFlow.selectSort(mode) } },
+            onSelectSortDirection = { descending -> scope.launch {
+                libraryFlow.selectSortDirection(descending)
+            } },
+            onTags = { navController.navigate(Routes.LibraryTags) },
+            onCreateCollection = { navController.navigate(Routes.NewCollection) },
+            collectionPage = chromeRoute == Routes.LibraryCollection,
+            smartCollection = chromeRoute == Routes.LibraryCollection && libraryFlow.collections.any {
+                it.collectionId == chromeEntry.arguments?.getString("collectionId") &&
+                    it.kind == org.tsuyomi.shared.librarydomain.CollectionKind.SMART
+            },
+            onEditRule = {
+                chromeEntry.arguments?.getString("collectionId")?.let { id ->
+                    navController.navigate(Routes.collectionRule(id))
+                }
+            },
+            onDeleteCollection = {
+                chromeEntry.arguments?.getString("collectionId")?.let { id ->
+                    scope.launch {
+                        libraryFlow.requestCollectionDeletion(
+                            setOf(id),
+                            resources.getString(R.string.collection_delete_failed),
+                        )
+                    }
+                }
+            },
+            selectionKind = chromeState.selectionKind,
+            selectedCount = if (chromeRoute == Routes.CollectionBookPicker) {
+                bookPickerOwner?.draft?.selectedBooks?.size ?: 0
+            } else chromeState.selectedBookIds.size + chromeState.selectedCollectionIds.size,
+            allVisibleSelected = when (chromeState.selectionKind) {
+                LibrarySelectionKind.BOOK -> chromeState.projectedEntries().let { visible ->
+                    visible.isNotEmpty() && chromeState.selectedBookIds.containsAll(
+                        visible.map { it.book.identity },
+                    )
+                }
+                LibrarySelectionKind.COLLECTION -> libraryFlow.visibleCollectionIds().let { visible ->
+                    visible.isNotEmpty() && chromeState.selectedCollectionIds.containsAll(visible)
+                }
+                null -> false
+            },
+            onClearSelection = libraryFlow::clearSelection,
+            onToggleAllSelection = libraryFlow::toggleAllVisibleSelection,
+            onCreateCollectionFromSelection = {
+                libraryFlow.requestSelectionDialog(LibrarySelectionDialog.CREATE_COLLECTION)
+            },
+            onAddSelectionToCollection = {
+                libraryFlow.requestSelectionDialog(LibrarySelectionDialog.ADD_TO_COLLECTION)
+            },
+            onRemoveSelection = {
+                if (libraryFlow.state.selectionKind == LibrarySelectionKind.COLLECTION) {
+                    scope.launch {
+                        libraryFlow.requestCollectionDeletion(
+                            libraryFlow.state.selectedCollectionIds,
+                            resources.getString(R.string.collection_delete_failed),
+                        )
+                    }
+                } else {
+                    libraryFlow.requestSelectionDialog(LibrarySelectionDialog.CONFIRM_REMOVE)
+                }
+            },
+            pickingBooks = chromeRoute == Routes.CollectionBookPicker,
+            onCompleteBookPick = {
+                bookPickerOwner?.edit { it.copy(booksBeforePick = emptySet()) }
+                navController.navigateUp()
+            },
+            onCancelBookPick = {
+                bookPickerOwner?.edit { it.copy(
+                    selectedBooks = it.booksBeforePick,
+                    booksBeforePick = emptySet(),
+                ) }
+                navController.navigateUp()
+            },
+        )
+    }
+    val detailChrome: @Composable () -> Unit = {
+        val selectedBook = sourceOwner.flow.selectedBook
+        val selectedPackage = sourceOwner.installer.activePackage
+        val sameActiveSource = selectedBook != null &&
+            selectedPackage?.manifest?.sourceId?.value == selectedBook.identity.sourceId
+        val remotePolicies = selectedPackage?.manifest?.capabilities?.remoteLibrary?.policies
+        val backDispatcher = checkNotNull(
+            androidx.activity.compose.LocalOnBackPressedDispatcherOwner.current,
+        ).onBackPressedDispatcher
+        BookDetailTopBar(
+            title = stringResource(R.string.title_book_detail),
+            inLibrary = sourceOwner.flow.remoteLibrary.selectedBookInLibrary,
+            onNavigateUp = { backDispatcher.onBackPressed() },
+            onCacheDetail = { issueDetailCommand(SourceDetailRouteOwner.Command.CACHE_DETAIL) },
+            onRefresh = { issueDetailCommand(SourceDetailRouteOwner.Command.REFRESH_DETAIL) },
+            onRemoveFromLibrary = { detailRemoveConfirmationVisible = true },
+            remoteRemoveAvailable = detailBookInRemoteLibrary && sameActiveSource &&
+                remotePolicies?.containsKey(RemoteOperation.REMOVE) == true,
+            remoteMoveAvailable = detailBookInRemoteLibrary && sameActiveSource &&
+                libraryFlow.isWebsiteGroupingEnabled(selectedBook.identity.sourceId) &&
+                remotePolicies?.containsKey(RemoteOperation.MOVE) == true,
+            onRemoveFromRemote = { issueDetailRequest(RemoteRemoveRequestKey) },
+            onMoveRemote = { issueDetailRequest(RemoteMoveRequestKey) },
+            updateChecksExcluded = selectedBook?.identity in updateSnapshot?.excludedBooks.orEmpty(),
+            onToggleUpdateChecksExcluded = {
+                selectedBook?.identity?.let { identity ->
+                    scope.launch {
+                        application.updateCoordinator.excludeBook(
+                            identity,
+                            identity !in updateSnapshot?.excludedBooks.orEmpty(),
+                        )
+                    }
+                }
+            },
+        )
+    }
     BoxWithConstraints(Modifier.fillMaxSize()) {
         val windowSize = TsuyomiWindowSize(
             widthDp = maxWidth.value.toInt(),
             heightDp = maxHeight.value.toInt(),
-        )
-        val routeOwnsChrome = environment.effectiveProfile == DisplayProfile.STANDARD && currentRoute in setOf(
-            Routes.Reader,
-            Routes.RemoteLibrary,
-            Routes.LibraryMirror,
-            Routes.LibraryMirrorFolder,
-            Routes.Verification,
-            Routes.VerifiedHomePage,
-            Routes.VerifiedPage,
-            Routes.VerifiedDetailPage,
-            Routes.VerifiedDirectoryPage,
-            Routes.VerifiedChapterPage,
         )
         Surface(
             modifier = Modifier
@@ -359,88 +487,30 @@ internal fun TsuyomiApp(
                 .displayRedrawLayer(),
             color = MaterialTheme.colorScheme.background,
         ) {
-            AppScaffold(
-                windowSize = windowSize,
-                topBar = {
-                    if (routeOwnsChrome) {
-                        // Source routes own their chrome.
-                    } else if (currentRoute == Routes.LibraryTags) {
+            CompositionLocalProvider(
+                LocalDestinationScaffold provides DestinationScaffold(
+                    windowSize = windowSize,
+                    topBar = { chromeRoute, chromeEntry ->
+                    val routeOwnsChrome = environment.effectiveProfile == DisplayProfile.STANDARD &&
+                        destinationOwnsChrome(chromeRoute)
+                    if (routeOwnsChrome || chromeRoute in setOf(Routes.Library, Routes.LibraryCollection) ||
+                        (chromeRoute == Routes.Detail && environment.effectiveProfile == DisplayProfile.STANDARD)) {
+                        // These destinations own their chrome and content in one NavHost layer.
+                    } else if (chromeRoute == Routes.LibraryTags) {
                         LibraryTagsTopBar(
-                            title = title,
+                            title = routeTitle(chromeRoute),
                             layout = libraryFlow.tagLayout,
                             onNavigateUp = navController::navigateUp,
                             onCycleLayout = libraryFlow::toggleTagLayout,
                         )
-                    } else if (currentRoute in setOf(
-                        Routes.Library,
+                    } else if (chromeRoute in setOf(
                         Routes.LibrarySystem,
-                        Routes.LibraryCollection,
                         Routes.LibraryTagBooks,
+                        Routes.CollectionBookPicker,
                     )) {
-                        LibraryTopBar(
-                            title = title,
-                            bookCount = libraryFlow.state.projectedEntries().size,
-                            layout = libraryFlow.state.layout,
-                            sortMode = libraryFlow.state.sortMode,
-                            sortDescending = libraryFlow.state.sortDescending,
-                            root = currentRoute == Routes.Library && libraryFlow.state.filter == SystemLibraryFilter.ALL,
-                            refreshing = if (
-                                currentRoute == Routes.Library && libraryFlow.state.filter == SystemLibraryFilter.ALL
-                            ) {
-                                libraryFlow.state.updateSession?.state in setOf(
-                                    org.tsuyomi.shared.librarydomain.UpdateSessionStates.QUEUED,
-                                    org.tsuyomi.shared.librarydomain.UpdateSessionStates.RUNNING,
-                                )
-                            } else {
-                                libraryFlow.state.refreshing
-                            },
-                            updateFilter = libraryFlow.state.updateFilter,
-                            filterSortPanelExpanded = libraryFlow.filterSortPanelExpanded,
-                            onFilterSortPanelExpandedChange = libraryFlow::setFilterAndSortPanelExpanded,
-                            onSetUpdateFilter = { filter -> scope.launch { libraryFlow.setUpdateFilter(filter) } },
-                            onNavigateUp = if (currentRoute == Routes.Library) null else ({ navController.navigateUp() }),
-                            onSearch = { navController.navigate(Routes.LibrarySearch) },
-                            onCycleLayout = { scope.launch { libraryFlow.cycleLayout() } },
-                            onCheckUpdates = ::requestManualUpdate,
-                            onRefresh = { scope.launch { reloadLibrary() } },
-                            onOpenUpdateSettings = { navController.navigate(Routes.UpdateSettings) },
-                            onSelectSort = { mode -> scope.launch { libraryFlow.selectSort(mode) } },
-                            onSelectSortDirection = { descending -> scope.launch {
-                                libraryFlow.selectSortDirection(descending)
-                            } },
-                            onTags = { navController.navigate(Routes.LibraryTags) },
-                            onCreateCollection = { navController.navigate(Routes.Collections) },
-                            selectionKind = libraryFlow.state.selectionKind,
-                            selectedCount = libraryFlow.state.selectedBookIds.size + libraryFlow.state.selectedCollectionIds.size,
-                            allVisibleSelected = when (libraryFlow.state.selectionKind) {
-                                LibrarySelectionKind.BOOK -> libraryFlow.state.projectedEntries().let { visible ->
-                                    visible.isNotEmpty() && libraryFlow.state.selectedBookIds.containsAll(
-                                        visible.map { it.book.identity },
-                                    )
-                                }
-                                LibrarySelectionKind.COLLECTION -> libraryFlow.collections
-                                    .filter { it.kind == org.tsuyomi.shared.librarydomain.CollectionKind.MANUAL }
-                                    .let { visible ->
-                                        visible.isNotEmpty() && libraryFlow.state.selectedCollectionIds.containsAll(
-                                            visible.map { it.collectionId },
-                                        )
-                                    }
-                                null -> false
-                            },
-                            onClearSelection = libraryFlow::clearSelection,
-                            onToggleAllSelection = libraryFlow::toggleAllVisibleSelection,
-                            onCreateCollectionFromSelection = {
-                                libraryFlow.requestSelectionDialog(LibrarySelectionDialog.CREATE_COLLECTION)
-                            },
-                            onAddSelectionToCollection = {
-                                libraryFlow.requestSelectionDialog(LibrarySelectionDialog.ADD_TO_COLLECTION)
-                            },
-                            onRemoveSelection = {
-                                libraryFlow.requestSelectionDialog(LibrarySelectionDialog.CONFIRM_REMOVE)
-                            },
-                        )
+                        libraryChrome(chromeRoute, chromeEntry, null)
                     } else if (
-                        currentRoute == Routes.Browse &&
+                        chromeRoute == Routes.Browse &&
                         environment.effectiveProfile == DisplayProfile.STANDARD
                     ) {
                         BrowseTopBar(
@@ -450,7 +520,7 @@ internal fun TsuyomiApp(
                             onRefreshSources = { scope.launch { sourceOwner.refreshInstalledSources() } },
                         )
                     } else if (
-                        currentRoute == Routes.SourceHome &&
+                        chromeRoute == Routes.SourceHome &&
                         environment.effectiveProfile == DisplayProfile.STANDARD
                     ) {
                         TsuyomiTopBar(
@@ -527,81 +597,55 @@ internal fun TsuyomiApp(
                             },
                         )
                     } else if (
-                        currentRoute == Routes.Search &&
+                        chromeRoute == Routes.Search &&
                         environment.effectiveProfile == DisplayProfile.STANDARD
                     ) {
+                        val routeSearchLayout by chromeEntry.savedStateHandle
+                            .getStateFlow(SourceSearchRouteOwner.LayoutKey, SearchLayout.LIST)
+                            .collectAsStateWithLifecycle()
                         SearchTopBar(
-                            layout = searchLayout,
+                            layout = routeSearchLayout,
                             onCycleLayout = {
-                                currentEntry?.savedStateHandle?.set(
-                                    SourceSearchRouteOwner.LayoutKey,
-                                    searchLayout.next(),
-                                )
+                                chromeEntry.savedStateHandle[SourceSearchRouteOwner.LayoutKey] = routeSearchLayout.next()
                             },
                             onNavigateUp = { navController.navigateUp() },
                         )
-                    } else if (
-                        currentRoute == Routes.Detail &&
-                        environment.effectiveProfile == DisplayProfile.STANDARD
-                    ) {
-                        val selectedBook = sourceOwner.flow.selectedBook
-                        val selectedPackage = sourceOwner.installer.activePackage
-                        val sameActiveSource = selectedBook != null &&
-                            selectedPackage?.manifest?.sourceId?.value == selectedBook.identity.sourceId
-                        val remotePolicies = selectedPackage?.manifest?.capabilities?.remoteLibrary?.policies
-                        val backDispatcher = checkNotNull(
-                            androidx.activity.compose.LocalOnBackPressedDispatcherOwner.current,
-                        ).onBackPressedDispatcher
-                        BookDetailTopBar(
-                            title = stringResource(R.string.title_book_detail),
-                            inLibrary = sourceOwner.flow.remoteLibrary.selectedBookInLibrary,
-                            onNavigateUp = { backDispatcher.onBackPressed() },
-                            onCacheDetail = { issueDetailCommand(SourceDetailRouteOwner.Command.CACHE_DETAIL) },
-                            onRefresh = { issueDetailCommand(SourceDetailRouteOwner.Command.REFRESH_DETAIL) },
-                            onRemoveFromLibrary = { detailRemoveConfirmationVisible = true },
-                            remoteRemoveAvailable = detailBookInRemoteLibrary && sameActiveSource &&
-                                remotePolicies?.containsKey(RemoteOperation.REMOVE) == true,
-                            remoteMoveAvailable = detailBookInRemoteLibrary && sameActiveSource &&
-                                libraryFlow.isWebsiteGroupingEnabled(selectedBook.identity.sourceId) &&
-                                remotePolicies?.containsKey(RemoteOperation.MOVE) == true,
-                            onRemoveFromRemote = { issueDetailRequest(RemoteRemoveRequestKey) },
-                            onMoveRemote = { issueDetailRequest(RemoteMoveRequestKey) },
-                            updateChecksExcluded = selectedBook?.identity in updateSnapshot?.excludedBooks.orEmpty(),
-                            onToggleUpdateChecksExcluded = {
-                                selectedBook?.identity?.let { identity ->
-                                    scope.launch {
-                                        application.updateCoordinator.excludeBook(
-                                            identity,
-                                            identity !in updateSnapshot?.excludedBooks.orEmpty(),
-                                        )
-                                    }
-                                }
-                            },
-                        )
                     } else {
                         TsuyomiTopBar(
-                            title = title,
-                            onNavigateUp = if (isRoot) null else ({ navController.navigateUp() }),
+                            title = routeTitle(chromeRoute),
+                            onNavigateUp = if (chromeRoute in setOf(Routes.Library, Routes.Browse, Routes.More)) null else ({
+                                if (chromeRoute == Routes.NewCollection || chromeRoute == Routes.CollectionRule) {
+                                    chromeEntry.savedStateHandle["collection.rule.up"] = true
+                                } else {
+                                    navController.navigateUp()
+                                }
+                            }),
                         )
                     }
                 },
-                navigation = { layout ->
-                    if (!routeOwnsChrome) {
+                    navigation = { chromeRoute, chromeEntry, layout ->
+                    val routeOwnsChrome = environment.effectiveProfile == DisplayProfile.STANDARD &&
+                        destinationOwnsChrome(chromeRoute)
+                    if (!routeOwnsChrome && chromeRoute != Routes.CollectionBookPicker) {
                         TsuyomiNavigation(
                             layout = layout,
                             items = appNavigationItems,
-                            selectedRoute = selectedRoot,
+                            selectedRoute = chromeEntry.savedStateHandle.get<String>(BookCallerRootKey)
+                                ?: rootRouteFor(chromeRoute),
                             onSelect = { item ->
                                 if (item.route == Routes.Library) {
                                     scope.launch {
                                         libraryFlow.selectTab(SystemLibraryFilter.ALL)
+                                        navController.selectRoot(item.route)
                                     }
+                                } else {
+                                    navController.selectRoot(item.route)
                                 }
-                                navController.selectRoot(item.route)
                             }
                         )
                     }
                 },
+                ),
             ) {
                 NavHost(
                     navController = navController,
@@ -611,6 +655,7 @@ internal fun TsuyomiApp(
                     libraryRoutes(
                         navController = navController,
                         controller = libraryFlow,
+                        chrome = libraryChrome,
                         coverState = { entry -> libraryFlow.coverState(entry) },
                         openBookDetail = sourceOwner::openLibraryDetail,
                         resumeReading = sourceOwner::resumeReading,
@@ -634,6 +679,7 @@ internal fun TsuyomiApp(
                             scope.launch { application.readerPreferencesRepository.update(updated) }
                         },
                         onRequestRemoveFromLibrary = { detailRemoveConfirmationVisible = true },
+                        detailChrome = detailChrome,
                         onExactChapterCompleted = { identity ->
                             application.updateCoordinator.reconcileCompleted(
                                 identity,

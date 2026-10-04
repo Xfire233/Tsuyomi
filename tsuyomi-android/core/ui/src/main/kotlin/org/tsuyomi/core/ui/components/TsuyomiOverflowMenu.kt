@@ -7,6 +7,8 @@ package org.tsuyomi.core.ui.components
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
@@ -21,8 +23,12 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.Immutable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.key
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.geometry.Rect
+import androidx.compose.ui.layout.boundsInWindow
+import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalDensity
@@ -31,11 +37,14 @@ import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.DpOffset
 import androidx.compose.ui.unit.dp
+import org.tsuyomi.core.ui.R
 import org.tsuyomi.core.ui.icons.TsuyomiIcons
 import org.tsuyomi.core.ui.theme.TsuyomiSpacing
 
+import org.tsuyomi.core.ui.theme.activeAccent
 @Immutable
 data class TsuyomiOverflowAction(
     val label: String,
@@ -68,11 +77,19 @@ fun TsuyomiOverflowMenu(
     fun setExpanded(value: Boolean) {
         if (onExpandedChange == null) internalExpanded = value else onExpandedChange(value)
     }
-    var submenu by remember(isExpanded) { mutableStateOf(requestedSubmenu) }
-    val panelMaxHeight = with(LocalDensity.current) {
-        (LocalWindowInfo.current.containerSize.height.toDp() - 96.dp).coerceAtLeast(48.dp)
+    var submenuPath by remember(isExpanded) { mutableStateOf(requestedSubmenu?.let(::listOf).orEmpty()) }
+    var anchorBounds by remember { mutableStateOf<Rect?>(null) }
+    val density = LocalDensity.current
+    val windowHeight = LocalWindowInfo.current.containerSize.height
+    val safeInsets = WindowInsets.safeDrawing
+    val panelMaxHeight = with(density) {
+        val safeTop = safeInsets.getTop(this)
+        val safeBottom = safeInsets.getBottom(this)
+        val availableBelow = windowHeight - safeBottom - (anchorBounds?.bottom?.toInt() ?: safeTop)
+        val availableAbove = (anchorBounds?.top?.toInt() ?: windowHeight) - safeTop
+        (maxOf(availableAbove, availableBelow).toDp() - TsuyomiSpacing.Md).coerceAtLeast(48.dp)
     }
-    Box(modifier) {
+    Box(modifier.onGloballyPositioned { if (!isExpanded) anchorBounds = it.boundsInWindow() }) {
         if (trigger == null) {
             TsuyomiIconButton(
                 imageVector = triggerIcon,
@@ -82,11 +99,15 @@ fun TsuyomiOverflowMenu(
         } else {
             trigger { setExpanded(true) }
         }
+        key(submenuPath.lastOrNull()?.label) {
         DropdownMenu(
             expanded = isExpanded,
             onDismissRequest = {
-                setExpanded(false)
-                submenu = null
+                if (submenuPath.isNotEmpty()) {
+                    submenuPath = submenuPath.dropLast(1)
+                } else {
+                    setExpanded(false)
+                }
             },
             modifier = Modifier.widthIn(min = 176.dp, max = 320.dp).heightIn(max = panelMaxHeight),
             offset = DpOffset(x = 0.dp, y = TsuyomiSpacing.Xs),
@@ -108,17 +129,18 @@ fun TsuyomiOverflowMenu(
                 )
                 HorizontalDivider()
             }
-            submenu?.let { parent ->
+            submenuPath.lastOrNull()?.let { parent ->
                 DropdownMenuItem(
                     text = {
                         Text(
-                            text = parent.label,
+                            text = stringResource(R.string.coreui_menu_back_to,
+                                submenuPath.dropLast(1).lastOrNull()?.label ?: panelTitle ?: stringResource(R.string.coreui_more_actions)),
                             style = MaterialTheme.typography.labelLarge,
-                            maxLines = if (panelTitle != null || submenu != null) Int.MAX_VALUE else 1,
+                            maxLines = Int.MAX_VALUE,
                             overflow = TextOverflow.Ellipsis,
                         )
                     },
-                    onClick = { submenu = null },
+                    onClick = { submenuPath = submenuPath.dropLast(1) },
                     leadingIcon = {
                         Icon(
                             imageVector = TsuyomiIcons.Back,
@@ -131,7 +153,7 @@ fun TsuyomiOverflowMenu(
                 HorizontalDivider()
             }
             var previousSection: String? = null
-            (submenu?.menu ?: actions).forEach { action ->
+            (submenuPath.lastOrNull()?.menu ?: actions).forEach { action ->
                 action.section?.takeIf { it != previousSection }?.let { section ->
                     if (previousSection != null) HorizontalDivider()
                     Text(
@@ -155,17 +177,17 @@ fun TsuyomiOverflowMenu(
                             } else {
                                 MaterialTheme.colorScheme.onSurface
                             },
-                            maxLines = if (panelTitle != null || submenu != null) Int.MAX_VALUE else 1,
+                            maxLines = if (panelTitle != null || submenuPath.isNotEmpty()) Int.MAX_VALUE else 1,
                             overflow = TextOverflow.Ellipsis,
                         )
                     },
                     onClick = {
                         if (action.menu.isEmpty()) {
                             setExpanded(false)
-                            submenu = null
+                            submenuPath = emptyList()
                             action.onClick()
                         } else {
-                            submenu = action
+                            submenuPath = submenuPath + action
                         }
                     },
                     leadingIcon = action.icon?.let { icon ->
@@ -173,10 +195,10 @@ fun TsuyomiOverflowMenu(
                             Icon(
                                 imageVector = icon,
                                 contentDescription = null,
-                                tint = if (action.destructive) {
-                                    MaterialTheme.colorScheme.error
-                                } else {
-                                    MaterialTheme.colorScheme.onSurfaceVariant
+                                tint = when {
+                                    action.destructive -> MaterialTheme.colorScheme.error
+                                    action.selected == true -> MaterialTheme.colorScheme.activeAccent
+                                    else -> MaterialTheme.colorScheme.onSurfaceVariant
                                 },
                             )
                         }
@@ -187,7 +209,7 @@ fun TsuyomiOverflowMenu(
                                 Icon(
                                     imageVector = TsuyomiIcons.Selected,
                                     contentDescription = null,
-                                    tint = MaterialTheme.colorScheme.primary,
+                                    tint = MaterialTheme.colorScheme.activeAccent,
                                 )
                             }
                         }
@@ -207,6 +229,7 @@ fun TsuyomiOverflowMenu(
                     contentPadding = PaddingValues(horizontal = TsuyomiSpacing.Md),
                 )
             }
+        }
         }
     }
 }

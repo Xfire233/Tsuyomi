@@ -49,6 +49,7 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalWindowInfo
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -66,6 +67,7 @@ import org.tsuyomi.core.ui.theme.tsuyomiAnimateFloatAsState
 import org.tsuyomi.core.ui.theme.instantMotion
 import org.tsuyomi.core.ui.components.coverCardHeight
 import org.tsuyomi.shared.model.BookIdentity
+import org.tsuyomi.core.ui.theme.activeAccent
 
 enum class LibraryScrollDirection {
     FORWARD,
@@ -407,6 +409,7 @@ internal fun LibraryBookGridCard(
     val identity = entry.book.identity
     val wide = currentCoverCardLayout().usesWideTitleLane
     val status = entry.libraryStatusLabel()
+    val eInk = LocalDisplayEnvironment.current.effectiveProfile == org.tsuyomi.core.display.DisplayProfile.EINK
     val targeted = dragCoordinator.bookTargetIdentity == identity
     val targetScale = tsuyomiAnimateFloatAsState(
         target = if (targeted) 1.025f else 1f,
@@ -480,13 +483,13 @@ internal fun LibraryBookGridCard(
                         modifier = Modifier.align(if (wide) Alignment.BottomStart else Alignment.TopEnd)
                             .padding(6.dp).size(32.dp),
                         shape = MaterialTheme.shapes.extraLarge,
-                        color = MaterialTheme.colorScheme.primary,
+                        color = if (eInk) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.secondaryContainer,
                     ) {
                         Box(contentAlignment = Alignment.Center) {
                             Icon(
                                 TsuyomiIcons.Selected,
                                 contentDescription = "已选择",
-                                tint = MaterialTheme.colorScheme.onPrimary,
+                                tint = if (eInk) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.activeAccent,
                             )
                         }
                     }
@@ -546,7 +549,7 @@ internal fun LibraryBookListRow(
             )
         },
         trailingContent = when {
-            selected -> ({ Icon(TsuyomiIcons.Selected, contentDescription = "已选择", tint = MaterialTheme.colorScheme.primary) })
+            selected -> ({ Icon(TsuyomiIcons.Selected, contentDescription = "已选择", tint = MaterialTheme.colorScheme.activeAccent) })
             update != null -> ({ LibraryUpdateActionButton(update, onIgnoreUpdate) })
             else -> null
         },
@@ -603,7 +606,7 @@ internal fun LibraryCompactBookRow(
             if (supporting.isNotBlank()) Text(supporting, maxLines = 1, overflow = TextOverflow.Ellipsis)
         },
         trailingContent = when {
-            selected -> ({ Icon(TsuyomiIcons.Selected, contentDescription = "已选择", tint = MaterialTheme.colorScheme.primary) })
+            selected -> ({ Icon(TsuyomiIcons.Selected, contentDescription = "已选择", tint = MaterialTheme.colorScheme.activeAccent) })
             update != null -> ({ LibraryUpdateActionButton(update, onIgnoreUpdate) })
             else -> entry.rating?.let { rating -> { Text("★ $rating") } }
         },
@@ -641,10 +644,20 @@ internal fun ProductionBookCover(
         onCoverVisibility(entry, true)
         onDispose { onCoverVisibility(entry, false) }
     }
+    val unresolved = entry.reconciliation == org.tsuyomi.shared.librarydomain.RemoteReconciliationState.UNRESOLVED
+    val unresolvedDescription = if (unresolved) stringResource(
+        when (entry.reconciliationOperation?.uppercase()) {
+            "ADD" -> R.string.remote_library_pending_add_description
+            "MOVE" -> R.string.remote_library_pending_move_description
+            "REMOVE" -> R.string.remote_library_pending_remove_description
+            else -> R.string.remote_library_pending_other_description
+        },
+    ) else null
     CoverImage(
         state = coverState(entry),
         modifier = modifier,
-        unresolvedBadge = entry.reconciliation == org.tsuyomi.shared.librarydomain.RemoteReconciliationState.UNRESOLVED,
+        unresolvedBadge = unresolved,
+        unresolvedDescription = unresolvedDescription,
     )
 }
 

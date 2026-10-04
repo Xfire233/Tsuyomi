@@ -167,8 +167,7 @@ Loading → Content | Empty | Error
 
 ### 6.1 Standard
 
-- Light：暖纸背景 `#FAF8F3`，surface `#FDFCF9`，墨青 primary `#2E4A56`。
-- Dark：background `#151A1C`，surface `#1C2225`，primary `#A9C6D2`。
+- Standard配色由 `UI_CONSTITUTION.md` G-53与§3.1统一定义：黑白灰基础层级，仅激活/选中前景使用珊瑚粉强调；普通按钮和容器不染红。
 - 可用不透明 tonal surface、受控 elevation 与克制动效。
 - 不在 standard 使用纯 `#000000` / `#FFFFFF` 作为应用 chrome。
 

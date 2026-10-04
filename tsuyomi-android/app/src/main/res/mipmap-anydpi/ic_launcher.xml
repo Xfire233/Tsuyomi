@@ -1,0 +1,9 @@
+<!-- SPDX-FileCopyrightText: 2026 Tsuyomi Contributors -->
+<!-- SPDX-License-Identifier: Apache-2.0 -->
+<layer-list xmlns:android="http://schemas.android.com/apk/res/android">
+    <item>
+        <bitmap
+            android:gravity="fill"
+            android:src="@drawable/ic_launcher" />
+    </item>
+</layer-list>

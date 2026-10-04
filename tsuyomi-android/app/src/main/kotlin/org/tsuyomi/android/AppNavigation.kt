@@ -7,9 +7,18 @@ package org.tsuyomi.android
 
 import android.net.Uri
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.res.stringResource
+import androidx.navigation.NavBackStackEntry
+import androidx.navigation.NavGraphBuilder
 import androidx.navigation.NavGraph.Companion.findStartDestination
 import androidx.navigation.NavHostController
+import androidx.navigation.compose.composable
+import org.tsuyomi.core.ui.components.AppScaffold
+import org.tsuyomi.core.ui.components.TsuyomiInstantEnter
+import org.tsuyomi.core.ui.components.TsuyomiInstantExit
+import org.tsuyomi.core.ui.layout.TsuyomiNavigationLayout
+import org.tsuyomi.core.ui.layout.TsuyomiWindowSize
 import org.tsuyomi.core.ui.components.TsuyomiNavigationItem
 import org.tsuyomi.core.ui.icons.TsuyomiIcons
 import org.tsuyomi.shared.model.BookIdentity
@@ -24,7 +33,9 @@ internal object Routes {
     const val UpdateSettings = "library/update-settings"
     const val LibraryTagBooks = "library/tag/{ownership}/{sourceId}/{tag}"
     const val Browse = "browse"
-    const val Collections = "library/collections"
+    const val NewCollection = "library/collections/new"
+    const val CollectionBookPicker = "library/collections/new/books"
+    const val CollectionRule = "library/collections/{collectionId}/rule"
     const val More = "more"
     const val Display = "more/display"
     const val ReaderSettings = "more/reader"
@@ -51,6 +62,7 @@ internal object Routes {
 
     fun libraryCollection(collectionId: String): String =
         "library/collection/${Uri.encode(collectionId)}"
+    fun collectionRule(collectionId: String): String = "library/collections/${Uri.encode(collectionId)}/rule"
 
     fun libraryTag(destination: LibraryTagDestination): String =
         "library/tag/${destination.ownership.name}/${Uri.encode(destination.sourceId ?: "_")}/${Uri.encode(destination.normalizedName)}"
@@ -62,7 +74,9 @@ internal object Routes {
 
 
 internal fun rootRouteFor(route: String): String = when (route) {
-    Routes.Collections,
+    Routes.NewCollection,
+    Routes.CollectionBookPicker,
+    Routes.CollectionRule,
     Routes.LibrarySearch,
     Routes.LibrarySystem,
     Routes.LibraryCollection,
@@ -143,7 +157,9 @@ internal fun navigationItems(): List<TsuyomiNavigationItem> = listOf(
 internal fun routeTitle(route: String): String = when (route) {
     Routes.Library -> stringResource(R.string.nav_library)
     Routes.LibrarySearch -> stringResource(R.string.title_library_search)
-    Routes.Collections -> stringResource(R.string.title_collections)
+    Routes.NewCollection -> stringResource(R.string.collection_manual_create_title)
+    Routes.CollectionBookPicker -> stringResource(R.string.nav_library)
+    Routes.CollectionRule -> stringResource(R.string.title_collection_rule_edit)
     Routes.LibrarySystem, Routes.LibraryCollection -> stringResource(R.string.nav_library)
     Routes.LibraryTags, Routes.LibraryTagBooks -> stringResource(R.string.title_library_tags)
     Routes.UpdateSettings -> stringResource(R.string.title_updates_settings)
@@ -177,5 +193,53 @@ internal fun NavHostController.selectRoot(route: String) {
         }
         launchSingleTop = true
         restoreState = true
+    }
+}
+
+internal fun destinationOwnsChrome(route: String): Boolean = when (route) {
+    Routes.Reader,
+    Routes.RemoteLibrary,
+    Routes.LibraryMirror,
+    Routes.LibraryMirrorFolder,
+    Routes.Verification,
+    Routes.VerifiedHomePage,
+    Routes.VerifiedPage,
+    Routes.VerifiedDetailPage,
+    Routes.VerifiedDirectoryPage,
+    Routes.VerifiedChapterPage,
+    -> true
+    else -> false
+}
+
+internal class DestinationScaffold(
+    val windowSize: TsuyomiWindowSize,
+    val topBar: @Composable (String, NavBackStackEntry) -> Unit,
+    val navigation: @Composable (String, NavBackStackEntry, TsuyomiNavigationLayout) -> Unit,
+)
+
+internal val LocalDestinationScaffold = staticCompositionLocalOf<DestinationScaffold> {
+    error("Navigation destination has no scaffold owner")
+}
+
+/** Animate the whole destination, including its route-specific chrome, in one fixed viewport. */
+internal fun NavGraphBuilder.appDestination(
+    route: String,
+    instantPopEnter: Boolean = false,
+    instantPopExit: Boolean = false,
+    content: @Composable (NavBackStackEntry) -> Unit,
+) {
+    composable(
+        route,
+        popEnterTransition = if (instantPopEnter) ({ TsuyomiInstantEnter }) else null,
+        popExitTransition = if (instantPopExit) ({ TsuyomiInstantExit }) else null,
+    ) { entry ->
+        val scaffold = LocalDestinationScaffold.current
+        AppScaffold(
+            windowSize = scaffold.windowSize,
+            topBar = { scaffold.topBar(route, entry) },
+            navigation = { layout -> scaffold.navigation(route, entry, layout) },
+        ) {
+            content(entry)
+        }
     }
 }

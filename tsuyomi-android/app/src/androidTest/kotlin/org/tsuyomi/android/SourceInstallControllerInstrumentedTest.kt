@@ -121,6 +121,148 @@ internal class SourceInstallControllerInstrumentedTest : SourceFlowInstrumentedT
     }
 
     @Test
+    fun unsignedLocalImportRequiresFreshConsentForEveryExactArchive() = runBlocking {
+        val first = assembleUnsignedCandidate("9.9.8")
+        val changed = assembleUnsignedCandidate("9.9.9")
+        try {
+            val install = SourceInstallController(context, library)
+            install.prepare(Uri.fromFile(first), context.contentResolver)
+            val approval = install.state as BrowseUiState.Approval
+            assertEquals(org.tsuyomi.feature.browse.BrowsePublisherIdentity.LOCAL_UNSIGNED, approval.publisherIdentity)
+            assertFalse(approval.requiresUnsignedIdentityTransition)
+            assertEquals(null, install.activePackage)
+            install.approve(false, expectedPackageSha256 = approval.packageSha256)
+            assertTrue(install.state is BrowseUiState.Approval)
+            assertEquals(null, install.activePackage)
+            install.dismissApproval()
+            assertFalse((context.applicationContext as TsuyomiApplication).packageTrust
+                .isApproved(org.tsuyomi.source.extensionmanager.HxpArchiveVerifier(
+                    OfficialRepositoryConfiguration.publisherKeys(null),
+                ).verify(first)))
+
+            install.prepare(Uri.fromFile(first), context.contentResolver)
+            install.approve(
+                allowDowngrade = false,
+                allowUnsignedRisk = true,
+                expectedPackageSha256 = (install.state as BrowseUiState.Approval).packageSha256,
+            )
+            val active = requireNotNull(install.activePackage)
+            assertEquals(null, active.publisherFingerprint)
+            assertTrue((context.applicationContext as TsuyomiApplication).packageTrust.isApproved(active))
+            val restored = SourceInstallController(context, library)
+            restored.restoreInstalled()
+            assertEquals(active.packageSha256, restored.activePackage?.packageSha256)
+
+            restored.prepare(Uri.fromFile(changed), context.contentResolver)
+            val changedApproval = restored.state as BrowseUiState.Approval
+            assertFalse(changedApproval.packageSha256 == active.packageSha256)
+            restored.approve(false, expectedPackageSha256 = changedApproval.packageSha256)
+            assertTrue(restored.state is BrowseUiState.Approval)
+            assertEquals(active.packageSha256, restored.activePackage?.packageSha256)
+            restored.dismissApproval()
+            assertEquals(active.packageSha256, restored.activePackage?.packageSha256)
+            val activeArchive = File(context.noBackupFilesDir, "extensions/active/${active.manifest.sourceId.value}.hxp")
+            activeArchive.writeBytes(changed.readBytes())
+            val uncheckedRestore = SourceInstallController(context, library)
+            uncheckedRestore.restoreInstalled()
+            assertEquals(null, uncheckedRestore.activePackage)
+            assertTrue(uncheckedRestore.state is BrowseUiState.Failure)
+            assertFalse(requireNotNull(library.sourceAvailability(active.manifest.sourceId.value)).available)
+        } finally {
+            first.delete()
+            changed.delete()
+        }
+    }
+
+    @Test
+    fun signedSourceCannotBeReplacedByUnsignedFileAndTransitionNeedsSeparateApprovalAfterUninstall() = runBlocking {
+        val signed = installFixture()
+        val sourceId = signed.manifest.sourceId.value
+        val book = summary(sourceId, "transition", "保留书籍")
+        library.addToLibrary(org.tsuyomi.shared.librarydomain.LibraryBook(
+            identity = book.identity, title = book.title, author = book.author,
+            coverUrl = book.coverUrl, canonicalUrl = book.canonicalUrl,
+            addedAt = SOURCE_FLOW_TEST_TIME, metadataUpdatedAt = SOURCE_FLOW_TEST_TIME,
+        ))
+        val progress = org.tsuyomi.shared.librarydomain.ReadingProgress(
+            book.identity,
+            org.tsuyomi.shared.locator.ReaderLocator(
+                document = org.tsuyomi.shared.locator.DocumentIdentity(sourceId, "transition", "chapter-1"),
+                blockId = "p1", characterOffset = 7, chapterProgress = 0.4,
+                capturedAt = SOURCE_FLOW_TEST_TIME,
+            ),
+        )
+        library.saveProgress(progress)
+        putCredential(sourceId)
+        val partition = SourceCredentialPartition(sourceId, HttpsOrigin("https://www.wenku8.net"))
+        val retainedCredentials = VerifiedBrowserSessionStore(context).getSnapshot(partition)?.session
+        val candidate = assembleUnsignedCandidate("9.9.8")
+        try {
+            val install = SourceInstallController(context, library)
+            install.restoreInstalled()
+            install.prepare(Uri.fromFile(candidate), context.contentResolver)
+            assertTrue(install.state is BrowseUiState.Failure)
+            assertEquals(BrowseInstallFailure.IDENTITY_CONFLICT, (install.state as BrowseUiState.Failure).reason)
+            assertEquals(signed.packageSha256, install.activePackage?.packageSha256)
+            assertTrue(install.uninstall(sourceId))
+            assertEquals(null, install.activePackage)
+            assertEquals(progress, library.progress(book.identity))
+            assertEquals(retainedCredentials, VerifiedBrowserSessionStore(context).getSnapshot(partition)?.session)
+
+            install.prepare(Uri.fromFile(candidate), context.contentResolver)
+            val approval = install.state as BrowseUiState.Approval
+            assertTrue(approval.requiresUnsignedIdentityTransition)
+            install.approve(false, allowUnsignedRisk = true, expectedPackageSha256 = approval.packageSha256)
+            assertTrue(install.state is BrowseUiState.Approval)
+            assertEquals(null, install.activePackage)
+            install.dismissApproval()
+            assertEquals(null, install.activePackage)
+
+            install.prepare(Uri.fromFile(candidate), context.contentResolver)
+            install.approve(
+                allowDowngrade = false,
+                allowUnsignedRisk = true,
+                allowUnsignedIdentityTransition = true,
+                expectedPackageSha256 = (install.state as BrowseUiState.Approval).packageSha256,
+            )
+            val unsigned = requireNotNull(install.activePackage)
+            assertEquals(candidate.readBytes().let(::digest), unsigned.packageSha256)
+            assertEquals(null, unsigned.publisherFingerprint)
+            assertTrue(requireNotNull(library.sourceAvailability(sourceId)).available)
+            assertEquals(progress, library.progress(book.identity))
+            assertEquals(retainedCredentials, VerifiedBrowserSessionStore(context).getSnapshot(partition)?.session)
+            val restored = SourceInstallController(context, library)
+            restored.restoreInstalled()
+            assertEquals(unsigned.packageSha256, restored.activePackage?.packageSha256)
+            assertTrue(restored.uninstall(sourceId))
+            val signedArchive = File.createTempFile("signed-return-", ".hxp", context.cacheDir)
+            try {
+                context.assets.open("wenku8-fixture.hxp").use { input ->
+                    signedArchive.outputStream().use(input::copyTo)
+                }
+                restored.prepare(Uri.fromFile(signedArchive), context.contentResolver)
+                val signedApproval = restored.state as BrowseUiState.Approval
+                assertTrue(signedApproval.requiresSignedIdentityTransition)
+                restored.approve(false, expectedPackageSha256 = signedApproval.packageSha256)
+                assertTrue(restored.state is BrowseUiState.Approval)
+                assertEquals(null, restored.activePackage)
+                restored.approve(
+                    allowDowngrade = false,
+                    allowLegacyMigration = true,
+                    expectedPackageSha256 = signedApproval.packageSha256,
+                )
+                assertEquals(signed.packageSha256, restored.activePackage?.packageSha256)
+                assertEquals(progress, library.progress(book.identity))
+                assertEquals(retainedCredentials, VerifiedBrowserSessionStore(context).getSnapshot(partition)?.session)
+            } finally {
+                signedArchive.delete()
+            }
+        } finally {
+            candidate.delete()
+        }
+    }
+
+    @Test
     fun uninstallRetainsLibraryProgressCredentialsAndReinstallRestoresAvailability() = runBlocking(Dispatchers.Main) {
         val installed = installFixture()
         val sourceId = installed.manifest.sourceId.value
@@ -425,7 +567,7 @@ internal class SourceInstallControllerInstrumentedTest : SourceFlowInstrumentedT
                 executedSearches += 1
                 listOf(summary(sourceId, "revocation-regression", "Retained source"))
             }) },
-            isPackageTrusted = { OfficialRepositoryConfiguration.isTrusted(it, keys) },
+            isPackageTrusted = { OfficialRepositoryConfiguration.isTrusted(it, keys, (context.applicationContext as TsuyomiApplication).packageTrust) },
         )
         flow.open(active)
         flow.updateQuery("before revocation")
@@ -457,6 +599,31 @@ internal class SourceInstallControllerInstrumentedTest : SourceFlowInstrumentedT
             flow.close()
             cache.deleteRecursively()
         }
+    }
+
+    private fun assembleUnsignedCandidate(version: String): File {
+        val archive = File.createTempFile("unsigned-local-candidate-", ".hxp", context.cacheDir)
+        ZipInputStream(context.assets.open("wenku8-fixture.hxp")).use { input ->
+            ZipOutputStream(archive.outputStream()).use { output ->
+                while (true) {
+                    val entry = input.nextEntry ?: break
+                    if (entry.name == "signature.ed25519") continue
+                    val bytes = if (entry.name == "manifest.json") {
+                        val manifest = JSONObject(input.readBytes().toString(Charsets.UTF_8))
+                        manifest.put("manifestVersion", 2)
+                        manifest.put("version", version)
+                        manifest.put("signing", JSONObject().put("algorithm", "none"))
+                        manifest.toString().toByteArray(Charsets.UTF_8)
+                    } else {
+                        input.readBytes()
+                    }
+                    output.putNextEntry(ZipEntry(entry.name))
+                    output.write(bytes)
+                    output.closeEntry()
+                }
+            }
+        }
+        return archive
     }
 
     private fun signedRepositoryCatalog(

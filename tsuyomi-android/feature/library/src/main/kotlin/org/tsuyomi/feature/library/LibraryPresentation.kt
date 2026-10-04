@@ -48,12 +48,12 @@ internal fun LibraryPresentation(
     state: LibraryUiState,
     primaryTabStates: Map<SystemLibraryFilter, LibraryUiState>,
     collections: List<LibraryCollection>,
+    currentCollectionId: String? = null,
     showNavigationNodes: Boolean,
     onSelectTab: suspend (SystemLibraryFilter) -> Unit,
     onOpenCollection: (LibraryCollection) -> Unit,
     onOpenBook: (LibraryEntry) -> Unit,
     onOpenMirror: (LibraryMirrorShortcut) -> Unit,
-    onCreateCollection: () -> Unit,
     onClearFilter: () -> Unit,
     onOpenUpdateSettings: () -> Unit,
     onCancelUpdateScan: () -> Unit,
@@ -92,6 +92,7 @@ internal fun LibraryPresentation(
             LibraryPrimaryTabPage(
                 state = state,
                 collections = collections,
+                currentCollectionId = currentCollectionId,
                 active = true,
                 dragCoordinator = dragCoordinator,
                 onOpenCollection = onOpenCollection,
@@ -129,7 +130,6 @@ internal fun LibraryPresentation(
     val currentOnSelectTab by rememberUpdatedState(onSelectTab)
     val currentSelectedTab by rememberUpdatedState(selectedTab)
     val currentDragActive by rememberUpdatedState(activeDragCoordinator.activePayload != null)
-    val filtered = state.projectedEntries()
     val structuralCollections = collections.filter { it.parentCollectionId == null }
     val rootMirrors = state.mirrorShortcuts.filter { it.targetId == null }
     val showDestinationRail = showNavigationNodes && state.isRootProjection &&
@@ -197,7 +197,7 @@ internal fun LibraryPresentation(
             }
             if (showNavigationNodes && state.isRootProjection && state.updateFilter == LibraryUpdateFilter.UPDATES_ONLY) {
                 LibraryFilterSummary(
-                    count = filtered.size,
+                    count = state.projectedEntries().size,
                     onEdit = onEditFilter,
                     onClear = onClearFilter,
                 )
@@ -273,6 +273,7 @@ internal fun LibraryPresentation(
 private fun LibraryPrimaryTabPage(
     state: LibraryUiState,
     collections: List<LibraryCollection>,
+    currentCollectionId: String? = null,
     active: Boolean,
     dragCoordinator: LibraryDragCoordinator,
     onOpenCollection: (LibraryCollection) -> Unit,
@@ -304,6 +305,11 @@ private fun LibraryPrimaryTabPage(
             placements = state.rootNodePlacements,
             customOrder = state.sortMode == LibrarySortMode.CUSTOM,
         )
+    } else if (currentCollectionId != null) {
+        collections.filter { it.parentCollectionId == currentCollectionId }
+            .sortedWith(compareBy<LibraryCollection> { it.displayOrder }.thenBy { it.collectionId })
+            .map { LibraryRootItem.Collection(it, state.collectionCounts[it.collectionId] ?: 0) } +
+            filtered.map(LibraryRootItem::Book)
     } else {
         null
     }

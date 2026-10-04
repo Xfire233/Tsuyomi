@@ -41,7 +41,8 @@ internal object HxpManifestParser {
                 "integrity", "signing", "capabilities", "resourceLimits", "update",
             ),
         )
-        if (root.string("format") != "tsuyomi-hxp" || root.int("manifestVersion") != 1) {
+        val manifestVersion = root.int("manifestVersion")
+        if (root.string("format") != "tsuyomi-hxp" || manifestVersion !in 1..2) {
             fail(HxpVerificationError.INVALID_MANIFEST)
         }
 
@@ -89,14 +90,20 @@ internal object HxpManifestParser {
         }
         if (entry !in files) fail(HxpVerificationError.INVALID_MANIFEST)
 
-        val signing = root.obj("signing").also {
-            it.requireKeys(setOf("algorithm", "keyId", "signatureFile"))
-        }
-        if (signing.string("algorithm") != "Ed25519" || signing.string("signatureFile") != "signature.ed25519") {
-            fail(HxpVerificationError.INVALID_MANIFEST)
-        }
-        val keyId = signing.string("keyId").also {
-            if (!KEY_ID.matches(it)) fail(HxpVerificationError.INVALID_MANIFEST)
+        val signing = root.obj("signing")
+        val keyId = when (manifestVersion) {
+            1 -> {
+                signing.requireKeys(setOf("algorithm", "keyId", "signatureFile"))
+                if (signing.string("algorithm") != "Ed25519" || signing.string("signatureFile") != "signature.ed25519") {
+                    fail(HxpVerificationError.INVALID_MANIFEST)
+                }
+                signing.string("keyId").also { if (!KEY_ID.matches(it)) fail(HxpVerificationError.INVALID_MANIFEST) }
+            }
+            else -> {
+                signing.requireKeys(setOf("algorithm"))
+                if (signing.string("algorithm") != "none") fail(HxpVerificationError.INVALID_MANIFEST)
+                null
+            }
         }
 
         val capabilities = parseCapabilities(root.obj("capabilities"))

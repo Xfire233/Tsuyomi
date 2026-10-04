@@ -19,6 +19,15 @@ import org.tsuyomi.shared.librarydomain.CollectionKind
 import org.tsuyomi.shared.librarydomain.LibraryCollection
 import org.tsuyomi.shared.librarydomain.LibraryEntry
 
+enum class CollectionDeletionPolicy { REPARENT_CHILDREN, DELETE_SUBTREES }
+
+data class CollectionDeletionPlan(
+    val selectedIds: Set<String>,
+    val policy: CollectionDeletionPolicy,
+    val folderCount: Int,
+    val membershipCount: Int,
+)
+
 internal class RoomCollectionStore(
     private val database: TsuyomiDatabase,
     private val dao: LibraryDao,
@@ -63,6 +72,21 @@ internal class RoomCollectionStore(
             dao.upsertSmartRule(SmartRuleEntity(collection.collectionId, rule.version, astJson, 1))
         }
     }
+    suspend fun smartRule(collectionId: String): SmartRule? =
+        dao.smartRule(collectionId)?.let { SmartRuleCodec.decode(it.astJson).getOrThrow() }
+
+    suspend fun updateSmartCollection(collectionId: String, title: String, rule: SmartRule, now: Instant = Instant.now()) {
+        val normalized = title.trim().replace(Regex("\\s+"), " ")
+        require(normalized.isNotEmpty() && normalized.length <= 512) { "Invalid collection title" }
+        database.withTransaction {
+            require(dao.collection(collectionId)?.kind == CollectionKind.SMART) { "Not a smart collection" }
+            val astJson = SmartRuleCodec.encode(rule)
+            SmartShelfQueryCompiler.requireWithinArgumentLimit(rule)
+            check(dao.renameCollection(collectionId, normalized, now.epochSecond, now.nano) == 1)
+            dao.upsertSmartRule(SmartRuleEntity(collectionId, rule.version, astJson, 1))
+        }
+    }
+
 
     suspend fun renameCollection(collectionId: String, title: String, updatedAt: Instant = Instant.now()) {
         val normalized = title.trim().replace(Regex("\\s+"), " ")
@@ -70,14 +94,71 @@ internal class RoomCollectionStore(
         check(dao.renameCollection(collectionId, normalized, updatedAt.epochSecond, updatedAt.nano) == 1)
     }
 
-    suspend fun deleteCollection(collectionId: String): Boolean = database.withTransaction {
-        val deleted = dao.collection(collectionId) ?: return@withTransaction false
-        val formerParentId = deleted.parentCollectionId
-        dao.reparentChildren(collectionId, null)
-        check(dao.deleteCollection(collectionId) == 1)
-        compactCollectionOrders(formerParentId)
-        if (formerParentId != null) compactCollectionOrders(null)
+    suspend fun previewDeletion(ids: Set<String>, policy: CollectionDeletionPolicy): CollectionDeletionPlan =
+        database.withTransaction {
+            val rows = dao.allCollections()
+            require(ids.isNotEmpty() && rows.map { it.collectionId }.containsAll(ids)) { "Unknown collection" }
+            val removed = deletionIds(rows, ids, policy)
+            CollectionDeletionPlan(
+                ids.toSet(), policy, removed.size,
+                dao.allManualMemberships().count { it.collectionId in removed },
+            )
+        }
+
+    suspend fun deleteCollections(plan: CollectionDeletionPlan): Boolean = database.withTransaction {
+        val rows = dao.allCollections()
+        if (!rows.map { it.collectionId }.containsAll(plan.selectedIds) || plan.selectedIds.isEmpty()) {
+            return@withTransaction false
+        }
+        val removed = deletionIds(rows, plan.selectedIds, plan.policy)
+        if (removed.size != plan.folderCount ||
+            dao.allManualMemberships().count { it.collectionId in removed } != plan.membershipCount
+        ) return@withTransaction false
+
+        val byId = rows.associateBy { it.collectionId }
+        val children = rows.groupBy { it.parentCollectionId }.mapValues { (_, siblings) ->
+            siblings.sortedWith(compareBy<CollectionEntity> { it.displayOrder }.thenBy { it.collectionId })
+        }
+        if (plan.policy == CollectionDeletionPolicy.REPARENT_CHILDREN) {
+            // Expand selected slots in place so children retain their relative position at the nearest surviving parent.
+            fun survivingAt(parentId: String?): List<CollectionEntity> = children[parentId].orEmpty().flatMap { row ->
+                if (row.collectionId in removed) survivingAt(row.collectionId) else listOf(row)
+            }
+            val affectedParents = removed.mapTo(linkedSetOf<String?>()) { id ->
+                var parent = byId.getValue(id).parentCollectionId
+                while (parent != null && parent in removed) parent = byId.getValue(parent).parentCollectionId
+                parent
+            }
+            affectedParents.forEach { parent ->
+                survivingAt(parent).forEachIndexed { index, row ->
+                    check(dao.updateCollectionPresentation(row.collectionId, parent, index.toLong()) == 1)
+                }
+            }
+        }
+        removed.forEach { check(dao.deleteCollection(it) == 1) }
+        if (plan.policy == CollectionDeletionPolicy.DELETE_SUBTREES) {
+            removed.mapTo(linkedSetOf()) { byId.getValue(it).parentCollectionId }
+                .filterNot { it in removed }.forEach { compactCollectionOrders(it) }
+        }
         true
+    }
+
+    suspend fun deleteCollection(collectionId: String): Boolean {
+        if (dao.collection(collectionId) == null) return false
+        return deleteCollections(previewDeletion(setOf(collectionId), CollectionDeletionPolicy.REPARENT_CHILDREN))
+    }
+
+    private fun deletionIds(
+        rows: List<CollectionEntity>, ids: Set<String>, policy: CollectionDeletionPolicy,
+    ): Set<String> {
+        if (policy == CollectionDeletionPolicy.REPARENT_CHILDREN) return ids
+        val children = rows.groupBy { it.parentCollectionId }
+        val removed = linkedSetOf<String>()
+        fun visit(id: String) {
+            if (removed.add(id)) children[id].orEmpty().forEach { visit(it.collectionId) }
+        }
+        ids.forEach(::visit)
+        return removed
     }
 
     suspend fun createCollection(collection: LibraryCollection) {

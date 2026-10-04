@@ -26,7 +26,6 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.LifecycleEventEffect
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.navigation.NavGraphBuilder
-import androidx.navigation.compose.composable
 import org.tsuyomi.core.ui.components.StateView
 import org.tsuyomi.core.ui.components.TsuyomiStateKind
 import org.tsuyomi.feature.library.UpdateSettingsScreen
@@ -38,7 +37,7 @@ internal fun NavGraphBuilder.updateSettingsRoute(
     application: TsuyomiApplication,
     libraryFlow: LibraryFlowController,
 ) {
-    composable(Routes.UpdateSettings) {
+    appDestination(Routes.UpdateSettings) {
         val context = LocalContext.current
         var notificationStateRevision by rememberSaveable { mutableIntStateOf(0) }
         var permissionRequested by rememberSaveable { mutableStateOf(false) }

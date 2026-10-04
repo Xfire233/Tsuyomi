@@ -65,7 +65,6 @@ fun LibraryEmptyStateScreenshots() {
                     showNavigationNodes = true,
                     onOpenCollection = {},
                     onOpenBook = {},
-                    onCreateCollection = {},
                     onRetry = {},
                 )
             }

@@ -9,6 +9,7 @@ import java.time.Instant
 import kotlinx.coroutines.runBlocking
 import org.junit.After
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -197,23 +198,105 @@ class RoomCollectionInstrumentedTest {
     }
 
     @Test
-    fun deleteCollectionReparentsChildrenAndCompactsBothAffectedSiblingGroups() = runBlocking {
+    fun deletionPreviewAndReparentPreserveNearestParentOrderAndBookRecord() = runBlocking {
+        val book = LibraryBook(BookIdentity("source", "member"), "Book", Instant.EPOCH, Instant.EPOCH)
+        repository.addToLibrary(book)
         repository.createCollection(LibraryCollection("grandparent", CollectionKind.MANUAL, "Grandparent", null, 0))
         repository.createCollection(LibraryCollection("parent", CollectionKind.MANUAL, "Parent", "grandparent", 10))
         repository.createCollection(LibraryCollection("former-sibling", CollectionKind.MANUAL, "Former sibling", "grandparent", 30))
         repository.createCollection(LibraryCollection("root", CollectionKind.MANUAL, "Root", null, 5))
         repository.createCollection(LibraryCollection("child-b", CollectionKind.MANUAL, "Child B", "parent", 7))
-        repository.createCollection(LibraryCollection("child-a", CollectionKind.MANUAL, "Child A", "parent", 7))
+        repository.createManualCollectionWithMemberships(
+            LibraryCollection("child-a", CollectionKind.MANUAL, "Child A", "parent", 7), setOf(book.identity),
+        )
+        val plan = repository.previewCollectionDeletion(setOf("parent"), CollectionDeletionPolicy.REPARENT_CHILDREN)
+        assertEquals(1, plan.folderCount)
+        assertEquals(0, plan.membershipCount)
+        assertEquals("parent", repository.collections().first { it.collectionId == "child-a" }.parentCollectionId)
+        assertTrue(repository.deleteCollections(plan))
 
-        assertTrue(repository.deleteCollection("parent"))
+        val rows = repository.collections().associateBy { it.collectionId }
+        assertFalse("parent" in rows)
+        assertEquals("grandparent", rows.getValue("child-a").parentCollectionId)
+        assertEquals("grandparent", rows.getValue("child-b").parentCollectionId)
+        assertEquals(0L, rows.getValue("child-a").displayOrder)
+        assertEquals(1L, rows.getValue("child-b").displayOrder)
+        assertEquals(2L, rows.getValue("former-sibling").displayOrder)
+        assertEquals(5L, rows.getValue("root").displayOrder)
+        assertEquals(listOf(book.identity), repository.collectionEntries("child-a").map { it.book.identity })
+        assertEquals("Book", repository.book(book.identity)?.title)
+    }
 
-        val collections = repository.collections().associateBy { it.collectionId }
-        assertEquals(null, collections["parent"])
-        assertEquals(null, requireNotNull(collections["child-a"]).parentCollectionId)
-        assertEquals(null, requireNotNull(collections["child-b"]).parentCollectionId)
-        assertEquals(0L, requireNotNull(collections["former-sibling"]).displayOrder)
-        assertEquals(1L, requireNotNull(collections["root"]).displayOrder)
-        assertEquals(2L, requireNotNull(collections["child-a"]).displayOrder)
-        assertEquals(3L, requireNotNull(collections["child-b"]).displayOrder)
+    @Test
+    fun overlappingBatchSubtreeDeletionIsAtomicAndLeavesBooksIntact() = runBlocking {
+        val identity = BookIdentity("source", "member")
+        repository.addToLibrary(LibraryBook(identity, "Book", Instant.EPOCH, Instant.EPOCH))
+        repository.createCollection(LibraryCollection("parent", CollectionKind.MANUAL, "Parent", null, 0))
+        repository.createManualCollectionWithMemberships(
+            LibraryCollection("child", CollectionKind.MANUAL, "Child", "parent", 0), setOf(identity),
+        )
+        repository.createCollection(LibraryCollection("sibling", CollectionKind.MANUAL, "Sibling", null, 1))
+        val plan = repository.previewCollectionDeletion(setOf("parent", "child"), CollectionDeletionPolicy.DELETE_SUBTREES)
+        assertEquals(2, plan.folderCount)
+        assertEquals(1, plan.membershipCount)
+        // Preview and cancel perform no mutation; a stale preview cannot silently delete changed memberships.
+        assertEquals(3, repository.collections().size)
+        assertEquals(listOf(identity), repository.collectionEntries("child").map { it.book.identity })
+        val late = BookIdentity("source", "late")
+        repository.addToLibrary(LibraryBook(late, "Late", Instant.EPOCH, Instant.EPOCH))
+        assertTrue(repository.addManualMembership("child", late))
+        assertFalse(repository.deleteCollections(plan))
+        assertEquals(3, repository.collections().size)
+        val currentPlan = repository.previewCollectionDeletion(setOf("parent", "child"), CollectionDeletionPolicy.DELETE_SUBTREES)
+        assertEquals(2, currentPlan.membershipCount)
+        assertTrue(repository.deleteCollections(currentPlan))
+        assertEquals(listOf("sibling"), repository.collections().map { it.collectionId })
+        assertEquals(0L, repository.collections().single().displayOrder)
+        assertEquals(emptySet<String>(), repository.manualCollectionIds(identity))
+        assertEquals("Book", repository.book(identity)?.title)
+        assertEquals("Late", repository.book(late)?.title)
+    }
+
+    @Test
+    fun overlappingBatchReparentPromotesOnlySurvivorsInOriginalOrder() = runBlocking {
+        val identity = BookIdentity("source", "survivor")
+        repository.addToLibrary(LibraryBook(identity, "Survivor", Instant.EPOCH, Instant.EPOCH))
+        repository.createCollection(LibraryCollection("parent", CollectionKind.MANUAL, "Parent", null, 0))
+        repository.createCollection(LibraryCollection("child", CollectionKind.MANUAL, "Child", "parent", 0))
+        repository.createManualCollectionWithMemberships(
+            LibraryCollection("grandchild", CollectionKind.MANUAL, "Grandchild", "child", 0), setOf(identity),
+        )
+        repository.createCollection(LibraryCollection("sibling", CollectionKind.MANUAL, "Sibling", null, 1))
+        val plan = repository.previewCollectionDeletion(
+            setOf("child", "parent"), CollectionDeletionPolicy.REPARENT_CHILDREN,
+        )
+        assertEquals(2, plan.folderCount)
+        assertEquals(0, plan.membershipCount)
+        assertTrue(repository.deleteCollections(plan))
+        val survivors = repository.collections()
+        assertEquals(listOf("grandchild", "sibling"), survivors.map { it.collectionId })
+        assertEquals(null, survivors.first().parentCollectionId)
+        assertEquals(0L, survivors.first().displayOrder)
+        assertEquals(listOf(identity), repository.collectionEntries("grandchild").map { it.book.identity })
+    }
+
+    @Test
+    fun smartRuleUpdatePreservesIdentityAndRejectsManualConversion() = runBlocking {
+        val identity = BookIdentity("source", "match")
+        repository.addToLibrary(LibraryBook(identity, "Book", Instant.EPOCH, Instant.EPOCH))
+        val initial = SmartRule(root = SmartRuleNode.All(listOf(
+            SmartRuleNode.Predicate(SmartPredicate.SourceIn(setOf("other"))),
+        )))
+        repository.createSmartCollection(LibraryCollection("smart", CollectionKind.SMART, "Old", null, 0), initial)
+        val replacement = SmartRule(root = SmartRuleNode.All(listOf(
+            SmartRuleNode.Predicate(SmartPredicate.SourceIn(setOf("source"))),
+        )))
+        repository.updateSmartCollection("smart", "New", replacement)
+        assertEquals("New", repository.collections().single().title)
+        assertEquals(replacement, repository.smartRule("smart"))
+        assertEquals(listOf(identity), repository.collectionEntries("smart").map { it.book.identity })
+        repository.createCollection(LibraryCollection("manual", CollectionKind.MANUAL, "Manual", null, 1))
+        assertTrue(runCatching { repository.updateSmartCollection("manual", "Never", replacement) }.isFailure)
+        assertEquals(CollectionKind.MANUAL, repository.collections().first { it.collectionId == "manual" }.kind)
     }
 }

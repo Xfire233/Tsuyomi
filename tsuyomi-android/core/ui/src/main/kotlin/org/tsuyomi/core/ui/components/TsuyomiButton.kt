@@ -26,6 +26,7 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.ButtonShapes
 import androidx.compose.material3.FilterChip
+import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.FilledTonalIconButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButtonDefaults
@@ -55,6 +56,7 @@ import org.tsuyomi.core.ui.theme.instantMotion
 import org.tsuyomi.core.ui.theme.rememberSystemReducedMotion
 import org.tsuyomi.core.ui.theme.tsuyomiFocusRing
 
+import org.tsuyomi.core.ui.theme.activeAccent
 /** Visual weight of a [TsuyomiButton]. Only one primary action should be visible per surface. */
 enum class TsuyomiButtonStyle {
     PRIMARY,
@@ -375,7 +377,9 @@ fun TsuyomiToggleChip(
     compact: Boolean = false,
     leadingIcon: ImageVector? = null,
 ) {
-    val useCompact = compact && LocalDisplayEnvironment.current.effectiveProfile != DisplayProfile.EINK
+    val isEInk = LocalDisplayEnvironment.current.effectiveProfile == DisplayProfile.EINK
+    val useCompact = compact && !isEInk
+    val scheme = MaterialTheme.colorScheme
     val chipModifier = modifier
         .heightIn(min = if (useCompact) 40.dp else 48.dp)
         .semantics { this.stateDescription = stateDescription }
@@ -385,16 +389,32 @@ fun TsuyomiToggleChip(
             onClick = onClick,
             enabled = enabled,
             modifier = chipModifier,
+            colors = if (isEInk) FilterChipDefaults.filterChipColors() else FilterChipDefaults.filterChipColors(
+                labelColor = scheme.onSurfaceVariant,
+                selectedContainerColor = scheme.surfaceVariant,
+                selectedLabelColor = scheme.activeAccent,
+            ),
             label = {
                 Text(
                     text = text,
                     modifier = if (useCompact) Modifier else Modifier.fillMaxWidth(),
                     textAlign = TextAlign.Center,
                     maxLines = 1,
+                    color = if (isEInk) {
+                        if (selected) scheme.activeAccent else scheme.onSurfaceVariant
+                    } else {
+                        Color.Unspecified
+                    },
                 )
             },
             leadingIcon = leadingIcon?.let { icon ->
-                { Icon(imageVector = icon, contentDescription = null) }
+                {
+                    Icon(
+                        imageVector = icon,
+                        contentDescription = null,
+                        tint = if (selected) MaterialTheme.colorScheme.activeAccent else MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
             },
         )
     }

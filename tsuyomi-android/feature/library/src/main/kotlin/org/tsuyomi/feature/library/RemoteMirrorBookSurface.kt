@@ -57,7 +57,7 @@ fun RemoteMirrorBookSurface(
     selectedTargetId: String?,
     groupingEnabled: Boolean,
     selectedBookIds: Set<BookIdentity>,
-    unresolvedBookIds: Set<String>,
+    unresolvedBookOperations: Map<String, String>,
     layout: LibraryLayout,
     onOpenTarget: (RemoteTarget) -> Unit,
     onOpenBook: (SourceBookSummary) -> Unit,
@@ -71,7 +71,7 @@ fun RemoteMirrorBookSurface(
     modifier: Modifier = Modifier,
 ) {
     val summariesByIdentity = remember(books) { books.associateBy { it.identity } }
-    val entries = remember(books, unresolvedBookIds) {
+    val entries = remember(books, unresolvedBookOperations) {
         books.map { summary ->
             LibraryEntry(
                 book = LibraryBook(
@@ -87,11 +87,12 @@ fun RemoteMirrorBookSurface(
                 rating = null,
                 localTags = emptySet(),
                 sourceAvailable = true,
-                reconciliation = if (summary.identity.remoteBookId in unresolvedBookIds) {
+                reconciliation = if (summary.identity.remoteBookId in unresolvedBookOperations) {
                     RemoteReconciliationState.UNRESOLVED
                 } else {
                     null
                 },
+                reconciliationOperation = unresolvedBookOperations[summary.identity.remoteBookId],
             )
         }
     }

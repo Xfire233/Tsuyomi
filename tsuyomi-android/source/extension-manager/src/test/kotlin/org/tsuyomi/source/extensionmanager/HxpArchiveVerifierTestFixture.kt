@@ -15,6 +15,7 @@ import java.util.zip.ZipOutputStream
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.Json
 import org.bouncycastle.crypto.params.Ed25519PrivateKeyParameters
 import org.bouncycastle.crypto.signers.Ed25519Signer
 import org.erdtman.jcs.JsonCanonicalizer
@@ -84,6 +85,38 @@ internal fun signedFixture(
         ),
     )
     return SignedFixture(publisher, archive, version)
+}
+
+internal data class UnsignedFixture(val bytes: ByteArray) {
+    fun writeToTemporaryFile(archive: ByteArray = bytes): File =
+        Files.createTempFile("unsigned-wenku8-", ".hxp").toFile().apply {
+            writeBytes(archive)
+            deleteOnExit()
+        }
+}
+
+internal fun unsignedFixture(
+    version: String = "0.2.0",
+    payload: ByteArray = ENTRY_BYTES,
+    indexedPayload: ByteArray = payload,
+    signing: JsonObject = JsonObject(mapOf("algorithm" to JsonPrimitive("none"))),
+    extraEntries: Map<String, ByteArray> = emptyMap(),
+): UnsignedFixture {
+    val files = JsonObject(mapOf(ENTRY_PATH to JsonPrimitive(sha256(indexedPayload))))
+    val contentDigest = sha256(JsonCanonicalizer(files.toString()).encodedUTF8)
+    val signedManifest = Json.parseToJsonElement(
+        manifest(contentDigest, files, version, FixtureLimits(), JsonObject(
+            mapOf("read" to JsonPrimitive(false), "writeOperations" to JsonArray(emptyList())),
+        ), null, null, "tsuyomi-fixture-key"),
+    ) as JsonObject
+    val unsignedManifest = JsonObject(signedManifest.toMutableMap().apply {
+        put("manifestVersion", JsonPrimitive(2))
+        put("signing", signing)
+    })
+    return UnsignedFixture(zip(linkedMapOf(
+        "manifest.json" to unsignedManifest.toString().toByteArray(StandardCharsets.UTF_8),
+        ENTRY_PATH to payload,
+    ) + extraEntries))
 }
 
 internal fun newInstaller(

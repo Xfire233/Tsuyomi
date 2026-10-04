@@ -219,4 +219,37 @@ class RoomRemoteLibraryInstrumentedTest {
         assertTrue(refreshed.targets.single { it.targetId == "1" }.frozen)
         assertEquals(1, repository.remoteMirrorTargetCount(sourceId, "0"))
     }
+
+    @Test
+    fun mirrorReadAndSuccessfulEmptyReplaceNeverAcknowledgeUnresolvedAdd() = runBlocking {
+        val sourceId = "org.tsuyomi.wenku8"
+        val book = LibraryBook(BookIdentity(sourceId, "pending-add"), "待确认网站收藏", Instant.EPOCH, Instant.EPOCH)
+        val receipt = repository.beginRemoteAdd(
+            RemoteAddRequest(
+                book = book,
+                packageDigest = "digest",
+                packageVersion = "0.2.0",
+                capabilitySetFingerprint = "capability",
+                registryGeneration = 2,
+                startedAt = Instant.EPOCH,
+            ),
+        )
+        assertTrue(repository.transitionRemoteAdd(receipt, RemoteReconciliationState.PENDING_USER_ACTION, RemoteReconciliationState.IN_FLIGHT, Instant.EPOCH.plusSeconds(1)))
+        assertTrue(repository.transitionRemoteAdd(receipt, RemoteReconciliationState.IN_FLIGHT, RemoteReconciliationState.UNRESOLVED, Instant.EPOCH.plusSeconds(2)))
+
+        repository.saveRemoteMirrorSnapshot(
+            RemoteMirrorReplaceRequest(
+                sourceId, "文库8", listOf(RemoteMirrorBookSnapshot(book, null)), emptyList(), Instant.EPOCH.plusSeconds(3),
+            ),
+        )
+        assertEquals(1, requireNotNull(repository.remoteMirrorSnapshot(sourceId)).books.size)
+        assertEquals(RemoteReconciliationState.UNRESOLVED, repository.bookReconciliation(sourceId, book.identity.remoteBookId)?.state)
+
+        repository.saveRemoteMirrorSnapshot(
+            RemoteMirrorReplaceRequest(sourceId, "文库8", emptyList(), emptyList(), Instant.EPOCH.plusSeconds(4)),
+        )
+        assertTrue(requireNotNull(repository.remoteMirrorSnapshot(sourceId)).books.isEmpty())
+        assertEquals(RemoteReconciliationState.UNRESOLVED, repository.bookReconciliation(sourceId, book.identity.remoteBookId)?.state)
+        assertEquals(RemoteReconciliationState.UNRESOLVED, repository.libraryEntry(book.identity)?.reconciliation)
+    }
 }
