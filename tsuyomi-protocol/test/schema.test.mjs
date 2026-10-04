@@ -47,6 +47,11 @@ for (const { label, schemaPath, fixturePath } of [
     fixturePath: '../fixtures/hxp/valid-minimal-manifest.json',
   },
   {
+    label: 'hxp manifest v2 local unsigned',
+    schemaPath: '../schemas/hxp-manifest-v2.schema.json',
+    fixturePath: '../fixtures/hxp/valid-local-unsigned-v2-manifest.json',
+  },
+  {
     label: 'hxp update check v2',
     schemaPath: '../schemas/hxp-update-check-v2.schema.json',
     fixturePath: '../fixtures/hxp/valid-update-check-v2.json',
@@ -154,6 +159,26 @@ test('tsuyomi repository v1 rejects unsigned shape changes and unsafe package UR
   const credentialed = await loadJson('../fixtures/repository/valid-catalog.json');
   credentialed.signed.packages[0].downloadUrl = 'https://user@example.test/fixture.hxp';
   assert.equal(validate(credentialed), false);
+});
+
+test('HXP schema versions forbid unsigned v1, signed v2, missing signing, and forged publisher identity', async () => {
+  const ajv = createAjv();
+  const signed = ajv.compile(await loadJson('../schemas/hxp-manifest-v1.schema.json'));
+  const unsigned = ajv.compile(await loadJson('../schemas/hxp-manifest-v2.schema.json'));
+  const v1 = await loadJson('../fixtures/hxp/valid-minimal-manifest.json');
+  const v2 = await loadJson('../fixtures/hxp/valid-local-unsigned-v2-manifest.json');
+  assert.equal(signed(v1), true, ajv.errorsText(signed.errors));
+  assert.equal(unsigned(v2), true, ajv.errorsText(unsigned.errors));
+  assert.equal(signed(v2), false);
+  assert.equal(unsigned(v1), false);
+  for (const fixture of [
+    'invalid-local-unsigned-v2-missing-signing.json',
+    'invalid-local-unsigned-v2-mixed-signing.json',
+  ]) {
+    assert.equal(unsigned(await loadJson(`../fixtures/hxp/${fixture}`)), false, fixture);
+  }
+  assert.equal(signed({ ...v1, signing: { algorithm: 'none' } }), false);
+  assert.equal(unsigned({ ...v2, signing: { algorithm: 'Ed25519', keyId: 'signed-publisher', signatureFile: 'signature.ed25519' } }), false);
 });
 
 test('hxp manifest v1 rejects non-HTTPS network origins', async () => {

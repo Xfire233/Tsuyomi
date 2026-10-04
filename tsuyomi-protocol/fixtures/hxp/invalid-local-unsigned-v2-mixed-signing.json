@@ -1,0 +1,155 @@
+{
+  "format": "tsuyomi-hxp",
+  "manifestVersion": 2,
+  "id": "org.tsuyomi.wenku8",
+  "version": "0.1.0",
+  "display": {
+    "name": "Wenku8",
+    "summary": "Fixture manifest only"
+  },
+  "hostApi": {
+    "minInclusive": "1.0.0",
+    "maxExclusive": "2.0.0"
+  },
+  "entry": "index.mjs",
+  "integrity": {
+    "algorithm": "sha256",
+    "contentDigest": "56831e6873b526e619945a4d1d9a543e677939154434edf3c9aa62da3d266508",
+    "files": {
+      "index.mjs": "450f0af4f4c1ecc4c7180f2e364c8a59bfed69dd350fb6b47bce8641c2a37786"
+    }
+  },
+  "signing": {
+    "algorithm": "none",
+    "keyId": "bad-publisher-identity",
+    "signatureFile": "signature.ed25519"
+  },
+  "capabilities": {
+    "network": {
+      "origins": [
+        "https://www.wenku8.net"
+      ],
+      "maxConcurrentRequests": 2,
+      "requestTimeoutMs": 15000,
+      "maxResponseBytes": 1048576
+    },
+    "cookies": {
+      "mode": "sourceScoped",
+      "origins": [
+        "https://www.wenku8.net"
+      ]
+    },
+    "webLogin": {
+      "enabled": true,
+      "origins": [
+        "https://www.wenku8.net"
+      ]
+    },
+    "home": {
+      "enabled": true
+    },
+    "remoteLibrary": {
+      "read": true,
+      "writeOperations": [
+        "add",
+        "remove",
+        "move"
+      ],
+      "policies": {
+        "read": {
+          "origin": "https://www.wenku8.net",
+          "method": "GET",
+          "path": "/modules/article/bookcase.php",
+          "parameters": {
+            "action": {
+              "kind": "fixed",
+              "value": "list"
+            },
+            "cursor": {
+              "kind": "cursor"
+            }
+          }
+        },
+        "targets": {
+          "origin": "https://www.wenku8.net",
+          "method": "GET",
+          "path": "/modules/article/bookcase.php",
+          "parameters": {
+            "action": {
+              "kind": "fixed",
+              "value": "targets"
+            }
+          }
+        },
+        "add": {
+          "origin": "https://www.wenku8.net",
+          "method": "POST",
+          "path": "/modules/article/bookcase.php",
+          "redirects": [
+            {
+              "origin": "https://www.wenku8.net",
+              "method": "GET",
+              "path": "/modules/article/bookcase-success.php",
+              "parameters": {
+                "status": {
+                  "kind": "fixed",
+                  "value": "added"
+                }
+              }
+            }
+          ],
+          "parameters": {
+            "action": {
+              "kind": "fixed",
+              "value": "add"
+            },
+            "aid": {
+              "kind": "remoteBookId"
+            }
+          }
+        },
+        "remove": {
+          "origin": "https://www.wenku8.net",
+          "method": "POST",
+          "path": "/modules/article/bookcase.php",
+          "parameters": {
+            "action": {
+              "kind": "fixed",
+              "value": "remove"
+            },
+            "aid": {
+              "kind": "remoteBookId"
+            }
+          }
+        },
+        "move": {
+          "origin": "https://www.wenku8.net",
+          "method": "POST",
+          "path": "/modules/article/bookcase.php",
+          "parameters": {
+            "action": {
+              "kind": "fixed",
+              "value": "move"
+            },
+            "aid": {
+              "kind": "remoteBookId"
+            },
+            "target": {
+              "kind": "targetId"
+            }
+          }
+        }
+      }
+    },
+    "storage": {
+      "quotaBytes": 1048576
+    }
+  },
+  "resourceLimits": {
+    "maxExecutionWallTimeMs": 15000,
+    "maxMemoryBytes": 16777216
+  },
+  "update": {
+    "channel": "stable"
+  }
+}
