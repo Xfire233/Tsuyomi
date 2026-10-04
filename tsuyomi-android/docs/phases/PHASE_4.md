@@ -742,3 +742,9 @@ F-014 `app/SourceRouteScopedOwners.kt` mutation status and `feature/book/BookDet
 
 - Coordinated source-publication inputs: protocol schema commit `981e97b1e5a1e8ae43e9ad3957d3f3c18d1aef1d` in `Xfire233/Tsuyomi`, then extension commit `b527c65dbe381a217a23ace268b49c4c7cf3a388` in `Chachaanteng/tsuyomi-extensions`. The provider's vendored v2 schema is byte-identical to that immutable protocol input, SHA-256 `8f33526b6ef302ae07a869eca880cc1948683eb46bc4a3d3060d58f245e4155a`, with its Apache-2.0 notice retained. These are feature-branch source inputs, not release tags, a new signed package or permission to deploy them over the accepted candidate.
 
+### PR admission continuation — 2026-10-05
+
+- After the completed dual-repository source delivery, the maintainer directed continuation. The next bounded stage is creating the corresponding main/provider PRs, final-head independent Adviser review, and the existing strict hosted admission checks. Record the exact PR heads, bases, run IDs and actual step results; earlier local proof and package acceptance do not replace them.
+- Main admission retains `repository-policy`, `protocol-conformance`, `extensions-baseline`, `android-build-test-lint-goldens` and `android-api29-instrumentation`; provider admission retains `verify`, strict base freshness and resolved conversations. This continuation does not relax protection, upgrade LOW to local HIGH CI, authorize golden updates, merge either PR, publish/sign/tag a release, replace the canonical artifact/device, restore EINK or perform website writes.
+
+
