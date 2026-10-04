@@ -230,8 +230,12 @@ class HxpArchiveVerificationTest {
         val unsigned = unsignedFixture()
         val digest = sha256(unsigned.bytes)
         val officialKeys = InMemoryPublisherKeyStore(emptyList())
-        val official = object : PublisherKeyResolver by officialKeys {
+        // Interface defaults must run on the authorized resolver, not the unprivileged key store.
+        val official = object : PublisherKeyResolver {
             override val hasGlobalRevocationAuthority = true
+            override fun resolve(keyId: String): PublisherKey? = officialKeys.resolve(keyId)
+            override fun isRevokedFingerprint(fingerprint: String): Boolean = officialKeys.isRevokedFingerprint(fingerprint)
+            override fun isRevokedPackage(packageSha256: String): Boolean = officialKeys.isRevokedPackage(packageSha256)
         }
         val subscription = InMemoryPublisherKeyStore(emptyList()).also { it.revokePackage(digest) }
         val resolver = CompositePublisherKeyResolver(listOf(

@@ -66,7 +66,8 @@ jobs:
 
   android-api29-instrumentation:
     runs-on: ubuntu-latest
-    timeout-minutes: 18
+    # Cold precompile plus the full serialized device matrix exceeded the former 18-minute limit.
+    timeout-minutes: 35
     steps:
       - name: Checkout
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
