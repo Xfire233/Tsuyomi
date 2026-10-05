@@ -18,9 +18,11 @@ Some sources require interactive login, Cloudflare checks, CAPTCHA, or browser s
 
 ## Decision
 
-An extension may request a controlled WebView only when its manifest declares the capability and the user granted it. The host opens an allowlisted, user-visible WebView. The user performs login or verification manually.
+An extension may request a controlled WebView only when its manifest declares the capability and the user granted it. The host opens an allowlisted, user-visible WebView. Ordinary login and verification remain user-mediated in production. Narrow exception: externally operated automation MAY enter credentials and submit the normal user-visible allowlisted WebView login for the explicitly authorized, newly provisioned dedicated Wenku8 test account and private test environment only. This exception does not change production manual-login behavior; ESJZone and Yamibo require explicit account designation before any automated login.
 
-The host may transfer only source-scoped cookies and narrowly defined completion metadata into the corresponding host-managed cookie partition. Extensions cannot automate CAPTCHA, Cloudflare, or comparable anti-bot challenges, inject bypass scripts, read unrelated cookies, or navigate outside the granted origin policy.
+The host may transfer only source-scoped cookies and narrowly defined completion metadata into the corresponding host-managed cookie partition. Extensions cannot automate CAPTCHA, Cloudflare, or comparable anti-bot challenges, inject bypass scripts, read unrelated cookies, or navigate outside the granted origin policy. External automation is limited to ordinary login interaction: no extension-auth automation, challenge bypass, or implicit website writes. If a challenge appears, pause for a human. Session expiry may use the same authorized ordinary login again.
+
+Credentials are transient and may be held only in private encrypted host storage; they must be absent from public source, CI, distributable APKs, reports, screenshots, and memory. The shared online candidate retains its application data, signing identity, and source-scoped session; credential-clearing test setup is forbidden there. Disposable CI devices never use the persistent candidate or its credentials.
 
 WebView closure and login-state checks do not implicitly trigger remote favorite synchronization or other mutations.
 

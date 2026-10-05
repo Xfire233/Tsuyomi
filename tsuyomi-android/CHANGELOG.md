@@ -8,6 +8,8 @@ All notable changes use semantic versioning. Future Phase baselines use annotate
 ## [Unreleased]
 
 ### Changed
+- Advanced the next prerelease candidate to `0.3.0-beta.5` / versionCode7; private build-fingerprint suffixes remain distinct. Independent signing-key recovery is maintainer-confirmed; public publication still requires protected source admission, human merge confirmation and release signing.
+- Reduced README to download, capabilities and necessary privacy/license information, with source-build and native HIGH API29 runner instructions owned by CONTRIBUTING. Local CI and protected hosted admission remain unchanged.
 - Replaced the temporary black-and-white launcher glyph with the directly selected F6R Tsuyomi mark: coral open `つ`, cream page, ochre page depth, continuous upper-right coral depth and parchment background.
 - Standard chrome now uses a neutral light/dark palette with restrained coral-pink selected icons, labels and check markers. Ordinary buttons and selected containers remain grayscale; inline author links retain an underline affordance. Explicit Dynamic Color, E-ink and Reader content themes retain their existing scope.
 - Simplified website-collection explanations and consent prompts into plain Chinese; removed redundant loading/empty-state prose while preserving local-versus-website effects and removal warnings.

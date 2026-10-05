@@ -52,6 +52,9 @@ One observable claim has one owner:
 | Long-reading comfort, trust, wording quality, brand judgment or TalkBack experience | Human review |
 
 Do not run a Journey, screenshot, hierarchy dump and manual replay to prove the same deterministic fact. Use another owner only when the first owner lacks the required capability or reports a concrete failure.
+## Shared online candidate
+
+The routine online lane uses one explicitly designated dedicated-test-account, online debug-signed candidate. Automation owns it first; after evidence and exact build/source digests are handed off, freeze it for human review of changed qualitative items only. Human review remains `PENDING` until a human completes it. CI fixture, migration, security and screenshot regression evidence stays on disposable CI devices and does not create a separate fixture walkthrough or visual round. Never perform credential-clearing setup or wipe data on the shared candidate. An extra development device is optional when iteration overlaps human review; the existing daily canonical is not repurposed without deployment authorization.
 
 ## Production state inventory
 

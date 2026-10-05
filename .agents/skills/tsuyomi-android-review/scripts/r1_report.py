@@ -57,6 +57,8 @@ class ChangeSummary:
     build_required: bool
     device_required: bool
     product_runtime_changed: bool
+    evidence_plan: dict[str, Any]
+
 
 def _summarize_changes(context: ReportBuildContext) -> ChangeSummary:
     classes = {change["class"] for change in context.changes}
@@ -70,16 +72,42 @@ def _summarize_changes(context: ReportBuildContext) -> ChangeSummary:
     )
     current_stage_nodes = [node for node in affected_nodes if node.startswith(active_prefixes)]
     deferred_nodes = [node for node in affected_nodes if node.startswith(deferred_prefixes)]
-    active_runtime_change = bool(current_stage_nodes) and bool(
-        classes & {"runtime", "build", "unknown"}
+    runtime_classes = {"runtime", "unknown", "review-request"}
+    runtime_nodes = {
+        node
+        for change in context.changes
+        if change["class"] in runtime_classes
+        for node in change["affectedNodes"]
+        if node.startswith(active_prefixes)
+    }
+    regression_classes = runtime_classes | {"evidence"}
+    regression_nodes = {
+        node
+        for change in context.changes
+        if change["class"] in regression_classes
+        for node in change["affectedNodes"]
+        if node.startswith(active_prefixes)
+    }
+    actual_online_prefixes = tuple(execution["actualOnlineRequirements"]["nodePrefixes"])
+    replay_nodes = sorted(node for node in regression_nodes if node.startswith(actual_online_prefixes))
+    task_flow_nodes = sorted(runtime_nodes)
+    live_service_nodes = sorted(
+        node for node in runtime_nodes if node.startswith(actual_online_prefixes)
     )
-    build_required = context.force_full_review or active_runtime_change
-    device_required = context.force_full_review or (
-        bool(current_stage_nodes) and bool(classes & {"runtime", "unknown"})
-    )
-    product_runtime_changed = bool(current_stage_nodes) and (
-        context.force_full_review or bool(classes & {"runtime", "unknown"})
-    )
+    ci_required = bool(regression_nodes) or "build" in classes
+    human_needed = bool(task_flow_nodes)
+    evidence_plan = {
+        "ciRequired": ci_required,
+        "ciRegressionNodes": sorted(regression_nodes),
+        "ciControlledFixtureReplayNodes": replay_nodes,
+        "sharedCandidateTaskFlowNodes": task_flow_nodes,
+        "sharedCandidateLiveServiceNodes": live_service_nodes,
+        "humanReviewState": "PENDING" if human_needed else None,
+        "standaloneFixtureReview": False,
+    }
+    build_required = context.force_full_review or bool(runtime_nodes) or "build" in classes
+    device_required = context.force_full_review or bool(runtime_nodes)
+    product_runtime_changed = context.force_full_review or bool(runtime_nodes)
     if not context.changes:
         scope = "none"
     elif classes <= {"workflow", "other"}:
@@ -96,6 +124,7 @@ def _summarize_changes(context: ReportBuildContext) -> ChangeSummary:
         build_required,
         device_required,
         product_runtime_changed,
+        evidence_plan,
     )
 
 
@@ -146,7 +175,7 @@ def _summary_section(
     summary: ChangeSummary,
     deferred_profiles: list[str],
 ) -> dict[str, Any]:
-    affected_set = set(summary.current_stage_nodes)
+    runtime_nodes = set(summary.evidence_plan["sharedCandidateTaskFlowNodes"])
     return {
         "scope": summary.scope,
         "changedFiles": len(context.changes),
@@ -161,7 +190,7 @@ def _summary_section(
         "requiresDeviceProfiles": context.review_policy["activeProfiles"] if summary.device_required else [],
         "deferredProfilesAffected": deferred_profiles if summary.device_required else [],
         "requiresJourneySelection": (
-            summary.product_runtime_changed and bool({"B03"} & affected_set)
+            summary.product_runtime_changed and "B03" in runtime_nodes
         ),
         "changedKotlinFiles": sorted(context.changed_kotlin_files),
         "androidStudioAnalyzeRecommended": False,
@@ -189,6 +218,7 @@ def _next_section(
         stage = "UI-R1 complete"
     return {
         "stage": stage,
+        "evidencePlan": summary.evidence_plan,
         "avoid": [
             "Do not edit Review Graph progress or verdicts during UI-R1",
             "Do not build, deploy, capture, or start an emulator for workflow-only changes",

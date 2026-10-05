@@ -206,6 +206,37 @@ class PolicyCatalogConsistencyTest(unittest.TestCase):
             set(policy["activeProfiles"]) & {item["profile"] for item in policy["deferredProfiles"]},
         )
 
+    def test_review_policy_rejects_missing_or_legacy_scheduling_fields(self) -> None:
+        repository = r1.find_repo_root(Path.cwd())
+        valid = json.loads((repository / r1.POLICY_PATH).read_text(encoding="utf-8"))
+        invalid_policies = []
+        missing_owner = json.loads(json.dumps(valid))
+        del missing_owner["nodeExecution"]["actualOnlineRequirements"]["controlledFixtureReplayOwner"]
+        invalid_policies.append(missing_owner)
+        wrong_owner = json.loads(json.dumps(valid))
+        wrong_owner["nodeExecution"]["actualOnlineRequirements"]["controlledFixtureReplayOwner"] = "standalone"
+        invalid_policies.append(wrong_owner)
+        legacy_owner = json.loads(json.dumps(valid))
+        actual_online = legacy_owner["nodeExecution"]["actualOnlineRequirements"]
+        actual_online["requiresControlledFixtureReplay"] = True
+        invalid_policies.append(legacy_owner)
+        standalone = json.loads(json.dumps(valid))
+        standalone["routineReview"]["standaloneFixtureReview"] = True
+        invalid_policies.append(standalone)
+        sharing = json.loads(json.dumps(valid))
+        sharing["routineReview"]["shareOnlineCandidateWithHuman"] = False
+        invalid_policies.append(sharing)
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            policy_path = root / r1.POLICY_PATH
+            policy_path.parent.mkdir(parents=True)
+            for policy in invalid_policies:
+                with self.subTest(policy=policy):
+                    policy_path.write_text(json.dumps(policy), encoding="utf-8")
+                    with self.assertRaises(SystemExit):
+                        r1.load_review_policy(root)
+
     def test_catalog_is_standalone_production_review_data(self) -> None:
         root = r1.find_repo_root(Path.cwd())
         _, node_ids = r1.parse_catalog(root)

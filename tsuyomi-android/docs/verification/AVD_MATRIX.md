@@ -11,7 +11,7 @@
 - device template：`pixel_2`（只提供基础硬件字段，显示参数由脚本覆盖）
 - locale：`zh-CN`
 - navigation：three-button 与 keyboard/DPAD 场景均验证
-- 启动：验收前 wipe data/cold boot；不得依赖 snapshot 中的应用状态。canonical 实机/覆盖安装 look **不得** `-wipe-data`。真实 declared-origin WebView 用 `tools/avd/Start-CanonicalAvd.ps1`：`-dns-server 8.8.8.8,1.1.1.1 -netdelay none -netspeed full`。模拟器 DNS 代理跟随主机解析器，本机代理/TUN 拆除后必须带公共 DNS 重启，否则 WebView 报 `ERR_NAME_NOT_RESOLVED`。DNS 修复只需重启模拟器进程，不必 cold boot。
+- 启动：验收前 wipe data/cold boot；不得依赖 snapshot 中的应用状态。此 wipe/clean-install 规则适用于 disposable CI AVD 与迁移证据。持久 online review candidate 必须保留同一 APK 签名身份、应用数据与授权 session；不得 `-wipe-data`、clean-install 或运行清凭据 fixture setup/instrumentation。canonical 实机/覆盖安装 look **不得** `-wipe-data`。真实 declared-origin WebView 用 `tools/avd/Start-CanonicalAvd.ps1`：`-dns-server 8.8.8.8,1.1.1.1 -netdelay none -netspeed full`。模拟器 DNS 代理跟随主机解析器，本机代理/TUN 拆除后必须带公共 DNS 重启，否则 WebView 报 `ERR_NAME_NOT_RESOLVED`。DNS 修复只需重启模拟器进程，不必 cold boot。
 
 SDK package 和 emulator 的实际 revision 必须记录在 `docs/phases/PHASE_N.md`；升级 revision 会使运行期证据失效并要求重跑。
 
@@ -48,7 +48,9 @@ active profile 的记录不能用另一 profile、同一 AVD 内切换、Layoutl
 5. clean install、进程重建、应用重启后的持久化；
 6. route、滚动、焦点和可恢复失败状态；
 7. 无裁切、重叠、不可达操作、残留焦点或无效选项；
-8. 受控 WebView：分别记录 fixture host transport、真实 declared-origin 页面、blocked navigation、完成/取消 cookie handoff。WebView 的 `ERR_CACHE_MISS`、offline、403 或错误页只证明失败恢复，不得当作手动验证成功。
+8. 受控 WebView：CI 记录 fixture host transport、blocked navigation 与完成/取消 cookie handoff；共享 online candidate 的实际 declared-origin task flow 使用真实来源页面。Dedicated test account 的普通、用户可见 allowlisted WebView 登录可由授权自动化执行；挑战暂停交给人，不绕过。错误页只证明失败恢复，不能冒充成功。Disposable CI 不访问持久候选或其凭据。
+
+CI fixture、migration、security 与 screenshot assertions 均是 planner-selected regression evidence，不形成单独 fixture walkthrough 或视觉 acceptance round。若有 opt-in fixture-retention flags，它们仅供诊断检查，不是额外验收义务。
 
 执行前记录：
 

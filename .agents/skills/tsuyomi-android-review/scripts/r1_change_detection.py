@@ -72,6 +72,13 @@ def load_review_policy(repo_root: Path) -> tuple[dict, str]:
     }
     if set(active) & deferred_names:
         raise SystemExit("Review policy cannot activate and defer the same profile")
+    routine_review = data.get("routineReview")
+    if not isinstance(routine_review, dict):
+        raise SystemExit("Review policy must declare routineReview")
+    if routine_review.get("standaloneFixtureReview") is not False:
+        raise SystemExit("Review policy standaloneFixtureReview must be false")
+    if routine_review.get("shareOnlineCandidateWithHuman") is not True:
+        raise SystemExit("Review policy shareOnlineCandidateWithHuman must be true")
     node_execution = data.get("nodeExecution")
     if not isinstance(node_execution, dict):
         raise SystemExit("Review policy must declare nodeExecution")
@@ -102,6 +109,14 @@ def load_review_policy(repo_root: Path) -> tuple[dict, str]:
         raise SystemExit("Review policy actual-online nodePrefixes is invalid")
     if not set(actual_online_prefixes) <= set(active_prefixes):
         raise SystemExit("Actual-online node prefixes must be active production prefixes")
+    if "requiresControlledFixtureReplay" in actual_online:
+        raise SystemExit("Review policy legacy requiresControlledFixtureReplay is unsupported")
+    if actual_online.get("controlledFixtureReplayOwner") != "ci":
+        raise SystemExit("Review policy controlledFixtureReplayOwner must be ci")
+    if actual_online.get("requiresLiveOnlineService") is not True:
+        raise SystemExit("Review policy actual-online requirements must require live service")
+    if actual_online.get("forbidFixtureOnlyFinalization") is not True:
+        raise SystemExit("Review policy actual-online requirements must forbid fixture-only finalization")
     return data, sha256_file(path)
 
 
