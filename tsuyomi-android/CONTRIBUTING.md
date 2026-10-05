@@ -69,7 +69,7 @@ base="$(git -C .. merge-base origin/main HEAD)"
 python3 ../tools/android_api29.py --repo-root .. --base "$base" --head HEAD --mode high --build
 ```
 
-Runner details, AVD profile, evidence and diagnosis rules are owned by [`QUALITY_GATES.md`](docs/process/QUALITY_GATES.md) and [`tools/android_api29_profile.json`](tools/android_api29_profile.json); do not reproduce their policy here.
+Runner details, AVD profile, evidence and diagnosis rules are owned by [`QUALITY_GATES.md`](docs/process/QUALITY_GATES.md) and [`tools/android_api29_profile.json`](../tools/android_api29_profile.json); do not reproduce their policy here.
 
 ## Updates verification
 

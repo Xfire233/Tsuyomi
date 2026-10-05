@@ -7,6 +7,7 @@
 
 - Simplified the public root/Android READMEs into user-facing download, capability and privacy/license entry points; moved developer build and native HIGH API29 invocation guidance to Android CONTRIBUTING without removing local or hosted admission checks.
 - Prepared Android `0.3.0-beta.5` / versionCode7 as a distinct next prerelease candidate. The maintainer confirmed independent signing-key recovery and directed continuing publication on2026-10-06; protected admission, human merge confirmation and merged-source signing remain required. No new published artifact or physical-phone approval is implied.
+- Corrected the migrated API29 profile link and beta.5 signing instructions; release tag/asset identity derives from the current receipt, and the release runbook preserves final-head protected PR admission plus separate lightweight main health.
 - Made image viewing opt-in and prohibited automatic `imgcat`/terminal-pane workarounds during image reads or captures.
 - Consolidated acceptance into CI-owned deterministic regression and one dedicated-account online candidate shared sequentially by automation and human review. Preserved local HIGH preflight and protected hosted admission, removed standalone fixture review scheduling, made UI-R1 evidence selection change-scoped, and permitted only explicitly authorized private test-account WebView login without weakening credential, challenge or website-write boundaries.
 

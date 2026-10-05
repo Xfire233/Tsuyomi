@@ -11,15 +11,15 @@
 
 发布前必须同时满足：
 
-- 待发布提交已在受保护的 `main` 上，且工作树干净（`git status --porcelain` 为空）；
-- 五个 required checks 在待发布提交上全部成功（`repository-policy`、`protocol-conformance`、`extensions-baseline`、`android-build-test-lint-goldens`、`android-api29-instrumentation`）；
+- 制品对应源码已通过受保护 PR 正常合并到 `main`，发布工作树干净（`git status --porcelain` 为空）；记录 PR head、base、准入 run、merge commit 与远端 `main`，squash 时核对源树对应关系；
+- 五个 required checks 在最终 PR head 上全部成功（`repository-policy`、`protocol-conformance`、`extensions-baseline`、`android-build-test-lint-goldens`、`android-api29-instrumentation`），且已获 `QUALITY_GATES.md` G4.5 要求的人工合并确认；合并后的三项轻量 main health 单独记录，不重复触发 Android 重型门禁，也不替代 PR 准入；
 - `python tools/check_repository.py`（仓库根执行）通过；
-- 本地 `HIGH` 门禁在该提交或其唯一差异为文档/工具的同树提交上通过；
-- 用户已明确授权本次发布；物理手机验收状态按第 7 节如实记录，不得用模拟器证据代替。
+- 本地 `HIGH` planner-selected 门禁已通过，证据绑定确切源码／版本／资源输入；后续只有文档／工具差异时明确记录差异及其受影响验证，不能把另一输入冒充同一次执行；
+- 用户已明确授权本次发布；物理手机验收状态按第 8 节如实记录，不得用模拟器证据代替。
 
 ## 2. 版本身份
 
-- `versionCode` 单调递增；`versionName` 使用 SemVer，预发布后缀写作 `0.3.0-beta.4`。
+- `versionCode` 单调递增；`versionName` 使用 SemVer（例如 `0.3.0-beta.5`）。本次版本以已合并源码 `app/build.gradle.kts` 为准，不能沿用历史发布的参数或资产名。
 - **私有机密候选**与**发布制品**必须可区分：私有候选通过 `-Ptsuyomi.buildFingerprint=<value>` 追加 `+<value>` 后缀，发布制品使用不带后缀的干净 `versionName`。
 - 两者的 `versionCode`/`versionName` 都必须能从 `aapt2 dump badging` 和 `dumpsys package org.tsuyomi.android` 读出，避免 `install -r` 静默保留旧构建。
 
@@ -40,9 +40,13 @@ sh ./gradlew :app:assembleRelease --dependency-verification strict
 
 签名**不得**在 Gradle 中进行：keystore 口令一旦进入 configuration cache、build scan 或 CI 作业输入即视为泄漏。
 
+在 `tsuyomi-android` 目录核对本次已合并源码的版本后设置参数。以下为 beta.5 / versionCode7；后续发布需使用对应源码的实际值，脚本会拒绝 APK 身份不匹配：
+
 ```powershell
+$VersionName = '0.3.0-beta.5'
+$VersionCode = 7
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File tools/Publish-AndroidRelease.ps1 `
-  -VersionName 0.3.0-beta.4 -VersionCode 6 -SourceRevision (git rev-parse HEAD)
+  -VersionName $VersionName -VersionCode $VersionCode -SourceRevision (git rev-parse HEAD)
 ```
 
 脚本按顺序执行并在任一断言失败时终止：
@@ -73,13 +77,13 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File tools/Publish-AndroidRel
 
 ## 6. 发布
 
-1. 在**制品对应的源提交**上创建 annotated tag：`android-v<versionName>`（预发布同样使用该前缀，例如 `android-v0.3.0-beta.4`）。tag 消息记录所属 Phase 文档、宿主/协议版本与制品摘要。tag 一旦推送不得移动。
+1. 在**制品对应的源提交**上创建 annotated tag：`android-v<versionName>`，版本从本次 `release.json` 读取。tag 消息记录所属 Phase 文档、宿主/协议版本与制品摘要。tag 一旦推送不得移动。
 2. 以该 tag 创建 GitHub Release。预发布必须标记 `prerelease`；`draft` 与 `prerelease` 都不等于稳定版，稳定化需要一次新的、明确的用户决定。
 3. 上传资产：`Tsuyomi-<versionName>.apk`，以及可选源码归档。
-4. Release 正文必须包含机器可校验的摘要行，供第 7 节工作流解析：
+4. Release 正文必须包含机器可校验的摘要行，供第 7 节工作流解析。以下占位符全部用本次 `release.json` 的实际值替换，不复制历史资产名：
 
 ```text
-apk-asset: Tsuyomi-0.3.0-beta.4.apk
+apk-asset: Tsuyomi-<versionName>.apk
 apk-sha256: <64 hex>
 apk-bytes: <decimal>
 apk-version-code: <decimal>
