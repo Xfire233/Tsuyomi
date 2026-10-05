@@ -9,7 +9,7 @@
 
 ## 下载与更新
 
-从 [GitHub Releases](https://github.com/Xfire233/Tsuyomi/releases) 下载 APK。当前公开版本仍为预发布版 [`android-v0.3.0-beta.4`](https://github.com/Xfire233/Tsuyomi/releases/tag/android-v0.3.0-beta.4)；后续版本尚未发布。
+从 [GitHub Releases](https://github.com/Xfire233/Tsuyomi/releases) 下载 APK，以发布页面列出的版本和制品为准。应用目前处于 Beta 预发布阶段，尚不是稳定版。
 
 更新时不要先卸载旧版，否则 Android 会删除应用数据。请先导出重要数据备份。
 

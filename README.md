@@ -9,7 +9,7 @@ Tsuyomi 是一款本地优先的原生 Android 轻小说阅读器，使用 Kotli
 
 ## 下载与安装
 
-从 [GitHub Releases](https://github.com/Xfire233/Tsuyomi/releases) 下载 APK。当前公开版本仍是预发布版 [`android-v0.3.0-beta.4`](https://github.com/Xfire233/Tsuyomi/releases/tag/android-v0.3.0-beta.4)；后续版本尚未发布。
+从 [GitHub Releases](https://github.com/Xfire233/Tsuyomi/releases) 下载 APK，以发布页面列出的版本和制品为准。应用目前处于 Beta 预发布阶段，尚不是稳定版。
 
 更新时不要先卸载旧版本，否则 Android 会删除应用数据。预发布版可能存在问题，请先导出重要数据作为备份。
 
