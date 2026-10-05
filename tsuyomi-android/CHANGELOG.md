@@ -7,8 +7,12 @@ All notable changes use semantic versioning. Future Phase baselines use annotate
 
 ## [Unreleased]
 
+## [0.3.0-beta.5] - 2026-10-06
+
+[Published Beta prerelease](https://github.com/Xfire233/Tsuyomi/releases/tag/android-v0.3.0-beta.5), versionCode7, from protected PR60 / source `5de7a78ccfbc1c4646a7c1b871ddde3325683ba1`. Retained certificate, v3-only signature and16KiB alignment; independent uploaded-asset verification37360974704 passed. This is not a stable promotion or exact-artifact physical-phone acceptance; immutable identities and evidence are recorded in [`PHASE_4.md`](docs/phases/PHASE_4.md).
+
 ### Changed
-- Advanced the next prerelease candidate to `0.3.0-beta.5` / versionCode7; private build-fingerprint suffixes remain distinct. Independent signing-key recovery is maintainer-confirmed; public publication still requires protected source admission, human merge confirmation and release signing.
+- Advanced the public prerelease to `0.3.0-beta.5` / versionCode7; private build-fingerprint suffixes remain distinct. Independent signing-key recovery is maintainer-confirmed; protected source admission, post-check human merge confirmation and retained-identity release signing completed.
 - Reduced README to download, capabilities and necessary privacy/license information, with source-build and native HIGH API29 runner instructions owned by CONTRIBUTING. Local CI and protected hosted admission remain unchanged.
 - Corrected the contributor runner-profile link and release-signing parameters for beta.5/code7; release-body identity now comes from the current receipt rather than the historical beta.4 asset. The release runbook now records final-PR-head admission and merged-main health separately, matching the existing protected-check policy without a duplicate post-merge Android matrix.
 - Replaced the temporary black-and-white launcher glyph with the directly selected F6R Tsuyomi mark: coral open `つ`, cream page, ochre page depth, continuous upper-right coral depth and parchment background.

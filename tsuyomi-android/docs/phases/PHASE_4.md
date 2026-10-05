@@ -768,11 +768,39 @@ The maintainer explicitly approved implementation of the revised workflow: prese
 - Human approval remains human-only and artifact-bound. Acceptance of an online candidate is not approval of unexecuted nodes, a release APK or a frozen profile; exact debug/release equivalence is not a new requirement. Release signing, exact-release acceptance and publication remain governed by the unchanged release procedure.
 - Scope is workflow contracts, review policy/report selection, regression tests and documentation. The maintainer subsequently supplied the dedicated test-account credentials privately and permits normal login testing after deployment to a new dedicated online environment; no credential value is recorded here. This does not authorize replacement of the existing daily canonical, app-data reset, CI assertion/task removal, EINK restoration, commit/push/PR/merge, signing/tag/release or live website mutation. Record actual deployment/login evidence separately; authorization is not proof of success.
 
-## Next Android prerelease preparation — 2026-10-06
+## Android beta.5 prerelease publication — 2026-10-06
 
-The maintainer requested a new public Android prerelease and concise user-facing root/Android READMEs. The existing `android-v0.3.0-beta.4` is already published and remains immutable; the next candidate is `0.3.0-beta.5` / versionCode7, using the retained release-signing identity and a distinct source/artifact record. This request does not approve the new artifact, unexecuted human/physical-phone checks, stable promotion or EINK restoration.
+The maintainer requested a new public Android prerelease and concise user-facing root/Android READMEs. **0.3.0-beta.5 / versionCode7 is now published** from protected merged source `5de7a78ccfbc1c4646a7c1b871ddde3325683ba1`, using the retained release-signing identity and a distinct immutable artifact. Existing `android-v0.3.0-beta.4` tag/assets remain unchanged. Publication does not approve the new artifact, unexecuted human/physical-phone checks, stable promotion or EINK restoration.
 
-After the independent-recovery instructions, the maintainer confirmed the backup complete and explicitly directed continuing publication on2026-10-06. This resolves the maintainer-selected recovery prerequisite by their confirmation, not agent inspection; never request or record private key/password/backup contents. Continue the protected PR admission and final-head Adviser review. `QUALITY_GATES.md` still requires the maintainer's merge confirmation after all required checks pass; then build from merged main, sign with the retained release identity outside Gradle and publish a new immutable prerelease. The confirmation does not grant admin bypass, automatic merge, physical-phone approval, stable promotion, canonical replacement or EINK restoration.
+After the independent-recovery instructions, the maintainer confirmed backup complete and directed continuing publication on2026-10-06. This resolves the recovery prerequisite by their confirmation, not agent inspection; never request or record private key/password/backup contents. Both independent Adviser scopes and all five required checks passed on PR60 head `aef72c717b714b4f21a3d8413bb7820e21c181b2`; the maintainer then explicitly confirmed normal squash merge and continuation of signing/publication. Normal `--match-head-commit` merge produced5de7a78, with no admin bypass, auto-merge or direct main push. A clean merged-source Release was built and signed outside Gradle; actual uploaded-asset verification passed. No physical-phone approval, stable promotion, canonical replacement or EINK restoration is implied.
 
 Public READMEs retain the application icon, download/update-data warning, Android baseline, concise capabilities, honest prerelease status and privacy/content/license/attribution boundaries. Developer invocation guidance moves to the existing Android `CONTRIBUTING.md`; gate authority remains `QUALITY_GATES.md`, with local HIGH and protected hosted checks preserved. The already frozen dedicated online candidate, its encrypted test session, canonical devices and historical release assets are unchanged.
+
+### Published beta.5 artifact and G6 evidence
+
+| Field | Value |
+|---|---|
+| Release | [GitHub prerelease](https://github.com/Xfire233/Tsuyomi/releases/tag/android-v0.3.0-beta.5), not draft; published2026-10-05T19:06:17Z |
+| Annotated tag / tag object | `android-v0.3.0-beta.5` / `f3a5ac2fd3482957d264740377d873fadcd94bf8` |
+| Source revision / tree | `5de7a78ccfbc1c4646a7c1b871ddde3325683ba1` / `e82c28a40b8dd01b5ee8604cc4edaf083875909f`; source tree equals admitted PR head tree |
+| Host / Android identity | `org.tsuyomi.android`, `0.3.0-beta.5`, versionCode7, minSdk29, targetSdk36, compileSdk37 |
+| Protocol package manifest | `@tsuyomi/protocol`0.2.0; no new protocol/provider publication |
+| APK | `Tsuyomi-0.3.0-beta.5.apk` |
+| APK SHA-256 / bytes | `e705a75a7f03ee2c8520e1f306fe6b28276b2175a382904dd2a5b37e6ac93b05` /71424746 |
+| Unsigned inner APK SHA-256 | `4f10d319938765d3bd68d2c3918f47313726763fec4bde3f25b4a04c7b3f7126` |
+| Signer certificate SHA-256 | `0be46968ea9f184b8a5857334d4e4d46eb67ea14b0601c07a5fa3b07f00a7bb7` (retained identity) |
+| Signature / alignment | v1 false, v2 false, v3 true, v4 false;16KiB verified; build-tools36.0.0 |
+| Production artifact constraints | non-debuggable, non-testOnly; launcher resource present; no embedded HXP assets |
+| PR admission | [PR60](https://github.com/Xfire233/Tsuyomi/pull/60), headaef72c717b714b4f21a3d8413bb7820e21c181b2, basef6d8165df3fe795cc7d0ae862c6ce1e323ba93c9; both final-head Adviser scopes and five required checks passed |
+| Android admission | [37352822579](https://github.com/Xfire233/Tsuyomi/actions/runs/37352822579): selected app assemble/lint/JVM and API29 instrumentation actually executed; no screenshot tasks selected |
+| Other admission | Repository37352823109 ran REUSE/policy/planner/review tests; protocol37352822522 was a path-selected no-op, not conformance execution; extensions37352822828 verified pinned digest/provenance |
+| Merged-main health | Repository37359415056, protocol37359415015, extensions37359414989 succeeded on5de7a78; separate lightweight health, no duplicate Android matrix |
+| Uploaded-asset verification | [37360974704](https://github.com/Xfire233/Tsuyomi/actions/runs/37360974704), release event /5de7a78 /SUCCESS; download and fixed-certificate/hash/signature/alignment/package checks actually executed |
+| Recovery custody | Maintainer confirmed independent backup complete; no agent inspection of backup/key/password contents |
+| Physical-phone acceptance | **PENDING**, bound to this exact published APK; no debug/older-artifact equivalence or stable promotion inferred |
+
+The signed APK and `release.json` are generated local artifacts, never versioned. Public Release body carries the same machine-readable facts; independent verification re-derives them from the downloaded upload and its fixed certificate, not the body's own approval claim. Beta.4 asset id569731202, digest `71bc913d8bad28e14315f375b3b0d1eb962d6bd57b0ca1bf26208d5f5da060e3`,70933114bytes, timestamps and source4ab67a6 remain unchanged. The dedicated online debug candidate/session, canonical devices, Wenku80.2.38 and frozen EINK were not replaced.
+
+Local repeat download encountered a TLS handshake timeout and the static reader a certificate-verification error; neither is counted as success, and no TLS validation bypass was introduced. The independent hosted workflow successfully downloaded and verified the actual uploaded bytes. No APK, CI or fixture acceptance rerun is required merely to record this publication outcome.
+
 
