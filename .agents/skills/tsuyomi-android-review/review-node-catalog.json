@@ -1,6 +1,6 @@
 {
   "schema": "tsuyomi-review-node-catalog-v1",
-  "version": 132,
+  "version": 133,
   "nodes": [
     {
       "id": "L01",
@@ -525,7 +525,7 @@
         "输入但不提交并确认结果不变",
         "点击唯一 Search 并观察真实线上来源结果增量，同时确认没有本地书架结果或 Room 搜索 lane；加载中重复点击或触发 IME 提交只保留同一操作且每个目标来源恰好一次 transport",
         "从详情作者链接直接提交一次同来源作者搜索并应用结果；结果详情再返回仍保留结果且零重放；验证作者模式的手动验证、离线和显式重试",
-        "制造线上单来源失败、去重、空态和离线；在固定长度响应中途断开或切换网络，确认显示网络失败而非页面结构错误，恢复网络后一次显式重试只发出一次新请求；再用签名 fixture 重放"
+        "对本次受影响的真实线上来源验证失败、空态、离线及显式恢复；固定长度响应中断时确认网络失败而非页面结构错误，恢复后一次显式重试只发一次新请求；签名 fixture 的中断、去重、取消和恢复回归由现有 CI 拥有，不在共享 online 候选上另跑夹具验收"
       ],
       "visualChecks": [
         "只有一个提交动作和一个来源聚合进度",
@@ -585,7 +585,7 @@
         "在真实全屏 WebView 完成、取消、错误、Back、同来源重入，并从暂停的搜索、详情、目录和章节操作依次显式选择打开对应页面和使用当前页面",
         "确认重入在首个页面加载前恢复同一来源/声明 origin 的 cookie+exact-UA 会话；打开动作加载精确暂停 GET，只允许同 origin HTTPS 顶层重定向保留来源绑定，后续非重定向导航使绑定失效；当前页以原请求精确匹配一次、以最终页面 URL 作为响应元数据，经签名 parser 验证后返回，且不自动重试、导入、刷新或写网站",
         "制造声明HTTPS登录origin向同主机HTTP登录路径的顶层跳转，确认WebView从不加载HTTP而是保留path/query、丢弃fragment升级回已声明的默认端口HTTPS origin；跨主机、子frame、user-info、自定义端口及其他不可升级目标继续阻止并显示反馈，升级不得扩大cookie、cookie导出或verified-page绑定边界",
-
+        "明确指定的专用 Wenku8 测试账户允许正常 WebView 自动登录；其他账户保持人工登录，验证码或安全挑战始终转交人工。只使用瞬时私有输入与既有加密来源会话，登录后进程重启复用同一会话；不清凭据、不导出秘密、不在共享候选运行夹具清理 setup，也不因登录而写网站",
         "验证 session 过期后的显式登录恢复、cookie+exact-UA handoff、bounded live retry，以及 raw snapshot 不持久化/不记录/不自动 replay 的边界"
       ],
       "visualChecks": [
@@ -880,7 +880,7 @@
       "route": null,
       "requiredStates": [],
       "operations": [
-        "对真实线上服务运行 slow、offline、recoverable-error、cancelled、unresolved、retry 和进程中断恢复；再用签名 fixture 重放",
+        "在共享 online 候选验证本次受影响且可安全触发的真实 slow、offline、recoverable-error、cancelled、unresolved、retry 或进程恢复任务；确定性失败、取消、竞态和恢复的签名 fixture 回归由现有本地/线上 CI 拥有，不另建夹具验收轮次；自动化结束后冻结同一候选并只交接剩余定性判断",
         "检查共享 Loading/Empty/Error 状态图：Loading 在 STANDARD 以700ms帧距执行有界的右侧抬手/拿书/向左递书/左侧表情复原/放手循环，拿书前的第二帧必须为`(・_・)ノ`，递书后的第五帧必须为`ヽ(・_・)`，保证右手拿书、左手递出后的动作方向连续；递出的书不得在回程重新拿回；`_`与`ω`嘴形必须落在同一个固定宽度槽内，左右动作附件也使用对称固定槽，避免表情字宽或书/手位置变化造成脸部胀缩、横移；末帧左侧抬手到首帧放手必须自然衔接，不得重复端点停顿；reduced-motion与E-ink保持首帧静态；Empty恢复已确认单色颜文字；Error按安全可见文案稳定选择预制颜文字且不随机、不动画。三态均保留固定几何、完整标题/原因/操作语义，不出现空白圆角框、spinner、状态图标或资源加载"
       ],
       "visualChecks": [

@@ -61,7 +61,7 @@ This section changes blocking order only. Where the remainder of this Phase says
 
 The Standard Atlas **UI construction** milestone and actual production scenarios are separate evidence stages. The current construction closeout executes `L01–L08`, `B01–B03` and `M01–M07`: 18 nodes, 16 surfaces and 84 route-state obligations. It does not create manual design approval or production implementation authorization.
 
-`S01–S04` and `X01–X06` remain ten binding Review Graph nodes, but every one executes later in `org.tsuyomi.android` against real host controllers, storage, navigation and live online services. A signed deterministic source fixture remains mandatory for repeatable regression and diagnosis; it supplements rather than replaces the live-service pass. Evidence must redact credentials, cookies, verification answers, private reading content and raw WebView payloads. The isolated Atlas may retain rehearsal fixtures and AI drafts for these nodes but cannot mark them human-complete or assign final verdicts.
+`S01–S04` and `X01–X06` remain binding production Review Graph nodes executed in `org.tsuyomi.android` against real host controllers, storage, navigation and live online services. Under the 2026-10-05 consolidation, signed deterministic source regression remains mandatory inside the existing local/hosted CI lanes, not a separate fixture review round. Evidence redacts credentials, cookies, verification answers, private reading content and raw WebView payloads. The retired Atlas rehearsal and AI drafts never supply human completion or final verdicts.
 
 E-ink remains frozen after the Standard Atlas construction closeout. Resumption still requires a later explicit user decision and the complete restoration scope in the preceding section.
 
@@ -69,7 +69,7 @@ E-ink remains frozen after the Standard Atlas construction closeout. Resumption 
 
 The user explicitly abandoned further Standard Atlas review and accepted correcting remaining UI problems during production implementation. This superseded the former requirement that a fresh manifest-bound Atlas manual approval tuple exist before Phase 4A production work began. The completed exact-source Atlas automation closeout remains non-approval reference evidence.
 
-At that date, the authorization covered only the clean-cutover Phase 4A scope and did not yet authorize Phase 4B/4C, E-ink restoration, release or tag operations. The Phase 4B restriction in this historical checkpoint is superseded by the 2026-09-06 Phase 4B authorization reconciliation immediately below. All 28 Review Graph nodes remain production-stage obligations; `S*`/`X*` still require `org.tsuyomi.android`, real host state, live online services and signed deterministic fixture replay.
+At that date, authorization covered only Phase 4A and did not authorize Phase 4B/4C, E-ink restoration or release/tag operations; the historical Phase 4B restriction is superseded by the 2026-09-06 reconciliation below. All Review Graph nodes remain production-stage obligations. The 2026-10-05 schedule now assigns signed replay to CI and live task flows to the shared online candidate; it does not erase the earlier evidence or grant human approval.
 
 ### Phase 4B production-authorization reconciliation — 2026-09-06
 
@@ -87,17 +87,17 @@ This historical decision never authorized fake data, review controls, human verd
 
 Library remains the first corrected production surface. Its AppBar, fixed `书架 / 继续阅读 / 稍后再读` tabs, typed collection/mirror/book root flow, three-column cover geometry, menus, selection grammar and dedicated child routes are driven by production Room, collection, read-later, mirror, refresh and navigation owners. `LibraryProductionJourneyInstrumentedTest` remains the highest observable seam and rejects restoration of either the interim untyped mixed-node screen or the retired permanent Quick Shelf.
 
-The user-confirmed “near Hikari” depth benchmark remains inside the already authorized Phase 4A scope. Primary acceptance uses production-route Journeys through real route owners, storage and navigation on API 29; `S*`/`X*` additionally retain live-service plus signed-fixture evidence.
+The user-confirmed “near Hikari” depth benchmark remains inside the authorized Phase 4A scope. Primary acceptance uses production-route Journeys through real route owners, storage and navigation on API 29; `S*`/`X*` retain live-service task flows and signed deterministic regression owned by CI, without an additional fixture acceptance round.
 
 ### Phase 4A Wenku8 usable-reader milestone — 2026-08-30
 
 The user prioritized one basic usable Wenku8 production reader before continuing the remaining broad production cutover. The binding end-to-end path is: install the signed acceptance source, complete explicit controlled WebView login when required, submit one Browse-owned real source search, open the one canonical identity-addressed Detail with integrated directory, open an exact chapter, read and cross only to the immediate adjacent chapter, pin the book locally, restart the process, and resume the same semantic locator without duplicate identities or a second detail implementation.
 
-Implementation order is security-first. Raw live responses are non-durable until classification and parser/DTO validation succeed; login, challenge, HTTP-error and parser-rejected pages never become normal content cache. Durable offline state contains only validated normalized metadata, directory and opened `ReaderDocument` projections with explicit current/stale-offline provenance. Live probing uses one predeclared public query/book, concurrency one, a bounded request count, no catalogue crawl, no automatic challenge loop, and redacted evidence. The same observable path must pass signed sanitized fixture replay.
+Implementation order is security-first. Raw live responses are non-durable until classification and parser/DTO validation succeed; login, challenge, HTTP-error and parser-rejected pages never become normal content cache. Durable offline state contains only validated normalized metadata, directory and opened `ReaderDocument` projections with explicit current/stale-offline provenance. Live probing uses one predeclared public query/book, concurrency one, a bounded request count, no catalogue crawl, no automatic challenge loop, and redacted evidence. Signed sanitized regression for the observable path is CI-owned; record its own immutable compatible inputs rather than requiring the shared online candidate to run another fixture pass.
 
 The ordinary `加入书架` command is unconditionally local-only. It never invokes website ADD even when an older grant or setting exists. Website favourites are included as a separate read-only `S03` surface: refresh and copy selected/all to local require direct foreground actions and produce zero website writes. Existing or future website ADD remains a separately labelled, separately confirmed remote operation and is outside this milestone. Login completion, cancellation and Back return to the exact paused task and perform no automatic retry, import, favourites pull, refresh or write; retry is explicit, and the accepted ADR 0017 bounded verified-page path remains the fallback when exact cookie-plus-user-agent replay is still challenged.
 
-Real covers are included through the host-owned validated media boundary; raw cover URLs and fetch/decode/cache implementation do not enter feature or `core:ui` ownership. If the active verified Wenku8 session expires during live validation, implementation pauses at the controlled WebView and asks the user to complete login again; credentials and private content never enter chat or evidence. The acceptance-signed Wenku8 package is the milestone install identity because production publisher keys remain an explicit non-goal. Emulator/API 29 evidence proves the implementation slice; any contract-mandated final physical-device qualitative or actual-online evidence remains explicitly open rather than inferred.
+Real covers remain inside the host-owned validated media boundary; raw cover URLs and fetch/decode/cache implementation never enter feature or `core:ui` ownership. The explicitly authorized dedicated Wenku8 test account may use normal WebView login automation and the existing encrypted source-scoped session store; other accounts retain manual login, and challenges always pause for the human. No credential values or private content are echoed into chat, reports or evidence. The original acceptance-signed source identity is historical; each new candidate records its exact installed source identity and required trust. Emulator/API 29 evidence proves only its exercised slice; unexecuted physical qualitative or actual-online obligations stay open.
 
 
 ## Outcome
@@ -398,7 +398,7 @@ The following original requirements are retained as historical review evidence. 
 5. Define operation phases and startup recovery: unaccepted/recovered orphan PENDING → CANCELLED; accepted IN_FLIGHT cancellation, timeout, source change, process death or lease loss → UNRESOLVED; only validated typed result → CONFIRMED. Project reconciliation by operation (and MOVE target), never by one latest row per book.
 6. Replace generic schema-revert language with D18’s chosen compatibility contract and API 29 upgrade/feature-disable/re-upgrade evidence.
 
-## 本轮手工输入基线
+## 历史手工输入基线（非当前验收配方）
 
 | 字段 | 固定值 |
 |---|---|
@@ -410,17 +410,14 @@ The following original requirements are retained as historical review evidence. 
 | deterministic replay | `/sdcard/Download/wenku8-fixture.hxp`，签名、脱敏、可重复，只用于回归和诊断 |
 | live service | 实际线上内容源和公开内容；真实网络是 `S*`/`X*` 后续验收的必需输入，但证据不得包含秘密或私有正文 |
 
-## 手工验收流
+## 当前共享 online 候选验收流
 
-1. 从空书架进入“浏览”，选择“导入内容源包”，在 DocumentsUI 选择 `wenku8-fixture.hxp`；核对安装说明并确认安装。
-2. 选择“进入内容源”，搜索 `fixture`，打开 `雾港纪事`，检查搜索结果、详情、目录与章节 `第一章 雾中的灯塔` 的可见性、触控和返回栈。
-3. 在书籍详情执行本地加入、标签/评分/集合操作；在页面中观察反馈、禁用状态、文本换行、滚动、底部导航与返回行为。
-4. 在“更多”中检查数据迁移与备份入口；取消 DocumentsUI，再次进入，确认应用没有误报成功、没有卡死或丢失当前路由。
-5. 在“更多 > 显示”确认 Standard 是当前 active profile，E-ink 仍明确冻结且不产生新的 routine evidence；不得把一次 profile 切换当作 E-ink readiness。
-6. 旋转到横屏、回到竖屏，并将字体缩放设为 2.0；检查文字裁切/重叠、焦点可达性、系统栏与底部导航。横屏仅为附加覆盖，不能替代本表中的手机竖屏基线。
-7. 在获得生产实现授权并进入 actual-online stage 后，安装真实线上来源、使用公开内容执行 `S01–S04` 与 `X01–X06`；再用签名 fixture 重放同一失败/恢复路径。两种证据都必须存在，且任何 secret、cookie、验证码、私有正文或原始 WebView payload 都不得进入日志、截图或导出。
-
-真实线上服务验收可以使用匿名或明确授权的会话，但不得把凭证、cookie、验证码、私有内容或原始 WebView payload 写入证据。受控 fixture 继续覆盖取消、返回和错误恢复的确定性重放。
+1. 从当前 policy/catalog 选择受影响节点与证据所有者；记录源码输入、APK/build identity、签名身份、实际来源版本/摘要和 Standard 设备事实。仅部署到明确指定的专用测试账户设备，不替换原日常 canonical，不卸载或清数据。
+2. 使用真实来源和授权测试会话执行本次变化涉及的真实任务流；专用 Wenku8 账户允许正常 WebView 自动填入与登录，验证码/安全挑战转交人工。保持原签名和 encrypted declared-origin session，重启不重复初始化或删除凭据。
+3. 本地/线上 CI 在各自可丢弃设备上拥有确定性 fixture、安全、迁移、截图和生命周期回归。HIGH 保留最小失败→相邻顺序→稳定候选完整 planned gate→线上准入；不再另建 fixture 安装、巡检、视觉轮次或报告。
+4. 只对受影响行为选择必要的真实窗口、字号、输入、返回和恢复检查；不因节点存在而遍历整套来源、Reader 或设备矩阵。登录或局部成功不代表其他节点、E-ink 或完整验收通过。
+5. 自动化结束后停止输入和后台状态变更，冻结同一 APK、来源与测试状态；人工接手只判断剩余视觉、手感、措辞和辅助技术体验。人工审阅期间不换包、不修改数据；并行迭代可另用 development 设备，但不是另一轮强制验收。
+6. 结果保留在既有唯一审查报告及对应 CI 回执中，绑定各自精确输入；秘密、cookie、验证码、私有正文与 raw WebView payload 不进入证据。CI 和自动化不代替人工结论；网站写回、canonical 部署与 release 仍需各自授权。
 
 ## 发现项登记与准入
 
@@ -495,7 +492,7 @@ Phase 4 的最终审阅必须把产品操作逻辑与代码正确性作为两个
 | D30 | Phase 4 adopts the Constitution production DAG and forbidden edges: `shared:library-domain` contains pure domain types/ports; `core:library` coordinates library, search, mirror and update; `core:media` is the only cover/branding request, validation, decode and cache boundary; `core:preferences` owns UI preference schema/migration/reset. Features compose immutable UiState and typed actions only. A retired prototype namespace, fixture UI or dependency is forbidden. | 4A foundation modules and clean cutover |
 | D32 | **[SUPERSEDED 2026-09-06 BY D36 / UI_CONSTITUTION G-27]** This decision formerly combined local FTS and source fan-out in one root-neutral search session. It remains historical provenance only and must not supply routes, UI, coordinator behavior or tests. | Historical Phase 4A search design |
 | D33 | **[DEFERRED BY USER — NOT IN CURRENT PHASE]** 保留为未来隔离 spike 的研究草案：host-owned advanced `SearchIntent`、extension-declared `SearchCapabilityDescriptor v2`、公共/本地/来源专属 filter descriptors 与 `search-v2`。当前不得实现其 UI、协议依赖、fixtures 或 P1 gate；重新纳入必须重新裁决范围和 source-contract 版本。 | Future isolated search/HXP spike only |
-| D34 | **[SUPERSEDED 2026-09-06]** Prototype construction and production actual-online validation were separate migration stages. The prototype stage is retired. All 28 nodes now use production surfaces; `S*`/`X*` require live online services plus signed deterministic fixture replay, and fixture-only evidence cannot finalize them. E-ink remains frozen until its explicit restoration trigger. | Phase 4 review sequencing, evidence and authorization |
+| D34 | **[SUPERSEDED 2026-09-06; scheduling reconciled 2026-10-05]** The prototype migration stage is retired. All 28 nodes use production surfaces. `S*`/`X*` retain live-service task flows on the shared online candidate and CI-owned signed deterministic regression, without another fixture acceptance round. Neither CI nor automation supplies the human verdict; E-ink remains frozen until its explicit restoration trigger. | Phase 4 review sequencing, evidence and authorization |
 | D35 | Website mirror grouping is an optional per-source presentation mode, default off. Simple mode projects one aggregate `全部网站收藏`, sends ADD to the actual website default target and omits folder nodes, folder shortcuts, target selection, ADD→MOVE and MOVE controls. Enabling grouping from that mirror's overflow restores the retained target structure and advanced operations without moving website data. A persisted remote-folder pin is explicit migration intent and keeps that source grouped; target metadata alone is not opt-in. Disabling preserves hidden folder pins/order and membership for later restoration. | 4B `core:preferences`, Library mirror/Detail presentation, migration and Review Graph |
 | D36 | Library and Browse search are separate. `library/search` is local-only. Its `书架` scope uses 120 ms latest-wins input search over the complete local Library metadata projection and all local manual/smart folder titles; empty input shows bounded recommendations from existing recent-reading, recent-addition, configured collection-order and caller-collection signals. Trailing/IME Search commits immediately. Its future `正文` scope is separate and submit-only, limited to normalized cached Reader text. Browse owns explicit-submit `聚合搜索` over active source capabilities; source-card and Detail-author entries may bind one source. Neither route starts, merges or displays the other lane. Cached-body index rows are rebuildable, excluded from transfer and deleted with chapter cache. | 4A search correction; bounded 4C prework and future cached-body index |
 | D37 | **[SUPERSEDED 2026-09-07 BY THE INTEGRATED ROOT MODEL]** Phase 4C manual entry is Standard Library pull-to-refresh and the visible Refresh action. Both remain on Library, start/coalesce only UpdateCoordinator and never mirror calibration. Root default `SMART` temporarily promotes the most recently read book only while it has unresolved updates, then other updated books by source date/detection time; the remaining books retain manual relative order. Explicit sorts are strict. Persistent `全部 / 有更新` filters the root book flow while keeping the shortcut shelf. Each updated book shows exact unresolved `+N`; completing all exact IDs removes it. `忽略当前更新` resolves the exact current anchor with bounded Undo and never mutates progress. Source/book exclusions remain available without removing local data or sources. | 4C entry、root projection、filter、sort、ignore |
@@ -568,7 +565,7 @@ Phase 4A and Phase 4B production implementation 已获明确授权。production 
 |---|---|---|---|
 | Foundation contracts | schema/migration、ports/DAG、static forbidden edges、source/transport adversarial tests、transfer allowlist、route/recreation、P1 proof | 不适用 | 未全部通过即阻断对应实现 slice 的合并/接受。 |
 | UI Constitution conformance | production screenshot/golden、semantics、fontScale、Standard profile/window/locale matrix、deterministic fixture hash | 生产使用体验和高风险文案可在实现过程中纠正；历史 Atlas 不构成人工批准 | Phase 4A/4B 可实现，但 production acceptance 只由 production evidence 与明确人工结论支持。 |
-| `S*`/`X*` actual-online | 签名、脱敏、确定性 fixture replay | 真实 production package、真实 host state、live online service；无 secret/private payload evidence | 两种证据缺一均不得 finalize 对应节点。 |
+| `S*`/`X*` actual-online | CI-owned 签名、脱敏、确定性 fixture regression | 共享 online 候选上的真实 host state/live service 与剩余人工定性判断；无 secret/private payload evidence | 两种证据职责均保留；无独立夹具验收轮次，CI/fixture-only 不得 finalize。 |
 | Production authorization | Phase 4A/4B complete; Phase 4C implementation authorized by explicit user direction on 2026-09-07 | E-ink, canonical replacement, release/tag and publication remain separately authorized; website mutation still requires direct authorization | Build and verify the reconciled Phase 4C scope unattended; record unresolved design gaps for later review without treating implementation evidence as human acceptance. |
 
 This section records Phase 4A/4B and the 2026-09-07 Phase 4C implementation authorization. It does not authorize commit, push, PR, merge, release, tag, canonical device replacement/data changes or agent-initiated live website mutation.
@@ -760,4 +757,22 @@ F-014 `app/SourceRouteScopedOwners.kt` mutation status and `feature/book/BookDet
 
 
 
+
+## Acceptance execution consolidation — authorized 2026-10-05
+
+The maintainer explicitly approved implementation of the revised workflow: preserve local CI because hosted CI is slow and failure-prone, preserve hosted protected admission, remove a standalone fixture-acceptance round, and let affected real-task automation and human qualitative review share one frozen `online` debug-signed candidate. This supersedes earlier mandatory local fixture replay/visual acceptance and separate development/human-device scheduling, not the deterministic replay tests or any required CI check. `QUALITY_GATES.md` owns execution; `review-policy.json` selects evidence owners; the Constitution and catalog retain behavioral obligations.
+
+- Keep explicit-HIGH `focused failure → adjacent sequence → one stable planner-selected full local gate before push → hosted checks`; retain LOW's no-local-CI restriction. Fixture, security, migration, screenshot and lifecycle regression run inside the existing local/hosted CI lanes on disposable automation devices. Do not add another fixture deployment, walkthrough or report, or repeat the full local matrix for each finding. Each result remains bound to its exact immutable inputs; no result for another input is reused as a pass.
+- Use one explicitly designated, dedicated-test-account Standard device for real `org.tsuyomi.android` online task flows. Automation owns it first, then stops and hands the same APK/build/source identities and remaining qualitative checks to the human. Freeze the candidate during human review; preserve app data, signing identity and declared-origin sessions. A second permanently maintained development/human AVD is not mandatory. CI never uses that device, and this authorization does not replace or clear the existing daily canonical.
+- The maintainer created a new empty Wenku8 account and explicitly permits normal WebView login automation and private test-environment credential embedding for that account. Prefer transient login input and the existing encrypted host session store; credentials must not enter public source, hosted CI, distributable APKs, reports, screenshots or memory. The exception does not authorize CAPTCHA/anti-bot bypass, extension-held credentials, undeclared origins or automatic website writes. Challenge/verification pauses for human completion; test-account writeback still needs bounded source/account/scenario authorization and normal product confirmations. ESJ/Yamibo accounts require their own explicit designation when supplied.
+- Human approval remains human-only and artifact-bound. Acceptance of an online candidate is not approval of unexecuted nodes, a release APK or a frozen profile; exact debug/release equivalence is not a new requirement. Release signing, exact-release acceptance and publication remain governed by the unchanged release procedure.
+- Scope is workflow contracts, review policy/report selection, regression tests and documentation. The maintainer subsequently supplied the dedicated test-account credentials privately and permits normal login testing after deployment to a new dedicated online environment; no credential value is recorded here. This does not authorize replacement of the existing daily canonical, app-data reset, CI assertion/task removal, EINK restoration, commit/push/PR/merge, signing/tag/release or live website mutation. Record actual deployment/login evidence separately; authorization is not proof of success.
+
+## Next Android prerelease preparation — 2026-10-06
+
+The maintainer requested a new public Android prerelease and concise user-facing root/Android READMEs. The existing `android-v0.3.0-beta.4` is already published and remains immutable; the next candidate is `0.3.0-beta.5` / versionCode7, using the retained release-signing identity and a distinct source/artifact record. This request does not approve the new artifact, unexecuted human/physical-phone checks, stable promotion or EINK restoration.
+
+After the independent-recovery instructions, the maintainer confirmed the backup complete and explicitly directed continuing publication on2026-10-06. This resolves the maintainer-selected recovery prerequisite by their confirmation, not agent inspection; never request or record private key/password/backup contents. Continue the protected PR admission and final-head Adviser review. `QUALITY_GATES.md` still requires the maintainer's merge confirmation after all required checks pass; then build from merged main, sign with the retained release identity outside Gradle and publish a new immutable prerelease. The confirmation does not grant admin bypass, automatic merge, physical-phone approval, stable promotion, canonical replacement or EINK restoration.
+
+Public READMEs retain the application icon, download/update-data warning, Android baseline, concise capabilities, honest prerelease status and privacy/content/license/attribution boundaries. Developer invocation guidance moves to the existing Android `CONTRIBUTING.md`; gate authority remains `QUALITY_GATES.md`, with local HIGH and protected hosted checks preserved. The already frozen dedicated online candidate, its encrypted test session, canonical devices and historical release assets are unchanged.
 

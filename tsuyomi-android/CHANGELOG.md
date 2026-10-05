@@ -8,6 +8,9 @@ All notable changes use semantic versioning. Future Phase baselines use annotate
 ## [Unreleased]
 
 ### Changed
+- Advanced the next prerelease candidate to `0.3.0-beta.5` / versionCode7; private build-fingerprint suffixes remain distinct. Independent signing-key recovery is maintainer-confirmed; public publication still requires protected source admission, human merge confirmation and release signing.
+- Reduced README to download, capabilities and necessary privacy/license information, with source-build and native HIGH API29 runner instructions owned by CONTRIBUTING. Local CI and protected hosted admission remain unchanged.
+- Corrected the contributor runner-profile link and release-signing parameters for beta.5/code7; release-body identity now comes from the current receipt rather than the historical beta.4 asset. The release runbook now records final-PR-head admission and merged-main health separately, matching the existing protected-check policy without a duplicate post-merge Android matrix.
 - Replaced the temporary black-and-white launcher glyph with the directly selected F6R Tsuyomi mark: coral open `つ`, cream page, ochre page depth, continuous upper-right coral depth and parchment background.
 - Standard chrome now uses a neutral light/dark palette with restrained coral-pink selected icons, labels and check markers. Ordinary buttons and selected containers remain grayscale; inline author links retain an underline affordance. Explicit Dynamic Color, E-ink and Reader content themes retain their existing scope.
 - Simplified website-collection explanations and consent prompts into plain Chinese; removed redundant loading/empty-state prose while preserving local-versus-website effects and removal warnings.

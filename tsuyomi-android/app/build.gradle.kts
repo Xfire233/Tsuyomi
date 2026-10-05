@@ -34,8 +34,8 @@ android {
     namespace = "org.tsuyomi.android"
     defaultConfig {
         applicationId = "org.tsuyomi.android"
-        versionCode = 6
-        versionName = if (buildFingerprint.isEmpty()) "0.3.0-beta.4" else "0.3.0-beta.4+$buildFingerprint"
+        versionCode = 7
+        versionName = if (buildFingerprint.isEmpty()) "0.3.0-beta.5" else "0.3.0-beta.5+$buildFingerprint"
         testInstrumentationRunnerArguments["keep_p4c_review_state"] =
             providers.gradleProperty("tsuyomi.keepP4cReviewState").orElse("false").get()
         buildConfigField("String", "OFFICIAL_REPOSITORY_KEY_ID", "\"$repositoryKeyId\"")

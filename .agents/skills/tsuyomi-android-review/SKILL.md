@@ -58,7 +58,7 @@ Before editing visible UI:
 2. Read the official Claude `frontend-design` skill and the applicable official Android skills or docs.
 3. State two compact design directions. Critique both against the user request, Tsuyomi identity, information density, touch ergonomics, accessibility, implementation cost, and the current active-profile policy. Select one direction; do not blend incompatible ideas.
 4. For Material 3 Expressive, default to **Foundational** intensity. Permit at most one deliberate hero moment on a screen, preserve standard navigation and labels, and use semantic `MaterialTheme` roles rather than hard-coded visual tokens.
-5. Implement only on `Tsuyomi_Review_Work_API29` unless the user explicitly authorizes canonical replacement. Resolve the running serial by AVD name; serial numbers are not ownership. Its size, density, orientation and baseline font scale must match the agreed Standard phone profile before visual evidence is captured.
+5. Use `Tsuyomi_Review_Work_API29` for parallel code iteration. The shared online candidate runs only on an explicitly designated dedicated-test-account device; that designation does not authorize replacement of the existing daily canonical. Resolve serial by AVD name; serial numbers are not ownership. Match the agreed Standard physical geometry, orientation and baseline font scale before visual evidence.
 6. Verify the actual changed production surface: interaction, semantics/layout, PNG at 1:1 where visual judgment matters, relevant state restoration, and the exact API 29 window. Screenshot assertions never prove behavior.
 7. Hand off the exact production APK/build identity, evidence and pending human-only claims. Deployment is not approval.
 
@@ -110,7 +110,7 @@ Local API 29 CI is permitted only in explicit `HIGH`. In that mode, after the bo
 
 In `LOW`, do not invoke the local API 29 runner, matrix, preflight, or `--prepare-only`; bounded direct development is not CI and hosted protected checks are the only CI path. `--mode ci` is reserved for hosted execution with `GITHUB_ACTIONS=true`. In `HIGH`, use `--task` with an exact `--test-class` only for the focused diagnostic step. It is explicitly not a full gate. The required order is focused test, directly adjacent sequence, then the complete planner-selected local gate; hosted protected checks independently remain final acceptance and cannot be bypassed by local evidence. On a repeated signature, collect logs/device state and classify the shared lifecycle, helper or synchronization boundary before any change—never invent a speculative production patch.
 
-The automation AVD is a CI-only exception, not `Tsuyomi_Review_Work_API29`: it does not replace a visual/human Review_Work device, canonical APK, canonical AVD, or human authorization. Its environment evidence records image/emulator revision, system fingerprint, WebView version, resolved local head/worktree overlay and phase timings for comparison; it must not claim host, kernel or emulator-build identity with hosted CI. Compare timing only for equal resolved head/overlay policy, scope, selected tasks, profile/image revision and host evidence. The contributor-facing invocation, native Windows preference and conditional WSL2 requirements are owned by [`tsuyomi-android/README.md`](../../../tsuyomi-android/README.md).
+The automation AVD is a CI-only exception, not `Tsuyomi_Review_Work_API29`: it does not replace a visual/human Review_Work device, canonical APK, canonical AVD, or human authorization. Its environment evidence records image/emulator revision, system fingerprint, WebView version, resolved local head/worktree overlay and phase timings for comparison; it must not claim host, kernel or emulator-build identity with hosted CI. Compare timing only for equal resolved head/overlay policy, scope, selected tasks, profile/image revision and host evidence. Contributor-facing native Windows invocation and conditional WSL2 fallback are documented in [`tsuyomi-android/CONTRIBUTING.md`](../../../tsuyomi-android/CONTRIBUTING.md#local-api-29-runner).
 
 ## Fast review path
 
@@ -161,8 +161,8 @@ Rules:
 When UI-R1 requires runtime evidence:
 Before changing a device display, bind its serial to `adb -s <serial> emu avd name` and record `adb -s <serial> shell wm size` **both physical and override** values. The active profile requires the prescribed *physical* size; `wm size` overrides cannot make a differently sized AVD equivalent. For a temporary narrow/large-type pass, restore the recorded pre-pass override (`wm size reset` if none, otherwise the exact prior override) and verify it again. Never infer restoration from a screenshot or hard-code `1080x2400`: an override of 1080x2400 on a physical 1080x1920 Pixel 2 previously left the bottom and right of the host emulator unclickable. Before a human touch handoff, verify real mouse input on the affected lower/right controls; ADB-injected taps and Windows hit tests cannot prove emulator mouse mapping.
 
-1. Build the affected production APK/test target once with Gradle.
-2. Deploy once to each active isolated profile device with Android CLI delta install/run. Never replace the canonical package as part of routine review.
+1. Build the affected production `online` APK once; it uses debug signing and the real transport. CI owns its separate deterministic fixture/test targets. Workflow-only edits do not require an APK build or device pass; an explicit deployment request is separate runtime scope.
+2. Deploy once to the explicitly authorized dedicated-account device, using Android CLI delta install/run. Preserve app data and signing identity. Do not replace the existing daily canonical or install/run fixture-cleaning instrumentation on the shared candidate.
 3. Account for every affected current-stage node/state obligation, but do not automatically create one PNG per obligation:
    - deterministic static geometry/copy → existing screenshot assertion;
    - bounds, semantics, focusability, or overlap → `android layout --diff`;
@@ -177,19 +177,19 @@ Primary production commands:
 
 ```text
 tsuyomi-android/gradlew.bat -p tsuyomi-android \
-  :app:assembleDebug --console=plain --dependency-verification strict
+  :app:assembleOnline --console=plain --dependency-verification strict
 
 android install --use-delta-install \
-  --apks=tsuyomi-android/app/build/outputs/apk/debug/app-debug.apk \
-  --device=<isolated-serial>
+  --apks=tsuyomi-android/app/build/outputs/apk/online/app-online.apk \
+  --device=<designated-test-account-serial>
 
 android run \
-  --apks=tsuyomi-android/app/build/outputs/apk/debug/app-debug.apk \
-  --device=<isolated-serial> \
+  --apks=tsuyomi-android/app/build/outputs/apk/online/app-online.apk \
+  --device=<designated-test-account-serial> \
   --activity=org.tsuyomi.android.MainActivity
 
-android layout --device=<isolated-serial> --diff --pretty -o=.local/<node>-layout.json
-android screen capture --device=<isolated-serial> -o=.local/<node>.png
+android layout --device=<designated-test-account-serial> --diff --pretty -o=.local/<node>-layout.json
+android screen capture --device=<designated-test-account-serial> -o=.local/<node>.png
 ```
 
 Bounded fallback:
@@ -197,7 +197,7 @@ Bounded fallback:
 - If `android layout --diff` fails, retry one full `android layout`.
 - If the full layout also fails while the device remains healthy, record the CLI failure and use one UIAutomator2 hierarchy. Do not loop retries or capture a duplicate screenshot.
 - Do not run `android describe` in the edit/review loop. It resolves the whole Android project model rather than proving the changed behavior; use Gradle tasks and known APK paths.
-- Deterministic fixture state selection may use explicit debug/test seams in `org.tsuyomi.android.fixture`; it must not introduce a second UI implementation. Journeys still start from visible production controls.
+- Deterministic fixture seams in `org.tsuyomi.android.fixture` remain CI regression or bounded failure-diagnosis tools, not another acceptance round. Never run credential-clearing fixture/live-test setup on the shared candidate. Real task-flow checks start at visible production controls.
 
 ### UI-R3 — Journeys only for changed transitions
 
@@ -213,11 +213,11 @@ Select only Journeys whose transition, persistence, input, or high-risk contract
 
 Each action is one interaction or one assertion, executed in order. A failure marks remaining actions `SKIPPED`; never rewrite the Journey to obtain a pass. Hash normalized interaction traces separately from PNG bytes.
 
-Journeys selected by `actualOnlineRequirements.nodePrefixes` execute only with the policy-required package, real host controllers/storage/navigation, and every policy-required live/fixture lane. Redact credentials, cookies, verification answers, private content and raw WebView payloads. Fixture-only execution never closes an actual-online node.
+Journeys selected by `actualOnlineRequirements.nodePrefixes` use the policy-required production package and real host controllers/storage/navigation/live service on the shared candidate. `controlledFixtureReplayOwner=ci` assigns signed replay to the existing local/hosted CI, not this Journey pass. Redact credentials, cookies, verification answers, private content and raw WebView payloads. Fixture-only evidence never closes an actual-online node.
 
 ### UI-R4 — Human handoff
 
-Hand off the same APK, node, route, state, active profile, and evidence. Human-only items include long-reading comfort, Reader seek feel, TalkBack experience, trust/destructive wording, and visual/brand judgment.
+After selected automation finishes, stop further input and freeze the same APK, source, route and reusable test session for the human. Record remaining qualitative items as `PENDING`; do not repeat already proven operations merely for handoff. Human-only judgments include long-reading comfort, Reader seek feel, TalkBack experience, trust/destructive wording and visual/brand quality.
 
 Qualitative and full-matrix items for every deferred profile remain explicitly deferred. When the policy's resume trigger is satisfied, its retained physical-device and human evidence requirements become mandatory again.
 
@@ -225,23 +225,12 @@ Qualitative and full-matrix items for every deferred profile remain explicitly d
 
 Human review uses the exact production APK, build ID, route, state, active profile and evidence already produced by UI-R2/UI-R3. Review comments are recorded in the owning gate/checkpoint or ignored local handoff; there is no in-app reviewer, bridge daemon or app-private approval channel.
 
-Use two Standard AVDs when human review and code iteration overlap:
+Default to one explicitly designated dedicated-account `online` candidate, used sequentially by automation then human review. A separate development AVD is optional only when iteration overlaps the frozen human handoff; it is not a second mandatory acceptance lane.
 
-- human-review AVD: stable exact production APK and final human observation;
-- development AVD: assistant install/debug/layout/PNG/Journey work.
+Deployment/replacement still needs the device-specific user authorization. Preserve application data, signing identity and encrypted source-scoped sessions. The dedicated Wenku8 test account may use normal WebView login automation and transient private credential input; other accounts remain manual. Challenges pause for the human. Never embed credentials in hosted CI, public source or APKs, never export them to evidence, and never treat login permission as website-write permission. Do not use credential-clearing `LiveWebViewVerificationInstrumentedTest` setup on this candidate. Restarted reusable sessions do not require another login unless expired or challenged.
 
-Only explicit user authorization permits replacing the APK on the human-review or canonical AVD. Preserve app data unless the authorized scenario explicitly requires clearing it. A comment, screenshot or automation event never implies `humanReviewedAt`, `approvedAt`, `ACCEPT`, production authorization or E-ink approval.
+An absent iteration device may be created independently with `Create-ReviewAvds.ps1 -ReviewWorkOnly`; do not recreate canonical devices. The agreed Standard API 29 profile is portrait physical 1080×2400, 420dpi and font scale 1.0. Additional narrow, landscape or large-type scenarios restore their recorded prior display overrides before handoff. Verify actual human mouse input on affected lower/right controls when a touch handoff is claimed; injected taps do not prove host input coordinates. Approval remains explicit, human-only and artifact-bound.
 
-If the non-canonical development AVD is absent, create only that AVD without recreating either canonical review device:
-
-```text
-C:/Windows/System32/WindowsPowerShell/v1.0/powershell.exe \
-  -ExecutionPolicy Bypass \
-  -File tsuyomi-android/tools/avd/Create-ReviewAvds.ps1 \
-  -ReviewWorkOnly
-```
-
-`Tsuyomi_Review_Work_API29` mirrors the Standard profile from `UI_ATLAS.md`: API 29, portrait 1080×2400, 420dpi and baseline font scale 1.0. Verify effective geometry and font scale before visual review. Deliberate landscape, large-font and forced-window tests are additional evidence, not substitutes for the matching portrait capture. This AVD never owns final human approval.
 
 ## Tool ownership and escalation
 
@@ -280,7 +269,7 @@ Run `android studio check` once per IDE-assisted session. Successful compiler/li
 - Direct deferred-profile source change → the minimal direct-change exception from `review-policy.json`; no full matrix.
 - Full AI review → every current catalog node impact-accounted according to the active/deferred partition; policy-selected actual-online prefixes receive their additional evidence lanes.
 - Deferred-profile restoration → the policy's complete retained graph, inventory, Journeys, adaptive matrix, and physical human review.
-- Actual-online review → policy-required package, real host controllers/storage/navigation, live and controlled-fixture lanes, redacted evidence, and no fixture-only verdict substitution.
+- Actual-online review → policy-required production package, real host state and live task flows on the shared online candidate; signed deterministic replay belongs to CI, with no standalone fixture acceptance and no fixture-only verdict substitution. Device deployment is separately authorized.
 - Resolve the policy partition before every Gradle/device command. Tests for a profile currently marked deferred/frozen remain retained but ignored from routine instrumentation and screenshot registration; a test's presence in a class never makes that profile active.
 - Journey debugging in explicit `HIGH` follows `QUALITY_GATES.md`: exact reproduction, stable affected test, adjacent sequence, then the local planner-selected API 29 gate before hosted protected final acceptance. The entire planner-selected local matrix is required preflight in `HIGH`, but never an inner retry loop. In `LOW`, no local API 29 runner executes; hosted protected checks are the CI path.
 - When the same failure signature crosses Journeys or appears only in class order, stop broad execution, capture diagnostic state, and classify the shared helper, lifecycle owner, device state, or synchronization boundary before changing anything. Never make speculative production changes to satisfy Compose idling; report the boundary change immediately.

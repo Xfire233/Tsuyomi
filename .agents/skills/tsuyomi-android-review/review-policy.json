@@ -20,7 +20,9 @@
     "buildOnce": true,
     "deployOncePerActiveDevice": true,
     "captureOnlyAffectedVisualStates": true,
-    "journeysOnlyForChangedTransitions": true
+    "journeysOnlyForChangedTransitions": true,
+    "standaloneFixtureReview": false,
+    "shareOnlineCandidateWithHuman": true
   },
   "nodeExecution": {
     "activeStage": "PHASE4_PRODUCTION_IMPLEMENTATION",
@@ -39,9 +41,8 @@
         "S",
         "X"
       ],
-      "requiredPackage": "org.tsuyomi.android",
       "requiresLiveOnlineService": true,
-      "requiresControlledFixtureReplay": true,
+      "controlledFixtureReplayOwner": "ci",
       "forbidFixtureOnlyFinalization": true,
       "reason": "S01-S04 and X01-X06 are active only on production surfaces and require both live-service evidence and signed deterministic replay."
     },
