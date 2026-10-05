@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import assert from 'node:assert/strict';
+import { createHash } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import test from 'node:test';
 import Ajv2020 from 'ajv/dist/2020.js';
@@ -384,6 +385,19 @@ test('HXP integrity excludes the signed manifest to avoid a self-referential dig
   const manifest = await loadJson('../fixtures/hxp/valid-minimal-manifest.json');
   assert.equal(Object.hasOwn(manifest.integrity.files, 'manifest.json'), false);
   assert.ok(Object.hasOwn(manifest.integrity.files, manifest.entry));
+});
+
+test('HXP v2 local fixture hashes complete payload bytes but provides no publisher authentication', async () => {
+  const manifest = await loadJson('../fixtures/hxp/valid-local-unsigned-v2-manifest.json');
+  const hash = (bytes) => createHash('sha256').update(bytes).digest('hex');
+  const entry = Buffer.from('export default {};\n');
+  assert.deepEqual(Object.keys(manifest.integrity.files), [manifest.entry]);
+  assert.equal(manifest.integrity.files[manifest.entry], hash(entry));
+  assert.equal(manifest.integrity.contentDigest, hash(Buffer.from(JSON.stringify(manifest.integrity.files))));
+  assert.notEqual(manifest.integrity.files[manifest.entry], hash(Buffer.from('export default { changed: true };\n')));
+  assert.equal(Object.hasOwn(manifest.integrity.files, 'manifest.json'), false);
+  assert.equal(Object.hasOwn(manifest.integrity.files, 'signature.ed25519'), false);
+  assert.deepEqual(manifest.signing, { algorithm: 'none' });
 });
 
 test('reader document and semantic locator schemas accept their fixtures', async () => {

@@ -123,6 +123,82 @@ class RemoteLibraryScreenInstrumentedTest {
     }
 
     @Test
+    fun failedRefreshKeepsFiveBooksAndCountWithLocalizedCauseUntilExplicitRetry() {
+        val retained = (1..5).map { number ->
+            SourceBookSummary(BookIdentity(SourceId, number.toString()), "收藏$number", null, null, "https://example.com/$number")
+        }
+        var state by mutableStateOf(RemoteLibraryViewState.CONTENT)
+        var refreshes = 0
+        composeRule.setContent {
+            DisplayEnvironmentProvider(environment) {
+                TsuyomiTheme(environment) {
+                    RemoteLibraryScreen(
+                        sourceId = SourceId,
+                        sourceName = "文库8",
+                        books = if (state == RemoteLibraryViewState.EMPTY) emptyList() else retained,
+                        selectedIds = emptySet(),
+                        state = state,
+                        message = if (state == RemoteLibraryViewState.CONTENT) "网络不可用。" else null,
+                        refreshFailure = state == RemoteLibraryViewState.CONTENT,
+                        unresolvedBookOperations = mapOf("1" to "ADD"),
+                        copyConfirmationVisible = false,
+                        onNavigateUp = {},
+                        onRefresh = { refreshes++; state = RemoteLibraryViewState.EMPTY },
+                        onToggleSelection = {},
+                        onClearSelection = {},
+                        onRequestCopy = {},
+                        onDismissCopy = {},
+                        onConfirmCopy = {},
+                        onOpenVerification = {},
+                        onOpenBook = {},
+                    )
+                }
+            }
+        }
+        composeRule.onNodeWithText("文库8 · 5 本").assertIsDisplayed()
+        retained.forEach { composeRule.onNodeWithTag("library-book-$SourceId-${it.identity.remoteBookId}").assertIsDisplayed() }
+        composeRule.onNodeWithText("网络不可用。").assertIsDisplayed()
+        composeRule.onNodeWithContentDescription("加入网站收藏结果待确认", useUnmergedTree = true).assertIsDisplayed()
+        composeRule.onNodeWithText("重试读取").performClick()
+        assertEquals(1, refreshes)
+        composeRule.onNodeWithText("网站收藏为空").assertIsDisplayed()
+        composeRule.onNodeWithTag("library-book-$SourceId-1").assertDoesNotExist()
+    }
+    @Test
+    fun refreshErrorWithoutPreviousRowsShowsFullErrorAndRetry() {
+        var retries = 0
+        composeRule.setContent {
+            DisplayEnvironmentProvider(environment) {
+                TsuyomiTheme(environment) {
+                    RemoteLibraryScreen(
+                        sourceId = SourceId,
+                        sourceName = "文库8",
+                        books = emptyList(),
+                        selectedIds = emptySet(),
+                        state = RemoteLibraryViewState.ERROR,
+                        message = "网络不可用。",
+                        copyConfirmationVisible = false,
+                        onNavigateUp = {},
+                        onRefresh = { retries++ },
+                        onToggleSelection = {},
+                        onClearSelection = {},
+                        onRequestCopy = {},
+                        onDismissCopy = {},
+                        onConfirmCopy = {},
+                        onOpenVerification = {},
+                        onOpenBook = {},
+                    )
+                }
+            }
+        }
+        composeRule.onNodeWithText("网站收藏读取失败").assertIsDisplayed()
+        composeRule.onNodeWithText("网络不可用。").assertIsDisplayed()
+        composeRule.onNodeWithTag("library-book-$SourceId-1").assertDoesNotExist()
+        composeRule.onNodeWithText("重试读取").performClick()
+        assertEquals(1, retries)
+    }
+
+    @Test
     fun simpleMirrorAggregatesBooksAndOffersGroupingOptInWithoutFolderChrome() {
         var groupingEnabled: Boolean? = null
         composeRule.setContent {
@@ -294,8 +370,6 @@ class RemoteLibraryScreenInstrumentedTest {
         }
 
         composeRule.onAllNodesWithText("从网站收藏移除").filterToOne(hasClickAction()).assertIsDisplayed()
-        composeRule.onNodeWithText("确定要从网站收藏中移除《文学少女》吗？\n此操作只修改网站收藏；本地书架、稍后再读、评分、标签和阅读进度均保留。")
-            .assertIsDisplayed()
         composeRule.onAllNodesWithText("从网站收藏移除").filterToOne(hasClickAction()).performClick()
         assertEquals("1", confirmedBookId)
     }

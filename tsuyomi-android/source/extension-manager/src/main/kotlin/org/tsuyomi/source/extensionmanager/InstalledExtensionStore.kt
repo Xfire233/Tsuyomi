@@ -17,6 +17,14 @@ class InstalledExtensionStore(private val files: QuotaFileStore) {
             throw ExtensionInstallException(ExtensionInstallError.STORAGE_UNAVAILABLE, error)
         }
     }
+    /** Reinstates exact prior bytes if the post-write trust commit fails. */
+    internal fun restoreActive(sourceId: SourceId, prior: ByteArray?) {
+        try {
+            if (prior == null) files.delete(path(sourceId)) else files.write(path(sourceId), prior)
+        } catch (error: StorageException) {
+            throw ExtensionInstallException(ExtensionInstallError.STORAGE_UNAVAILABLE, error)
+        }
+    }
 
     fun readActive(sourceId: SourceId): ByteArray? = try {
         files.read(path(sourceId))
@@ -47,6 +55,7 @@ enum class ExtensionInstallError {
     REPOSITORY_VERSION_REJECTED,
     KEY_ROTATION_NOT_AUTHORIZED,
     REPOSITORY_BINDING_MISMATCH,
+    UNSIGNED_REPOSITORY_REJECTED,
     REPOSITORY_ACTIVE_UNVERIFIABLE,
     CANDIDATE_RECHECK_FAILED,
     CAPABILITY_GRANT_REQUIRED,

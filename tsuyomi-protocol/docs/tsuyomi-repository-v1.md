@@ -40,6 +40,8 @@ A publisher has a unique `keyId`, base64 raw-32-byte `publicKey`, and lowercase 
 
 The catalog binds a download to its source ID, version, archive size and digest, publisher key and fingerprint, and exact host API interval. A verified HXP whose manifest differs from any of those bindings is not installable from the catalog.
 
+Repository delivery accepts **signed manifest v1 only**: the archive must contain its valid Ed25519 publisher signature. A root-signed catalog's SHA-256 download binding is an exact-byte check, not a substitute publisher signature; an unsigned local manifest v2 must be rejected even if catalog metadata names its digest and publisher. Local-unsigned files are never downloaded, offered as repository updates, or authorized by root/subscription metadata.
+
 ## Revocation and migration
 
 `revocations.publisherFingerprints` and `revocations.packageDigests` are root-signed, unique, bounded lists. A valid current or previously authenticated catalog revocation disables affected installed packages and rejects new packages. A missing or stale catalog alone does not disable an otherwise valid installed package.
@@ -99,7 +101,10 @@ For a user-added publisher, signing key material permits verification but not ex
 persists an explicit exact grant for `(sourceId, publisherKeyId, publisher fingerprint, archive
 SHA-256)` after visible package consent. The grant does not authorize another archive, source or
 publisher. Hosts preserve the source publisher pin across uninstall; a different publisher for the
-same source is rejected unless the built-in official root's separately authenticated exact
-`legacyMigration` is approved and activated. A local HXP reveals no public key: an untrusted,
-bounded manifest key-ID extraction is only a key-entry label, and the user-entered raw public key
-must cryptographically verify the complete archive before consent.
+same source is rejected through this repository path unless the built-in official root's separately
+authenticated exact `legacyMigration` is approved and activated. A locally selected signed v1 HXP
+reveals no public key: untrusted bounded key-ID extraction is only a key-entry label, and the
+user-entered raw public key must cryptographically verify the complete archive before consent.
+The distinct unsigned local v2 import has no key-entry label or publisher identity, and cannot
+use repository migration authority; after uninstall it requires separately informed source-identity
+transition approval without deleting the old signed identity history or local books/progress.

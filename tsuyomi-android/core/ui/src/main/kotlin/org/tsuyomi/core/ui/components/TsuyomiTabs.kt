@@ -34,6 +34,7 @@ import org.tsuyomi.core.ui.theme.TsuyomiSpacing
 import org.tsuyomi.core.ui.theme.libraryTabSelected
 import org.tsuyomi.core.ui.theme.libraryTabUnselected
 
+import org.tsuyomi.core.ui.theme.activeAccent
 data class TsuyomiTabOption(
     val key: String,
     val label: String,
@@ -65,12 +66,16 @@ fun TsuyomiTabRow(
 ) {
     if (options.isEmpty()) return
     val selectedIndex = options.indexOfFirst { it.key == selectedKey }.coerceAtLeast(0)
+    val activeAccent = MaterialTheme.colorScheme.activeAccent
     val tabs: @Composable () -> Unit = {
         options.forEach { option ->
+            val selected = option.key == selectedKey
             Tab(
-                selected = option.key == selectedKey,
+                selected = selected,
                 onClick = { onSelect(option.key) },
                 modifier = Modifier.testTag("tsuyomi-tab-${option.key}"),
+                selectedContentColor = activeAccent,
+                unselectedContentColor = MaterialTheme.colorScheme.onSurfaceVariant,
                 text = { Text(option.label) },
             )
         }
@@ -129,8 +134,8 @@ fun TsuyomiTextTabRow(
                 onClick = { onSelect(option.key) },
                 modifier = Modifier.testTag("tsuyomi-tab-${option.key}")
                     .sizeIn(minWidth = 48.dp, minHeight = 48.dp),
-                selectedContentColor = MaterialTheme.colorScheme.libraryTabSelected,
-                unselectedContentColor = MaterialTheme.colorScheme.libraryTabUnselected,
+                selectedContentColor = MaterialTheme.colorScheme.activeAccent,
+                unselectedContentColor = MaterialTheme.colorScheme.onSurfaceVariant,
             ) {
                 Text(
                     text = option.label,

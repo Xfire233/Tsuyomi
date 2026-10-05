@@ -15,7 +15,9 @@ class AppNavigationTest {
     @Test
     fun nestedRoutesMapToTheirStableRoot() {
         mapOf(
-            Routes.Collections to Routes.Library,
+            Routes.NewCollection to Routes.Library,
+            Routes.CollectionBookPicker to Routes.Library,
+            Routes.CollectionRule to Routes.Library,
             Routes.LibrarySearch to Routes.Library,
             Routes.Reader to Routes.Browse,
             Routes.Transfer to Routes.More,

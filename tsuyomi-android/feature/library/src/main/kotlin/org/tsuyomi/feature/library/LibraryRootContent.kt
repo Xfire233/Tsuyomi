@@ -60,6 +60,7 @@ import org.tsuyomi.core.ui.components.tsuyomiAnimateItem
 
 import org.tsuyomi.core.ui.theme.tsuyomiAnimateFloatAsState
 
+import org.tsuyomi.core.ui.theme.activeAccent
 data class LibraryRootNodePlacement(
     val id: String,
     val bookOffset: Int,
@@ -222,7 +223,13 @@ internal fun LibraryRootNodeListRow(
         headlineContent = { Text(model.title, maxLines = if (compact) 1 else 2, overflow = TextOverflow.Ellipsis) },
         supportingContent = { Text(model.supporting, maxLines = 1, overflow = TextOverflow.Ellipsis) },
         leadingContent = { Icon(model.icon, contentDescription = null, modifier = Modifier.size(32.dp)) },
-        trailingContent = if (selected) ({ Icon(TsuyomiIcons.Selected, contentDescription = "已选择") }) else null,
+        trailingContent = if (selected) ({
+            Icon(
+                TsuyomiIcons.Selected,
+                contentDescription = "已选择",
+                tint = MaterialTheme.colorScheme.activeAccent,
+            )
+        }) else null,
         modifier = Modifier.fillMaxWidth().heightIn(min = if (compact) 52.dp else 72.dp)
             .testTag("library-root-node-${item.key}")
             .rootNodeTargets(item, index, dragCoordinator)

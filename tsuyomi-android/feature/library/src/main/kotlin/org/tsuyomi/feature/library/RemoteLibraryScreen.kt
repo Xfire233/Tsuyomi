@@ -98,7 +98,8 @@ fun RemoteLibraryScreen(
     onOpenTarget: (String) -> Unit = {},
     groupingEnabled: Boolean = false,
     onGroupingEnabledChange: (Boolean) -> Unit = {},
-    unresolvedBookIds: Set<String> = emptySet(),
+    refreshFailure: Boolean = false,
+    unresolvedBookOperations: Map<String, String> = emptyMap(),
     removeConfirmationBook: SourceBookSummary? = null,
     onDismissRemoveConfirmation: () -> Unit = {},
     onConfirmRemove: (SourceBookSummary) -> Unit = {},
@@ -127,7 +128,6 @@ fun RemoteLibraryScreen(
                     TsuyomiOverflowAction(
                         label = if (groupingEnabled) "停用网站分组" else "启用网站分组",
                         onClick = { onGroupingEnabledChange(!groupingEnabled) },
-                        icon = TsuyomiIcons.Folder,
                     ),
                 )
             }
@@ -136,7 +136,6 @@ fun RemoteLibraryScreen(
                     TsuyomiOverflowAction(
                         label = stringResource(R.string.remote_library_copy_all),
                         onClick = onRequestCopy,
-                        icon = TsuyomiIcons.Copy,
                     ),
                 )
             }
@@ -211,21 +210,32 @@ fun RemoteLibraryScreen(
         Column(
             Modifier.fillMaxSize().padding(padding).testTag("remote-library-surface"),
         ) {
-            message?.let {
-                Text(
-                    text = it,
+            if (message != null && state != RemoteLibraryViewState.ERROR) {
+                Row(
                     modifier = Modifier.fillMaxWidth()
                         .semantics { liveRegion = LiveRegionMode.Polite }
                         .padding(horizontal = 20.dp, vertical = 12.dp),
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text(
+                        text = message,
+                        modifier = Modifier.weight(1f),
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    if (refreshFailure) {
+                        TsuyomiButton(
+                            text = stringResource(R.string.remote_library_retry),
+                            onClick = onRefresh,
+                            style = TsuyomiButtonStyle.TEXT,
+                        )
+                    }
+                }
             }
             when (state) {
                 RemoteLibraryViewState.LOADING -> StateView(
                     kind = TsuyomiStateKind.LOADING,
                     title = stringResource(R.string.remote_library_loading),
-                    message = stringResource(R.string.remote_library_loading_message),
                     modifier = Modifier.fillMaxSize(),
                 )
                 RemoteLibraryViewState.IDLE -> StateView(
@@ -239,7 +249,6 @@ fun RemoteLibraryScreen(
                 RemoteLibraryViewState.EMPTY -> StateView(
                     kind = TsuyomiStateKind.EMPTY,
                     title = stringResource(R.string.remote_library_empty_title),
-                    message = stringResource(R.string.remote_library_read_only_empty_message),
                     actionLabel = stringResource(R.string.remote_library_refresh),
                     onAction = onRefresh,
                     modifier = Modifier.fillMaxSize(),
@@ -259,7 +268,7 @@ fun RemoteLibraryScreen(
                 -> StateView(
                     kind = TsuyomiStateKind.ERROR,
                     title = stringResource(R.string.remote_library_error_title),
-                    message = stringResource(R.string.remote_library_error_message),
+                    message = message ?: stringResource(R.string.remote_library_error_message),
                     actionLabel = stringResource(R.string.remote_library_retry),
                     onAction = onRefresh,
                     modifier = Modifier.fillMaxSize(),
@@ -274,7 +283,7 @@ fun RemoteLibraryScreen(
                     selectedTargetId = selectedTargetId.takeIf { groupingEnabled },
                     groupingEnabled = groupingEnabled,
                     selectedBookIds = books.filter { remoteLibrarySelectionId(it) in selectedIds }.mapTo(linkedSetOf()) { it.identity },
-                    unresolvedBookIds = unresolvedBookIds,
+                    unresolvedBookOperations = unresolvedBookOperations,
                     layout = layout,
                     onOpenTarget = { onOpenTarget(it.targetId) },
                     onOpenBook = onOpenBook,
@@ -312,7 +321,7 @@ fun RemoteLibraryScreen(
         TsuyomiDialog(
             onDismissRequest = onDismissRemoveConfirmation,
             title = "从网站收藏移除",
-            text = "确定要从网站收藏中移除《${removeConfirmationBook.title}》吗？\n此操作只修改网站收藏；本地书架、稍后再读、评分、标签和阅读进度均保留。",
+            text = "从网站收藏中移除《${removeConfirmationBook.title}》？\n本地书架、稍后再读、评分、标签和阅读进度都会保留。",
             confirmLabel = "从网站收藏移除",
             onConfirm = { onConfirmRemove(removeConfirmationBook) },
             dismissLabel = "取消",
@@ -326,9 +335,8 @@ fun RemoteLibraryScreen(
         }
         TsuyomiDialog(
             onDismissRequest = onDismissMoveSelection,
-            title = "移至分类 / 目标",
+            title = "移至网站分组",
             body = {
-                Text("选择要移动至的目标分类：")
                 targets.forEach { target ->
                     TsuyomiSelectableRow(
                         selected = pickedTargetId == target.targetId,
@@ -354,14 +362,14 @@ fun RemoteLibraryScreen(
     if (jitPrompt != null) {
         val opName = when (jitPrompt.operation) {
             "add" -> "加入"
-            "remove" -> "删除"
+            "remove" -> "移除"
             else -> "移动"
         }
         TsuyomiDialog(
             onDismissRequest = onDismissJitPrompt,
-            title = "授权远端回写操作",
-            text = "您即将对《${jitPrompt.bookTitle}》执行远端书架${opName}操作。\nTsuyomi 将代表您向「${jitPrompt.sourceName}」发送远端变更。\n是否授权并继续？",
-            confirmLabel = "授权并执行",
+            title = "允许修改网站收藏？",
+            text = "允许 Tsuyomi 在「${jitPrompt.sourceName}」的网站收藏中${opName}《${jitPrompt.bookTitle}》吗？",
+            confirmLabel = "允许并继续",
             onConfirm = onConfirmJitPrompt,
             dismissLabel = "取消",
         )

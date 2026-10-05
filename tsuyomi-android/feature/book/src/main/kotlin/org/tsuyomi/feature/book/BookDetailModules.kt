@@ -46,12 +46,15 @@ import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.TextLinkStyles
 import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.withLink
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.unit.Constraints
 import androidx.compose.ui.platform.testTag
+import org.tsuyomi.core.display.DisplayProfile
+import org.tsuyomi.core.display.LocalDisplayEnvironment
 import org.tsuyomi.core.media.api.CoverUiState
 import org.tsuyomi.core.ui.components.CoverImage
 import org.tsuyomi.core.ui.components.TsuyomiButton
@@ -101,7 +104,7 @@ fun BookDetailTopBar(
         )
     }
     val overflow = buildList {
-        add(TsuyomiOverflowAction(stringResource(R.string.book_refresh_detail), onRefresh, TsuyomiIcons.Refresh))
+        add(TsuyomiOverflowAction(stringResource(R.string.book_refresh_detail), onRefresh))
         if (inLibrary) {
             add(
                 TsuyomiOverflowAction(
@@ -122,7 +125,6 @@ fun BookDetailTopBar(
                     if (updateChecksExcluded) R.string.book_resume_update_checks else R.string.book_stop_update_checks,
                 ),
                 onClick = onToggleUpdateChecksExcluded,
-                icon = TsuyomiIcons.Updates,
             ),
         )
     }
@@ -150,6 +152,8 @@ internal fun DetailIdentityModule(
     destinationMenuContent: @Composable ColumnScope.(dismissMenu: () -> Unit) -> Unit,
 ) {
     var titleExpanded by rememberSaveable(detail.summary.identity, detail.summary.title) { mutableStateOf(false) }
+    val showUnresolvedCoverBadge = localState.reconciliation == "UNRESOLVED" &&
+        localState.reconciliationOperation?.uppercase() != "ADD"
     Layout(
         modifier = Modifier.fillMaxWidth()
             .padding(start = TsuyomiSpacing.Md, top = TsuyomiSpacing.Md, end = TsuyomiSpacing.Md, bottom = TsuyomiSpacing.Xs)
@@ -158,7 +162,17 @@ internal fun DetailIdentityModule(
             CoverImage(
                 state = coverState,
                 modifier = Modifier.testTag("detail-cover"),
-                unresolvedBadge = localState.reconciliation == "UNRESOLVED",
+                unresolvedBadge = showUnresolvedCoverBadge,
+                unresolvedDescription = if (showUnresolvedCoverBadge) {
+                    stringResource(
+                        when (localState.reconciliationOperation?.uppercase()) {
+                            "ADD" -> R.string.book_unresolved_add_marker_description
+                            "MOVE" -> R.string.book_unresolved_move_marker_description
+                            "REMOVE" -> R.string.book_unresolved_remove_marker_description
+                            else -> R.string.book_unresolved_marker_description
+                        },
+                    )
+                } else null,
             )
             Box(Modifier.fillMaxWidth().testTag("detail-title-block")) {
                 DetailTitle(detail.summary.title, titleExpanded) { titleExpanded = !titleExpanded }
@@ -252,7 +266,14 @@ private fun DetailAuthor(author: String?, onSearchAuthor: (String) -> Unit) {
     Box(Modifier.fillMaxWidth().testTag("detail-author-row")) {
         author?.takeIf(String::isNotBlank)?.let { value ->
             val linkStyles = TextLinkStyles(
-                style = SpanStyle(color = MaterialTheme.colorScheme.link),
+                style = SpanStyle(
+                    color = MaterialTheme.colorScheme.link,
+                    textDecoration = if (LocalDisplayEnvironment.current.effectiveProfile == DisplayProfile.STANDARD) {
+                        TextDecoration.Underline
+                    } else {
+                        null
+                    },
+                ),
             )
             val searchLabel = stringResource(R.string.book_search_author, value)
             Text(
@@ -729,7 +750,6 @@ internal fun mutationMessage(status: DetailMutationStatus): String {
         DetailMutationOperation.REMOVE_FROM_REMOTE -> "从远程书架移除"
         DetailMutationOperation.MOVE_REMOTE -> "移动远程分类"
         DetailMutationOperation.RECONCILE_RETRY -> "重试远端同步"
-        DetailMutationOperation.RECONCILE_ACKNOWLEDGE -> "解除锁定状态"
     }
     return when (status.phase) {
         DetailMutationPhase.WORKING -> stringResource(R.string.book_mutation_working, operation)

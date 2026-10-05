@@ -28,6 +28,7 @@ import org.tsuyomi.core.files.StorageRoots
 import org.tsuyomi.core.security.SourceCredentialPartition
 import org.tsuyomi.core.security.VerifiedBrowserSessionStore
 import org.tsuyomi.feature.browse.BrowseCatalogAction
+import org.tsuyomi.feature.browse.BrowsePublisherIdentity
 import org.tsuyomi.feature.browse.BrowseInstallFailure
 import org.tsuyomi.feature.browse.BrowseResourceLimit
 import org.tsuyomi.feature.browse.BrowseResourceLimitIncrease
@@ -41,6 +42,7 @@ import org.tsuyomi.source.extensionmanager.HxpArchiveVerifier
 import org.tsuyomi.source.extensionmanager.HxpVerificationException
 import org.tsuyomi.source.extensionmanager.InstalledExtensionStore
 import org.tsuyomi.source.extensionmanager.OfficialRepositoryClient
+import org.tsuyomi.source.extensionmanager.PublisherTrust
 import org.tsuyomi.source.extensionmanager.PreparedExtensionInstall
 import org.tsuyomi.source.extensionmanager.RemoteOperation
 import org.tsuyomi.source.extensionmanager.RepositoryCatalog
@@ -85,20 +87,21 @@ class SourceInstallController(
 
     private var selectedPackage: VerifiedHxpPackage? by mutableStateOf(null)
     var activePackage: VerifiedHxpPackage?
-        get() = selectedPackage?.takeIf { OfficialRepositoryConfiguration.isTrusted(it, publisherKeys) }
+        get() = selectedPackage?.takeIf { OfficialRepositoryConfiguration.isTrusted(it, publisherKeys, packageTrust) }
         private set(value) { selectedPackage = value }
     private var prepared: PreparedExtensionInstall? = null
     private var preparedRepositoryInstall: BrowseCatalogAction.Install? = null
     private var preparedRepository: OfficialRepositoryClient? = null
     private var preparedPublisher: org.tsuyomi.source.extensionmanager.PublisherKey? = null
     private var preparedPublisherFromInput = false
+    private var preparedInstaller: ExtensionInstaller? = null
     private var pendingLocalArchive: File? = null
     private var installedLoaded = false
     var installedPackages: List<VerifiedHxpPackage> by mutableStateOf(emptyList())
         private set
 
     internal val trustedInstalledPackages: List<VerifiedHxpPackage>
-        get() = installedPackages.filter { OfficialRepositoryConfiguration.isTrusted(it, publisherKeys) }
+        get() = installedPackages.filter { OfficialRepositoryConfiguration.isTrusted(it, publisherKeys, packageTrust) }
     internal val catalog = SourceCatalogController(context, repositoryClient, this, subscriptions)
     internal val mutationPending: Boolean
         get() = mutationMutex.isLocked || prepared != null || pendingLocalArchive != null
@@ -122,7 +125,7 @@ class SourceInstallController(
                 null
             } catch (_: IllegalArgumentException) {
                 null
-            } ?: return null
+            }?.takeIf { OfficialRepositoryConfiguration.isTrusted(it, publisherKeys, packageTrust) } ?: return null
             activePackage = restored
             persistActiveSource(restored.manifest.sourceId.value)
             showInstalled(restored)
@@ -145,7 +148,7 @@ class SourceInstallController(
                 null
             } catch (_: IllegalArgumentException) {
                 null
-            }?.takeIf { OfficialRepositoryConfiguration.isTrusted(it, publisherKeys) }
+            }?.takeIf { OfficialRepositoryConfiguration.isTrusted(it, publisherKeys, packageTrust) }
         } finally {
             mutationMutex.unlock()
         }
@@ -169,6 +172,7 @@ class SourceInstallController(
             } catch (_: IllegalArgumentException) {
                 null
             } ?: return@mapNotNull null
+            if (!OfficialRepositoryConfiguration.isTrusted(installed, publisherKeys, packageTrust)) return@mapNotNull null
             if (!installed.manifest.capabilities.remoteLibrary.policies.containsKey(RemoteOperation.READ)) {
                 return@mapNotNull null
             }
@@ -208,8 +212,13 @@ class SourceInstallController(
             val id = org.tsuyomi.shared.sourcecontract.SourceId(sourceId)
             val installed = installedPackages.singleOrNull { it.manifest.sourceId == id } ?: return false
             return withContext(NonCancellable) {
-                withContext(Dispatchers.IO) {
-                    packageTrust.pinInstalled(installed, requireNotNull(publisherKeys.resolve(installed.manifest.publisherKeyId)))
+                if (installed.publisherTrust != PublisherTrust.LOCAL_UNSIGNED) {
+                    withContext(Dispatchers.IO) {
+                        packageTrust.pinInstalled(
+                            installed,
+                            requireNotNull(publisherKeys.resolve(requireNotNull(installed.manifest.publisherKeyId))),
+                        )
+                    }
                 }
                 val previous = libraryRepository.sourceAvailability(sourceId)
                 markSourceUnavailable(sourceId)
@@ -307,10 +316,12 @@ class SourceInstallController(
                     override fun isRevokedFingerprint(fingerprint: String) = false
                     override fun isRevokedPackage(packageSha256: String) = false
                 }
-                ExtensionInstaller(
+                val localInstaller = ExtensionInstaller(
                     HxpArchiveVerifier(org.tsuyomi.source.extensionmanager.CompositePublisherKeyResolver(listOf(publisherKeys, ephemeral))),
                     store, stagingDirectory, packageExecutionTrust = packageTrust,
-                ).prepare(archive)
+                )
+                preparedInstaller = localInstaller
+                localInstaller.prepare(archive)
             } finally {
                 archive.delete()
             }
@@ -329,7 +340,9 @@ class SourceInstallController(
             clearPreparedState()
             state = BrowseUiState.Preparing(name)
             val result = withContext(Dispatchers.IO) { load() }
-            if (preparedPublisher == null) preparedPublisher = publisherKeys.resolve(result.candidate.manifest.publisherKeyId)
+            if (preparedPublisher == null) {
+                preparedPublisher = result.candidate.manifest.publisherKeyId?.let(publisherKeys::resolve)
+            }
             prepared = result
             preparedRepositoryInstall = repositoryInstall
             state = BrowseUiState.Approval(
@@ -347,8 +360,17 @@ class SourceInstallController(
                 },
                 isDowngrade = result.isDowngrade,
                 isLegacyMigration = result.isLegacyMigration,
-                requiresNonOfficialConsent = preparedPublisher?.trust == org.tsuyomi.source.extensionmanager.PublisherTrust.USER_ADDED,
+                requiresNonOfficialConsent = preparedPublisher?.trust == PublisherTrust.USER_ADDED,
                 packageSha256 = result.candidate.packageSha256,
+                publisherIdentity = if (result.candidate.publisherTrust == PublisherTrust.LOCAL_UNSIGNED) {
+                    BrowsePublisherIdentity.LOCAL_UNSIGNED
+                } else {
+                    BrowsePublisherIdentity.SIGNED
+                },
+                requiresUnsignedIdentityTransition = result.candidate.publisherTrust == PublisherTrust.LOCAL_UNSIGNED &&
+                    result.requiresPublisherTransition,
+                requiresSignedIdentityTransition = result.candidate.publisherTrust != PublisherTrust.LOCAL_UNSIGNED &&
+                    result.requiresPublisherTransition && !result.isLegacyMigration,
             )
         } catch (cancelled: CancellationException) {
             clearPreparedState()
@@ -377,6 +399,8 @@ class SourceInstallController(
         allowLegacyMigration: Boolean = false,
         allowNonOfficial: Boolean = false,
         expectedPackageSha256: String? = null,
+        allowUnsignedRisk: Boolean = false,
+        allowUnsignedIdentityTransition: Boolean = false,
     ) {
         if (!mutationMutex.tryLock()) return
         try {
@@ -385,9 +409,13 @@ class SourceInstallController(
             if (expectedPackageSha256 != null && expectedPackageSha256 != candidate.candidate.packageSha256) {
                 return resetToFailure(BrowseInstallFailure.EXPIRED_APPROVAL, repositoryInstall)
             }
-            val publisher = preparedPublisher ?: return resetToFailure(BrowseInstallFailure.VERIFICATION, repositoryInstall)
+            val unsigned = candidate.candidate.publisherTrust == PublisherTrust.LOCAL_UNSIGNED
+            val publisher = preparedPublisher
+            if (!unsigned && publisher == null) return resetToFailure(BrowseInstallFailure.VERIFICATION, repositoryInstall)
             if (candidate.isDowngrade && !allowDowngrade || candidate.isLegacyMigration && !allowLegacyMigration) return
-            if (publisher.trust == org.tsuyomi.source.extensionmanager.PublisherTrust.USER_ADDED && !allowNonOfficial) return
+            if (!unsigned && candidate.requiresPublisherTransition && !allowLegacyMigration) return
+            if (unsigned && (!allowUnsignedRisk || candidate.requiresPublisherTransition && !allowUnsignedIdentityTransition)) return
+            if (publisher?.trust == PublisherTrust.USER_ADDED && !allowNonOfficial) return
             val repository = preparedRepository
             if (repositoryInstall != null && (
                 repository == null || !catalog.isCurrentInstallable(repositoryInstall, repository)
@@ -398,8 +426,18 @@ class SourceInstallController(
                 state = BrowseUiState.Preparing(candidate.candidate.manifest.displayName)
                 withContext(Dispatchers.IO) {
                     preparedRepository?.validatePreparedRepositoryInstall(candidate)
-                    packageTrust.approve(candidate, publisher, retainPublisherKey = preparedPublisherFromInput)
-                    installer.activate(candidate, ExtensionInstallApproval.approve(candidate, allowDowngrade, allowLegacyMigration))
+                    if (unsigned) {
+                        check(repositoryInstall == null && preparedRepository == null)
+                        packageTrust.approveLocalUnsigned(candidate, allowUnsignedIdentityTransition)
+                    } else {
+                        packageTrust.approve(
+                            candidate,
+                            requireNotNull(publisher),
+                            retainPublisherKey = preparedPublisherFromInput,
+                            allowPublisherTransition = allowLegacyMigration,
+                        )
+                    }
+                    (preparedInstaller ?: installer).activate(candidate, ExtensionInstallApproval.approve(candidate, allowDowngrade, allowLegacyMigration))
                 }
                 activePackage = candidate.candidate
                 persistActiveSource(candidate.candidate.manifest.sourceId.value)
@@ -448,7 +486,7 @@ class SourceInstallController(
             } catch (_: IllegalArgumentException) {
                 null
             }
-            if (restored == null) {
+            if (restored == null || !OfficialRepositoryConfiguration.isTrusted(restored, publisherKeys, packageTrust)) {
                 invalid = true
                 markSourceUnavailable(sourceId.value)
             } else {
@@ -528,11 +566,13 @@ class SourceInstallController(
     }
 
     private fun clearPreparedState() {
+        prepared?.let(packageTrust::cancelApproval)
         prepared = null
         preparedRepositoryInstall = null
         preparedRepository = null
         preparedPublisher = null
         preparedPublisherFromInput = false
+        preparedInstaller = null
         pendingLocalArchive?.delete()
         pendingLocalArchive = null
     }
@@ -570,6 +610,7 @@ class SourceInstallController(
     }
 
     private fun extensionFailure(error: ExtensionInstallException): BrowseInstallFailure = when (error.error) {
+        ExtensionInstallError.KEY_ROTATION_NOT_AUTHORIZED -> BrowseInstallFailure.IDENTITY_CONFLICT
         ExtensionInstallError.STORAGE_UNAVAILABLE -> BrowseInstallFailure.STORAGE
         ExtensionInstallError.REPOSITORY_BINDING_MISMATCH,
         ExtensionInstallError.REPOSITORY_ACTIVE_UNVERIFIABLE,
@@ -587,6 +628,11 @@ class SourceInstallController(
         state = BrowseUiState.Installed(
             sourceName = packageInfo.manifest.displayName,
             version = packageInfo.manifest.version.original,
+            publisherIdentity = if (packageInfo.publisherTrust == PublisherTrust.LOCAL_UNSIGNED) {
+                BrowsePublisherIdentity.LOCAL_UNSIGNED
+            } else {
+                BrowsePublisherIdentity.SIGNED
+            },
         )
     }
 
@@ -606,14 +652,15 @@ class SourceInstallController(
         val generation = (currentAvailability?.generation ?: 0L) + 1L
         val capabilityFingerprint = installer.remoteCapabilitySetFingerprint(packageInfo)
         val currentPolicy = libraryRepository.sourceRemotePolicy(sourceId)
+        val policyIdentity = packageInfo.publisherFingerprint ?: "local-unsigned:${packageInfo.packageSha256}"
         val preservesPolicy = preserveWriteback &&
-            currentPolicy?.trustedPublisherFingerprint == packageInfo.publisherFingerprint &&
+            currentPolicy?.trustedPublisherFingerprint == policyIdentity &&
             currentPolicy.capabilitySetFingerprint == capabilityFingerprint
         val readPolicy = packageInfo.manifest.capabilities.remoteLibrary.policies[RemoteOperation.READ]
         libraryRepository.saveSourceRemotePolicy(
             SourceRemotePolicy(
                 sourceId = sourceId,
-                trustedPublisherFingerprint = packageInfo.publisherFingerprint,
+                trustedPublisherFingerprint = policyIdentity,
                 capabilitySetFingerprint = capabilityFingerprint,
                 approvedOrigin = readPolicy?.origin?.canonical.orEmpty(),
                 addWritebackEnabled = preservesPolicy && currentPolicy.addWritebackEnabled,

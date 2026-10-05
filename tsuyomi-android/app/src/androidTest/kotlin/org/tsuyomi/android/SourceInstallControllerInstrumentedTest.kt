@@ -102,6 +102,34 @@ internal class SourceInstallControllerInstrumentedTest : SourceFlowInstrumentedT
             assertEquals(null, application.packageTrust.publisherKeys.resolve("tsuyomi-user-consent-test"))
             install.prepare(Uri.fromFile(archive), context.contentResolver)
             install.providePublisherKey(publicKey)
+            val occupied = List(16) { File(context.noBackupFilesDir, "extensions/occupied-$it") }
+            try {
+                occupied.forEach { it.writeText("occupied") }
+                install.approve(allowDowngrade = false, allowNonOfficial = true)
+                assertEquals(BrowseInstallFailure.STORAGE, (install.state as BrowseUiState.Failure).reason)
+                assertEquals(null, install.activePackage)
+                assertEquals(null, application.packageTrust.publisherKeys.resolve("tsuyomi-user-consent-test"))
+                val afterFailure = PackageTrustRegistry(trustDirectory)
+                assertEquals(null, afterFailure.publisherKeys.resolve("tsuyomi-user-consent-test"))
+                val candidate = org.tsuyomi.source.extensionmanager.HxpArchiveVerifier(
+                    org.tsuyomi.source.extensionmanager.InMemoryPublisherKeyStore(listOf(PublisherKey(
+                        "tsuyomi-user-consent-test", Base64.getDecoder().decode(publicKey), PublisherTrust.USER_ADDED,
+                    ))),
+                ).verify(archive)
+                assertFalse(afterFailure.isApproved(candidate))
+                val retry = SourceInstallController(context, library, packageTrust = afterFailure)
+                retry.restoreInstalled()
+                assertEquals(null, retry.activePackage)
+                retry.prepare(Uri.fromFile(archive), context.contentResolver)
+                assertTrue(retry.state is BrowseUiState.PublisherKeyRequired)
+                retry.dismissApproval()
+            } finally {
+                occupied.forEach { it.delete() }
+            }
+            install.dismissFailure()
+            install.prepare(Uri.fromFile(archive), context.contentResolver)
+            assertTrue(install.state is BrowseUiState.PublisherKeyRequired)
+            install.providePublisherKey(publicKey)
             install.approve(allowDowngrade = false, allowNonOfficial = true)
             val active = requireNotNull(install.activePackage)
             assertTrue(application.packageTrust.isApproved(active))
@@ -117,6 +145,252 @@ internal class SourceInstallControllerInstrumentedTest : SourceFlowInstrumentedT
             assertEquals(active.packageSha256, restored.activePackage?.packageSha256)
         } finally {
             archive.delete()
+        }
+    }
+
+    @Test
+    fun unsignedLocalImportRequiresFreshConsentForEveryExactArchive() = runBlocking {
+        val first = assembleUnsignedCandidate("9.9.8")
+        val changed = assembleUnsignedCandidate("9.9.9")
+        try {
+            val install = SourceInstallController(context, library)
+            install.prepare(Uri.fromFile(first), context.contentResolver)
+            val approval = install.state as BrowseUiState.Approval
+            assertEquals(org.tsuyomi.feature.browse.BrowsePublisherIdentity.LOCAL_UNSIGNED, approval.publisherIdentity)
+            assertFalse(approval.requiresUnsignedIdentityTransition)
+            assertEquals(null, install.activePackage)
+            install.approve(false, expectedPackageSha256 = approval.packageSha256)
+            assertTrue(install.state is BrowseUiState.Approval)
+            assertEquals(null, install.activePackage)
+            install.dismissApproval()
+            assertFalse((context.applicationContext as TsuyomiApplication).packageTrust
+                .isApproved(org.tsuyomi.source.extensionmanager.HxpArchiveVerifier(
+                    OfficialRepositoryConfiguration.publisherKeys(null),
+                ).verify(first)))
+
+            install.prepare(Uri.fromFile(first), context.contentResolver)
+            install.approve(
+                allowDowngrade = false,
+                allowUnsignedRisk = true,
+                expectedPackageSha256 = (install.state as BrowseUiState.Approval).packageSha256,
+            )
+            val active = requireNotNull(install.activePackage)
+            assertEquals(null, active.publisherFingerprint)
+            assertTrue((context.applicationContext as TsuyomiApplication).packageTrust.isApproved(active))
+            val restored = SourceInstallController(context, library)
+            restored.restoreInstalled()
+            assertEquals(active.packageSha256, restored.activePackage?.packageSha256)
+
+            restored.prepare(Uri.fromFile(changed), context.contentResolver)
+            val changedApproval = restored.state as BrowseUiState.Approval
+            assertFalse(changedApproval.packageSha256 == active.packageSha256)
+            restored.approve(false, expectedPackageSha256 = changedApproval.packageSha256)
+            assertTrue(restored.state is BrowseUiState.Approval)
+            assertEquals(active.packageSha256, restored.activePackage?.packageSha256)
+            restored.dismissApproval()
+            assertEquals(active.packageSha256, restored.activePackage?.packageSha256)
+            val activeArchive = File(context.noBackupFilesDir, "extensions/active/${active.manifest.sourceId.value}.hxp")
+            activeArchive.writeBytes(changed.readBytes())
+            val uncheckedRestore = SourceInstallController(context, library)
+            uncheckedRestore.restoreInstalled()
+            assertEquals(null, uncheckedRestore.activePackage)
+            assertTrue(uncheckedRestore.state is BrowseUiState.Failure)
+            assertFalse(requireNotNull(library.sourceAvailability(active.manifest.sourceId.value)).available)
+        } finally {
+            first.delete()
+            changed.delete()
+        }
+    }
+
+    @Test
+    fun signedSourceCannotBeReplacedByUnsignedFileAndTransitionNeedsSeparateApprovalAfterUninstall() = runBlocking {
+        val signed = installFixture()
+        val sourceId = signed.manifest.sourceId.value
+        val book = summary(sourceId, "transition", "保留书籍")
+        library.addToLibrary(org.tsuyomi.shared.librarydomain.LibraryBook(
+            identity = book.identity, title = book.title, author = book.author,
+            coverUrl = book.coverUrl, canonicalUrl = book.canonicalUrl,
+            addedAt = SOURCE_FLOW_TEST_TIME, metadataUpdatedAt = SOURCE_FLOW_TEST_TIME,
+        ))
+        val progress = org.tsuyomi.shared.librarydomain.ReadingProgress(
+            book.identity,
+            org.tsuyomi.shared.locator.ReaderLocator(
+                document = org.tsuyomi.shared.locator.DocumentIdentity(sourceId, "transition", "chapter-1"),
+                blockId = "p1", characterOffset = 7, chapterProgress = 0.4,
+                capturedAt = SOURCE_FLOW_TEST_TIME,
+            ),
+        )
+        library.saveProgress(progress)
+        putCredential(sourceId)
+        val partition = SourceCredentialPartition(sourceId, HttpsOrigin("https://www.wenku8.net"))
+        val retainedCredentials = VerifiedBrowserSessionStore(context).getSnapshot(partition)?.session
+        val candidate = assembleUnsignedCandidate("9.9.8")
+        try {
+            val install = SourceInstallController(context, library)
+            install.restoreInstalled()
+            install.prepare(Uri.fromFile(candidate), context.contentResolver)
+            assertTrue(install.state is BrowseUiState.Failure)
+            assertEquals(BrowseInstallFailure.IDENTITY_CONFLICT, (install.state as BrowseUiState.Failure).reason)
+            assertEquals(signed.packageSha256, install.activePackage?.packageSha256)
+            assertTrue(install.uninstall(sourceId))
+            assertEquals(null, install.activePackage)
+            assertEquals(progress, library.progress(book.identity))
+            assertEquals(retainedCredentials, VerifiedBrowserSessionStore(context).getSnapshot(partition)?.session)
+
+            install.prepare(Uri.fromFile(candidate), context.contentResolver)
+            val approval = install.state as BrowseUiState.Approval
+            assertTrue(approval.requiresUnsignedIdentityTransition)
+            install.approve(false, allowUnsignedRisk = true, expectedPackageSha256 = approval.packageSha256)
+            assertTrue(install.state is BrowseUiState.Approval)
+            assertEquals(null, install.activePackage)
+            install.dismissApproval()
+            assertEquals(null, install.activePackage)
+
+            install.prepare(Uri.fromFile(candidate), context.contentResolver)
+            install.approve(
+                allowDowngrade = false,
+                allowUnsignedRisk = true,
+                allowUnsignedIdentityTransition = true,
+                expectedPackageSha256 = (install.state as BrowseUiState.Approval).packageSha256,
+            )
+            val unsigned = requireNotNull(install.activePackage)
+            assertEquals(candidate.readBytes().let(::digest), unsigned.packageSha256)
+            assertEquals(null, unsigned.publisherFingerprint)
+            assertTrue(requireNotNull(library.sourceAvailability(sourceId)).available)
+            assertEquals(progress, library.progress(book.identity))
+            assertEquals(retainedCredentials, VerifiedBrowserSessionStore(context).getSnapshot(partition)?.session)
+            val restored = SourceInstallController(context, library)
+            restored.restoreInstalled()
+            assertEquals(unsigned.packageSha256, restored.activePackage?.packageSha256)
+            assertTrue(restored.uninstall(sourceId))
+            val signedArchive = File.createTempFile("signed-return-", ".hxp", context.cacheDir)
+            try {
+                context.assets.open("wenku8-fixture.hxp").use { input ->
+                    signedArchive.outputStream().use(input::copyTo)
+                }
+                restored.prepare(Uri.fromFile(signedArchive), context.contentResolver)
+                val signedApproval = restored.state as BrowseUiState.Approval
+                assertTrue(signedApproval.requiresSignedIdentityTransition)
+                restored.approve(false, expectedPackageSha256 = signedApproval.packageSha256)
+                assertTrue(restored.state is BrowseUiState.Approval)
+                assertEquals(null, restored.activePackage)
+                restored.approve(
+                    allowDowngrade = false,
+                    allowLegacyMigration = true,
+                    expectedPackageSha256 = signedApproval.packageSha256,
+                )
+                assertEquals(signed.packageSha256, restored.activePackage?.packageSha256)
+                assertEquals(progress, library.progress(book.identity))
+                assertEquals(retainedCredentials, VerifiedBrowserSessionStore(context).getSnapshot(partition)?.session)
+            } finally {
+                signedArchive.delete()
+            }
+        } finally {
+            candidate.delete()
+        }
+    }
+
+    @Test
+    fun unsignedToUnknownSignedPublisherRetainsKeyOnlyAfterSuccessfulActivation() = runBlocking {
+        val application = context.applicationContext as TsuyomiApplication
+        val descriptor = JSONObject(InstrumentationRegistry.getInstrumentation().context.assets
+            .open("repository/source-user-consent.json").bufferedReader().use { it.readText() })
+        val publisher = descriptor.getJSONObject("provenance").getJSONObject("publisher")
+        val keyId = publisher.getString("keyId")
+        val publicKey = publisher.getString("publicKeyBase64")
+        val sourceId = descriptor.getJSONObject("manifest").getString("id")
+        val unsigned = assembleUnsignedCandidate("9.9.8", sourceId)
+        val signed = assembleSignedSwitchOverlay("source-user-consent")
+        try {
+            val install = SourceInstallController(context, library)
+            install.prepare(Uri.fromFile(unsigned), context.contentResolver)
+            install.approve(false, allowUnsignedRisk = true,
+                expectedPackageSha256 = (install.state as BrowseUiState.Approval).packageSha256)
+            assertEquals(PublisherTrust.LOCAL_UNSIGNED, requireNotNull(install.activePackage).publisherTrust)
+            assertTrue(install.uninstall(sourceId))
+            assertEquals(null, application.packageTrust.publisherKeys.resolve(keyId))
+
+            install.prepare(Uri.fromFile(signed), context.contentResolver)
+            assertTrue(install.state is BrowseUiState.PublisherKeyRequired)
+            install.providePublisherKey(publicKey)
+            val declined = install.state as BrowseUiState.Approval
+            assertTrue(declined.requiresSignedIdentityTransition)
+            install.approve(false, allowNonOfficial = true, expectedPackageSha256 = declined.packageSha256)
+            assertTrue(install.state is BrowseUiState.Approval)
+            install.dismissApproval()
+            assertEquals(null, application.packageTrust.publisherKeys.resolve(keyId))
+            assertEquals(null, install.activePackage)
+
+            install.prepare(Uri.fromFile(signed), context.contentResolver)
+            install.providePublisherKey(publicKey)
+            val approval = install.state as BrowseUiState.Approval
+            assertEquals(null, application.packageTrust.publisherKeys.resolve(keyId))
+            install.approve(false, allowLegacyMigration = true, allowNonOfficial = true,
+                expectedPackageSha256 = approval.packageSha256)
+            val active = requireNotNull(install.activePackage)
+            assertEquals(digest(signed.readBytes()), active.packageSha256)
+            assertEquals(PublisherTrust.USER_ADDED, active.publisherTrust)
+            assertEquals(digest(Base64.getDecoder().decode(publicKey)),
+                application.packageTrust.publisherKeys.resolve(keyId)?.fingerprint)
+            val restored = SourceInstallController(context, library)
+            restored.restoreInstalled()
+            assertEquals(active.packageSha256, restored.activePackage?.packageSha256)
+            assertTrue(requireNotNull(library.sourceAvailability(sourceId)).available)
+        } finally {
+            unsigned.delete()
+            signed.delete()
+        }
+    }
+
+    @Test
+    fun unsignedInstalledSourceSurvivesUnrelatedSubscriptionRevocationAndRemoval() = runBlocking {
+        val unsigned = assembleUnsignedCandidate("9.9.8")
+        val signed = assembleSignedSwitchOverlay("source-user-consent")
+        val directory = File(context.noBackupFilesDir, "unsigned-revocation-scope")
+        val descriptor = JSONObject(InstrumentationRegistry.getInstrumentation().context.assets
+            .open("repository/source-user-consent.json").bufferedReader().use { it.readText() })
+        val root = Ed25519PrivateKeyParameters(ByteArray(32) { (it + 93).toByte() }, 0)
+        val now = Instant.now()
+        val revokedDigest = digest(unsigned.readBytes())
+        val catalog = signedRepositoryCatalog(signed.readBytes(), descriptor, root, now, listOf(revokedDigest))
+        val fetcher = object : RepositoryFetcher {
+            override fun fetch(url: String, maxBytes: Int): ByteArray {
+                check(url == RETRY_INDEX && catalog.size <= maxBytes)
+                return catalog
+            }
+        }
+        val official = OfficialRepositoryClient(RepositoryRoot(
+            "org.tsuyomi.official-revocation-scope", "https://official.example/index-v1.json",
+            PublisherKey("unsigned-official-root", ByteArray(32) { 42 }, PublisherTrust.BUILT_IN_OFFICIAL),
+        ), File(directory, "official"))
+        val subscriptionsDirectory = File(directory, "subscriptions")
+        val grantsDirectory = File(directory, "grants")
+        val subscriptions = RepositorySubscriptionRegistry(subscriptionsDirectory, fetcher) { now }
+        val trust = PackageTrustRegistry(grantsDirectory)
+        val install = SourceInstallController(context, library, official, subscriptions, trust)
+        try {
+            install.prepare(Uri.fromFile(unsigned), context.contentResolver)
+            install.approve(false, allowUnsignedRisk = true,
+                expectedPackageSha256 = (install.state as BrowseUiState.Approval).packageSha256)
+            val active = requireNotNull(install.activePackage)
+            val link = "$RETRY_INDEX#repositoryId=$RETRY_REPOSITORY&keyId=$RETRY_ROOT_KEY_ID&publicKey=${Base64.getEncoder().encodeToString(root.generatePublicKey().encoded)}"
+            requireNotNull(subscriptions.client(subscriptions.add(link).repositoryId)).refresh()
+            assertTrue(subscriptions.publisherKeys.isRevokedPackage(revokedDigest))
+            install.refreshInstalled()
+            assertEquals(active.packageSha256, install.activePackage?.packageSha256)
+            assertTrue(requireNotNull(library.sourceAvailability(active.manifest.sourceId.value)).available)
+            assertTrue(subscriptions.remove(RETRY_REPOSITORY))
+
+            val retainedSubscriptions = RepositorySubscriptionRegistry(subscriptionsDirectory, fetcher) { now }
+            assertTrue(retainedSubscriptions.publisherKeys.isRevokedPackage(revokedDigest))
+            val restored = SourceInstallController(context, library, official, retainedSubscriptions, PackageTrustRegistry(grantsDirectory))
+            restored.restoreInstalled()
+            assertEquals(active.packageSha256, restored.activePackage?.packageSha256)
+            assertTrue(requireNotNull(library.sourceAvailability(active.manifest.sourceId.value)).available)
+        } finally {
+            unsigned.delete()
+            signed.delete()
+            directory.deleteRecursively()
         }
     }
 
@@ -425,7 +699,7 @@ internal class SourceInstallControllerInstrumentedTest : SourceFlowInstrumentedT
                 executedSearches += 1
                 listOf(summary(sourceId, "revocation-regression", "Retained source"))
             }) },
-            isPackageTrusted = { OfficialRepositoryConfiguration.isTrusted(it, keys) },
+            isPackageTrusted = { OfficialRepositoryConfiguration.isTrusted(it, keys, (context.applicationContext as TsuyomiApplication).packageTrust) },
         )
         flow.open(active)
         flow.updateQuery("before revocation")
@@ -459,11 +733,38 @@ internal class SourceInstallControllerInstrumentedTest : SourceFlowInstrumentedT
         }
     }
 
+    private fun assembleUnsignedCandidate(version: String, sourceId: String? = null): File {
+        val archive = File.createTempFile("unsigned-local-candidate-", ".hxp", context.cacheDir)
+        ZipInputStream(context.assets.open("wenku8-fixture.hxp")).use { input ->
+            ZipOutputStream(archive.outputStream()).use { output ->
+                while (true) {
+                    val entry = input.nextEntry ?: break
+                    if (entry.name == "signature.ed25519") continue
+                    val bytes = if (entry.name == "manifest.json") {
+                        val manifest = JSONObject(input.readBytes().toString(Charsets.UTF_8))
+                        manifest.put("manifestVersion", 2)
+                        manifest.put("version", version)
+                        if (sourceId != null) manifest.put("id", sourceId)
+                        manifest.put("signing", JSONObject().put("algorithm", "none"))
+                        manifest.toString().toByteArray(Charsets.UTF_8)
+                    } else {
+                        input.readBytes()
+                    }
+                    output.putNextEntry(ZipEntry(entry.name))
+                    output.write(bytes)
+                    output.closeEntry()
+                }
+            }
+        }
+        return archive
+    }
+
     private fun signedRepositoryCatalog(
         archive: ByteArray,
         descriptor: JSONObject,
         root: Ed25519PrivateKeyParameters,
         now: Instant,
+        revokedDigests: List<String> = emptyList(),
     ): ByteArray {
         val manifest = descriptor.getJSONObject("manifest")
         val publisher = descriptor.getJSONObject("provenance").getJSONObject("publisher")
@@ -493,7 +794,7 @@ internal class SourceInstallControllerInstrumentedTest : SourceFlowInstrumentedT
                 .put("publisherKeyId", publisher.getString("keyId"))))
             .put("revocations", JSONObject()
                 .put("publisherFingerprints", JSONArray())
-                .put("packageDigests", JSONArray()))
+                .put("packageDigests", JSONArray(revokedDigests)))
         val message = "tsuyomi-repository-v1\u0000".toByteArray(Charsets.US_ASCII) + JsonCanonicalizer(signed.toString()).encodedUTF8
         val signature = Ed25519Signer().apply {
             init(true, root)

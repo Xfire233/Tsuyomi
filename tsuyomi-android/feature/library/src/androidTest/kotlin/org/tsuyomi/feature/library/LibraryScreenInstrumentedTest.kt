@@ -10,6 +10,8 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.semantics.SemanticsActions
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.test.hasAnyAncestor
 import androidx.compose.ui.test.hasTestTag
 import androidx.compose.ui.test.hasText
@@ -18,6 +20,7 @@ import androidx.compose.ui.test.DeviceConfigurationOverride
 import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.FontScale
 import androidx.compose.ui.test.ForcedSize
+import androidx.compose.ui.test.SemanticsMatcher
 import androidx.compose.ui.test.click
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.then
@@ -88,7 +91,6 @@ class LibraryScreenInstrumentedTest {
                         onSelectTab = { selectedTab = it },
                         onOpenCollection = {},
                         onOpenBook = {},
-                        onCreateCollection = {},
                         onRetry = {},
                     )
                 }
@@ -139,7 +141,6 @@ class LibraryScreenInstrumentedTest {
                         onSelectTab = { selectedTab = it },
                         onOpenCollection = {},
                         onOpenBook = {},
-                        onCreateCollection = {},
                         onRetry = {},
                     )
                 }
@@ -261,7 +262,6 @@ class LibraryScreenInstrumentedTest {
                         onSelectTab = { selectedTab = it },
                         onOpenCollection = {},
                         onOpenBook = {},
-                        onCreateCollection = {},
                         onRetry = {},
                     )
                 }
@@ -337,7 +337,6 @@ class LibraryScreenInstrumentedTest {
                                 onSelectTab = {},
                                 onOpenCollection = {},
                                 onOpenBook = {},
-                                onCreateCollection = {},
                                 onRetry = {},
                                 onLongPressBook = { identity ->
                                     library = library.copy(selectionKind = LibrarySelectionKind.BOOK, selectedBookIds = setOf(identity))
@@ -394,7 +393,6 @@ class LibraryScreenInstrumentedTest {
                                 onSelectTab = {},
                                 onOpenCollection = {},
                                 onOpenBook = {},
-                                onCreateCollection = {},
                                 onRetry = {},
                             )
                         }
@@ -466,7 +464,6 @@ class LibraryScreenInstrumentedTest {
                         showNavigationNodes = false,
                         onOpenCollection = {},
                         onOpenBook = {},
-                        onCreateCollection = {},
                         onRetry = {},
                     )
                 }
@@ -480,6 +477,137 @@ class LibraryScreenInstrumentedTest {
             composeRule.onNodeWithText("读至 42%").assertIsDisplayed()
             composeRule.onNodeWithText("已读完").assertIsDisplayed()
             composeRule.onNodeWithText("未开始").assertDoesNotExist()
+        }
+    }
+
+    @Test
+    fun smartRuleControlsKeepCodesTagsAndFractionalRatings() {
+        var minimumModeHeightPx = 0f
+        var tree by mutableStateOf(SmartDraftNode.Group(true, listOf(
+            SmartDraftNode.Condition(SmartConditionDraft(field = SmartField.SOURCE)),
+        )))
+        composeRule.setContent {
+            DisplayEnvironmentProvider(environment) {
+                TsuyomiTheme(environment) {
+                    minimumModeHeightPx = with(LocalDensity.current) { 48.dp.toPx() }
+                    CollectionRuleScreen(
+                        title = "示例规则",
+                        tree = tree,
+                        collections = emptyList(),
+                        sourceIds = listOf("source-a", "source-b"),
+                        sourceLabels = mapOf("source-a" to "同名书源", "source-b" to "同名书源"),
+                        tagChoices = listOf("科幻", "奇幻"),
+                        nameError = false,
+                        invalidConditions = emptySet(),
+                        saving = false,
+                        onTitleChange = {},
+                        onTreeChange = { tree = it },
+                        onSave = {},
+                    )
+                }
+            }
+        }
+
+        val modeBounds = composeRule.onNode(
+            SemanticsMatcher.expectValue(SemanticsProperties.Role, Role.Switch),
+        ).fetchSemanticsNode().boundsInRoot
+        val saveBounds = composeRule.onNodeWithText("保存智能收藏夹").fetchSemanticsNode().boundsInRoot
+        assertTrue("Mode switch must stay paired on the left: $modeBounds vs $saveBounds",
+            modeBounds.right < saveBounds.left + saveBounds.width * 0.75f)
+        assertTrue("Mode target must remain 48dp high: $modeBounds", modeBounds.height >= minimumModeHeightPx - 1f)
+        composeRule.onNodeWithText("选择值").performClick()
+        composeRule.onNodeWithText("同名书源（source-b）").performClick()
+        composeRule.onNodeWithText("同名书源（source-b）").assertIsDisplayed()
+        composeRule.runOnIdle { assertEquals("source-b", tree.conditions().single().value) }
+
+        composeRule.onNodeWithText("按来源筛选").performClick()
+        composeRule.onNodeWithText("连载状态").performClick()
+        composeRule.onNodeWithText("选择值").performClick()
+        composeRule.onNodeWithText("已完结").performClick()
+        composeRule.onNodeWithText("已完结").assertIsDisplayed()
+        composeRule.runOnIdle { assertEquals("completed", tree.conditions().single().value) }
+
+        composeRule.onNodeWithText("按连载状态筛选").performClick()
+        composeRule.onNodeWithText("阅读状态").performClick()
+        composeRule.onNodeWithText("选择值").performClick()
+        composeRule.onNodeWithText("阅读中").performClick()
+        composeRule.onNodeWithText("阅读中").assertIsDisplayed()
+        composeRule.runOnIdle { assertEquals("reading", tree.conditions().single().value) }
+
+        composeRule.runOnIdle {
+            tree = SmartDraftNode.Group(true, listOf(SmartDraftNode.Condition(
+                SmartConditionDraft(field = SmartField.TAG, value = "旧标签"),
+            )))
+        }
+        composeRule.onNodeWithText("已选 1 个标签：旧标签").performClick()
+        composeRule.onNodeWithText("科幻").performClick()
+        composeRule.onNodeWithText("奇幻").performClick()
+        composeRule.onNodeWithText("选好了").performClick()
+        composeRule.runOnIdle {
+            assertEquals(setOf("旧标签", "科幻", "奇幻"), parseSmartTerms(tree.conditions().single().value)?.toSet())
+        }
+        composeRule.onNodeWithText("已选 3 个标签：旧标签、科幻…").assertIsDisplayed()
+        composeRule.onNodeWithText("包含任一已选标签").assertIsDisplayed()
+        composeRule.onNodeWithText("包含任一已选标签").performClick()
+        composeRule.onNodeWithText("包含所有已选标签").assertIsDisplayed()
+        composeRule.onNodeWithText("按标签筛选").performClick()
+        composeRule.onNodeWithText("标签").performClick()
+        composeRule.runOnIdle {
+            assertEquals(setOf("旧标签", "科幻", "奇幻"), parseSmartTerms(tree.conditions().single().value)?.toSet())
+            assertTrue(tree.conditions().single().matchAllTags)
+        }
+
+        composeRule.runOnIdle {
+            tree = SmartDraftNode.Group(true, listOf(SmartDraftNode.Condition(
+                SmartConditionDraft(field = SmartField.RATING, value = "3.5,5"),
+            )))
+        }
+        composeRule.onNodeWithContentDescription("最高评分：5.0")
+            .performSemanticsAction(SemanticsActions.SetProgress) { it(4f) }
+        composeRule.runOnIdle {
+            val bounds = tree.conditions().single().value.split(',')
+            assertEquals("3.5", bounds[0])
+            assertEquals(4f, bounds[1].toFloat())
+        }
+    }
+
+    @Test
+    fun folderDeletePreviewExplainsBothPoliciesAndCancelDoesNotConfirm() {
+        var subtree by mutableStateOf(false)
+        var cancelled = false
+        var confirmed = false
+        composeRule.setContent {
+            DisplayEnvironmentProvider(environment) {
+                TsuyomiTheme(environment) {
+                    LibraryScreen(
+                        state = state(SystemLibraryFilter.ALL, emptyList()).copy(
+                            selectionKind = LibrarySelectionKind.COLLECTION,
+                            selectedCollectionIds = setOf("parent"),
+                            selectionDialog = LibrarySelectionDialog.CONFIRM_REMOVE,
+                        ),
+                        collections = emptyList(),
+                        showNavigationNodes = false,
+                        onOpenCollection = {},
+                        onOpenBook = {},
+                        onRetry = {},
+                        deletionFolderCount = if (subtree) 3 else 1,
+                        deletionMembershipCount = if (subtree) 4 else 2,
+                        deletionSubtree = subtree,
+                        onDeletionPolicyChange = { subtree = it },
+                        onDismissSelectionDialog = { cancelled = true },
+                        onRemoveSelection = { confirmed = true },
+                    )
+                }
+            }
+        }
+
+        composeRule.onNodeWithText("将删除 1 个收藏夹，移除 2 条书籍所属关系。", substring = true).assertIsDisplayed()
+        composeRule.onNodeWithText("删除所选及全部子收藏夹").performClick()
+        composeRule.onNodeWithText("将删除 3 个收藏夹，移除 4 条书籍所属关系。", substring = true).assertIsDisplayed()
+        composeRule.onNodeWithText("取消").performClick()
+        composeRule.runOnIdle {
+            assertTrue(cancelled)
+            assertTrue(!confirmed)
         }
     }
 

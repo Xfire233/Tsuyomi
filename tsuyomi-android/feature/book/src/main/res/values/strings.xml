@@ -19,6 +19,14 @@
     <string name="book_move_remote">移动网站收藏</string>
     <string name="book_keep_default_library">保留在默认书架</string>
     <string name="book_retry_move_only">继续移至%1$s</string>
+    <string name="book_reconciliation_resync">重新校准</string>
+    <string name="book_reconciliation_resync_note">只读取网站收藏；不会解除待确认的锁定。</string>
+    <string name="book_reconciliation_resync_success">已重新读取网站收藏，操作结果仍待确认。</string>
+    <string name="book_reconciliation_resync_failure">网站收藏读取失败，操作结果仍待确认。</string>
+    <string name="book_unresolved_add_marker_description">网站收藏添加结果待确认</string>
+    <string name="book_unresolved_move_marker_description">网站收藏移动结果待确认</string>
+    <string name="book_unresolved_remove_marker_description">网站收藏移除结果待确认</string>
+    <string name="book_unresolved_marker_description">网站收藏操作结果待确认</string>
     <string name="book_remove_from_remote">从网站收藏移除</string>
     <string name="book_continue_reading">继续阅读</string>
     <string name="book_start_reading">开始阅读</string>

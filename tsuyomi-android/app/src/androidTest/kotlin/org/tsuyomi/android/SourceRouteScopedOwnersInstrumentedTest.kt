@@ -1489,6 +1489,52 @@ internal class SourceRouteScopedOwnersInstrumentedTest : SourceFlowInstrumentedT
     }
 
     @Test
+    fun remote_library_failed_refresh_retains_snapshot_until_successful_empty_replace() = runBlocking {
+        val packageInfo = installFixture()
+        val sourceId = packageInfo.manifest.sourceId.value
+        putCredential(sourceId)
+        val retained = (1..5).map { summary(sourceId, "retained-$it", "网站收藏$it") }
+        var reads = 0
+        var writes = 0
+        controller {
+            FakeSession(
+                listRemote = {
+                    reads++
+                    when (reads) {
+                        1 -> RemoteLibraryPage(retained, null, true)
+                        2 -> throw SourceException(
+                            SourceErrorCode.NETWORK_OFFLINE,
+                            SourceDiagnostic("mirror-offline", "remote-list", "offline"),
+                        )
+                        else -> RemoteLibraryPage(emptyList(), null, true)
+                    }
+                },
+                addRemote = { _, _ -> writes++; error("A mirror refresh must not write to the website") },
+            )
+        }.use { flow ->
+            flow.open(packageInfo)
+            val owner = SourceRemoteLibraryRouteOwner(flow, { packageInfo }, SavedStateHandle())
+            owner.refresh()
+            assertEquals(retained, owner.books)
+            assertEquals(5, requireNotNull(flow.remoteMirrorSnapshot(sourceId)).books.size)
+
+            owner.refresh()
+            assertEquals(RemoteLibraryRouteStatus.Failure("offline"), owner.status)
+            assertEquals(retained, owner.books)
+            assertEquals(5, requireNotNull(flow.remoteMirrorSnapshot(sourceId)).books.size)
+            assertEquals(2, reads)
+            assertEquals(0, writes)
+
+            owner.refresh()
+            assertEquals(RemoteLibraryRouteStatus.Empty, owner.status)
+            assertTrue(owner.books.isEmpty())
+            assertTrue(requireNotNull(flow.remoteMirrorSnapshot(sourceId)).books.isEmpty())
+            assertEquals(3, reads)
+            assertEquals(0, writes)
+        }
+    }
+
+    @Test
     fun remote_library_owner_exposes_safe_transport_states() = runBlocking {
         val packageInfo = installFixture()
         val sourceId = packageInfo.manifest.sourceId.value

@@ -18,6 +18,7 @@
 - Signed read-only `updateCheck` capability and `hxp-update-check-v2` normalized parser schema. Exact `complete: true` and `order: "source"` assertions, the exact GET request policy, bounded no-URL/no-body evidence, and semantic fixtures reject generic transport fallback, incomplete evidence, raw chapter payloads, duplicate IDs, and invalid source dates.
 - Strict `tsuyomi-repository` v1 schema, deterministic signed fixture, and normative catalog contract for root signatures, bounded HTTPS download binding, durable sequence anti-rollback, expiry, revocation, and explicit root-authorized legacy publisher migration.
 - Strict third-party repository subscription-link bootstrap contract and fixtures: a user-added HTTPS root remains separate from official publisher authority, survives remove/re-add with cached anti-rollback and revocation state, forbids third-party publisher migration, and requires exact package-scoped execution consent.
+- Strict local-unsigned HXP manifest v2 schema and conformance fixtures require `signing: { "algorithm": "none" }` with no publisher key or signature entry. Exact archive SHA-256 identifies bytes, not a publisher; only informed local-file consent may authorize execution, and repository delivery remains signed v1.
 
 ## [0.1.0] - 2026-08-09
 

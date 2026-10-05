@@ -2,12 +2,13 @@
 <!-- SPDX-License-Identifier: Apache-2.0 -->
 <resources>
     <string name="browse_topbar_title">浏览</string>
+    <string name="source_home_show_menus">显示菜单</string>
     <string name="browse_topbar_installed_count">已安装 %1$d</string>
     <string name="browse_topbar_search">聚合搜索</string>
     <string name="browse_topbar_import">导入源</string>
     <string name="browse_topbar_refresh">刷新源列表</string>
     <string name="browse_empty_title">尚无可用内容源</string>
-    <string name="browse_empty_message">Tsuyomi 不内置任何内容源。导入已签名的内容源包后，即可在这里浏览在线书库。</string>
+    <string name="browse_empty_message">Tsuyomi 不内置任何内容源。可从已验证仓库安装，或自行选择本地内容源包；未签名文件须单独确认风险。</string>
     <string name="browse_import_action">导入内容源包</string>
     <string name="browse_section_installed">已安装</string>
     <string name="browse_section_installable">可安装</string>
@@ -24,6 +25,8 @@
     <string name="browse_source_details_version">版本</string>
     <string name="browse_source_details_summary">简介</string>
     <string name="browse_source_details_capabilities">可用功能</string>
+    <string name="browse_source_details_origin">安装来源</string>
+    <string name="browse_source_details_unsigned_origin">本地文件（未签名；无可验证发布者身份）</string>
     <string name="browse_source_uninstall_action">卸载来源</string>
     <string name="browse_source_uninstall_title">卸载此来源？</string>
     <string name="browse_source_uninstall_message">卸载“%1$s”后，书架中的书籍与阅读进度会保留；该来源的在线内容将暂时不可用。</string>
@@ -40,6 +43,8 @@
     <string name="browse_catalog_update_action">更新</string>
     <string name="browse_catalog_installed">已安装</string>
     <string name="browse_catalog_incompatible">不兼容</string>
+    <string name="browse_catalog_identity_conflict">需先卸载当前来源</string>
+    <string name="browse_catalog_identity_conflict_message">当前使用同一来源 ID 的本地未签名文件。仓库中的已签名包不能直接覆盖；若要切换，请先卸载当前来源，再单独确认新发布者身份。书籍与阅读进度不会因卸载而删除。</string>
     <string name="browse_catalog_preparing">正在准备</string>
     <string name="browse_catalog_details_title">来源详情</string>
     <string name="browse_catalog_publisher">发布者指纹</string>
@@ -76,9 +81,12 @@
     <string name="browse_repository_remove_title">移除“%1$s”？</string>
     <string name="browse_repository_remove_message">移除仓库不会卸载已安装的来源，也不会删除其书籍或阅读进度。</string>
     <string name="browse_repository_remove_action">移除仓库</string>
-    <string name="browse_install_progress">正在安装 %1$s：校验签名与权限</string>
+    <string name="browse_install_progress">正在检查 %1$s：完整性、兼容性与权限</string>
     <string name="browse_install_failure_banner">安装失败：%1$s 已安装来源与本地数据未受影响。</string>
     <string name="browse_install_candidate_summary">%1$s · 签名校验通过 · 哈希与包摘要绑定</string>
+    <string name="browse_install_unsigned_candidate_summary">%1$s · 本地文件 · 未签名</string>
+    <string name="browse_install_unsigned_warning">此文件没有签名，也无法验证发布者身份。它在 Tsuyomi 应用进程内运行，可能读取同一来源 ID 已保存的网站登录凭据，并可按声明的权限执行网站操作。请仅安装你信任内容的文件。</string>
+    <string name="browse_install_unsigned_digest">所选文件 SHA-256：%1$s。摘要只用于识别这次选定的文件，不能证明来源或内容可信。</string>
     <string name="browse_install_diff_expand">展开授权差异（新增 %1$d 项 · 上限提高 %2$d 项）</string>
     <string name="browse_install_diff_collapse">收起授权差异</string>
     <string name="browse_install_publisher">签名发布者指纹</string>
@@ -87,7 +95,7 @@
     <string name="browse_import_another_action">导入其他内容源包</string>
     <string name="browse_open_source_action">进入内容源</string>
     <string name="browse_preparing_title">正在验证内容源包</string>
-    <string name="browse_preparing_message">正在检查 %1$s 的签名、完整性与权限。</string>
+    <string name="browse_preparing_message">正在检查 %1$s 的完整性、兼容性与权限。</string>
     <string name="browse_approval_title">安装“%1$s”</string>
     <string name="browse_approval_identity">来源：%1$s · 版本：%2$s</string>
     <string name="browse_approval_publisher">签名发布者指纹：%1$s</string>
@@ -102,6 +110,9 @@
     <string name="browse_approval_limit_response_bytes">最大响应大小：%1$d 字节 → %2$d 字节</string>
     <string name="browse_approval_downgrade">我确认安装较低版本，并接受其可能不兼容现有数据。</string>
     <string name="browse_approval_legacy_migration">我确认迁移到新的发布者身份；已保留的本地数据不会被删除。</string>
+    <string name="browse_approval_signed_transition">我确认：此前安装的本地未签名来源已经卸载，现在将同一来源 ID 交回此已验签的发布者。书籍、阅读进度及已保存的网站登录凭据不会删除，新的来源也可能使用这些凭据；此前的身份记录仍保留。</string>
+    <string name="browse_approval_unsigned_risk">我理解此文件未签名、发布者身份不可验证；它可能读取该来源已保存的登录凭据并执行获准的网站操作。我只授权当前 SHA-256 对应的文件；文件改变必须重新确认。</string>
+    <string name="browse_approval_unsigned_transition">我确认：此前安装的签名来源已经卸载。现在将同一个来源 ID 交给此未签名文件；书籍与阅读进度仍保留，已保存的网站登录凭据也可能被新来源读取。原官方发布者记录会保留；这不是官方更新。</string>
     <string name="browse_approval_install_action">确认安装</string>
     <string name="browse_cancel_action">取消</string>
     <string name="browse_approval_nonofficial">我理解：非官方来源与 Tsuyomi 在同一应用进程中运行；即使已验证签名，仍可能影响我的本地数据和阅读体验。</string>
@@ -111,6 +122,8 @@
     <string name="browse_publisher_key_input_label">原始 Ed25519 公钥（Base64）</string>
     <string name="browse_publisher_key_verify_action">验证发布者公钥</string>
     <string name="browse_installed_title">“%1$s”已安装</string>
+    <string name="browse_installed_unsigned_version">%1$s · 本地未签名</string>
+    <string name="browse_installed_unsigned_message">当前活动版本：%1$s（本地未签名）</string>
     <string name="browse_installed_message">当前活动版本：%1$s</string>
     <string name="browse_install_failed_title">无法安装内容源包</string>
     <string name="browse_try_again_action">重新选择文件</string>
@@ -118,8 +131,10 @@
     <string name="browse_return_to_catalog_action">返回目录</string>
     <string name="browse_dismiss_action">返回</string>
     <string name="browse_failure_file_access">无法读取所选文件。</string>
-    <string name="browse_failure_verification">包未通过完整性、签名或兼容性验证。</string>
+    <string name="browse_failure_verification">包未通过完整性或兼容性检查；签名包也可能验签失败。</string>
     <string name="browse_failure_install">安装未完成；已保留当前内容源版本。</string>
+    <string name="browse_failure_identity_conflict">已安装来源与所选包的发布者身份不同，不能直接替换。如需切换，请先卸载当前来源，再重新导入并单独确认身份变更。卸载保留书籍与阅读进度。</string>
+    <string name="browse_dismiss_failure_action">关闭提示</string>
     <string name="browse_failure_expired_approval">待授权的内容源包已失效，请重新发起安装。</string>
     <string name="browse_failure_download_network">网络连接失败，无法下载内容源包。请检查网络；若当前网络无法访问插件仓库，可启用系统代理或可信代理工具后重试。</string>
     <string name="browse_failure_download_timeout">连接插件仓库超时。请检查网络；若当前网络访问受限，可启用系统代理或可信代理工具后重试。</string>

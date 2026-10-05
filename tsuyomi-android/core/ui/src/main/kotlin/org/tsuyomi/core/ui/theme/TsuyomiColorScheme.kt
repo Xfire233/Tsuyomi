@@ -8,8 +8,11 @@ package org.tsuyomi.core.ui.theme
 import androidx.compose.material3.ColorScheme
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.material3.lightColorScheme
+import androidx.compose.runtime.Composable
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.luminance
+import org.tsuyomi.core.display.DisplayProfile
+import org.tsuyomi.core.display.LocalDisplayEnvironment
 
 /** Opaque neutral ramp mandated for the E-ink display profile. */
 object TsuyomiEInkPalette {
@@ -21,93 +24,100 @@ object TsuyomiEInkPalette {
     val Paper = Color(0xFFFFFFFF)
 }
 
-/** Links use a muted blue distinct from both browser-default blue and the ink-teal primary. */
+/** Neutral links remain distinct from ordinary body text without becoming a palette accent. */
 val ColorScheme.link: Color
-    get() = if (surface.luminance() > 0.5f) Color(0xFF4A6E8A) else Color(0xFFA8C4D8)
+    get() = if (surface.luminance() > 0.5f) Color(0xFF3F3F3F) else Color(0xFFD0D0D0)
 
-/** Stronger ink-teal navigation accent; local to STANDARD Library text tabs. */
-val ColorScheme.libraryTabSelected: Color
-    get() = if (surface.luminance() > 0.5f) Color(0xFF007A8F) else Color(0xFF65D5EA)
+/**
+ * Foreground-only activation marker. E-ink and effective Dynamic Color defer to their active
+ * scheme; static Standard uses the restrained coral selected by the UI constitution.
+ */
+val ColorScheme.activeAccent: Color
+    @Composable get() {
+        val environment = LocalDisplayEnvironment.current
+        return when {
+            environment.effectiveProfile == DisplayProfile.EINK || environment.dynamicColorEffective -> primary
+            environment.effectiveDarkTheme -> Color(0xFFFF6B7A)
+            else -> Color(0xFFCC2B46)
+        }
+    }
 
-val ColorScheme.libraryTabUnselected: Color
-    get() = if (surface.luminance() > 0.5f) Color(0xFF707070) else Color(0xFFA0A0A0)
-
-/** Standard light scheme: warm paper background with ink-teal primary. Never pure black/white. */
+/** Standard light scheme: neutral chrome and grayscale ordinary actions. */
 val TsuyomiLightColorScheme: ColorScheme = lightColorScheme(
-    primary = Color(0xFF2E4A56),
-    onPrimary = Color(0xFFFDFCF9),
-    primaryContainer = Color(0xFFD3E0E5),
-    onPrimaryContainer = Color(0xFF16303B),
-    secondary = Color(0xFF55666E),
-    onSecondary = Color(0xFFFDFCF9),
-    secondaryContainer = Color(0xFFDDE5E8),
-    onSecondaryContainer = Color(0xFF2A3A41),
-    tertiary = Color(0xFF6A6055),
-    onTertiary = Color(0xFFFDFCF9),
-    tertiaryContainer = Color(0xFFEFE7DC),
-    onTertiaryContainer = Color(0xFF332E26),
+    primary = Color(0xFF424242),
+    onPrimary = Color(0xFFFFFFFF),
+    primaryContainer = Color(0xFFE8E8E8),
+    onPrimaryContainer = Color(0xFF1C1C1C),
+    secondary = Color(0xFF5F5F5F),
+    onSecondary = Color(0xFFFFFFFF),
+    secondaryContainer = Color(0xFFF0F0F0),
+    onSecondaryContainer = Color(0xFF1C1C1C),
+    tertiary = Color(0xFF505050),
+    onTertiary = Color(0xFFFFFFFF),
+    tertiaryContainer = Color(0xFFE5E5E5),
+    onTertiaryContainer = Color(0xFF1C1C1C),
     error = Color(0xFFA64445),
-    onError = Color(0xFFFDFCF9),
+    onError = Color(0xFFFFFFFF),
     errorContainer = Color(0xFFF6E0DE),
     onErrorContainer = Color(0xFF5C1A1C),
-    background = Color(0xFFFAF8F3),
-    onBackground = Color(0xFF1F2A2F),
-    surface = Color(0xFFFDFCF9),
-    onSurface = Color(0xFF1F2A2F),
-    surfaceVariant = Color(0xFFEAE6DE),
-    onSurfaceVariant = Color(0xFF4A545A),
-    outline = Color(0xFF6E787E),
-    outlineVariant = Color(0xFFCFCBC2),
-    scrim = Color(0xFF25333A),
-    inverseSurface = Color(0xFF2B3337),
-    inverseOnSurface = Color(0xFFEDEAE4),
-    inversePrimary = Color(0xFF9DB9C5),
-    surfaceDim = Color(0xFFDCD9D1),
-    surfaceBright = Color(0xFFFDFCF9),
-    surfaceContainerLowest = Color(0xFFFDFCF9),
-    surfaceContainerLow = Color(0xFFF5F3EE),
-    surfaceContainer = Color(0xFFF0EDE7),
-    surfaceContainerHigh = Color(0xFFEAE7E0),
-    surfaceContainerHighest = Color(0xFFE4E1D9),
+    background = Color(0xFFFAFAFA),
+    onBackground = Color(0xFF1C1C1C),
+    surface = Color(0xFFFDFDFD),
+    onSurface = Color(0xFF1C1C1C),
+    surfaceVariant = Color(0xFFE5E5E5),
+    onSurfaceVariant = Color(0xFF4A4A4A),
+    outline = Color(0xFF747474),
+    outlineVariant = Color(0xFFC6C6C6),
+    scrim = Color(0xFF000000),
+    inverseSurface = Color(0xFF2B2B2B),
+    inverseOnSurface = Color(0xFFF0F0F0),
+    inversePrimary = Color(0xFFB8B8B8),
+    surfaceDim = Color(0xFFDCDCDC),
+    surfaceBright = Color(0xFFFDFDFD),
+    surfaceContainerLowest = Color(0xFFFDFDFD),
+    surfaceContainerLow = Color(0xFFF8F8F8),
+    surfaceContainer = Color(0xFFF4F4F4),
+    surfaceContainerHigh = Color(0xFFF0F0F0),
+    surfaceContainerHighest = Color(0xFFEAEAEA),
 )
 
-/** Standard dark scheme. Never pure black/white. */
+/** Standard dark scheme: neutral chrome and grayscale ordinary actions. */
 val TsuyomiDarkColorScheme: ColorScheme = darkColorScheme(
-    primary = Color(0xFFA9C6D2),
-    onPrimary = Color(0xFF12262E),
-    primaryContainer = Color(0xFF31454F),
-    onPrimaryContainer = Color(0xFFD2E4EC),
-    secondary = Color(0xFF93A8B0),
-    onSecondary = Color(0xFF16262C),
-    secondaryContainer = Color(0xFF2E3E45),
-    onSecondaryContainer = Color(0xFFC9D8DE),
-    tertiary = Color(0xFFB0A696),
-    onTertiary = Color(0xFF262019),
-    tertiaryContainer = Color(0xFF3E382F),
-    onTertiaryContainer = Color(0xFFDDD3C5),
+    primary = Color(0xFFD0D0D0),
+    onPrimary = Color(0xFF1A1A1A),
+    primaryContainer = Color(0xFF303030),
+    onPrimaryContainer = Color(0xFFF0F0F0),
+    secondary = Color(0xFFC8C8C8),
+    onSecondary = Color(0xFF1B1B1B),
+    secondaryContainer = Color(0xFF2E2E2E),
+    onSecondaryContainer = Color(0xFFE8E8E8),
+    tertiary = Color(0xFFBDBDBD),
+    onTertiary = Color(0xFF1C1C1C),
+    tertiaryContainer = Color(0xFF353535),
+    onTertiaryContainer = Color(0xFFE8E8E8),
     error = Color(0xFFE8A9A5),
     onError = Color(0xFF4A1513),
     errorContainer = Color(0xFF6E2B28),
     onErrorContainer = Color(0xFFF6DEDD),
-    background = Color(0xFF151A1C),
-    onBackground = Color(0xFFDDE3E5),
-    surface = Color(0xFF1C2225),
-    onSurface = Color(0xFFDDE3E5),
-    surfaceVariant = Color(0xFF333D41),
-    onSurfaceVariant = Color(0xFFAEB9BD),
-    outline = Color(0xFF7E8A8F),
-    outlineVariant = Color(0xFF3A4448),
-    scrim = Color(0xFF0B1012),
-    inverseSurface = Color(0xFFDDE3E5),
-    inverseOnSurface = Color(0xFF232B2E),
-    inversePrimary = Color(0xFF2E4A56),
-    surfaceDim = Color(0xFF101415),
-    surfaceBright = Color(0xFF353E42),
-    surfaceContainerLowest = Color(0xFF101415),
-    surfaceContainerLow = Color(0xFF181E20),
-    surfaceContainer = Color(0xFF1C2225),
-    surfaceContainerHigh = Color(0xFF242B2E),
-    surfaceContainerHighest = Color(0xFF2C3437),
+    background = Color(0xFF181818),
+    onBackground = Color(0xFFE8E8E8),
+    surface = Color(0xFF222222),
+    onSurface = Color(0xFFE8E8E8),
+    surfaceVariant = Color(0xFF353535),
+    onSurfaceVariant = Color(0xFFC4C4C4),
+    outline = Color(0xFF949494),
+    outlineVariant = Color(0xFF484848),
+    scrim = Color(0xFF000000),
+    inverseSurface = Color(0xFFE8E8E8),
+    inverseOnSurface = Color(0xFF242424),
+    inversePrimary = Color(0xFF5F5F5F),
+    surfaceDim = Color(0xFF141414),
+    surfaceBright = Color(0xFF303030),
+    surfaceContainerLowest = Color(0xFF101010),
+    surfaceContainerLow = Color(0xFF1D1D1D),
+    surfaceContainer = Color(0xFF222222),
+    surfaceContainerHigh = Color(0xFF2A2A2A),
+    surfaceContainerHighest = Color(0xFF333333),
 )
 
 /**

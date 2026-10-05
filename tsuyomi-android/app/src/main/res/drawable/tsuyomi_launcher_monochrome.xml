@@ -1,0 +1,27 @@
+<!-- SPDX-FileCopyrightText: 2026 Tsuyomi Contributors -->
+<!-- SPDX-License-Identifier: Apache-2.0 -->
+<!-- Themed-icon silhouette uses the selected F6R front-plane paths, without its opaque background. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="1024"
+    android:viewportHeight="1024">
+    <group
+        android:translateX="52"
+        android:translateY="196"
+        android:scaleX="1.15"
+        android:scaleY="1.15">
+        <path
+            android:fillColor="#FF000000"
+            android:strokeColor="#FF000000"
+            android:strokeWidth="6"
+            android:strokeLineJoin="round"
+            android:pathData="M194,110 H430 C540,110 620,180 620,270 C620,365 550,435 450,440 H274 Q260,440 260,426 V374 Q260,360 274,360 H430 C500,360 550,320 550,270 C550,220 505,190 430,190 H194 Q180,190 180,176 V124 Q180,110 194,110 Z" />
+        <path
+            android:fillColor="#FF000000"
+            android:strokeColor="#FF000000"
+            android:strokeWidth="6"
+            android:strokeLineJoin="round"
+            android:pathData="M234,225 H425 C478,225 510,242 510,270 C510,298 478,315 425,315 H234 Q220,315 220,301 V239 Q220,225 234,225 Z" />
+    </group>
+</vector>

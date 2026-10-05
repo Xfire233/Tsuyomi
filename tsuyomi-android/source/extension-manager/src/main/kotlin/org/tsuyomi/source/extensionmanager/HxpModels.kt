@@ -146,13 +146,18 @@ data class HxpManifest(
     val entry: String,
     val contentDigest: String,
     val files: Map<String, String>,
-    val publisherKeyId: String,
+    val publisherKeyId: String?,
     val capabilities: HxpCapabilities,
     val resourceLimits: HxpResourceLimits,
     val updateChannel: String,
 )
 
-enum class PublisherTrust { BUILT_IN_OFFICIAL, BUILT_IN_TEST, USER_ADDED }
+enum class PublisherTrust { BUILT_IN_OFFICIAL, BUILT_IN_TEST, USER_ADDED, LOCAL_UNSIGNED }
+
+sealed interface HxpPublisherIdentity {
+    data class Signed(val keyId: String, val fingerprint: String) : HxpPublisherIdentity
+    data object LocalUnsigned : HxpPublisherIdentity
+}
 
 data class PublisherKey(
     val keyId: String,
@@ -164,6 +169,7 @@ data class PublisherKey(
     init {
         require(KEY_ID.matches(keyId)) { "Invalid publisher key ID" }
         require(publicKey.size == 32) { "Ed25519 public key must contain 32 bytes" }
+        require(trust != PublisherTrust.LOCAL_UNSIGNED) { "Unsigned local packages have no publisher key" }
     }
 
     companion object {
@@ -177,6 +183,10 @@ interface PublisherKeyResolver {
     fun resolve(keyId: String): PublisherKey?
     fun isRevokedFingerprint(fingerprint: String): Boolean
     fun isRevokedPackage(packageSha256: String): Boolean
+
+    /** Digest-only revocation must come from the same globally authorized resolver. */
+    fun isGloballyRevokedPackage(packageSha256: String): Boolean =
+        hasGlobalRevocationAuthority && isRevokedPackage(packageSha256)
 
     /** Scoped overloads preserve publisher provenance and explicitly configured root authority. */
     fun isRevokedPublisher(keyId: String, fingerprint: String): Boolean = isRevokedFingerprint(fingerprint)
@@ -226,6 +236,7 @@ enum class HxpVerificationError {
     REVOKED_PUBLISHER,
     REVOKED_PACKAGE,
     INVALID_SIGNATURE,
+    UNSIGNED_PUBLISHER_KEY_UNAVAILABLE,
 }
 
 class HxpVerificationException(val error: HxpVerificationError) : Exception(error.name)
@@ -233,12 +244,18 @@ class HxpVerificationException(val error: HxpVerificationError) : Exception(erro
 class VerifiedHxpPackage(
     val manifest: HxpManifest,
     val packageSha256: String,
-    val publisherFingerprint: String,
-    /** Origin classification comes from the resolver, never from a package manifest. */
+    val publisherFingerprint: String?,
+    /** Unsigned local bytes carry no publisher identity; this is never inferred from their digest. */
     val publisherTrust: PublisherTrust,
     archiveBytes: ByteArray,
     entryModuleBytes: ByteArray,
 ) {
+    val publisherIdentity: HxpPublisherIdentity = if (publisherTrust == PublisherTrust.LOCAL_UNSIGNED) {
+        require(manifest.publisherKeyId == null && publisherFingerprint == null)
+        HxpPublisherIdentity.LocalUnsigned
+    } else {
+        HxpPublisherIdentity.Signed(requireNotNull(manifest.publisherKeyId), requireNotNull(publisherFingerprint))
+    }
     private val storedArchiveBytes = archiveBytes.copyOf()
     private val storedEntryModuleBytes = entryModuleBytes.copyOf()
 

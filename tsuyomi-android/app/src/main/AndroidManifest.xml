@@ -15,7 +15,8 @@
         tools:targetApi="tiramisu"
         android:fullBackupContent="@xml/backup_rules"
         android:theme="@style/Theme.Tsuyomi"
-        android:icon="@drawable/ic_launcher"
+        android:icon="@mipmap/ic_launcher"
+        android:roundIcon="@mipmap/ic_launcher"
         android:label="@string/app_name"
         android:supportsRtl="true">
         <service

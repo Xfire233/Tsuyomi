@@ -5,9 +5,11 @@
 package org.tsuyomi.android
 
 import android.graphics.Bitmap
+import androidx.lifecycle.SavedStateHandle
 import androidx.compose.ui.test.junit4.v2.createAndroidComposeRule
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.semantics.SemanticsActions
+import androidx.compose.ui.test.SemanticsMatcher
 import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.onAllNodesWithTag
@@ -15,7 +17,9 @@ import androidx.compose.ui.test.isDisplayed
 import androidx.compose.ui.test.onAllNodesWithContentDescription
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithContentDescription
+import androidx.compose.ui.test.hasStateDescription
 import androidx.compose.ui.test.hasSetTextAction
+import androidx.compose.ui.test.hasClickAction
 import androidx.compose.ui.test.hasAnyDescendant
 import androidx.compose.ui.test.hasTestTag
 import androidx.compose.ui.test.hasText
@@ -29,6 +33,8 @@ import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.performTouchInput
 import androidx.compose.ui.test.performTextReplacement
 import androidx.compose.ui.test.performSemanticsAction
+import androidx.test.espresso.Espresso.closeSoftKeyboard
+import androidx.test.espresso.Espresso.pressBack
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.awaitCancellation
@@ -70,6 +76,8 @@ import org.tsuyomi.shared.locator.ReaderLocator
 import org.tsuyomi.core.preferences.DisplayPreference
 import org.tsuyomi.shared.model.BookIdentity
 import org.tsuyomi.feature.library.projectedEntries
+import org.tsuyomi.feature.library.SmartDraftNode
+import org.tsuyomi.feature.library.updateAt
 
 @RunWith(AndroidJUnit4::class)
 class LibraryProductionJourneyInstrumentedTest {
@@ -160,8 +168,611 @@ class LibraryProductionJourneyInstrumentedTest {
 
         composeRule.onNodeWithTag("tsuyomi-tab-READ_LATER").performClick()
         waitForText(title)
-        composeRule.activity.onBackPressedDispatcher.onBackPressed()
+        composeRule.runOnUiThread { composeRule.activity.onBackPressedDispatcher.onBackPressed() }
         waitForText("书架")
+    }
+
+    @Test
+    fun root_manual_creation_picks_local_book_and_saves_membership() {
+        val repository = (composeRule.activity.application as TsuyomiApplication).libraryRepository
+        val title = "手动选书-${UUID.randomUUID()}"
+        try {
+            runBlocking { repository.addToLibrary(book(identity, "待选书")) }
+            waitForText("书架")
+            composeRule.onNodeWithContentDescription("更多操作").performClick()
+            composeRule.onNodeWithText("新建收藏夹").performClick()
+            waitForText("收藏夹名称")
+            composeRule.onNodeWithText("选择书籍（已选 0 本）").assertIsDisplayed()
+            composeRule.onNode(hasSetTextAction() and hasText("收藏夹名称")).performTextReplacement(title)
+            composeRule.onNodeWithText("选择书籍（已选 0 本）").performClick()
+            composeRule.onNodeWithText("待选书").performClick()
+            composeRule.onNodeWithContentDescription("完成选择").performClick()
+            waitForText(title)
+            composeRule.onNodeWithText("选择书籍（已选 1 本）").assertIsDisplayed()
+            composeRule.onNodeWithText("选择书籍（已选 1 本）").performClick()
+            composeRule.onNodeWithText("待选书").performClick()
+            composeRule.onNodeWithContentDescription("取消选择").performClick()
+            composeRule.onNodeWithText("选择书籍（已选 1 本）").assertIsDisplayed()
+            composeRule.onNodeWithText("高级选项", substring = true).performClick()
+            composeRule.onNodeWithText("选择书籍（已选 1 本）").assertDoesNotExist()
+            composeRule.onNodeWithText("高级选项", substring = true).performClick()
+            composeRule.onNodeWithText("选择书籍（已选 1 本）").assertIsDisplayed()
+            composeRule.onNodeWithText("创建收藏夹").performClick()
+            composeRule.waitUntil(10_000) { runBlocking { repository.collections().any { it.title == title } } }
+            val created = runBlocking { repository.collections().single { it.title == title } }
+            assertEquals(CollectionKind.MANUAL, created.kind)
+            assertEquals(setOf(identity), runBlocking {
+                repository.collectionEntries(created.collectionId).map { it.book.identity }.toSet()
+            })
+            assertEquals(null, runBlocking { repository.smartRule(created.collectionId) })
+        } finally {
+            runBlocking {
+                repository.collections().filter { it.title == title }.forEach { repository.deleteCollection(it.collectionId) }
+            }
+        }
+    }
+
+    @Test
+    fun root_creation_discloses_smart_fields_and_persists_chosen_no_value_filter() {
+        val repository = (composeRule.activity.application as TsuyomiApplication).libraryRepository
+        val title = "未安装来源筛选-${UUID.randomUUID()}"
+        try {
+            waitForText("书架")
+            composeRule.onNodeWithContentDescription("更多操作").performClick()
+            composeRule.onNodeWithText("新建收藏夹").performClick()
+            composeRule.onNodeWithText("来源未安装").assertDoesNotExist()
+            composeRule.onNodeWithText("高级选项", substring = true).performClick()
+            composeRule.onNodeWithText("选择书籍（已选 0 本）").assertDoesNotExist()
+            composeRule.onNodeWithText("按标签筛选").performScrollTo().performClick()
+            composeRule.onNodeWithText("来源未安装").performScrollTo().performClick()
+            composeRule.onNodeWithText("按来源未安装筛选").assertExists()
+            composeRule.onNodeWithText("高级选项", substring = true).performClick()
+            composeRule.onNodeWithText("选择书籍（已选 0 本）").assertIsDisplayed()
+            composeRule.onNodeWithText("按来源未安装筛选").assertDoesNotExist()
+            assertTrue(runBlocking { repository.collections().none { it.title == title } })
+            composeRule.onNodeWithText("高级选项", substring = true).performClick()
+            composeRule.onNodeWithText("按来源未安装筛选").assertExists()
+            composeRule.onNode(hasSetTextAction() and hasText("收藏夹名称")).performTextReplacement(title)
+            saveVisibleRule()
+            composeRule.waitUntil(10_000) { runBlocking { repository.collections().any { it.title == title } } }
+            val created = runBlocking { repository.collections().single { it.title == title } }
+            assertEquals(CollectionKind.SMART, created.kind)
+            assertEquals(org.tsuyomi.shared.smartshelf.SmartPredicate.IsDormantSource,
+                ((runBlocking { repository.smartRule(created.collectionId) }?.root as
+                    org.tsuyomi.shared.smartshelf.SmartRuleNode.All).children.single() as
+                    org.tsuyomi.shared.smartshelf.SmartRuleNode.Predicate).value)
+        } finally {
+            runBlocking { repository.collections().filter { it.title == title }.forEach {
+                repository.deleteCollection(it.collectionId)
+            } }
+        }
+    }
+
+    @Test
+    fun focused_nested_rule_recreates_invalid_facet_then_saves_same_identity() {
+        val application = composeRule.activity.application as TsuyomiApplication
+        val repository = application.libraryRepository
+        val id = "focus-${UUID.randomUUID()}"
+        val original = org.tsuyomi.shared.smartshelf.SmartRule(root = org.tsuyomi.shared.smartshelf.SmartRuleNode.All(
+            listOf(org.tsuyomi.shared.smartshelf.SmartRuleNode.Any(listOf(
+                org.tsuyomi.shared.smartshelf.SmartRuleNode.All(listOf(
+                    org.tsuyomi.shared.smartshelf.SmartRuleNode.Predicate(
+                        org.tsuyomi.shared.smartshelf.SmartPredicate.FacetIn("source", setOf("分类,甲", "乙")),
+                    ),
+                )),
+            ))),
+        ))
+        try {
+            runBlocking {
+                application.displayController.setDisplayPreference(DisplayPreference.STANDARD)
+                repository.createSmartCollection(LibraryCollection(id, CollectionKind.SMART, "深层规则-$id", null, 0), original)
+            }
+            waitForText("书架")
+            composeRule.onNodeWithContentDescription("搜索").performClick()
+            waitForText("搜索书架")
+            composeRule.onNode(hasSetTextAction()).performTextReplacement("深层规则-$id")
+            waitForText("深层规则-$id")
+            composeRule.onNode(hasText("深层规则-$id") and hasClickAction() and !hasSetTextAction())
+                .performClick()
+            composeRule.onNodeWithContentDescription("更多操作").performClick()
+            composeRule.onNodeWithText("编辑规则").performClick()
+            waitForText("编辑智能收藏夹")
+            val collapsedGroup = hasStateDescription("已收起")
+            val expandedGroup = hasStateDescription("已展开")
+            composeRule.waitUntil(10_000) {
+                composeRule.onAllNodes(collapsedGroup, useUnmergedTree = true).fetchSemanticsNodes().isNotEmpty() ||
+                    composeRule.onAllNodes(expandedGroup, useUnmergedTree = true).fetchSemanticsNodes().isNotEmpty()
+            }
+            if (composeRule.onAllNodes(collapsedGroup, useUnmergedTree = true).fetchSemanticsNodes().isNotEmpty()) {
+                composeRule.onNode(collapsedGroup, useUnmergedTree = true).performClick()
+            }
+            composeRule.onNodeWithText("进入分组：匹配全部 ›", useUnmergedTree = true)
+                .performTouchInput { down(center); up() }
+            waitForText("返回上级条件")
+            composeRule.onAllNodes(hasSetTextAction())[1].performTextReplacement("")
+            saveVisibleRule()
+            composeRule.waitUntil(10_000) {
+                composeRule.onAllNodes(SemanticsMatcher.keyIsDefined(SemanticsProperties.Error), useUnmergedTree = true)
+                    .fetchSemanticsNodes().isNotEmpty()
+            }
+            composeRule.onNodeWithText("请修正此条件", useUnmergedTree = true).assertExists()
+            assertEquals(original, runBlocking { repository.smartRule(id) })
+            composeRule.activityRule.scenario.recreate()
+            waitForText("返回上级条件")
+            assertTrue(composeRule.onAllNodes(SemanticsMatcher.keyIsDefined(SemanticsProperties.Error), useUnmergedTree = true)
+                .fetchSemanticsNodes().isNotEmpty())
+            composeRule.onNodeWithText("请修正此条件", useUnmergedTree = true).assertExists()
+            composeRule.onAllNodes(hasSetTextAction())[1].performTextReplacement("other-source")
+            saveVisibleRule()
+            composeRule.waitUntil(10_000) {
+                runBlocking {
+                    val root = repository.smartRule(id)?.root as? org.tsuyomi.shared.smartshelf.SmartRuleNode.All
+                    val any = root?.children?.singleOrNull() as? org.tsuyomi.shared.smartshelf.SmartRuleNode.Any
+                    val all = any?.children?.singleOrNull() as? org.tsuyomi.shared.smartshelf.SmartRuleNode.All
+                    val facet = (all?.children?.singleOrNull() as? org.tsuyomi.shared.smartshelf.SmartRuleNode.Predicate)?.value
+                        as? org.tsuyomi.shared.smartshelf.SmartPredicate.FacetIn
+                    facet?.sourceId == "other-source" && facet.facetIds == setOf("分类,甲", "乙")
+                }
+            }
+            assertEquals(id, runBlocking { repository.collections().single { it.title == "深层规则-$id" }.collectionId })
+        } finally {
+            runBlocking { repository.deleteCollection(id) }
+        }
+    }
+
+    @Test
+    fun large_valid_smart_rule_recreates_without_bundling_tree_and_keeps_identity() {
+        val application = composeRule.activity.application as TsuyomiApplication
+        val repository = application.libraryRepository
+        val id = "large-draft-${UUID.randomUUID()}"
+        val originalTitle = "大规则-$id"
+        val changedTitle = "大规则修改-" + "书".repeat(290)
+        val original = org.tsuyomi.shared.smartshelf.SmartRule(root =
+            org.tsuyomi.shared.smartshelf.SmartRuleNode.All((0 until 13).map { group ->
+                org.tsuyomi.shared.smartshelf.SmartRuleNode.Any(listOf(
+                    org.tsuyomi.shared.smartshelf.SmartRuleNode.Predicate(
+                        org.tsuyomi.shared.smartshelf.SmartPredicate.FacetIn(
+                            "fixture.unmatched.source", (0 until 64).map { term ->
+                                "${group}-${term}-" + "书".repeat(250)
+                            }.toSet(),
+                        ),
+                    ),
+                ))
+            }),
+        )
+        try {
+            runBlocking {
+                application.displayController.setDisplayPreference(DisplayPreference.STANDARD)
+                repository.createSmartCollection(LibraryCollection(id, CollectionKind.SMART, originalTitle, null, 0), original)
+                val controller = LibraryFlowController(repository, libraryPreferences)
+                controller.reload("read failed")
+                val completeTree = encodeRuleDraft(requireNotNull(controller.collectionRuleDraft(id)).tree).toString()
+                assertTrue("Full original-predicate draft must exceed Binder-safe size",
+                    completeTree.toByteArray(Charsets.UTF_8).size > 1_048_576)
+                kotlinx.coroutines.withContext(Dispatchers.Main) {
+                    val saved = SavedStateHandle()
+                    val owner = CollectionRuleDraftOwner(application, saved)
+                    var coldOwner: CollectionRuleDraftOwner? = null
+                    try {
+                        owner.open(id) { requireNotNull(controller.collectionRuleDraft(id)) }
+                        owner.edit { it.copy(title = changedTitle) }
+                        assertTrue(owner.flush())
+                        assertEquals(setOf("collection.rule.draft-id", "collection.rule.revision"), saved.keys())
+                        coldOwner = CollectionRuleDraftOwner(application, SavedStateHandle(mapOf(
+                            "collection.rule.draft-id" to owner.id,
+                            "collection.rule.revision" to requireNotNull(owner.draft).revision,
+                        )))
+                        coldOwner.open(id) { error("Cold restore must use the durable multi-megabyte draft") }
+                        assertEquals(owner.draft, coldOwner.draft)
+                        assertEquals(changedTitle, coldOwner.draft?.title)
+                    } finally {
+                        coldOwner?.discard()
+                        owner.discard()
+                    }
+                }
+            }
+            waitForText("书架")
+            composeRule.onNodeWithContentDescription("搜索").performClick()
+            waitForText("搜索书架")
+            composeRule.onNode(hasSetTextAction()).performTextReplacement(originalTitle)
+            waitForText(originalTitle)
+            composeRule.onNode(hasText(originalTitle) and hasClickAction() and !hasSetTextAction()).performClick()
+            composeRule.onNodeWithContentDescription("更多操作").performClick()
+            composeRule.onNodeWithText("编辑规则").performClick()
+            composeRule.waitUntil(30_000) {
+                composeRule.onAllNodes(hasSetTextAction() and hasText("收藏夹名称")).fetchSemanticsNodes().isNotEmpty()
+            }
+            composeRule.onNode(hasSetTextAction() and hasText("收藏夹名称")).performTextReplacement(changedTitle)
+            composeRule.activityRule.scenario.recreate()
+            composeRule.waitUntil(30_000) {
+                composeRule.onAllNodes(hasSetTextAction() and hasText(changedTitle))
+                    .fetchSemanticsNodes().isNotEmpty()
+            }
+            assertEquals(original, runBlocking { repository.smartRule(id) })
+            saveVisibleRule()
+            composeRule.waitUntil(30_000) {
+                runBlocking { repository.collections().any { it.collectionId == id && it.title == changedTitle } }
+            }
+            assertEquals(original, runBlocking { repository.smartRule(id) })
+            assertEquals(id, runBlocking { repository.collections().single { it.title == changedTitle }.collectionId })
+        } finally {
+            runBlocking { repository.deleteCollection(id) }
+        }
+    }
+
+    @Test
+    fun smart_rule_cold_restore_retains_route_state_and_missing_file_fails_closed() {
+        val application = composeRule.activity.application as TsuyomiApplication
+        runBlocking(Dispatchers.Main) {
+        val originalPredicate = org.tsuyomi.shared.smartshelf.SmartRuleCodec.encode(
+            org.tsuyomi.shared.smartshelf.SmartRule(root = org.tsuyomi.shared.smartshelf.SmartRuleNode.Predicate(
+                org.tsuyomi.shared.smartshelf.SmartPredicate.TagContains(
+                    org.tsuyomi.shared.smartshelf.MatchMode.ANY, setOf("原始标签"),
+                ),
+            )),
+        )
+        val initialTree = SmartDraftNode.Group(true, listOf(SmartDraftNode.Group(true, listOf(
+            SmartDraftNode.Condition(
+                org.tsuyomi.feature.library.SmartConditionDraft(value = "原始标签"),
+                originalPredicateJson = originalPredicate,
+            ),
+        ))))
+        val saved = SavedStateHandle()
+        val owner = CollectionRuleDraftOwner(application, saved)
+        var restored: CollectionRuleDraftOwner? = null
+        try {
+            owner.open(null) { CollectionRuleDraft("原始标题", initialTree) }
+            val editedTree = initialTree.updateAt(listOf(0, 0)) { node ->
+                (node as SmartDraftNode.Condition).copy(draft = node.draft.copy(value = "更改标签"))
+            }
+            owner.edit { it.copy(title = "更改标题", tree = editedTree,
+                encodedTree = encodeRuleDraft(editedTree).toString(), focus = "0", attempted = true) }
+            assertTrue(owner.flush())
+            restored = CollectionRuleDraftOwner(application, SavedStateHandle(mapOf(
+                "collection.rule.draft-id" to owner.id,
+                "collection.rule.revision" to requireNotNull(owner.draft).revision,
+            )))
+            restored.open(null) { error("Active draft must not reload from collection") }
+            assertEquals(owner.draft, restored.draft)
+            assertFalse(restored.failed)
+
+            val missing = CollectionRuleDraftOwner(application, SavedStateHandle(mapOf(
+                "collection.rule.draft-id" to UUID.randomUUID().toString(),
+                "collection.rule.revision" to 1,
+            )))
+            try {
+                missing.open(null) { error("A missing active draft must not reload the original") }
+                assertTrue(missing.failed)
+                assertEquals(null, missing.draft)
+            } finally {
+                missing.discard()
+            }
+        } finally {
+            restored?.discard()
+            owner.discard()
+        }
+    }
+    }
+
+    @Test
+    fun new_smart_rule_retry_after_commit_updates_same_identity_without_duplication() = runBlocking {
+        val repository = (composeRule.activity.application as TsuyomiApplication).libraryRepository
+        val draftId = "retry-${UUID.randomUUID()}"
+        val manualId = "manual-retry-${UUID.randomUUID()}"
+        val first = SmartDraftNode.Group(true, listOf(SmartDraftNode.Condition(
+            org.tsuyomi.feature.library.SmartConditionDraft(value = "奇幻"),
+        )))
+        val edited = first.updateAt(listOf(0)) { node ->
+            (node as SmartDraftNode.Condition).copy(draft = node.draft.copy(value = "科幻"))
+        }
+        try {
+            val controller = LibraryFlowController(repository, libraryPreferences)
+            controller.reload("read failed")
+            assertTrue(controller.saveSmartCollection(null, "首次提交", first, "read failed", draftId))
+            // The route can survive a process death between Room's commit and the suspend reload.
+            assertTrue(controller.saveSmartCollection(null, "继续修改", edited, "read failed", draftId))
+            assertEquals(1, repository.collections().count { it.collectionId == draftId })
+            assertEquals("继续修改", repository.collections().single { it.collectionId == draftId }.title)
+            val root = repository.smartRule(draftId)?.root as org.tsuyomi.shared.smartshelf.SmartRuleNode.All
+            val predicate = root.children.single() as org.tsuyomi.shared.smartshelf.SmartRuleNode.Predicate
+            assertEquals(setOf("科幻"), (predicate.value as org.tsuyomi.shared.smartshelf.SmartPredicate.TagContains).tags)
+
+            repository.createCollection(LibraryCollection(manualId, CollectionKind.MANUAL, "手动保留", null, 0))
+            assertFalse(controller.saveSmartCollection(null, "不能改写", first, "read failed", manualId))
+            assertEquals(CollectionKind.MANUAL, repository.collections().single { it.collectionId == manualId }.kind)
+            assertEquals(null, repository.smartRule(manualId))
+        } finally {
+            repository.deleteCollection(draftId)
+            repository.deleteCollection(manualId)
+        }
+    }
+
+    @Test
+    fun nested_group_facet_edit_preserves_untouched_nodes_and_collection_identity() = runBlocking {
+        val repository = (composeRule.activity.application as TsuyomiApplication).libraryRepository
+        val id = "nested-${UUID.randomUUID()}"
+        val original = org.tsuyomi.shared.smartshelf.SmartRule(root = org.tsuyomi.shared.smartshelf.SmartRuleNode.All(
+            listOf(org.tsuyomi.shared.smartshelf.SmartRuleNode.Any(listOf(
+                org.tsuyomi.shared.smartshelf.SmartRuleNode.Not(org.tsuyomi.shared.smartshelf.SmartRuleNode.Predicate(
+                    org.tsuyomi.shared.smartshelf.SmartPredicate.FacetIn("source", setOf("分组,一", "收藏")),
+                )),
+                org.tsuyomi.shared.smartshelf.SmartRuleNode.Not(org.tsuyomi.shared.smartshelf.SmartRuleNode.Not(
+                    org.tsuyomi.shared.smartshelf.SmartRuleNode.Predicate(
+                        org.tsuyomi.shared.smartshelf.SmartPredicate.TagContains(
+                            org.tsuyomi.shared.smartshelf.MatchMode.ALL, setOf("奇幻", "完结"),
+                        ),
+                    ),
+                )),
+            ))),
+        ))
+        try {
+            repository.createSmartCollection(LibraryCollection(id, CollectionKind.SMART, "分组原名", null, 0), original)
+            val controller = LibraryFlowController(repository, libraryPreferences)
+            controller.reload("read failed")
+            val draft = requireNotNull(controller.collectionRuleDraft(id))
+            val nested = draft.tree.children.single() as SmartDraftNode.Group
+            val facet = nested.children.first() as SmartDraftNode.Condition
+            assertEquals(1, facet.negations)
+            assertEquals(org.tsuyomi.feature.library.SmartField.FACET, facet.draft.field)
+            val edited = draft.tree.updateAt(listOf(0, 0)) { node ->
+                (node as SmartDraftNode.Condition).copy(draft = node.draft.copy(facetSourceId = "source-next"))
+            }
+            assertTrue(controller.saveSmartCollection(id, "分组改名", edited, "read failed"))
+            val expected = original.copy(root = org.tsuyomi.shared.smartshelf.SmartRuleNode.All(listOf(
+                org.tsuyomi.shared.smartshelf.SmartRuleNode.Any(listOf(
+                    org.tsuyomi.shared.smartshelf.SmartRuleNode.Not(org.tsuyomi.shared.smartshelf.SmartRuleNode.Predicate(
+                        org.tsuyomi.shared.smartshelf.SmartPredicate.FacetIn("source-next", setOf("分组,一", "收藏")),
+                    )),
+                    (original.root as org.tsuyomi.shared.smartshelf.SmartRuleNode.All)
+                        .children.single().let { (it as org.tsuyomi.shared.smartshelf.SmartRuleNode.Any).children[1] },
+                )),
+            )))
+            assertEquals(expected, repository.smartRule(id))
+            assertEquals(id, repository.collections().single { it.title == "分组改名" }.collectionId)
+        } finally {
+            repository.deleteCollection(id)
+        }
+    }
+
+    @Test
+    fun existing_all_tag_rule_is_not_coerced_to_any_when_edited() = runBlocking {
+        val repository = (composeRule.activity.application as TsuyomiApplication).libraryRepository
+        val id = "tag-all-${UUID.randomUUID()}"
+        val original = org.tsuyomi.shared.smartshelf.SmartRule(root = org.tsuyomi.shared.smartshelf.SmartRuleNode.All(
+            listOf(org.tsuyomi.shared.smartshelf.SmartRuleNode.Predicate(
+                org.tsuyomi.shared.smartshelf.SmartPredicate.TagContains(
+                    org.tsuyomi.shared.smartshelf.MatchMode.ALL, setOf("奇幻", "完结"),
+                ),
+            )),
+        ))
+        try {
+            repository.createSmartCollection(LibraryCollection(id, CollectionKind.SMART, "原规则", null, 0), original)
+            val controller = LibraryFlowController(repository, libraryPreferences)
+            controller.reload("read failed")
+            val draft = requireNotNull(controller.collectionRuleDraft(id))
+            assertTrue(draft.conditions.single().matchAllTags)
+            assertTrue(controller.saveSmartCollection(id, "改名后", draft.tree, "read failed"))
+            assertEquals(original, repository.smartRule(id))
+            assertEquals(id, repository.collections().single { it.title == "改名后" }.collectionId)
+        } finally {
+            repository.deleteCollection(id)
+        }
+    }
+
+    @Test
+    fun smart_rule_picks_existing_local_and_source_tags_then_filters_saved_books() {
+        val application = composeRule.activity.application as TsuyomiApplication
+        val repository = application.libraryRepository
+        val title = "筛选已有标签-${UUID.randomUUID()}"
+        val books = listOf(identity, behaviorNewer, behaviorOlder, behaviorUnstarted)
+        try {
+            runBlocking {
+                application.displayController.setDisplayPreference(DisplayPreference.STANDARD)
+                repository.addToLibrary(book(identity, "无标签"))
+                repository.addToLibrary(book(behaviorNewer, "本地标签书"))
+                repository.addToLibrary(book(behaviorOlder, "来源标签书").copy(remoteTags = setOf("来源甲")))
+                repository.addToLibrary(book(behaviorUnstarted, "两个标签书").copy(remoteTags = setOf("来源甲")))
+                repository.setLocalTags(behaviorNewer, setOf("本地乙"))
+                repository.setLocalTags(behaviorUnstarted, setOf("本地乙"))
+            }
+            waitForText("书架")
+            composeRule.onNodeWithContentDescription("更多操作").performClick()
+            composeRule.onNodeWithText("新建收藏夹").performClick()
+            composeRule.onNodeWithText("高级选项", substring = true).performClick()
+            composeRule.onNode(hasSetTextAction() and hasText("收藏夹名称")).performTextReplacement(title)
+            composeRule.onNodeWithText("选择已有标签").performScrollTo().performClick()
+            composeRule.onNodeWithText("本地乙").performClick()
+            composeRule.onNodeWithText("来源甲").performClick()
+            composeRule.onNodeWithText("选好了").performClick()
+            composeRule.onNodeWithText("已选 2 个标签：", substring = true).assertExists()
+            composeRule.onNodeWithText("包含任一已选标签").performScrollTo().performClick()
+            saveVisibleRule()
+            composeRule.waitUntil(10_000) { runBlocking { repository.collections().any { it.title == title } } }
+            val created = runBlocking { repository.collections().single { it.title == title } }
+            assertEquals(setOf(behaviorUnstarted), runBlocking {
+                repository.collectionEntries(created.collectionId).map { it.book.identity }.toSet()
+            })
+            val savedAll = (runBlocking { repository.smartRule(created.collectionId) }?.root as
+                org.tsuyomi.shared.smartshelf.SmartRuleNode.All).children.single() as
+                org.tsuyomi.shared.smartshelf.SmartRuleNode.Predicate
+            val allTags = savedAll.value as org.tsuyomi.shared.smartshelf.SmartPredicate.TagContains
+            assertEquals(setOf("本地乙", "来源甲"), allTags.tags)
+            assertEquals(org.tsuyomi.shared.smartshelf.MatchMode.ALL, allTags.mode)
+
+            composeRule.waitUntil(10_000) {
+                composeRule.onAllNodesWithContentDescription("搜索").fetchSemanticsNodes().isNotEmpty()
+            }
+            composeRule.onNodeWithContentDescription("搜索").performClick()
+            waitForText("搜索书架")
+            composeRule.onNode(hasSetTextAction()).performTextReplacement(title)
+            waitForText(title)
+            composeRule.onNode(hasText(title) and hasClickAction() and !hasSetTextAction()).performClick()
+            composeRule.onNodeWithContentDescription("更多操作").performClick()
+            composeRule.onNodeWithText("编辑规则").performClick()
+            composeRule.waitUntil(10_000) {
+                composeRule.onAllNodesWithText("包含所有已选标签").fetchSemanticsNodes().isNotEmpty()
+            }
+            composeRule.onNodeWithText("包含所有已选标签").performScrollTo().performClick()
+            saveVisibleRule()
+            composeRule.waitUntil(10_000) { runBlocking {
+                repository.collectionEntries(created.collectionId).map { it.book.identity }.toSet() ==
+                    setOf(behaviorNewer, behaviorOlder, behaviorUnstarted)
+            } }
+            assertEquals(setOf(behaviorNewer, behaviorOlder, behaviorUnstarted), runBlocking {
+                repository.collectionEntries(created.collectionId).map { it.book.identity }.toSet()
+            })
+            assertEquals(created.collectionId, runBlocking { repository.collections().single { it.title == title } }.collectionId)
+            composeRule.waitUntil(10_000) {
+                composeRule.onAllNodesWithContentDescription("搜索").fetchSemanticsNodes().isNotEmpty()
+            }
+            composeRule.onNodeWithContentDescription("搜索").performClick()
+            waitForText("搜索书架")
+            composeRule.onNode(hasSetTextAction()).performTextReplacement(title)
+            waitForText(title)
+            composeRule.onNode(hasText(title) and hasClickAction() and !hasSetTextAction()).performClick()
+            composeRule.onNodeWithContentDescription("更多操作").performClick()
+            composeRule.onNodeWithText("编辑规则").performClick()
+            composeRule.waitUntil(10_000) {
+                composeRule.onAllNodesWithText("排除匹配此条件的书籍").fetchSemanticsNodes().isNotEmpty()
+            }
+            composeRule.onNodeWithText("排除匹配此条件的书籍").performScrollTo().performClick()
+            saveVisibleRule()
+            composeRule.waitUntil(10_000) { runBlocking {
+                repository.collectionEntries(created.collectionId).map { it.book.identity }.toSet() == setOf(identity)
+            } }
+            assertEquals(setOf(identity), runBlocking {
+                repository.collectionEntries(created.collectionId).map { it.book.identity }.toSet()
+            })
+            assertEquals(created.collectionId, runBlocking { repository.collections().single { it.title == title } }.collectionId)
+        } finally {
+            runBlocking {
+                repository.collections().firstOrNull { it.title == title }?.let { repository.deleteCollection(it.collectionId) }
+                books.forEach {
+                    repository.setLocalTags(it, emptySet())
+                    repository.removeFromLibrary(it)
+                }
+            }
+        }
+    }
+
+    @Test
+    fun smart_rule_invalid_draft_survives_recreation_and_stay_then_creates_once() {
+        val application = composeRule.activity.application as TsuyomiApplication
+        val title = "智能草稿-${UUID.randomUUID()}"
+        val repository = application.libraryRepository
+        fun editCompletionCondition() {
+            val field = hasSetTextAction() and hasText("完结")
+            val disclosure = hasText("输入其他标签") and !hasSetTextAction()
+            composeRule.waitUntil(10_000) {
+                composeRule.onAllNodes(field).fetchSemanticsNodes().isNotEmpty() ||
+                    composeRule.onAllNodes(disclosure).fetchSemanticsNodes().isNotEmpty()
+            }
+            if (composeRule.onAllNodes(field).fetchSemanticsNodes().isEmpty()) {
+                val disclosures = composeRule.onAllNodes(disclosure)
+                disclosures[disclosures.fetchSemanticsNodes().lastIndex].performScrollTo().performClick()
+            }
+            composeRule.waitUntil(10_000) {
+                composeRule.onAllNodes(field).fetchSemanticsNodes().size == 1
+            }
+            composeRule.onNode(field).performScrollTo().performTextReplacement("科幻")
+        }
+        try {
+            runBlocking { application.displayController.setDisplayPreference(DisplayPreference.STANDARD) }
+            waitForText("书架")
+            composeRule.onNodeWithContentDescription("更多操作").performClick()
+            composeRule.onNodeWithText("新建收藏夹").performClick()
+            composeRule.onNodeWithText("高级选项", substring = true).performClick()
+            composeRule.onNode(hasSetTextAction() and hasText("收藏夹名称")).performTextReplacement(title)
+            if (composeRule.onAllNodes(hasSetTextAction()).fetchSemanticsNodes().size == 1) {
+                composeRule.onNodeWithText("输入其他标签").performScrollTo().performClick()
+            }
+            composeRule.onAllNodes(hasSetTextAction())[1].performTextReplacement("奇幻")
+            closeSoftKeyboard()
+            composeRule.onNodeWithText("添加筛选条件").performScrollTo().performClick()
+            composeRule.waitUntil(10_000) { composeRule.onAllNodesWithText("按标签筛选").fetchSemanticsNodes().size == 2 }
+            saveVisibleRule()
+            composeRule.waitUntil(10_000) {
+                composeRule.onAllNodes(SemanticsMatcher.keyIsDefined(SemanticsProperties.Error), useUnmergedTree = true)
+                    .fetchSemanticsNodes().isNotEmpty()
+            }
+            composeRule.onNodeWithText("请修正此条件", useUnmergedTree = true).assertExists()
+            assertTrue(runBlocking { repository.collections().none { it.title == title } })
+
+            composeRule.activityRule.scenario.recreate()
+            waitForText(title)
+            assertTrue(composeRule.onAllNodes(SemanticsMatcher.keyIsDefined(SemanticsProperties.Error), useUnmergedTree = true)
+                .fetchSemanticsNodes().isNotEmpty())
+            composeRule.onNodeWithText("请修正此条件", useUnmergedTree = true).assertExists()
+            composeRule.onNodeWithContentDescription("返回").performClick()
+            waitForText("放弃修改？")
+            composeRule.onNodeWithText("继续编辑").performClick()
+            if (composeRule.onAllNodes(SemanticsMatcher.keyIsDefined(SemanticsProperties.Error) and hasSetTextAction(),
+                    useUnmergedTree = true).fetchSemanticsNodes().isEmpty()) {
+                composeRule.onNode(hasText("输入其他标签") and !hasSetTextAction()).performScrollTo().performClick()
+            }
+            composeRule.onNode(SemanticsMatcher.keyIsDefined(SemanticsProperties.Error) and hasSetTextAction(),
+                useUnmergedTree = true).performScrollTo().performTextReplacement("完结")
+            saveVisibleRule()
+            composeRule.waitUntil(10_000) {
+                runBlocking { repository.collections().count { it.title == title } == 1 }
+            }
+            val created = runBlocking { repository.collections().single { it.title == title } }
+            assertEquals(CollectionKind.SMART, created.kind)
+            assertEquals(2, (runBlocking { repository.smartRule(created.collectionId) }?.root as
+                org.tsuyomi.shared.smartshelf.SmartRuleNode.All).children.size)
+            composeRule.waitUntil(10_000) {
+                composeRule.onAllNodesWithContentDescription("搜索").fetchSemanticsNodes().isNotEmpty()
+            }
+            composeRule.onNodeWithContentDescription("搜索").performClick()
+            waitForText("搜索书架")
+            composeRule.onNode(hasSetTextAction()).performTextReplacement(title)
+            waitForText("智能收藏夹")
+            composeRule.onNode(hasText(title) and hasClickAction() and !hasSetTextAction()).performClick()
+            composeRule.waitUntil(10_000) {
+                composeRule.onAllNodesWithContentDescription("更多操作").fetchSemanticsNodes().isNotEmpty()
+            }
+            composeRule.onNodeWithContentDescription("更多操作").performClick()
+            composeRule.onNodeWithText("编辑规则").performClick()
+            waitForText("编辑智能收藏夹")
+            editCompletionCondition()
+            closeSoftKeyboard()
+            composeRule.runOnUiThread { composeRule.activity.onBackPressedDispatcher.onBackPressed() }
+            waitForText("放弃修改？")
+            composeRule.onNodeWithText("放弃修改").performClick()
+            assertEquals("奇幻", ((runBlocking { repository.smartRule(created.collectionId) }?.root as
+                org.tsuyomi.shared.smartshelf.SmartRuleNode.All).children[0] as
+                org.tsuyomi.shared.smartshelf.SmartRuleNode.Predicate).let {
+                (it.value as org.tsuyomi.shared.smartshelf.SmartPredicate.TagContains).tags.single()
+            })
+            composeRule.waitUntil(10_000) {
+                composeRule.onAllNodesWithContentDescription("更多操作").fetchSemanticsNodes().isNotEmpty()
+            }
+            composeRule.onNodeWithContentDescription("更多操作").performClick()
+            composeRule.onNodeWithText("编辑规则").performClick()
+            waitForText("编辑智能收藏夹")
+            editCompletionCondition()
+            saveVisibleRule()
+            composeRule.waitUntil(10_000) {
+                runBlocking {
+                    val rule = repository.smartRule(created.collectionId)?.root as?
+                        org.tsuyomi.shared.smartshelf.SmartRuleNode.All
+                    val edited = rule?.children?.getOrNull(1) as?
+                        org.tsuyomi.shared.smartshelf.SmartRuleNode.Predicate
+                    (edited?.value as? org.tsuyomi.shared.smartshelf.SmartPredicate.TagContains)
+                        ?.tags == setOf("科幻")
+                }
+            }
+            assertEquals("奇幻", ((runBlocking { repository.smartRule(created.collectionId) }?.root as
+                org.tsuyomi.shared.smartshelf.SmartRuleNode.All).children[0] as
+                org.tsuyomi.shared.smartshelf.SmartRuleNode.Predicate).let {
+                (it.value as org.tsuyomi.shared.smartshelf.SmartPredicate.TagContains).tags.single()
+            })
+            assertEquals(1, runBlocking { repository.collections().count { it.collectionId == created.collectionId } })
+        } finally {
+            runBlocking {
+                repository.collections().filter { it.title == title }.forEach { repository.deleteCollection(it.collectionId) }
+            }
+        }
     }
 
     @Test
@@ -200,7 +811,7 @@ class LibraryProductionJourneyInstrumentedTest {
         assertEquals(0, Phase2SourceGateway.searchRequestCount())
 
         composeRule.onNode(hasSetTextAction()).performTextReplacement("搜索目标收藏夹")
-        waitForText("手动集合")
+        waitForText("手动收藏夹")
         assertEquals(0, Phase2SourceGateway.searchRequestCount())
 
         composeRule.onNode(hasSetTextAction()).performTextReplacement("不会保留的旧查询")
@@ -309,7 +920,7 @@ class LibraryProductionJourneyInstrumentedTest {
         first.performClick()
         waitForText("已选 1 项")
 
-        composeRule.activity.onBackPressedDispatcher.onBackPressed()
+        composeRule.runOnUiThread { composeRule.activity.onBackPressedDispatcher.onBackPressed() }
         waitForText("书架")
         assertTrue(composeRule.onAllNodesWithText("已选 1 项").fetchSemanticsNodes().isEmpty())
         composeRule.onNodeWithContentDescription("刷新").fetchSemanticsNode()
@@ -354,6 +965,62 @@ class LibraryProductionJourneyInstrumentedTest {
         waitForText("已选 2 项")
         composeRule.onNodeWithContentDescription("退出选择").performClick()
         waitForText("书架")
+    }
+
+    @Test
+    fun selected_folders_share_one_preview_cancel_and_atomic_subtree_confirmation() {
+        val application = composeRule.activity.application as TsuyomiApplication
+        val repository = application.libraryRepository
+        val prefix = "delete-${UUID.randomUUID()}"
+        val parentA = "$prefix-a"
+        val parentB = "$prefix-b"
+        val childA = "$prefix-a-child"
+        val childB = "$prefix-b-child"
+        val identity = BookIdentity("fixture.collection", "$prefix-book")
+        try {
+            runBlocking {
+                application.displayController.setDisplayPreference(DisplayPreference.STANDARD)
+                repository.addToLibrary(book(identity, "删除后保留的书"))
+                repository.createCollection(LibraryCollection(parentA, CollectionKind.MANUAL, "删除父甲-$prefix", null, 0))
+                repository.createCollection(LibraryCollection(parentB, CollectionKind.MANUAL, "删除父乙-$prefix", null, 1))
+                repository.createCollection(LibraryCollection(childA, CollectionKind.MANUAL, "删除子甲", parentA, 0))
+                repository.createCollection(LibraryCollection(childB, CollectionKind.MANUAL, "删除子乙", parentB, 0))
+                assertTrue(repository.addManualMembership(childA, identity))
+            }
+            waitForText("书架")
+            composeRule.activityRule.scenario.recreate()
+            waitForText("删除父甲-$prefix")
+            composeRule.onNodeWithTag("library-root-node-collection:$parentA")
+                .performTouchInput { longClick() }
+            waitForText("已选 1 项")
+            composeRule.onNodeWithTag("library-root-node-collection:$parentB").performClick()
+            waitForText("已选 2 项")
+            composeRule.onNodeWithContentDescription("移除所选").performClick()
+            composeRule.waitUntil(10_000) {
+                composeRule.onAllNodesWithText("2 个收藏夹", substring = true).fetchSemanticsNodes().isNotEmpty() &&
+                    composeRule.onAllNodesWithText("0 条书籍所属关系", substring = true).fetchSemanticsNodes().isNotEmpty()
+            }
+            composeRule.onNodeWithText("取消").performClick()
+            waitForText("已选 2 项")
+            assertEquals(4, runBlocking { repository.collections().count { it.collectionId.startsWith(prefix) } })
+            assertEquals(listOf(identity), runBlocking { repository.collectionEntries(childA).map { it.book.identity } })
+            composeRule.onNodeWithContentDescription("移除所选").performClick()
+            composeRule.onNodeWithText("删除所选及全部子收藏夹").performClick()
+            composeRule.waitUntil(10_000) {
+                composeRule.onAllNodesWithText("4 个收藏夹", substring = true).fetchSemanticsNodes().isNotEmpty() &&
+                    composeRule.onAllNodesWithText("1 条书籍所属关系", substring = true).fetchSemanticsNodes().isNotEmpty()
+            }
+            composeRule.onNodeWithText("连同子收藏夹删除").performClick()
+            composeRule.waitUntil(10_000) {
+                runBlocking { repository.collections().none { it.collectionId.startsWith(prefix) } }
+            }
+            assertEquals(identity, runBlocking { repository.libraryEntry(identity)?.book?.identity })
+        } finally {
+            runBlocking {
+                listOf(childA, childB, parentA, parentB).forEach { repository.deleteCollection(it) }
+                repository.removeFromLibrary(identity)
+            }
+        }
     }
 
     @Test
@@ -457,13 +1124,39 @@ class LibraryProductionJourneyInstrumentedTest {
         controller.selectCollection(behaviorCollectionId)
         assertTrue(controller.state.loading)
         assertTrue(controller.state.entries.isEmpty())
+        assertEquals(org.tsuyomi.feature.library.SystemLibraryFilter.CONTINUE, controller.rootScreenState().filter)
+        assertFalse(controller.rootScreenState().loading)
+        assertEquals(callerIdentities, controller.rootScreenState().entries.map { it.book.identity }.toSet())
         controller.reload("failed")
         assertEquals(listOf(behaviorOlder), controller.state.entries.map { it.book.identity })
+        assertEquals(org.tsuyomi.feature.library.SystemLibraryFilter.CONTINUE, controller.rootScreenState().filter)
+        assertEquals(callerIdentities, controller.rootScreenState().entries.map { it.book.identity }.toSet())
 
         controller.restoreLibraryHome()
         assertFalse(controller.state.loading)
         assertEquals(org.tsuyomi.feature.library.SystemLibraryFilter.CONTINUE, controller.state.filter)
         assertEquals(callerIdentities, controller.state.entries.map { it.book.identity }.toSet())
+        controller.selectTab(org.tsuyomi.feature.library.SystemLibraryFilter.ALL)
+        val rootIdentities = controller.state.entries.map { it.book.identity }.toSet()
+        controller.selectCollection(behaviorCollectionId)
+        assertTrue(controller.rootScreenState().isRootProjection)
+        assertEquals(rootIdentities, controller.rootScreenState().entries.map { it.book.identity }.toSet())
+
+        controller.restoreLibraryHome()
+        repository.setReadLater(behaviorNewer, true)
+        controller.reload("failed")
+        controller.selectTab(org.tsuyomi.feature.library.SystemLibraryFilter.READ_LATER)
+        val readLaterIdentities = controller.state.entries.map { it.book.identity }.toSet()
+        assertEquals(setOf(behaviorNewer), readLaterIdentities)
+        controller.selectCollection(behaviorCollectionId)
+        assertFalse(controller.state.isRootProjection)
+        assertEquals(listOf(behaviorOlder), controller.state.entries.map { it.book.identity })
+        assertEquals(org.tsuyomi.feature.library.SystemLibraryFilter.READ_LATER, controller.rootScreenState().filter)
+        assertEquals(readLaterIdentities, controller.rootScreenState().entries.map { it.book.identity }.toSet())
+        controller.reload("failed")
+        assertEquals(readLaterIdentities, controller.rootScreenState().entries.map { it.book.identity }.toSet())
+        controller.restoreLibraryHome()
+        assertEquals(readLaterIdentities, controller.state.entries.map { it.book.identity }.toSet())
     }
 
     @Test
@@ -906,6 +1599,13 @@ class LibraryProductionJourneyInstrumentedTest {
             capturedAt = at,
         ),
     )
+    private fun saveVisibleRule() {
+        closeSoftKeyboard()
+        val action = if (composeRule.onAllNodesWithText("创建智能收藏夹").fetchSemanticsNodes().isNotEmpty())
+            "创建智能收藏夹" else "保存智能收藏夹"
+        composeRule.onNodeWithText(action).performScrollTo().performClick()
+    }
+
     private fun waitForText(text: String) {
         composeRule.waitUntil(timeoutMillis = 10_000) {
             composeRule.onAllNodesWithText(text).fetchSemanticsNodes().isNotEmpty()

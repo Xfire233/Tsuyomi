@@ -29,7 +29,7 @@ class HxpRemoteContractVerificationTest {
         )
         fun packageWith(
             parameters: List<HxpRemoteParameter>,
-            publisherKeyId: String = verified.manifest.publisherKeyId,
+            publisherKeyId: String = requireNotNull(verified.manifest.publisherKeyId),
             redirects: List<HxpRemoteRedirectTarget> = emptyList(),
         ): VerifiedHxpPackage {
             val policy = HxpRemoteOperationPolicy(

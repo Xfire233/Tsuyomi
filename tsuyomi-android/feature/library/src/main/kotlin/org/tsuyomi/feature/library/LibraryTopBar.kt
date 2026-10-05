@@ -39,6 +39,10 @@ fun LibraryTopBar(
     onSelectSortDirection: (Boolean) -> Unit,
     onTags: () -> Unit,
     onCreateCollection: () -> Unit,
+    smartCollection: Boolean = false,
+    collectionPage: Boolean = false,
+    onEditRule: () -> Unit = {},
+    onDeleteCollection: () -> Unit = {},
     selectionKind: LibrarySelectionKind? = null,
     selectedCount: Int = 0,
     allVisibleSelected: Boolean = false,
@@ -47,7 +51,24 @@ fun LibraryTopBar(
     onCreateCollectionFromSelection: () -> Unit = {},
     onAddSelectionToCollection: () -> Unit = {},
     onRemoveSelection: () -> Unit = {},
+    pickingBooks: Boolean = false,
+    onCompleteBookPick: () -> Unit = {},
+    onCancelBookPick: () -> Unit = {},
 ) {
+    if (pickingBooks) {
+        TsuyomiTopBar(
+            title = stringResource(R.string.library_selection_count, selectedCount),
+            onNavigateUp = onCancelBookPick,
+            navigationIcon = TsuyomiIcons.Close,
+            navigationContentDescription = stringResource(R.string.library_book_pick_cancel),
+            actions = listOf(TsuyomiTopBarAction(
+                icon = TsuyomiIcons.Selected,
+                label = stringResource(R.string.library_book_pick_done),
+                onClick = onCompleteBookPick,
+            )),
+        )
+        return
+    }
     if (selectionKind != null) {
         TsuyomiTopBar(
             title = stringResource(R.string.library_selection_count, selectedCount),
@@ -73,13 +94,13 @@ fun LibraryTopBar(
                         ),
                     )
                 }
-                add(
-                    TsuyomiTopBarAction(
+                if (selectionKind == LibrarySelectionKind.BOOK) {
+                    add(TsuyomiTopBarAction(
                         icon = TsuyomiIcons.MoveToFolder,
                         label = stringResource(R.string.library_selection_add_collection),
                         onClick = onAddSelectionToCollection,
-                    ),
-                )
+                    ))
+                }
                 add(
                     TsuyomiTopBarAction(
                         icon = TsuyomiIcons.Delete,
@@ -157,7 +178,6 @@ fun LibraryTopBar(
                                 TsuyomiOverflowAction(
                                     label = stringResource(R.string.library_filter_all),
                                     onClick = { onSetUpdateFilter(LibraryUpdateFilter.ALL) },
-                                    icon = if (updateFilter == LibraryUpdateFilter.ALL) TsuyomiIcons.Selected else null,
                                     section = stringResource(R.string.library_filter_sort_filter_section),
                                     selected = updateFilter == LibraryUpdateFilter.ALL,
                                 ),
@@ -166,7 +186,6 @@ fun LibraryTopBar(
                                 TsuyomiOverflowAction(
                                     label = stringResource(R.string.library_filter_unread),
                                     onClick = { onSetUpdateFilter(LibraryUpdateFilter.UPDATES_ONLY) },
-                                    icon = if (updateFilter == LibraryUpdateFilter.UPDATES_ONLY) TsuyomiIcons.Selected else null,
                                     selected = updateFilter == LibraryUpdateFilter.UPDATES_ONLY,
                                 ),
                             )
@@ -176,7 +195,6 @@ fun LibraryTopBar(
                                 TsuyomiOverflowAction(
                                     label = stringResource(R.string.library_sort_mode_option, option.label),
                                     onClick = { onSelectSort(option) },
-                                    icon = if (sortMode == option) TsuyomiIcons.Selected else null,
                                     selected = sortMode == option,
                                     section = if (index == 0) {
                                         stringResource(R.string.library_filter_sort_sort_section)
@@ -194,7 +212,6 @@ fun LibraryTopBar(
                                 TsuyomiOverflowAction(
                                     label = stringResource(R.string.library_sort_direction_option, optionDirection),
                                     onClick = { onSelectSortDirection(descending) },
-                                    icon = if (sortDescending == descending) TsuyomiIcons.Selected else null,
                                     selected = sortDescending == descending,
                                 ),
                             )
@@ -216,39 +233,40 @@ fun LibraryTopBar(
         },
         overflow = buildList {
             if (!root) {
-                add(
-                    TsuyomiOverflowAction(
-                        label = stringResource(R.string.library_action_refresh),
-                        onClick = onRefresh,
-                        icon = TsuyomiIcons.Refresh,
-                        enabled = !refreshing,
-                    ),
-                )
+                add(TsuyomiOverflowAction(
+                    label = stringResource(R.string.library_action_refresh),
+                    onClick = onRefresh,
+                    enabled = !refreshing,
+                ))
             }
             if (root) {
-                add(
-                    TsuyomiOverflowAction(
-                        label = stringResource(R.string.library_action_create_collection),
-                        onClick = onCreateCollection,
-                        icon = TsuyomiIcons.CreateFolder,
-                    ),
-                )
+                add(TsuyomiOverflowAction(
+                    label = stringResource(R.string.library_action_create_collection),
+                    onClick = onCreateCollection,
+                ))
+            }
+            if (smartCollection) {
+                add(TsuyomiOverflowAction(
+                    label = stringResource(R.string.library_action_edit_rule),
+                    onClick = onEditRule,
+                ))
+            }
+            if (collectionPage) {
+                add(TsuyomiOverflowAction(
+                    label = stringResource(R.string.collection_delete_action),
+                    onClick = onDeleteCollection,
+                ))
             }
             if (root) {
-                add(
-                    TsuyomiOverflowAction(
-                        label = stringResource(R.string.updates_settings),
-                        onClick = onOpenUpdateSettings,
-                        icon = TsuyomiIcons.Settings,
-                    ),
-                )
+                add(TsuyomiOverflowAction(
+                    label = stringResource(R.string.updates_settings),
+                    onClick = onOpenUpdateSettings,
+                ))
             }
-            add(
-                TsuyomiOverflowAction(
-                    label = stringResource(R.string.library_action_tags),
-                    onClick = onTags,
-                ),
-            )
+            add(TsuyomiOverflowAction(
+                label = stringResource(R.string.library_action_tags),
+                onClick = onTags,
+            ))
         },
     )
 }

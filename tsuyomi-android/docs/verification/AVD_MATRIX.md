@@ -61,4 +61,6 @@ adb shell settings get system font_scale
 adb shell getprop ro.build.version.sdk
 ```
 
+`wm size` 必须核对**物理**分辨率；只有 Override size 与表格一致，不能把物理尺寸不同的 AVD 当作当前 profile。窄窗测试前记录是否存在覆盖值及其原值；结束后原先无覆盖值就执行 `wm size reset`，否则恢复原覆盖值，再读取 `wm size` 并实际点击模拟器右侧和底部。不得将物理 1080×1920 的 Pixel 2 固定“恢复”为 1080×2400：ADB 注入可能正常，但模拟器窗口的键盘和按钮会出现触控死区。
+
 执行后把命令、结果摘要和截图 SHA-256 写入 Phase evidence；每个 active profile 使用独立小节或表格行，并记录 deferred profile 的 policy 状态与恢复触发条件。`build/acceptance` 只作本地暂存。

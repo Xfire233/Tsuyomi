@@ -111,6 +111,7 @@ class BrowseScreenInstrumentedTest {
                         ),
                         onRequestImport = {},
                         onApproveInstall = { _, _, _ -> },
+                        onApproveUnsigned = { _, _, _ -> error("Unexpected unsigned approval") },
                         onDismissApproval = {},
                         onDismissFailure = {},
                         onCatalogAction = { action -> catalogActions.add(action) },
@@ -188,6 +189,7 @@ class BrowseScreenInstrumentedTest {
                             catalog = catalog,
                             onRequestImport = {},
                             onApproveInstall = { _, _, _ -> },
+                            onApproveUnsigned = { _, _, _ -> error("Unexpected unsigned approval") },
                             onDismissApproval = { state = BrowseUiState.Empty },
                             onDismissFailure = {},
                             onCatalogAction = { action ->
@@ -252,6 +254,7 @@ class BrowseScreenInstrumentedTest {
                         catalog = BrowseCatalogState(),
                         onRequestImport = {},
                         onApproveInstall = { _, _, _ -> },
+                        onApproveUnsigned = { _, _, _ -> error("Unexpected unsigned approval") },
                         onDismissApproval = {},
                         onDismissFailure = {},
                         onCatalogAction = {},
@@ -311,6 +314,7 @@ class BrowseScreenInstrumentedTest {
                         catalog = BrowseCatalogState(),
                         onRequestImport = {},
                         onApproveInstall = { _, _, _ -> },
+                        onApproveUnsigned = { _, _, _ -> error("Unexpected unsigned approval") },
                         onDismissApproval = {},
                         onDismissFailure = {},
                         onCatalogAction = {},
@@ -353,6 +357,7 @@ class BrowseScreenInstrumentedTest {
                             catalog = BrowseCatalogState(),
                             onRequestImport = {},
                             onApproveInstall = { _, _, _ -> },
+                            onApproveUnsigned = { _, _, _ -> error("Unexpected unsigned approval") },
                             onDismissApproval = {},
                             onDismissFailure = {},
                             onCatalogAction = {},
@@ -397,6 +402,7 @@ class BrowseScreenInstrumentedTest {
                         catalog = BrowseCatalogState(),
                         onRequestImport = {},
                         onApproveInstall = { downgrade, migration, _ -> approvals += downgrade to migration },
+                        onApproveUnsigned = { _, _, _ -> error("Unexpected unsigned approval") },
                         onDismissApproval = {},
                         onDismissFailure = {},
                         onCatalogAction = {},
@@ -445,6 +451,7 @@ class BrowseScreenInstrumentedTest {
                         catalog = BrowseCatalogState(),
                         onRequestImport = {},
                         onApproveInstall = { _, _, _ -> },
+                        onApproveUnsigned = { _, _, _ -> error("Unexpected unsigned approval") },
                         onDismissApproval = {},
                         onDismissFailure = {},
                         onCatalogAction = {},
@@ -488,6 +495,7 @@ class BrowseScreenInstrumentedTest {
                         onApproveInstall = { downgrade, migration, nonOfficial ->
                             approvals += Triple(downgrade, migration, nonOfficial)
                         },
+                        onApproveUnsigned = { _, _, _ -> error("Unexpected unsigned approval") },
                         onDismissApproval = {},
                         onDismissFailure = {},
                         onCatalogAction = {},
@@ -501,6 +509,130 @@ class BrowseScreenInstrumentedTest {
         composeRule.onNodeWithTag("browse-approval-nonofficial").assertIsOff().performClick().assertIsOn()
         composeRule.onNodeWithText("确认安装").assertIsEnabled().performClick()
         assertEquals(listOf(Triple(false, false, true)), approvals)
+    }
+
+    @Test
+    fun unsignedLocalConsentRequiresSeparateRiskAndIdentityTransitionApprovals() {
+        val approvals = mutableListOf<Triple<Boolean, Boolean, Boolean>>()
+        val digest = "a1".repeat(32)
+        composeRule.setContent {
+            DisplayEnvironmentProvider(standardEnvironment) {
+                TsuyomiTheme {
+                    BrowseScreen(
+                        state = BrowseUiState.Approval(
+                            sourceName = "本地候选",
+                            sourceId = "org.tsuyomi.wenku8",
+                            version = "0.2.38",
+                            publisherFingerprint = null,
+                            capabilities = listOf("网站收藏读取"),
+                            resourceLimitIncreases = emptyList(),
+                            isDowngrade = false,
+                            packageSha256 = digest,
+                            publisherIdentity = BrowsePublisherIdentity.LOCAL_UNSIGNED,
+                            requiresUnsignedIdentityTransition = true,
+                        ),
+                        installedSources = emptyList(),
+                        catalog = BrowseCatalogState(),
+                        onRequestImport = {},
+                        onApproveInstall = { _, _, _ -> error("Unsigned candidate reached signed approval") },
+                        onApproveUnsigned = { downgrade, risk, transition ->
+                            approvals += Triple(downgrade, risk, transition)
+                        },
+                        onDismissApproval = {},
+                        onDismissFailure = {},
+                        onCatalogAction = {},
+                        onSourceAction = {},
+                    )
+                }
+            }
+        }
+
+        composeRule.onNodeWithText("此文件没有签名", substring = true).assertIsDisplayed()
+        composeRule.onNodeWithText("可能读取同一来源 ID 已保存的网站登录凭据", substring = true).assertIsDisplayed()
+        composeRule.onNodeWithText("摘要只用于识别这次选定的文件", substring = true)
+            .performScrollTo().assertIsDisplayed()
+        composeRule.onNodeWithText("确认安装").assertIsNotEnabled()
+        composeRule.onNodeWithTag("browse-approval-unsigned-risk").performScrollTo()
+            .assertIsOff().performClick().assertIsOn()
+        composeRule.onNodeWithText("确认安装").assertIsNotEnabled()
+        composeRule.onNodeWithTag("browse-approval-unsigned-transition").performScrollTo()
+            .assertIsOff().performClick().assertIsOn()
+        composeRule.onNodeWithText("确认安装").performScrollTo().assertIsEnabled().performClick()
+        assertEquals(listOf(Triple(false, true, true)), approvals)
+        composeRule.onNodeWithTag("browse-approval-unsigned-risk").performScrollTo().performClick().assertIsOff()
+        composeRule.onNodeWithText("确认安装").assertIsNotEnabled()
+    }
+
+    @Test
+    fun installedUnsignedSourceIsNotRepresentedAsSignedPublisher() {
+        val source = installedSource(
+            sourceId = "org.tsuyomi.wenku8",
+            name = "本地候选",
+            homeAvailable = true,
+        ).copy(publisherIdentity = BrowsePublisherIdentity.LOCAL_UNSIGNED)
+        composeRule.setContent {
+            DisplayEnvironmentProvider(standardEnvironment) {
+                TsuyomiTheme {
+                    BrowseScreen(
+                        state = BrowseUiState.Installed("本地候选", "0.2.38", BrowsePublisherIdentity.LOCAL_UNSIGNED),
+                        installedSources = listOf(source),
+                        catalog = BrowseCatalogState(),
+                        onRequestImport = {},
+                        onApproveInstall = { _, _, _ -> },
+                        onApproveUnsigned = { _, _, _ -> error("Unexpected unsigned approval") },
+                        onDismissApproval = {},
+                        onDismissFailure = {},
+                        onCatalogAction = {},
+                        onSourceAction = {},
+                    )
+                }
+            }
+        }
+
+        composeRule.onNodeWithText("1.0.0 · 本地未签名").assertIsDisplayed()
+        composeRule.onNodeWithContentDescription("更多 本地候选 操作").performClick()
+        composeRule.onNodeWithText("来源信息").performClick()
+        composeRule.onNodeWithText("本地文件（未签名；无可验证发布者身份）").assertIsDisplayed()
+    }
+
+    @Test
+    fun signedReturnAfterUnsignedUninstallNeedsExplicitIdentityConsent() {
+        val approvals = mutableListOf<Triple<Boolean, Boolean, Boolean>>()
+        composeRule.setContent {
+            DisplayEnvironmentProvider(standardEnvironment) {
+                TsuyomiTheme {
+                    BrowseScreen(
+                        state = BrowseUiState.Approval(
+                            sourceName = "官方来源",
+                            sourceId = "org.tsuyomi.wenku8",
+                            version = "0.2.37",
+                            publisherFingerprint = "ab".repeat(32),
+                            capabilities = emptyList(),
+                            resourceLimitIncreases = emptyList(),
+                            isDowngrade = false,
+                            requiresSignedIdentityTransition = true,
+                        ),
+                        installedSources = emptyList(),
+                        catalog = BrowseCatalogState(),
+                        onRequestImport = {},
+                        onApproveInstall = { downgrade, transition, nonOfficial ->
+                            approvals += Triple(downgrade, transition, nonOfficial)
+                        },
+                        onApproveUnsigned = { _, _, _ -> error("Unexpected unsigned approval") },
+                        onDismissApproval = {},
+                        onDismissFailure = {},
+                        onCatalogAction = {},
+                        onSourceAction = {},
+                    )
+                }
+            }
+        }
+
+        composeRule.onNodeWithText("确认安装").assertIsNotEnabled()
+        composeRule.onNodeWithText("此前安装的本地未签名来源已经卸载", substring = true)
+            .performScrollTo().assertIsDisplayed().assertIsOff().performClick().assertIsOn()
+        composeRule.onNodeWithText("确认安装").performScrollTo().assertIsEnabled().performClick()
+        assertEquals(listOf(Triple(false, true, false)), approvals)
     }
 
     @Test
@@ -522,6 +654,7 @@ class BrowseScreenInstrumentedTest {
                         onApproveInstall = { downgrade, migration, nonOfficial ->
                             approvals += Triple(downgrade, migration, nonOfficial)
                         },
+                        onApproveUnsigned = { _, _, _ -> error("Unexpected unsigned approval") },
                         onDismissApproval = {},
                         onDismissFailure = {},
                         onCatalogAction = {},
@@ -570,6 +703,7 @@ class BrowseScreenInstrumentedTest {
                         ),
                         onRequestImport = {},
                         onApproveInstall = { _, _, _ -> },
+                        onApproveUnsigned = { _, _, _ -> error("Unexpected unsigned approval") },
                         onDismissApproval = {},
                         onDismissFailure = {},
                         onCatalogAction = { action -> actions.add(action) },
@@ -586,6 +720,46 @@ class BrowseScreenInstrumentedTest {
             .assertIsNotEnabled()
         composeRule.onNodeWithTag("browse-catalog-install-official-repository-$sourceId").performClick()
         assertEquals(listOf(BrowseCatalogAction.Install(sourceId, "official-repository")), actions)
+    }
+
+    @Test
+    fun signedCatalogOfferCannotLookLikeAnUpdateOfActiveUnsignedSource() {
+        val source = catalogItem(
+            sourceId = "org.tsuyomi.wenku8",
+            name = "Wenku8",
+            repositoryId = "official-repository",
+            repositoryName = "官方书库",
+            official = true,
+        ).copy(installedVersion = "0.2.38", updateAvailable = true, identityConflict = true)
+        val actions = mutableListOf<BrowseCatalogAction>()
+        composeRule.setContent {
+            DisplayEnvironmentProvider(standardEnvironment) {
+                TsuyomiTheme {
+                    BrowseScreen(
+                        state = BrowseUiState.Installed("Wenku8", "0.2.38", BrowsePublisherIdentity.LOCAL_UNSIGNED),
+                        installedSources = listOf(installedSource(
+                            sourceId = source.sourceId,
+                            name = "Wenku8",
+                            homeAvailable = true,
+                        ).copy(publisherIdentity = BrowsePublisherIdentity.LOCAL_UNSIGNED)),
+                        catalog = BrowseCatalogState(status = BrowseCatalogStatus.READY, items = listOf(source)),
+                        onRequestImport = {},
+                        onApproveInstall = { _, _, _ -> },
+                        onApproveUnsigned = { _, _, _ -> error("Unexpected unsigned approval") },
+                        onDismissApproval = {},
+                        onDismissFailure = {},
+                        onCatalogAction = { actions += it },
+                        onSourceAction = {},
+                    )
+                }
+            }
+        }
+
+        composeRule.onNodeWithText("可安装").performClick()
+        composeRule.onNodeWithText("需先卸载当前来源").assertIsDisplayed().assertIsNotEnabled()
+        composeRule.onNodeWithText("Wenku8").performClick()
+        composeRule.onNodeWithText("仓库中的已签名包不能直接覆盖", substring = true).assertIsDisplayed()
+        assertEquals(emptyList<BrowseCatalogAction>(), actions)
     }
 
     @Test
@@ -609,6 +783,7 @@ class BrowseScreenInstrumentedTest {
                         catalog = BrowseCatalogState(),
                         onRequestImport = { pickerRequests += 1 },
                         onApproveInstall = { _, _, _ -> },
+                        onApproveUnsigned = { _, _, _ -> error("Unexpected unsigned approval") },
                         onDismissApproval = {},
                         onDismissFailure = { failureDismissals += 1 },
                         onCatalogAction = { catalogActions += it },
@@ -661,6 +836,7 @@ class BrowseScreenInstrumentedTest {
                         catalog = catalog,
                         onRequestImport = {},
                         onApproveInstall = { _, _, _ -> },
+                        onApproveUnsigned = { _, _, _ -> error("Unexpected unsigned approval") },
                         onDismissApproval = {},
                         onDismissFailure = {},
                         onCatalogAction = { action -> actions.add(action) },
@@ -726,6 +902,7 @@ class BrowseScreenInstrumentedTest {
                         catalog = catalog,
                         onRequestImport = {},
                         onApproveInstall = { _, _, _ -> },
+                        onApproveUnsigned = { _, _, _ -> error("Unexpected unsigned approval") },
                         onDismissApproval = {},
                         onDismissFailure = {},
                         onCatalogAction = { action ->

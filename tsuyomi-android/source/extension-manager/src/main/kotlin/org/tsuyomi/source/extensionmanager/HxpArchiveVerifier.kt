@@ -90,8 +90,7 @@ class HxpArchiveVerifier(
                     }
                 }
                 HxpManifestParser.parse(manifestBytes ?: fail(HxpVerificationError.MISSING_REQUIRED_FILE), hostApiVersion)
-                    .manifest
-                    .publisherKeyId
+                    .manifest.publisherKeyId ?: fail(HxpVerificationError.UNSIGNED_PUBLISHER_KEY_UNAVAILABLE)
             }
         }.getOrElse { error ->
             if (error is HxpVerificationException) throw error
@@ -155,13 +154,11 @@ class HxpArchiveVerifier(
             }
 
             val manifestBytes = entries[MANIFEST] ?: fail(HxpVerificationError.MISSING_REQUIRED_FILE)
-            val signature = entries[SIGNATURE] ?: fail(HxpVerificationError.MISSING_REQUIRED_FILE)
-            if (signature.size != 64) fail(HxpVerificationError.INVALID_SIGNATURE)
             val parsed = HxpManifestParser.parse(manifestBytes, hostApiVersion)
             val manifest = parsed.manifest
             if (manifest.entry !in entries) fail(HxpVerificationError.MISSING_REQUIRED_FILE)
 
-            val expectedArchiveFiles = manifest.files.keys + MANIFEST + SIGNATURE
+            val expectedArchiveFiles = manifest.files.keys + MANIFEST + (if (manifest.publisherKeyId != null) setOf(SIGNATURE) else emptySet())
             if (entries.keys != expectedArchiveFiles) fail(HxpVerificationError.INTEGRITY_MISMATCH)
             for ((path, expectedDigest) in manifest.files) {
                 val actual = entries[path]?.let(::sha256) ?: fail(HxpVerificationError.INTEGRITY_MISMATCH)
@@ -172,6 +169,21 @@ class HxpArchiveVerifier(
             ).encodedUTF8
             if (sha256(canonicalFiles) != manifest.contentDigest) fail(HxpVerificationError.INTEGRITY_MISMATCH)
 
+            if (manifest.publisherKeyId == null) {
+                if (publisherKeys.isGloballyRevokedPackage(packageSha256)) {
+                    fail(HxpVerificationError.REVOKED_PACKAGE)
+                }
+                return VerifiedHxpPackage(
+                    manifest = manifest,
+                    packageSha256 = packageSha256,
+                    publisherFingerprint = null,
+                    publisherTrust = PublisherTrust.LOCAL_UNSIGNED,
+                    archiveBytes = archiveBytes,
+                    entryModuleBytes = entries.getValue(manifest.entry),
+                )
+            }
+            val signature = entries[SIGNATURE] ?: fail(HxpVerificationError.MISSING_REQUIRED_FILE)
+            if (signature.size != 64) fail(HxpVerificationError.INVALID_SIGNATURE)
             val publisher = publisherKeys.resolve(manifest.publisherKeyId)
                 ?: fail(HxpVerificationError.UNKNOWN_PUBLISHER)
             if (publisherKeys.isRevokedPublisher(manifest.publisherKeyId, publisher.fingerprint)) {

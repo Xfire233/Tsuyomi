@@ -380,11 +380,22 @@ internal class SourceDetailRouteOwner(
     suspend fun retryRemoteReconciliation() = mutateRemote(DetailMutationOperation.RECONCILE_RETRY) {
         flow.retryRemoteMutation()
     }
-
-    suspend fun acknowledgeRemoteReconciliation() = mutate(DetailMutationOperation.RECONCILE_ACKNOWLEDGE) {
-        val book = selectedBook ?: return@mutate
-        check(flow.acknowledgeUnresolved(book.identity)) { "Acknowledge failed" }
+    suspend fun resyncRemoteLibrary(packageInfo: VerifiedHxpPackage): Boolean {
+        val book = selectedBook ?: return false
+        if (book.identity.sourceId != packageInfo.manifest.sourceId.value) return false
+        val result = flow.pullRemoteLibrary(packageInfo)
+        if (result !is RemoteLibraryPullResult.Success) return false
+        val targets = flow.listRemoteTargets().ifEmpty {
+            flow.remoteMirrorSnapshot(book.identity.sourceId)?.targets?.map {
+                RemoteTarget(it.targetId, it.displayName, it.parentId, it.kind)
+            }.orEmpty()
+        }
+        flow.saveRemoteMirrorSnapshot(packageInfo.manifest.displayName, result.books, targets)
+        flow.remoteLibrary.refreshSelection(book)
+        onLibraryChanged()
+        return true
     }
+
 
     fun dispose() {
         requestGeneration++
@@ -1159,7 +1170,7 @@ internal class SourceRemoteLibraryRouteOwner(
         private set
     var selectedTargetId by mutableStateOf<String?>(null)
         private set
-    var unresolvedBookIds by mutableStateOf<Set<String>>(emptySet())
+    var unresolvedBookOperations by mutableStateOf<Map<String, String>>(emptyMap())
         private set
     var removeConfirmationBook by mutableStateOf<SourceBookSummary?>(null)
         private set
@@ -1364,10 +1375,10 @@ internal class SourceRemoteLibraryRouteOwner(
     }
 
     private suspend fun reloadUnresolved(sourceId: String) {
-        unresolvedBookIds = flow.unresolvedReconciliations()
+        unresolvedBookOperations = flow.unresolvedReconciliations()
             .asSequence()
             .filter { it.sourceId == sourceId }
-            .mapTo(linkedSetOf()) { it.remoteBookId }
+            .associate { it.remoteBookId to it.operation }
     }
 
     private fun persistSelection() {

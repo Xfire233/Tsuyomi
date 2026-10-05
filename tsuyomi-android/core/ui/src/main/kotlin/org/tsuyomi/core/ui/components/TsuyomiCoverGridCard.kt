@@ -83,7 +83,7 @@ fun TsuyomiCoverGridCard(
                     text = title,
                     maxLines = 2,
                     overflow = TextOverflow.Ellipsis,
-                    style = titleStyle.copy(lineBreak = LineBreak.Heading),
+                    style = titleStyle.copy(lineBreak = coverTitleLineBreak()),
                 )
                 if (supportingText.isNullOrBlank()) {
                     Spacer(Modifier.weight(1f))
@@ -193,7 +193,7 @@ private fun CoverCardTitleLane(
             text = title,
             maxLines = titleMaxLines,
             overflow = TextOverflow.Ellipsis,
-            style = MaterialTheme.typography.coverCardTitle.copy(lineBreak = LineBreak.Heading),
+            style = MaterialTheme.typography.coverCardTitle.copy(lineBreak = coverTitleLineBreak()),
         )
         supportingText?.takeIf(String::isNotBlank)?.let { text ->
             Text(
@@ -246,7 +246,7 @@ fun BoxScope.TsuyomiCoverTitleOverlay(
             text = title,
             maxLines = 2,
             overflow = TextOverflow.Ellipsis,
-            style = titleStyle.copy(lineBreak = LineBreak.Heading),
+            style = titleStyle.copy(lineBreak = coverTitleLineBreak()),
             color = Color.White,
         )
         supportingText?.takeIf(String::isNotBlank)?.let { text ->
@@ -260,6 +260,11 @@ fun BoxScope.TsuyomiCoverTitleOverlay(
         }
     }
 }
+
+/** Keep the frozen E-ink wrapping while Standard covers use each available title line before wrapping. */
+@Composable
+private fun coverTitleLineBreak(): LineBreak =
+    if (LocalDisplayEnvironment.current.effectiveProfile == DisplayProfile.EINK) LineBreak.Heading else LineBreak.Simple
 
 private fun TextStyle.lineHeightOrFontSize(): TextUnit =
     lineHeight.takeIf { it != TextUnit.Unspecified } ?: fontSize

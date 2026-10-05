@@ -28,17 +28,26 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.key
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.input.key.Key
+import androidx.compose.ui.input.key.KeyEventType
+import androidx.compose.ui.input.key.key
+import androidx.compose.ui.input.key.type
+import androidx.compose.ui.input.key.onPreviewKeyEvent
+import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.platform.LocalWindowInfo
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.expand
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
@@ -55,6 +64,9 @@ import org.tsuyomi.core.ui.components.TsuyomiAnimatedContent
 import org.tsuyomi.core.ui.components.TsuyomiButton
 import org.tsuyomi.core.ui.components.TsuyomiButtonStyle
 import org.tsuyomi.core.ui.components.TsuyomiCoverGridCard
+import org.tsuyomi.core.ui.components.TsuyomiCollapsibleChrome
+import org.tsuyomi.core.ui.components.TsuyomiEnterAlwaysChromeState
+import org.tsuyomi.core.ui.components.rememberTsuyomiEnterAlwaysChromeState
 import org.tsuyomi.core.ui.components.TsuyomiFilterCapsuleButton
 import org.tsuyomi.core.ui.components.TsuyomiFilterCapsuleOption
 import org.tsuyomi.core.ui.components.TsuyomiFilterCapsuleOptionRow
@@ -125,6 +137,24 @@ internal fun SourceHomeStandardContent(
     val scope = rememberCoroutineScope()
     val instantMotion = LocalDisplayEnvironment.current.instantMotion || rememberSystemReducedMotion()
     var primaryTransitionJob by remember { mutableStateOf<Job?>(null) }
+    var primaryChromeHeight by remember { mutableIntStateOf(0) }
+    var pageChromeHeight by remember { mutableIntStateOf(0) }
+    var panelExpanded by remember { mutableStateOf(false) }
+    val chrome = rememberTsuyomiEnterAlwaysChromeState {
+        !panelExpanded && pagerState.currentPageOffsetFraction == 0f &&
+            pagerState.currentPage == pagerState.settledPage && state.activePageState?.replacing != true
+    }
+    val showMenus = stringResource(R.string.source_home_show_menus)
+
+    // A child's vertical fling can toggle Pager's scrolling flag without moving a page.
+    LaunchedEffect(pagerState) {
+        snapshotFlow {
+            pagerState.currentPageOffsetFraction != 0f || pagerState.currentPage != pagerState.settledPage
+        }.collect { changingPage ->
+            if (changingPage) chrome.reveal()
+        }
+    }
+    LaunchedEffect(state.selectedPrimary) { chrome.reveal() }
 
     LaunchedEffect(state.selectedPrimary, primaryValues, instantMotion) {
         val target = primaryValues.indexOf(state.selectedPrimary)
@@ -143,31 +173,54 @@ internal fun SourceHomeStandardContent(
             .collect { index -> primaryValues.getOrNull(index)?.let(onSelectPrimary) }
     }
 
-    Column(modifier.fillMaxSize()) {
+    Column(
+        modifier.fillMaxSize().nestedScroll(chrome.nestedScrollConnection)
+            .onPreviewKeyEvent { event ->
+                if (event.type == KeyEventType.KeyDown && event.key == Key.DirectionUp && !chrome.isFullyExpanded) {
+                    chrome.reveal()
+                    true
+                } else false
+            },
+    ) {
         state.primaryFilter?.let { filter ->
-            TsuyomiTextTabRow(
-                options = filter.options.map { TsuyomiTabOption(it.value, it.label) },
-                selectedKey = primaryValues.getOrNull(pagerState.currentPage),
-                onSelect = { selected ->
-                    val target = primaryValues.indexOf(selected)
-                    if (target >= 0 &&
-                        (target != pagerState.settledPage || pagerState.isScrollInProgress)
-                    ) {
-                        primaryTransitionJob?.cancel()
-                        primaryTransitionJob = scope.launch {
-                            if (instantMotion) pagerState.scrollToPage(target)
-                            else pagerState.animateScrollToPage(target)
-                        }
-                    }
+            TsuyomiCollapsibleChrome(
+                state = chrome,
+                onExpandedHeightChanged = { height ->
+                    primaryChromeHeight = height
+                    chrome.updateExpandedHeight(height + pageChromeHeight)
                 },
-                modifier = Modifier.testTag("source-home-primary-tabs"),
-            )
+            ) {
+                TsuyomiTextTabRow(
+                    options = filter.options.map { TsuyomiTabOption(it.value, it.label) },
+                    selectedKey = primaryValues.getOrNull(pagerState.currentPage),
+                    onSelect = { selected ->
+                        chrome.reveal()
+                        val target = primaryValues.indexOf(selected)
+                        if (target >= 0 &&
+                            (target != pagerState.settledPage || pagerState.isScrollInProgress)
+                        ) {
+                            primaryTransitionJob?.cancel()
+                            primaryTransitionJob = scope.launch {
+                                if (instantMotion) pagerState.scrollToPage(target)
+                                else pagerState.animateScrollToPage(target)
+                            }
+                        }
+                    },
+                    modifier = Modifier.testTag("source-home-primary-tabs"),
+                )
+            }
         }
         HorizontalPager(
             state = pagerState,
             flingBehavior = TsuyomiTextTabPagerDefaults.flingBehavior(pagerState),
             key = { index -> primaryValues[index] },
-            modifier = Modifier.fillMaxWidth().weight(1f).testTag("source-home-pager"),
+            modifier = Modifier.fillMaxWidth().weight(1f).testTag("source-home-pager")
+                .semantics {
+                    if (!chrome.isFullyExpanded) expand(showMenus) {
+                        chrome.reveal()
+                        true
+                    }
+                },
         ) { pageIndex ->
             val primary = primaryValues[pageIndex]
             val pageState = state.pages[primary] ?: return@HorizontalPager
@@ -186,6 +239,12 @@ internal fun SourceHomeStandardContent(
                 onOpenFeature = onOpenFeature,
                 coverState = coverState,
                 onCoverVisibility = onCoverVisibility,
+                chrome = chrome,
+                onControlsHeightChanged = { height ->
+                    pageChromeHeight = height
+                    chrome.updateExpandedHeight(primaryChromeHeight + height)
+                },
+                onPanelExpandedChange = { panelExpanded = it },
             )
         }
     }
@@ -207,9 +266,18 @@ private fun SourceHomeCatalogPage(
     onScrollPositionChanged: (primary: String, queryKey: String, index: Int, offset: Int) -> Unit,
     coverState: @Composable (SourceBookSummary) -> CoverUiState,
     onCoverVisibility: (SourceBookSummary, Boolean) -> Unit,
+    chrome: TsuyomiEnterAlwaysChromeState? = null,
+    onControlsHeightChanged: (Int) -> Unit = {},
+    onPanelExpandedChange: (Boolean) -> Unit = {},
 ) {
     val page = pageState.page
     if (page == null) {
+        SideEffect {
+            if (active) {
+                onControlsHeightChanged(0)
+                onPanelExpandedChange(false)
+            }
+        }
         val failure = pageState.replacementFailure
         if (failure == null) {
             StateView(
@@ -254,6 +322,13 @@ private fun SourceHomeCatalogPage(
         initialFirstVisibleItemIndex = pageState.firstVisibleItemIndex,
         initialFirstVisibleItemScrollOffset = pageState.firstVisibleItemScrollOffset,
     )
+    var controlsHeight by remember { mutableIntStateOf(0) }
+    LaunchedEffect(active, controlsHeight) {
+        if (active) onControlsHeightChanged(controlsHeight)
+    }
+    LaunchedEffect(active, pageState.replacing, pageState.replacementFailure) {
+        if (active && (pageState.replacing || pageState.replacementFailure != null)) chrome?.reveal()
+    }
     LaunchedEffect(gridState, primary, pageState.queryKey, active) {
         snapshotFlow { gridState.firstVisibleItemIndex to gridState.firstVisibleItemScrollOffset }
             .distinctUntilChanged()
@@ -272,11 +347,29 @@ private fun SourceHomeCatalogPage(
             .collect { nearEnd -> if (nearEnd) onLoadMore() }
     }
 
+    Column(Modifier.fillMaxSize()) {
+        if (hasPageControls) {
+            if (chrome == null) {
+                SourceHomePageControls(pageState, onSelectFilters, onRetryReplacement, onOpenVerification, active)
+            } else {
+                TsuyomiCollapsibleChrome(
+                    state = chrome,
+                    onExpandedHeightChanged = { controlsHeight = it },
+                ) {
+                    SourceHomePageControls(
+                        pageState, onSelectFilters, onRetryReplacement, onOpenVerification, active,
+                        onPanelExpandedChange = { if (active) onPanelExpandedChange(it) },
+                    )
+                }
+            }
+        } else {
+            SideEffect { if (active) onPanelExpandedChange(false) }
+        }
     TsuyomiPullToRefresh(
         isRefreshing = pageState.replacing,
         onRefresh = onRefresh,
-        enabled = active && !pageState.replacing,
-        modifier = Modifier.fillMaxSize(),
+        enabled = chrome == null && active && !pageState.replacing,
+        modifier = Modifier.fillMaxWidth().weight(1f),
     ) {
         Box(Modifier.fillMaxSize()) {
             LazyVerticalGrid(
@@ -292,16 +385,6 @@ private fun SourceHomeCatalogPage(
                 horizontalArrangement = Arrangement.spacedBy(TsuyomiSpacing.Sm),
                 verticalArrangement = Arrangement.spacedBy(TsuyomiSpacing.Sm),
             ) {
-                if (hasPageControls) {
-                    item(key = "controls:${pageState.queryKey}", span = { GridItemSpan(maxLineSpan) }) {
-                        SourceHomePageControls(
-                            pageState = pageState,
-                            onSelectFilters = onSelectFilters,
-                            onRetryReplacement = onRetryReplacement,
-                            onOpenVerification = onOpenVerification,
-                        )
-                    }
-                }
                 page.sections.forEach { section ->
                     item(
                         key = "section:${section.id}",
@@ -319,7 +402,7 @@ private fun SourceHomeCatalogPage(
                         }
                         TsuyomiCoverGridCard(
                             title = book.title,
-                            supportingText = book.author,
+                            supportingText = null,
                             onClick = { onOpenBook(book) },
                             cover = { CoverImage(coverState(book), Modifier.fillMaxSize()) },
                             modifier = Modifier.testTag("source-home-book-${book.identity.remoteBookId}"),
@@ -369,6 +452,7 @@ private fun SourceHomeCatalogPage(
         }
     }
     }
+    }
 }
 
 @Composable
@@ -377,6 +461,8 @@ private fun SourceHomePageControls(
     onSelectFilters: (Map<String, String>) -> Unit,
     onRetryReplacement: () -> Unit,
     onOpenVerification: () -> Unit,
+    active: Boolean,
+    onPanelExpandedChange: (Boolean) -> Unit = {},
 ) {
     val page = requireNotNull(pageState.page)
     val primaryId = page.filters.firstOrNull()?.id
@@ -384,6 +470,7 @@ private fun SourceHomePageControls(
     val leadingFilter = secondaryFilters.firstOrNull()
     val compactFilters = secondaryFilters.drop(1)
     var expandedFilterId by rememberSaveable(pageState.queryKey) { mutableStateOf<String?>(null) }
+    SideEffect { onPanelExpandedChange(expandedFilterId != null) }
 
     fun toggle(filter: SourceHomeFilter) {
         expandedFilterId = if (expandedFilterId == filter.id) null else filter.id
@@ -400,6 +487,7 @@ private fun SourceHomePageControls(
         modifier = Modifier
             .fillMaxWidth()
             .padding(vertical = TsuyomiSpacing.Xs)
+            .padding(horizontal = TsuyomiSpacing.Md)
             .testTag("source-home-page-controls"),
         verticalArrangement = Arrangement.spacedBy(TsuyomiSpacing.Sm),
     ) {
@@ -413,6 +501,7 @@ private fun SourceHomePageControls(
                     options = leadingFilter.options.map { TsuyomiFilterCapsuleOption(it.value, it.label) },
                     selectedKey = pageState.selectedFilters[leadingFilter.id],
                     expanded = expandedFilterId == leadingFilter.id,
+                    revealSelectionKey = active,
                     expandedStateDescription = stringResource(
                         R.string.source_home_filter_collapse,
                         leadingFilter.label,

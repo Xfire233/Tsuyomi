@@ -26,6 +26,10 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.state.ToggleableState
 import androidx.compose.ui.unit.dp
 import org.tsuyomi.core.ui.theme.TsuyomiSpacing
+import androidx.compose.material3.CheckboxDefaults
+import org.tsuyomi.core.display.DisplayProfile
+import org.tsuyomi.core.display.LocalDisplayEnvironment
+import org.tsuyomi.core.ui.theme.activeAccent
 
 /**
  * A labelled checkbox with one merged checkbox action for the complete row.
@@ -42,6 +46,14 @@ fun TsuyomiCheckboxRow(
     enabled: Boolean = true,
 ) {
     val interactionSource = remember { MutableInteractionSource() }
+    val checkboxColors = if (LocalDisplayEnvironment.current.effectiveProfile == DisplayProfile.EINK) {
+        CheckboxDefaults.colors()
+    } else {
+        CheckboxDefaults.colors(
+            checkedColor = MaterialTheme.colorScheme.secondaryContainer,
+            checkmarkColor = MaterialTheme.colorScheme.activeAccent,
+        )
+    }
     Row(
         modifier = modifier
             .fillMaxWidth()
@@ -63,6 +75,7 @@ fun TsuyomiCheckboxRow(
             onCheckedChange = null,
             enabled = enabled,
             modifier = Modifier.clearAndSetSemantics {},
+            colors = checkboxColors,
         )
         Text(
             text = label,
@@ -81,6 +94,14 @@ fun TsuyomiTriStateCheckboxRow(
     modifier: Modifier = Modifier,
     enabled: Boolean = true,
 ) {
+    val checkboxColors = if (LocalDisplayEnvironment.current.effectiveProfile == DisplayProfile.EINK) {
+        CheckboxDefaults.colors()
+    } else {
+        CheckboxDefaults.colors(
+            checkedColor = MaterialTheme.colorScheme.secondaryContainer,
+            checkmarkColor = MaterialTheme.colorScheme.activeAccent,
+        )
+    }
     Row(
         modifier = modifier
             .heightIn(min = 48.dp)
@@ -99,6 +120,7 @@ fun TsuyomiTriStateCheckboxRow(
             onClick = null,
             enabled = enabled,
             modifier = Modifier.clearAndSetSemantics {},
+            colors = checkboxColors,
         )
         Text(
             text = label,

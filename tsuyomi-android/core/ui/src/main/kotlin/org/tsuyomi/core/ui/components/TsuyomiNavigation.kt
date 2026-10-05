@@ -61,6 +61,7 @@ import org.tsuyomi.core.ui.theme.TsuyomiEInkPalette
 import org.tsuyomi.core.ui.theme.instantMotion
 import org.tsuyomi.core.ui.theme.tsuyomiAnimateColorAsState
 import org.tsuyomi.core.ui.theme.tsuyomiFocusRing
+import org.tsuyomi.core.ui.theme.activeAccent
 
 /** One top-level destination rendered by [TsuyomiNavigation]. Labels must stay within 4 CJK chars. */
 data class TsuyomiNavigationItem(
@@ -248,11 +249,11 @@ private fun NavigationItemView(
     // The icon sits on the indicator pill; the label sits on the bar/rail surface.
     val iconTint = when {
         selected && eInk -> TsuyomiEInkPalette.Paper
-        selected -> MaterialTheme.colorScheme.onSecondaryContainer
+        selected -> MaterialTheme.colorScheme.activeAccent
         else -> MaterialTheme.colorScheme.onSurfaceVariant
     }
     val labelColor = if (selected) {
-        MaterialTheme.colorScheme.onSurface
+        if (eInk) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.activeAccent
     } else {
         MaterialTheme.colorScheme.onSurfaceVariant
     }

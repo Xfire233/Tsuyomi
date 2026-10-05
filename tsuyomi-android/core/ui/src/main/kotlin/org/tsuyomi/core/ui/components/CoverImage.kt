@@ -17,6 +17,9 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.clearAndSetSemantics
+import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.geometry.Size
@@ -25,6 +28,7 @@ import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
 import org.tsuyomi.core.display.DisplayProfile
 import org.tsuyomi.core.display.LocalDisplayEnvironment
+import org.tsuyomi.core.ui.R
 
 import org.tsuyomi.core.media.api.CoverUiState
 import org.tsuyomi.core.media.api.FallbackSpec
@@ -40,6 +44,7 @@ fun CoverImage(
     state: CoverUiState,
     modifier: Modifier = Modifier,
     unresolvedBadge: Boolean = false,
+    unresolvedDescription: String? = null,
 ) {
     val bitmap = when (state) {
         is CoverUiState.Ready -> state.bitmap
@@ -65,16 +70,18 @@ fun CoverImage(
                 FallbackCover(state.fallbackSpec(), Modifier.fillMaxSize())
             }
             if (unresolvedBadge) {
+                val pendingLabel = stringResource(R.string.cover_unresolved_pending)
                 Surface(
                     modifier = Modifier
                         .align(Alignment.TopEnd)
                         .padding(4.dp)
-                        .testTag("cover-unresolved-badge"),
+                        .testTag("cover-unresolved-badge")
+                        .clearAndSetSemantics { contentDescription = unresolvedDescription ?: pendingLabel },
                     shape = MaterialTheme.shapes.extraSmall,
                     color = MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.92f),
                 ) {
                     Text(
-                        text = "UNRESOLVED",
+                        text = pendingLabel,
                         modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp),
                         style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
                         color = MaterialTheme.colorScheme.onErrorContainer,

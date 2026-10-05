@@ -20,6 +20,7 @@ import org.tsuyomi.feature.browse.BrowseCatalogStatus
 import org.tsuyomi.feature.browse.BrowseRepository
 import org.tsuyomi.feature.browse.BrowseSubscriptionState
 import org.tsuyomi.source.extensionmanager.OfficialRepositoryClient
+import org.tsuyomi.source.extensionmanager.PublisherTrust
 import org.tsuyomi.source.extensionmanager.RepositoryCatalog
 import org.tsuyomi.source.extensionmanager.RepositorySubscriptionLink
 import org.tsuyomi.source.extensionmanager.SemanticVersion
@@ -116,7 +117,9 @@ internal class SourceCatalogController(
         val item = state.items.singleOrNull {
             it.sourceId == action.sourceId && it.repositoryId == action.repositoryId
         } ?: return null
-        if (!item.installable || !item.compatible || (item.installedVersion != null && !item.updateAvailable)) return null
+        if (!item.installable || !item.compatible || item.identityConflict ||
+            (item.installedVersion != null && !item.updateAvailable)
+        ) return null
         return repository(action.repositoryId)
     }
 
@@ -191,13 +194,15 @@ internal class SourceCatalogController(
         val items = snapshots.filterKeys { it in enabled }.flatMap { (id, catalog) ->
             catalog.packages.map { entry ->
                 val active = installed[entry.id]
+                val identityConflict = active?.publisherTrust == PublisherTrust.LOCAL_UNSIGNED
                 BrowseCatalogItem(
                     sourceId = entry.id, name = entry.name, version = entry.version, summary = entry.summary,
                     language = entry.language, license = entry.license, sourceUrl = entry.sourceUrl,
                     sourceRevision = entry.sourceRevision,
                     publisherFingerprint = repository(id)?.publisherKeys?.resolve(entry.publisherKeyId)?.fingerprint.orEmpty(),
                     compatible = entry.isCompatible(HOST_API), installedVersion = active?.manifest?.version?.original,
-                    updateAvailable = active != null && SemanticVersion.parse(entry.version) > active.manifest.version,
+                    updateAvailable = !identityConflict && active != null && SemanticVersion.parse(entry.version) > active.manifest.version,
+                    identityConflict = identityConflict,
                     repositoryId = id, repositoryName = if (id == OFFICIAL_ID) context.getString(R.string.source_repository_official) else id,
                     official = id == OFFICIAL_ID, installable = id in usable,
                 )

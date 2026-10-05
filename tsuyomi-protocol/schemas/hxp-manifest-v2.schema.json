@@ -1,0 +1,676 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://protocol.tsuyomi.dev/schema/hxp-manifest-v2.schema.json",
+  "title": "Tsuyomi HXP Manifest v2 (Local Unsigned)",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "format",
+    "manifestVersion",
+    "id",
+    "version",
+    "display",
+    "hostApi",
+    "entry",
+    "integrity",
+    "signing",
+    "capabilities",
+    "resourceLimits",
+    "update"
+  ],
+  "properties": {
+    "format": {
+      "const": "tsuyomi-hxp"
+    },
+    "manifestVersion": {
+      "const": 2
+    },
+    "id": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9]*(?:[.-][a-z0-9]+)+$",
+      "maxLength": 128
+    },
+    "version": {
+      "type": "string",
+      "pattern": "^(0|[1-9]\\d*)\\.(0|[1-9]\\d*)\\.(0|[1-9]\\d*)(?:-[0-9A-Za-z-]+(?:\\.[0-9A-Za-z-]+)*)?(?:\\+[0-9A-Za-z-]+(?:\\.[0-9A-Za-z-]+)*)?$"
+    },
+    "display": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "summary"
+      ],
+      "properties": {
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "summary": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 512
+        },
+        "homepage": {
+          "type": "string",
+          "format": "uri"
+        }
+      }
+    },
+    "hostApi": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "minInclusive",
+        "maxExclusive"
+      ],
+      "properties": {
+        "minInclusive": {
+          "$ref": "#/$defs/semver"
+        },
+        "maxExclusive": {
+          "$ref": "#/$defs/semver"
+        }
+      }
+    },
+    "entry": {
+      "type": "string",
+      "pattern": "^(?!/)(?!.*(?:^|/)\\.\\.(?:/|$))[A-Za-z0-9._/-]+\\.mjs$",
+      "maxLength": 512
+    },
+    "integrity": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "algorithm",
+        "contentDigest",
+        "files"
+      ],
+      "properties": {
+        "algorithm": {
+          "const": "sha256"
+        },
+        "contentDigest": {
+          "$ref": "#/$defs/sha256"
+        },
+        "files": {
+          "type": "object",
+          "minProperties": 1,
+          "additionalProperties": {
+            "$ref": "#/$defs/sha256"
+          }
+        }
+      }
+    },
+    "signing": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "algorithm"
+      ],
+      "properties": {
+        "algorithm": {
+          "const": "none"
+        }
+      }
+    },
+    "capabilities": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "network",
+        "cookies",
+        "webLogin",
+        "remoteLibrary",
+        "storage"
+      ],
+      "properties": {
+        "network": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "origins",
+            "maxConcurrentRequests",
+            "requestTimeoutMs",
+            "maxResponseBytes"
+          ],
+          "properties": {
+            "origins": {
+              "type": "array",
+              "minItems": 1,
+              "uniqueItems": true,
+              "items": {
+                "$ref": "#/$defs/httpsOrigin"
+              }
+            },
+            "maxConcurrentRequests": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 8
+            },
+            "requestTimeoutMs": {
+              "type": "integer",
+              "minimum": 1000,
+              "maximum": 120000
+            },
+            "maxResponseBytes": {
+              "type": "integer",
+              "minimum": 1024,
+              "maximum": 16777216
+            }
+          }
+        },
+        "cookies": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "mode",
+            "origins"
+          ],
+          "properties": {
+            "mode": {
+              "enum": [
+                "none",
+                "sourceScoped"
+              ]
+            },
+            "origins": {
+              "type": "array",
+              "uniqueItems": true,
+              "items": {
+                "$ref": "#/$defs/httpsOrigin"
+              }
+            }
+          }
+        },
+        "webLogin": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "enabled",
+            "origins"
+          ],
+          "properties": {
+            "enabled": {
+              "type": "boolean"
+            },
+            "origins": {
+              "type": "array",
+              "uniqueItems": true,
+              "items": {
+                "$ref": "#/$defs/httpsOrigin"
+              }
+            }
+          }
+        },
+        "home": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "enabled"
+          ],
+          "properties": {
+            "enabled": {
+              "type": "boolean"
+            }
+          }
+        },
+        "updateCheck": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "version",
+            "origin",
+            "method",
+            "path",
+            "parameters"
+          ],
+          "properties": {
+            "version": {
+              "const": 2
+            },
+            "origin": {
+              "$ref": "#/$defs/httpsOrigin"
+            },
+            "method": {
+              "const": "GET"
+            },
+            "path": {
+              "type": "string",
+              "pattern": "^/[^?#]{0,1023}$"
+            },
+            "referrerPath": {
+              "type": "string",
+              "pattern": "^/[^?#]{0,1023}$"
+            },
+            "parameters": {
+              "type": "object",
+              "minProperties": 1,
+              "maxProperties": 16,
+              "propertyNames": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 256,
+                "pattern": "\\S"
+              },
+              "additionalProperties": {
+                "oneOf": [
+                  {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": [
+                      "kind",
+                      "value"
+                    ],
+                    "properties": {
+                      "kind": {
+                        "const": "fixed"
+                      },
+                      "value": {
+                        "type": "string",
+                        "maxLength": 8192
+                      }
+                    }
+                  },
+                  {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": [
+                      "kind"
+                    ],
+                    "properties": {
+                      "kind": {
+                        "const": "remoteBookId"
+                      }
+                    }
+                  }
+                ]
+              }
+            }
+          }
+        },
+        "remoteLibrary": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "read",
+            "writeOperations"
+          ],
+          "properties": {
+            "read": {
+              "type": "boolean"
+            },
+            "writeOperations": {
+              "type": "array",
+              "uniqueItems": true,
+              "items": {
+                "enum": [
+                  "add",
+                  "remove",
+                  "move"
+                ]
+              }
+            },
+            "policies": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "read": {
+                  "$ref": "#/$defs/remoteOperationPolicy"
+                },
+                "targets": {
+                  "$ref": "#/$defs/remoteOperationPolicy"
+                },
+                "add": {
+                  "$ref": "#/$defs/remoteOperationPolicy"
+                },
+                "remove": {
+                  "$ref": "#/$defs/remoteOperationPolicy"
+                },
+                "move": {
+                  "$ref": "#/$defs/remoteOperationPolicy"
+                }
+              }
+            }
+          },
+          "allOf": [
+            {
+              "if": {
+                "properties": {
+                  "read": {
+                    "const": true
+                  }
+                },
+                "required": [
+                  "read"
+                ]
+              },
+              "then": {
+                "required": [
+                  "policies"
+                ],
+                "properties": {
+                  "policies": {
+                    "type": "object",
+                    "required": [
+                      "read",
+                      "targets"
+                    ],
+                    "properties": {
+                      "read": {
+                        "$ref": "#/$defs/remoteOperationPolicy"
+                      },
+                      "targets": {
+                        "$ref": "#/$defs/remoteOperationPolicy"
+                      }
+                    }
+                  }
+                }
+              }
+            },
+            {
+              "if": {
+                "properties": {
+                  "writeOperations": {
+                    "type": "array",
+                    "contains": {
+                      "const": "add"
+                    }
+                  }
+                },
+                "required": [
+                  "writeOperations"
+                ]
+              },
+              "then": {
+                "required": [
+                  "policies"
+                ],
+                "properties": {
+                  "policies": {
+                    "type": "object",
+                    "required": [
+                      "add"
+                    ],
+                    "properties": {
+                      "add": {
+                        "$ref": "#/$defs/remoteOperationPolicy"
+                      }
+                    }
+                  }
+                }
+              }
+            },
+            {
+              "if": {
+                "properties": {
+                  "writeOperations": {
+                    "type": "array",
+                    "contains": {
+                      "const": "remove"
+                    }
+                  }
+                },
+                "required": [
+                  "writeOperations"
+                ]
+              },
+              "then": {
+                "required": [
+                  "policies"
+                ],
+                "properties": {
+                  "policies": {
+                    "type": "object",
+                    "required": [
+                      "remove"
+                    ],
+                    "properties": {
+                      "remove": {
+                        "$ref": "#/$defs/remoteOperationPolicy"
+                      }
+                    }
+                  }
+                }
+              }
+            },
+            {
+              "if": {
+                "properties": {
+                  "writeOperations": {
+                    "type": "array",
+                    "contains": {
+                      "const": "move"
+                    }
+                  }
+                },
+                "required": [
+                  "writeOperations"
+                ]
+              },
+              "then": {
+                "required": [
+                  "policies"
+                ],
+                "properties": {
+                  "policies": {
+                    "type": "object",
+                    "required": [
+                      "move"
+                    ],
+                    "properties": {
+                      "move": {
+                        "$ref": "#/$defs/remoteOperationPolicy"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          ]
+        },
+        "storage": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "quotaBytes"
+          ],
+          "properties": {
+            "quotaBytes": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 10485760
+            }
+          }
+        }
+      }
+    },
+    "resourceLimits": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "maxExecutionWallTimeMs",
+        "maxMemoryBytes"
+      ],
+      "properties": {
+        "maxExecutionWallTimeMs": {
+          "type": "integer",
+          "minimum": 100,
+          "maximum": 30000
+        },
+        "maxMemoryBytes": {
+          "type": "integer",
+          "minimum": 1048576,
+          "maximum": 67108864
+        }
+      }
+    },
+    "update": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "channel"
+      ],
+      "properties": {
+        "channel": {
+          "enum": [
+            "stable",
+            "beta"
+          ]
+        }
+      }
+    }
+  },
+  "$defs": {
+    "semver": {
+      "type": "string",
+      "pattern": "^(0|[1-9]\\d*)\\.(0|[1-9]\\d*)\\.(0|[1-9]\\d*)(?:-[0-9A-Za-z-]+(?:\\.[0-9A-Za-z-]+)*)?(?:\\+[0-9A-Za-z-]+(?:\\.[0-9A-Za-z-]+)*)?$"
+    },
+    "sha256": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{64}$"
+    },
+    "httpsOrigin": {
+      "type": "string",
+      "pattern": "^https://[A-Za-z0-9.-]+(?::[0-9]{1,5})?$"
+    },
+    "remoteOperationPolicy": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "origin",
+        "method",
+        "path",
+        "parameters"
+      ],
+      "properties": {
+        "origin": {
+          "$ref": "#/$defs/httpsOrigin"
+        },
+        "method": {
+          "enum": [
+            "GET",
+            "POST"
+          ]
+        },
+        "path": {
+          "type": "string",
+          "pattern": "^/[^?#]{0,1023}$"
+        },
+        "referrerPath": {
+          "type": "string",
+          "pattern": "^/[^?#]{0,1023}$"
+        },
+        "redirects": {
+          "type": "array",
+          "maxItems": 5,
+          "uniqueItems": true,
+          "items": {
+            "$ref": "#/$defs/remoteOperationRedirect"
+          }
+        },
+        "parameters": {
+          "type": "object",
+          "maxProperties": 64,
+          "propertyNames": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256,
+            "pattern": "\\S"
+          },
+          "additionalProperties": {
+            "oneOf": [
+              {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "kind",
+                  "value"
+                ],
+                "properties": {
+                  "kind": {
+                    "const": "fixed"
+                  },
+                  "value": {
+                    "type": "string",
+                    "maxLength": 8192
+                  }
+                }
+              },
+              {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "kind"
+                ],
+                "properties": {
+                  "kind": {
+                    "enum": [
+                      "remoteBookId",
+                      "cursor",
+                      "targetId"
+                    ]
+                  }
+                }
+              }
+            ]
+          }
+        }
+      }
+    },
+    "remoteOperationRedirect": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "origin",
+        "method",
+        "path",
+        "parameters"
+      ],
+      "properties": {
+        "origin": {
+          "$ref": "#/$defs/httpsOrigin"
+        },
+        "method": {
+          "const": "GET"
+        },
+        "path": {
+          "type": "string",
+          "pattern": "^/[^?#]{0,1023}$"
+        },
+        "referrerPath": {
+          "type": "string",
+          "pattern": "^/[^?#]{0,1023}$"
+        },
+        "parameters": {
+          "type": "object",
+          "maxProperties": 64,
+          "propertyNames": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256,
+            "pattern": "\\S"
+          },
+          "additionalProperties": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "kind",
+              "value"
+            ],
+            "properties": {
+              "kind": {
+                "const": "fixed"
+              },
+              "value": {
+                "type": "string",
+                "maxLength": 8192
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}

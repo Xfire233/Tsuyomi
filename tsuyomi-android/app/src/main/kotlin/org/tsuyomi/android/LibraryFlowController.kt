@@ -28,6 +28,8 @@ import org.tsuyomi.shared.librarydomain.LibraryCollection
 import org.tsuyomi.shared.librarydomain.LibraryEntry
 import org.tsuyomi.shared.librarydomain.LibraryBook
 import org.tsuyomi.core.database.RoomLibraryRepository
+import org.tsuyomi.core.database.CollectionDeletionPlan
+import org.tsuyomi.core.database.CollectionDeletionPolicy
 import org.tsuyomi.core.preferences.LibraryPreferencesRepository
 import org.tsuyomi.core.preferences.LibraryRootNodePreference
 import org.tsuyomi.core.preferences.LibraryTabPresentationPreferences
@@ -45,6 +47,11 @@ import org.tsuyomi.feature.library.LibrarySortMode
 import org.tsuyomi.feature.library.LibraryMirrorShortcut
 import org.tsuyomi.feature.library.LibraryTagLayout
 import org.tsuyomi.feature.library.SmartConditionDraft
+import org.tsuyomi.feature.library.SmartDraftNode
+import org.tsuyomi.feature.library.conditions
+import org.tsuyomi.feature.library.nodeCount
+import org.tsuyomi.feature.library.formatSmartTerms
+import org.tsuyomi.feature.library.parseSmartTerms
 import org.tsuyomi.feature.library.SmartField
 import org.tsuyomi.feature.library.LibraryUpdateFilter
 import org.tsuyomi.feature.library.buildLibraryRootItems
@@ -59,6 +66,13 @@ import org.tsuyomi.shared.smartshelf.PublicationStatus
 import org.tsuyomi.shared.smartshelf.SmartPredicate
 import org.tsuyomi.shared.smartshelf.SmartRule
 import org.tsuyomi.shared.smartshelf.SmartRuleNode
+import org.tsuyomi.shared.smartshelf.SmartRuleCodec
+import org.tsuyomi.shared.smartshelf.SmartRuleValidator
+
+internal data class CollectionRuleDraft(val title: String, val tree: SmartDraftNode.Group) {
+    val matchAll: Boolean get() = tree.matchAll
+    val conditions: List<SmartConditionDraft> get() = tree.conditions()
+}
 
 @Stable
 internal class LibraryFlowController private constructor(
@@ -97,6 +111,12 @@ internal class LibraryFlowController private constructor(
     var collections by mutableStateOf<List<LibraryCollection>>(emptyList())
         private set
     var collectionMessage by mutableStateOf<String?>(null)
+        private set
+    var deletionPreview by mutableStateOf<CollectionDeletionPlan?>(null)
+        private set
+    var deletionError by mutableStateOf<String?>(null)
+        private set
+    var deletionConfirmEnabled by mutableStateOf(false)
         private set
     var selectedCollectionId by mutableStateOf(initialCollectionId)
         private set
@@ -495,6 +515,11 @@ internal class LibraryFlowController private constructor(
             refreshFailure = null,
         )
     }
+    // A child page may still own [state] when NavHost first composes the root after Back.
+    // Render the cached caller projection until restoreLibraryHome switches the mutable owner.
+    fun rootScreenState(): LibraryUiState =
+        if (selectedCollectionId == null) state else primaryTabState(callerTab)
+
     /**
      * Returns the independently restored state for each fixed Library page.
      *
@@ -792,9 +817,8 @@ internal class LibraryFlowController private constructor(
             selectedBookIds = selected,
         )
     }
-
     fun longPressCollection(collectionId: String) {
-        if (collections.none { it.collectionId == collectionId && it.kind == CollectionKind.MANUAL }) return
+        if (collectionId !in visibleCollectionIds()) return
         when (state.selectionKind) {
             null, LibrarySelectionKind.COLLECTION -> {
                 if (collectionId !in state.selectedCollectionIds) {
@@ -810,7 +834,7 @@ internal class LibraryFlowController private constructor(
 
     fun toggleCollectionSelection(collectionId: String) {
         if (state.selectionKind != null && state.selectionKind != LibrarySelectionKind.COLLECTION) return
-        if (collections.none { it.collectionId == collectionId && it.kind == CollectionKind.MANUAL }) return
+        if (collectionId !in visibleCollectionIds()) return
         val selected = if (collectionId in state.selectedCollectionIds) {
             state.selectedCollectionIds - collectionId
         } else {
@@ -821,6 +845,12 @@ internal class LibraryFlowController private constructor(
             selectedCollectionIds = selected,
         )
     }
+    fun visibleCollectionIds(): Set<String> = if (selectedCollectionId == null && state.filter != SystemLibraryFilter.ALL) {
+        emptySet()
+    } else collections.asSequence()
+        .filter { it.parentCollectionId == selectedCollectionId }
+        .mapTo(linkedSetOf()) { it.collectionId }
+
 
     fun clearSelection() {
         state = state.copy(
@@ -829,6 +859,9 @@ internal class LibraryFlowController private constructor(
             selectedCollectionIds = emptySet(),
             selectionDialog = null,
         )
+        deletionPreview = null
+        deletionError = null
+        deletionConfirmEnabled = false
     }
 
     fun toggleAllVisibleSelection() {
@@ -843,8 +876,7 @@ internal class LibraryFlowController private constructor(
                 )
             }
             LibrarySelectionKind.COLLECTION -> {
-                val visible = collections.filter { it.kind == CollectionKind.MANUAL }
-                    .mapTo(linkedSetOf()) { it.collectionId }
+                val visible = visibleCollectionIds()
                 val allSelected = visible.isNotEmpty() && state.selectedCollectionIds.containsAll(visible)
                 val selected = if (allSelected) state.selectedCollectionIds - visible else state.selectedCollectionIds + visible
                 state = state.copy(
@@ -864,6 +896,9 @@ internal class LibraryFlowController private constructor(
 
     fun dismissSelectionDialog() {
         state = state.copy(selectionDialog = null)
+        deletionPreview = null
+        deletionError = null
+        deletionConfirmEnabled = false
     }
 
     fun requestBookDropOnBook(moved: Set<BookIdentity>, target: BookIdentity) {
@@ -917,24 +952,78 @@ internal class LibraryFlowController private constructor(
         reload(failureMessage)
     }.isSuccess
 
-    suspend fun removeSelection(failureMessage: String): Boolean = runCatching {
-        if (state.selectionKind == LibrarySelectionKind.COLLECTION) {
-            state.selectedCollectionIds.forEach { repository.deleteCollection(it) }
-        } else {
+    suspend fun removeSelection(failureMessage: String, changedMessage: String = failureMessage): Boolean {
+        deletionPreview?.let { plan ->
+            if (!deletionConfirmEnabled) return false
+            deletionConfirmEnabled = false
+            return deleteCollections(plan, failureMessage, changedMessage)
+        }
+        if (state.selectionKind == LibrarySelectionKind.COLLECTION) return false
+        return try {
             val selected = state.selectedBookIds
             when {
-                selectedCollectionId != null && currentCollection()?.kind == CollectionKind.MANUAL -> {
+                selectedCollectionId != null && currentCollection()?.kind == CollectionKind.MANUAL ->
                     repository.removeManualMemberships(requireNotNull(selectedCollectionId), selected)
-                }
-                state.filter == SystemLibraryFilter.READ_LATER -> {
+                state.filter == SystemLibraryFilter.READ_LATER ->
                     selected.forEach { repository.setReadLater(it, false) }
-                }
                 else -> repository.removeFromLibrary(selected)
             }
+            clearSelection()
+            reload(failureMessage)
+            true
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (_: Exception) {
+            collectionMessage = failureMessage
+            false
+        }
+    }
+
+    fun pauseDeletionConfirmation() {
+        deletionConfirmEnabled = false
+        deletionError = null
+    }
+
+    suspend fun requestCollectionDeletion(
+        ids: Set<String>, failureMessage: String,
+        policy: CollectionDeletionPolicy = CollectionDeletionPolicy.REPARENT_CHILDREN,
+    ) {
+        deletionConfirmEnabled = false
+        try {
+            deletionPreview = repository.previewCollectionDeletion(ids, policy)
+            deletionError = null
+            deletionConfirmEnabled = true
+            state = state.copy(selectionDialog = LibrarySelectionDialog.CONFIRM_REMOVE)
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (_: Exception) {
+            collectionMessage = failureMessage
+            deletionError = failureMessage
+        }
+    }
+
+    suspend fun deleteCollections(
+        plan: CollectionDeletionPlan, failureMessage: String, changedMessage: String = failureMessage,
+    ): Boolean {
+        try {
+            if (!repository.deleteCollections(plan)) {
+                deletionPreview = repository.previewCollectionDeletion(plan.selectedIds, plan.policy)
+                deletionError = changedMessage
+                deletionConfirmEnabled = true
+                return false
+            }
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (_: Exception) {
+            deletionError = failureMessage
+            deletionConfirmEnabled = true
+            return false
         }
         clearSelection()
         reload(failureMessage)
-    }.isSuccess
+        return true
+    }
+
 
     suspend fun reorderBooks(
         moved: Set<BookIdentity>,
@@ -974,51 +1063,120 @@ internal class LibraryFlowController private constructor(
         selectedEntry?.let { tagDraft = it.localTags.joinToString("，") }
     }
 
-    suspend fun createManualCollection(title: String, failureMessage: String): Boolean = runCatching {
-        val now = Instant.now()
-        repository.createCollection(
-            LibraryCollection(
-                collectionId = UUID.randomUUID().toString(),
-                kind = CollectionKind.MANUAL,
-                title = title.trim(),
-                parentCollectionId = null,
-                displayOrder = collections.size.toLong(),
-                createdAt = now,
-                updatedAt = now,
-            ),
-        )
+    suspend fun createManualCollection(
+        title: String, selectedBooks: Set<BookIdentity>, failureMessage: String,
+        draftId: String,
+    ): Boolean {
+        if (title.isBlank() || title.trim().length > 256) return false
+        try {
+            val existing = repository.collections().firstOrNull { it.collectionId == draftId }
+            if (existing == null) {
+                val now = Instant.now()
+                repository.createManualCollectionWithMemberships(
+                    LibraryCollection(draftId, CollectionKind.MANUAL, title.trim(), null,
+                        collections.size.toLong(), now, now),
+                    selectedBooks,
+                )
+            } else if (existing.kind != CollectionKind.MANUAL || existing.title != title.trim() ||
+                repository.collectionEntries(draftId).mapTo(hashSetOf()) { it.book.identity } != selectedBooks
+            ) return false
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (_: Exception) {
+            collectionMessage = failureMessage
+            return false
+        }
         reload(failureMessage)
-    }.isSuccess
-
-    suspend fun createSmartCollection(
-        title: String,
-        matchAll: Boolean,
-        drafts: List<SmartConditionDraft>,
-        failureMessage: String,
-    ): Boolean = runCatching {
-        val now = Instant.now()
-        repository.createSmartCollection(
-            LibraryCollection(
-                collectionId = UUID.randomUUID().toString(),
-                kind = CollectionKind.SMART,
-                title = title.trim(),
-                parentCollectionId = null,
-                displayOrder = collections.size.toLong(),
-                createdAt = now,
-                updatedAt = now,
-            ),
-            buildSmartRule(matchAll, drafts),
-        )
-        reload(failureMessage)
-    }.isSuccess
-
-    suspend fun deleteCollection(collection: LibraryCollection, failureMessage: String) {
-        repository.deleteCollection(collection.collectionId)
-        reload(failureMessage)
+        return true
     }
-    fun showCollectionMessage(message: String) {
-        collectionMessage = message
+
+    suspend fun saveSmartCollection(
+        collectionId: String?, title: String, tree: SmartDraftNode.Group, failureMessage: String,
+        draftId: String = UUID.randomUUID().toString(),
+    ): Boolean {
+        if (title.isBlank() || title.trim().length > 512 || tree.nodeCount() > 128) return false
+        try {
+            val rule = buildSmartRule(tree)
+            SmartRuleValidator.requireValid(rule)
+            if (collectionId == null) {
+                val existing = repository.collections().firstOrNull { it.collectionId == draftId }
+                if (existing == null) {
+                    val now = Instant.now()
+                    repository.createSmartCollection(
+                        LibraryCollection(draftId, CollectionKind.SMART, title.trim(), null,
+                            collections.size.toLong(), now, now), rule,
+                    )
+                } else if (existing.kind == CollectionKind.SMART) {
+                    // Creation may have committed before reload was cancelled. This UUID still owns the draft.
+                    repository.updateSmartCollection(draftId, title, rule)
+                } else return false
+            } else {
+                repository.updateSmartCollection(collectionId, title, rule)
+            }
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (_: Exception) {
+            collectionMessage = failureMessage
+            return false
+        }
+        reload(failureMessage)
+        return true
     }
+
+    suspend fun collectionRuleDraft(collectionId: String): CollectionRuleDraft? {
+        val collection = collections.firstOrNull { it.collectionId == collectionId && it.kind == CollectionKind.SMART }
+            ?: return null
+        val root = repository.smartRule(collectionId)?.root ?: return null
+        fun convert(node: SmartRuleNode): SmartDraftNode {
+            var current = node
+            var negations = 0
+            while (current is SmartRuleNode.Not) {
+                negations++
+                current = current.child
+            }
+            return when (current) {
+                is SmartRuleNode.All -> SmartDraftNode.Group(true, current.children.map(::convert), negations)
+                is SmartRuleNode.Any -> SmartDraftNode.Group(false, current.children.map(::convert), negations)
+                is SmartRuleNode.Predicate -> SmartDraftNode.Condition(
+                    draft = draftFromPredicate(current.value),
+                    negations = negations,
+                    originalPredicateJson = SmartRuleCodec.encode(SmartRule(root = current)),
+                )
+                is SmartRuleNode.Not -> error("negation already unwrapped")
+            }
+        }
+        val converted = convert(root)
+        val tree = if (converted is SmartDraftNode.Group) converted else
+            SmartDraftNode.Group(true, listOf(converted), syntheticRoot = true)
+        return CollectionRuleDraft(collection.title, tree)
+    }
+
+    private fun draftFromPredicate(predicate: SmartPredicate): SmartConditionDraft {
+        val (field, value) = when (predicate) {
+            is SmartPredicate.SourceIn -> SmartField.SOURCE to formatSmartTerms(predicate.sourceIds)
+            is SmartPredicate.InManualCollection -> SmartField.MANUAL_COLLECTION to formatSmartTerms(predicate.collectionIds)
+            is SmartPredicate.TagContains -> SmartField.TAG to formatSmartTerms(predicate.tags)
+            is SmartPredicate.FacetIn -> SmartField.FACET to formatSmartTerms(predicate.facetIds)
+            is SmartPredicate.TitleContains -> SmartField.TITLE to formatSmartTerms(predicate.terms)
+            is SmartPredicate.AuthorContains -> SmartField.AUTHOR to formatSmartTerms(predicate.terms)
+            is SmartPredicate.StatusIn -> SmartField.STATUS to predicate.statuses.joinToString(",") { it.name.lowercase() }
+            is SmartPredicate.RatingBetween -> SmartField.RATING to "${predicate.minimum ?: ""},${predicate.maximum ?: ""}"
+            is SmartPredicate.AddedWithinDays -> SmartField.ADDED_WITHIN_DAYS to predicate.days.toString()
+            is SmartPredicate.LastReadWithinDays -> SmartField.LAST_READ_WITHIN_DAYS to predicate.days.toString()
+            is SmartPredicate.MetadataUpdatedWithinDays -> SmartField.METADATA_UPDATED_WITHIN_DAYS to predicate.days.toString()
+            is SmartPredicate.ProgressIn -> SmartField.PROGRESS to predicate.states.joinToString(",") { it.name.lowercase() }
+            SmartPredicate.HasUnresolvedUpdate -> SmartField.UNRESOLVED_UPDATE to ""
+            SmartPredicate.IsDormantSource -> SmartField.DORMANT_SOURCE to ""
+        }
+        return SmartConditionDraft(field, value, matchAllTags = (predicate as? SmartPredicate.TagContains)?.mode == MatchMode.ALL,
+            facetSourceId = (predicate as? SmartPredicate.FacetIn)?.sourceId.orEmpty())
+    }
+
+    fun unchangedPredicate(node: SmartDraftNode.Condition): Boolean = node.originalPredicateJson?.let {
+        val original = SmartRuleCodec.decode(it).getOrNull()?.root as? SmartRuleNode.Predicate ?: return@let false
+        node.draft == draftFromPredicate(original.value)
+    } ?: false
+
 
     suspend fun saveTags(failureMessage: String) {
         val entry = selectedEntry ?: return
@@ -1060,39 +1218,55 @@ internal class LibraryFlowController private constructor(
 
     internal fun savedCollectionId(): String = selectedCollectionId.orEmpty()
 
-    private fun buildSmartRule(matchAll: Boolean, drafts: List<SmartConditionDraft>): SmartRule {
-        fun values(raw: String): Set<String> = raw.split(',', '，')
-            .mapNotNull { it.trim().takeIf(String::isNotEmpty) }
-            .toSet()
+    private fun buildSmartRule(tree: SmartDraftNode.Group): SmartRule {
+        fun values(raw: String): Set<String> = requireNotNull(parseSmartTerms(raw)).toSet()
 
-        val children = drafts.map { draft ->
-            val parsedValues = values(draft.value)
-            val predicate: SmartPredicate = when (draft.field) {
-                SmartField.SOURCE -> SmartPredicate.SourceIn(parsedValues)
-                SmartField.MANUAL_COLLECTION -> SmartPredicate.InManualCollection(parsedValues)
-                SmartField.TAG -> SmartPredicate.TagContains(MatchMode.ANY, parsedValues)
-                SmartField.TITLE -> SmartPredicate.TitleContains(parsedValues)
-                SmartField.AUTHOR -> SmartPredicate.AuthorContains(parsedValues)
-                SmartField.STATUS -> SmartPredicate.StatusIn(
-                    parsedValues.mapTo(linkedSetOf()) { PublicationStatus.valueOf(it.uppercase()) },
-                )
-                SmartField.RATING -> {
-                    val range = draft.value.split(',', '，').map { it.trim() }
-                    SmartPredicate.RatingBetween(range.getOrNull(0)?.toDoubleOrNull(), range.getOrNull(1)?.toDoubleOrNull())
+        fun build(node: SmartDraftNode): SmartRuleNode {
+            val base: SmartRuleNode = when (node) {
+                is SmartDraftNode.Group -> {
+                    val children = node.children.map(::build)
+                    if (node.matchAll) SmartRuleNode.All(children) else SmartRuleNode.Any(children)
                 }
-                SmartField.ADDED_WITHIN_DAYS -> SmartPredicate.AddedWithinDays(draft.value.trim().toLong())
-                SmartField.LAST_READ_WITHIN_DAYS -> SmartPredicate.LastReadWithinDays(draft.value.trim().toLong())
-                SmartField.METADATA_UPDATED_WITHIN_DAYS -> SmartPredicate.MetadataUpdatedWithinDays(draft.value.trim().toLong())
-                SmartField.PROGRESS -> SmartPredicate.ProgressIn(
-                    parsedValues.mapTo(linkedSetOf()) { ProgressState.valueOf(it.uppercase()) },
-                )
-                SmartField.UNRESOLVED_UPDATE -> SmartPredicate.HasUnresolvedUpdate
-                SmartField.DORMANT_SOURCE -> SmartPredicate.IsDormantSource
+                is SmartDraftNode.Condition -> {
+                    val draft = node.draft
+                    val original = if (unchangedPredicate(node))
+                        SmartRuleCodec.decode(requireNotNull(node.originalPredicateJson)).getOrThrow().root as SmartRuleNode.Predicate
+                    else null
+                    original ?: run {
+                        val parsedValues = values(draft.value)
+                        val predicate: SmartPredicate = when (draft.field) {
+                            SmartField.SOURCE -> SmartPredicate.SourceIn(parsedValues)
+                            SmartField.MANUAL_COLLECTION -> SmartPredicate.InManualCollection(parsedValues)
+                            SmartField.TAG -> SmartPredicate.TagContains(if (draft.matchAllTags) MatchMode.ALL else MatchMode.ANY, parsedValues)
+                            SmartField.FACET -> SmartPredicate.FacetIn(draft.facetSourceId, parsedValues)
+                            SmartField.TITLE -> SmartPredicate.TitleContains(parsedValues)
+                            SmartField.AUTHOR -> SmartPredicate.AuthorContains(parsedValues)
+                            SmartField.STATUS -> SmartPredicate.StatusIn(
+                                parsedValues.mapTo(linkedSetOf()) { PublicationStatus.valueOf(it.uppercase()) },
+                            )
+                            SmartField.RATING -> {
+                                val range = draft.value.split(',', '，').map { it.trim() }
+                                SmartPredicate.RatingBetween(range.getOrNull(0)?.toDoubleOrNull(), range.getOrNull(1)?.toDoubleOrNull())
+                            }
+                            SmartField.ADDED_WITHIN_DAYS -> SmartPredicate.AddedWithinDays(draft.value.trim().toLong())
+                            SmartField.LAST_READ_WITHIN_DAYS -> SmartPredicate.LastReadWithinDays(draft.value.trim().toLong())
+                            SmartField.METADATA_UPDATED_WITHIN_DAYS -> SmartPredicate.MetadataUpdatedWithinDays(draft.value.trim().toLong())
+                            SmartField.PROGRESS -> SmartPredicate.ProgressIn(
+                                parsedValues.mapTo(linkedSetOf()) { ProgressState.valueOf(it.uppercase()) },
+                            )
+                            SmartField.UNRESOLVED_UPDATE -> SmartPredicate.HasUnresolvedUpdate
+                            SmartField.DORMANT_SOURCE -> SmartPredicate.IsDormantSource
+                        }
+                        SmartRuleNode.Predicate(predicate)
+                    }
+                }
             }
-            val node = SmartRuleNode.Predicate(predicate)
-            if (draft.excluded) SmartRuleNode.Not(node) else node
+            var wrapped = base
+            repeat(node.negations) { wrapped = SmartRuleNode.Not(wrapped) }
+            return wrapped
         }
-        return SmartRule(root = if (matchAll) SmartRuleNode.All(children) else SmartRuleNode.Any(children))
+        return SmartRule(root = if (tree.syntheticRoot && tree.children.size == 1 && tree.matchAll && tree.negations == 0)
+            build(tree.children.single()) else build(tree))
     }
 
     internal fun savedCallerTab(): SystemLibraryFilter = callerTab

@@ -34,6 +34,9 @@ class ExtensionInstaller(
         repositoryBinding: RepositoryInstallBinding?,
     ): PreparedExtensionInstall {
         val candidate = verifier.verify(candidateFile)
+        if (repositoryBinding != null && candidate.publisherTrust == PublisherTrust.LOCAL_UNSIGNED) {
+            throw ExtensionInstallException(ExtensionInstallError.UNSIGNED_REPOSITORY_REJECTED)
+        }
         if (repositoryBinding != null && !repositoryBinding.matches(candidate)) {
             throw ExtensionInstallException(ExtensionInstallError.REPOSITORY_BINDING_MISMATCH)
         }
@@ -43,7 +46,7 @@ class ExtensionInstaller(
                 if (candidate.manifest.version == active.manifest.version) {
                     throw ExtensionInstallException(ExtensionInstallError.REPLAY_REJECTED)
                 }
-                if (candidate.manifest.publisherKeyId != active.manifest.publisherKeyId) {
+                if (candidate.publisherIdentity != active.publisherIdentity) {
                     throw ExtensionInstallException(ExtensionInstallError.KEY_ROTATION_NOT_AUTHORIZED)
                 }
             }
@@ -66,6 +69,10 @@ class ExtensionInstaller(
                 false
             }
         }
+        val requiresPublisherTransition = !isLegacyMigration && packageExecutionTrust.requiresPublisherTransition(candidate)
+        if (requiresPublisherTransition && store.readActive(candidate.manifest.sourceId) != null) {
+            throw ExtensionInstallException(ExtensionInstallError.KEY_ROTATION_NOT_AUTHORIZED)
+        }
         val addedCapabilities = addedCapabilities(candidate.manifest, active?.manifest)
         val resourceLimitIncreases = resourceLimitIncreases(candidate.manifest, active?.manifest)
         return PreparedExtensionInstall(
@@ -74,45 +81,60 @@ class ExtensionInstaller(
             addedCapabilities = addedCapabilities.sorted(),
             resourceLimitIncreases = resourceLimitIncreases,
             capabilityGrantFingerprint = capabilityGrantFingerprint(candidate, addedCapabilities, resourceLimitIncreases),
-            remoteCapabilitySetFingerprint = remoteCapabilitySetFingerprint(candidate.manifest, candidate.publisherFingerprint),
+            remoteCapabilitySetFingerprint = remoteCapabilitySetFingerprint(candidate),
             isDowngrade = repositoryBinding == null && active != null && candidate.manifest.version < active.manifest.version,
             isLegacyMigration = isLegacyMigration,
+            requiresPublisherTransition = requiresPublisherTransition,
+            localFileImport = repositoryBinding == null,
             repositoryBinding = repositoryBinding,
         )
     }
 
     /** Revalidates the candidate and active snapshot immediately before the atomic replacement. */
     fun activate(prepared: PreparedExtensionInstall, approval: ExtensionInstallApproval) {
-        if (approval.packageSha256 != prepared.candidate.packageSha256 ||
-            approval.publisherFingerprint != prepared.candidate.publisherFingerprint ||
-            approval.capabilityGrantFingerprint != prepared.capabilityGrantFingerprint
-        ) {
-            throw ExtensionInstallException(ExtensionInstallError.APPROVAL_MISMATCH)
+        try {
+            if (approval.packageSha256 != prepared.candidate.packageSha256 ||
+                approval.publisherFingerprint != prepared.candidate.publisherFingerprint ||
+                approval.capabilityGrantFingerprint != prepared.capabilityGrantFingerprint
+            ) throw ExtensionInstallException(ExtensionInstallError.APPROVAL_MISMATCH)
+            if (prepared.isDowngrade && !approval.allowLocalDowngrade) {
+                throw ExtensionInstallException(ExtensionInstallError.DOWNGRADE_REQUIRES_CONFIRMATION)
+            }
+            if (prepared.isLegacyMigration && !approval.allowLegacyMigration) {
+                throw ExtensionInstallException(ExtensionInstallError.LEGACY_MIGRATION_REQUIRES_CONFIRMATION)
+            }
+            val reverified = try {
+                verifier.verify(prepared.candidate.archiveBytes)
+            } catch (error: HxpVerificationException) {
+                throw ExtensionInstallException(ExtensionInstallError.CANDIDATE_RECHECK_FAILED, error)
+            }
+            if (reverified.packageSha256 != prepared.candidate.packageSha256 ||
+                reverified.publisherIdentity != prepared.candidate.publisherIdentity ||
+                reverified.manifest != prepared.candidate.manifest
+            ) throw ExtensionInstallException(ExtensionInstallError.APPROVAL_MISMATCH)
+            packageExecutionTrust.requireExecutable(reverified)
+            packageExecutionTrust.requireActivation(prepared)
+            val sourceId = prepared.candidate.manifest.sourceId
+            val current = readReplaceableActive(sourceId)
+            if (current?.packageSha256 != prepared.active?.packageSha256 ||
+                prepared.requiresPublisherTransition && store.readActive(sourceId) != null
+            ) throw ExtensionInstallException(ExtensionInstallError.APPROVAL_MISMATCH)
+            val previousBytes = store.readActive(sourceId)
+            store.writeActive(reverified)
+            try {
+                (packageExecutionTrust as? PackageActivationTrust)?.activationSucceeded(prepared)
+            } catch (error: Exception) {
+                try {
+                    store.restoreActive(sourceId, previousBytes)
+                } catch (rollback: Exception) {
+                    rollback.addSuppressed(error)
+                    throw rollback
+                }
+                throw error
+            }
+        } finally {
+            packageExecutionTrust.cancelApproval(prepared)
         }
-        if (prepared.isDowngrade && !approval.allowLocalDowngrade) {
-            throw ExtensionInstallException(ExtensionInstallError.DOWNGRADE_REQUIRES_CONFIRMATION)
-        }
-        if (prepared.isLegacyMigration && !approval.allowLegacyMigration) {
-            throw ExtensionInstallException(ExtensionInstallError.LEGACY_MIGRATION_REQUIRES_CONFIRMATION)
-        }
-        val reverified = try {
-            verifier.verify(prepared.candidate.archiveBytes)
-        } catch (error: HxpVerificationException) {
-            throw ExtensionInstallException(ExtensionInstallError.CANDIDATE_RECHECK_FAILED, error)
-        }
-        if (reverified.packageSha256 != prepared.candidate.packageSha256 ||
-            reverified.publisherFingerprint != prepared.candidate.publisherFingerprint ||
-            reverified.manifest != prepared.candidate.manifest
-        ) {
-            throw ExtensionInstallException(ExtensionInstallError.APPROVAL_MISMATCH)
-        }
-        packageExecutionTrust.requireExecutable(reverified)
-        val current = readReplaceableActive(prepared.candidate.manifest.sourceId)
-        if (current?.packageSha256 != prepared.active?.packageSha256) {
-            throw ExtensionInstallException(ExtensionInstallError.APPROVAL_MISMATCH)
-        }
-        store.writeActive(reverified)
-        (packageExecutionTrust as? PackageActivationTrust)?.activationSucceeded(prepared)
     }
 
     fun readVerifiedActive(sourceId: SourceId): VerifiedHxpPackage? {
@@ -145,7 +167,7 @@ class ExtensionInstaller(
     }
 
     fun remoteCapabilitySetFingerprint(packageInfo: VerifiedHxpPackage): String =
-        remoteCapabilitySetFingerprint(packageInfo.manifest, packageInfo.publisherFingerprint)
+        remoteCapabilitySetFingerprint(packageInfo.manifest, packageInfo.publisherFingerprint ?: "local-unsigned:${packageInfo.packageSha256}")
 
     private fun addedCapabilities(candidate: HxpManifest, active: HxpManifest?): Set<String> = buildSet {
         val activeCapabilities = active?.capabilities
@@ -220,8 +242,7 @@ class ExtensionInstaller(
                 append(name).append(':').append(value.length).append(':').append(value).append('\n')
             }
             field("publisher", publisherFingerprint)
-            field("publisher-key-id", manifest.publisherKeyId)
-            field("source", manifest.sourceId.value)
+            field("publisher-key-id", manifest.publisherKeyId.orEmpty())
             field("remote-read", manifest.capabilities.remoteLibrary.read.toString())
             manifest.capabilities.remoteLibrary.writeOperations.sorted().forEach { field("remote-write", it) }
             manifest.capabilities.remoteLibrary.policies.toSortedMap(compareBy { it.name }).values.forEach { policy ->
@@ -299,6 +320,8 @@ data class PreparedExtensionInstall(
     val isDowngrade: Boolean,
     /** Root-authorized publisher transition requiring a separate explicit approval. */
     val isLegacyMigration: Boolean = false,
+    val requiresPublisherTransition: Boolean = false,
+    internal val localFileImport: Boolean = false,
     internal val repositoryBinding: RepositoryInstallBinding? = null,
 )
 
@@ -319,7 +342,7 @@ data class ResourceLimitIncrease(
 
 data class ExtensionInstallApproval(
     val packageSha256: String,
-    val publisherFingerprint: String,
+    val publisherFingerprint: String?,
     val capabilityGrantFingerprint: String,
     val allowLocalDowngrade: Boolean,
     val allowLegacyMigration: Boolean = false,

@@ -44,9 +44,12 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.LiveRegionMode
+import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.unit.dp
 import org.tsuyomi.shared.librarydomain.LibraryEntry
 import org.tsuyomi.shared.librarydomain.LibraryCollection
@@ -194,6 +197,7 @@ fun LibraryScreen(
     collections: List<LibraryCollection>,
     showNavigationNodes: Boolean,
     modifier: Modifier = Modifier,
+    currentCollectionId: String? = null,
     primaryTabStates: Map<SystemLibraryFilter, LibraryUiState> = emptyMap(),
     onSelectTab: suspend (SystemLibraryFilter) -> Unit = {},
     onOpenCollection: (LibraryCollection) -> Unit,
@@ -204,7 +208,6 @@ fun LibraryScreen(
     onRefreshUpdates: () -> Unit = {},
     onEditFilter: () -> Unit = {},
     onClearFilter: () -> Unit = {},
-    onCreateCollection: () -> Unit,
     onRetry: () -> Unit,
     onLongPressBook: (BookIdentity) -> Unit = {},
     onToggleBookSelection: (BookIdentity) -> Unit = {},
@@ -215,6 +218,12 @@ fun LibraryScreen(
     onDismissSelectionDialog: () -> Unit = {},
     onCreateCollectionFromSelection: (String) -> Unit = {},
     onAddSelectionToCollection: (String) -> Unit = {},
+    deletionFolderCount: Int? = null,
+    deletionMembershipCount: Int = 0,
+    deletionMessage: String? = null,
+    deletionConfirmEnabled: Boolean = true,
+    deletionSubtree: Boolean = false,
+    onDeletionPolicyChange: (Boolean) -> Unit = {},
     onRemoveSelection: () -> Unit = {},
     onViewportChanged: (LibraryViewport) -> Unit = {},
     onViewportSettled: suspend (Int, Int) -> Unit = { _, _ -> },
@@ -241,13 +250,17 @@ fun LibraryScreen(
             showNavigationNodes = showNavigationNodes,
             onSelectTab = onSelectTab,
             onOpenCollection = onOpenCollection,
-            onOpenBook = onOpenBook,
+            onOpenBook = { entry ->
+                if (state.selectionKind == LibrarySelectionKind.BOOK) onToggleBookSelection(entry.book.identity)
+                else onOpenBook(entry)
+            },
             modifier = modifier.fillMaxSize(),
         )
         else -> LibraryPresentation(
             state = state,
             primaryTabStates = primaryTabStates,
             collections = collections,
+            currentCollectionId = currentCollectionId,
             showNavigationNodes = showNavigationNodes,
             onOpenCollection = onOpenCollection,
             onSelectTab = onSelectTab,
@@ -260,7 +273,6 @@ fun LibraryScreen(
             onRefreshUpdates = onRefreshUpdates,
             onEditFilter = onEditFilter,
             onClearFilter = onClearFilter,
-            onCreateCollection = onCreateCollection,
             onRetry = onRetry,
             onLongPressBook = onLongPressBook,
             onToggleBookSelection = onToggleBookSelection,
@@ -272,6 +284,7 @@ fun LibraryScreen(
             onIgnoreUpdate = onIgnoreUpdate,
             onViewportChanged = onViewportChanged,
             onViewportSettled = onViewportSettled,
+            modifier = modifier,
         )
     }
     LibrarySelectionDialogs(
@@ -279,6 +292,12 @@ fun LibraryScreen(
         collections = collections,
         onDismiss = onDismissSelectionDialog,
         onCreateCollection = onCreateCollectionFromSelection,
+        deletionFolderCount = deletionFolderCount,
+        deletionMembershipCount = deletionMembershipCount,
+        deletionMessage = deletionMessage,
+        deletionConfirmEnabled = deletionConfirmEnabled,
+        deletionSubtree = deletionSubtree,
+        onDeletionPolicyChange = onDeletionPolicyChange,
         onAddToCollection = onAddSelectionToCollection,
         onRemove = onRemoveSelection,
     )
@@ -290,6 +309,12 @@ private fun LibrarySelectionDialogs(
     collections: List<LibraryCollection>,
     onDismiss: () -> Unit,
     onCreateCollection: (String) -> Unit,
+    deletionFolderCount: Int?,
+    deletionMembershipCount: Int,
+    deletionMessage: String?,
+    deletionConfirmEnabled: Boolean,
+    deletionSubtree: Boolean,
+    onDeletionPolicyChange: (Boolean) -> Unit,
     onAddToCollection: (String) -> Unit,
     onRemove: () -> Unit,
 ) {
@@ -338,18 +363,44 @@ private fun LibrarySelectionDialogs(
             )
         }
         LibrarySelectionDialog.CONFIRM_REMOVE -> {
-            val selectingCollections = state.selectionKind == LibrarySelectionKind.COLLECTION
+            val selectingCollections = deletionFolderCount != null || state.selectionKind == LibrarySelectionKind.COLLECTION
             TsuyomiDialog(
                 onDismissRequest = onDismiss,
-                title = if (selectingCollections) "删除所选收藏夹？" else "移除所选书籍？",
+                title = if (selectingCollections) stringResource(
+                    if (deletionSubtree) R.string.collection_delete_subtree_title else R.string.collection_delete_reparent_title,
+                ) else "移除所选书籍？",
                 text = if (selectingCollections) {
-                    "将删除 ${state.selectedCollectionIds.size} 个本地收藏夹。收藏夹内书籍仍保留在书架。"
-                } else {
-                    "将处理 ${state.selectedBookIds.size} 本书。网站书架不会被修改。"
+                    if (deletionFolderCount == null) stringResource(R.string.collection_delete_loading)
+                    else stringResource(R.string.collection_delete_preview, deletionFolderCount, deletionMembershipCount) + "\n" +
+                        stringResource(if (deletionSubtree) R.string.collection_delete_subtree_consequence
+                            else R.string.collection_delete_reparent_consequence)
+                } else "将处理 ${state.selectedBookIds.size} 本书。网站书架不会被修改。",
+                body = {
+                    if (selectingCollections) {
+                        deletionMessage?.let { Text(it, Modifier.semantics { liveRegion = LiveRegionMode.Polite }) }
+                    TsuyomiButton(
+                        text = stringResource(R.string.collection_delete_reparent),
+                        onClick = { onDeletionPolicyChange(false) },
+                        modifier = Modifier.fillMaxWidth(),
+                        enabled = deletionConfirmEnabled || deletionMessage != null,
+                        style = if (deletionSubtree) TsuyomiButtonStyle.SECONDARY else TsuyomiButtonStyle.PRIMARY,
+                    )
+                    TsuyomiButton(
+                        text = stringResource(R.string.collection_delete_subtree),
+                        onClick = { onDeletionPolicyChange(true) },
+                        modifier = Modifier.fillMaxWidth(),
+                        style = if (deletionSubtree) TsuyomiButtonStyle.PRIMARY else TsuyomiButtonStyle.SECONDARY,
+                        enabled = deletionConfirmEnabled || deletionMessage != null,
+                    )
+                    }
                 },
-                confirmLabel = if (selectingCollections) "删除" else "移除",
+                confirmLabel = if (selectingCollections) stringResource(
+                    if (deletionSubtree) R.string.collection_delete_subtree_confirm
+                    else R.string.collection_delete_reparent_confirm,
+                ) else "移除",
                 onConfirm = onRemove,
-                dismissLabel = "取消",
+                confirmEnabled = !selectingCollections || (deletionFolderCount != null && deletionConfirmEnabled),
+                dismissLabel = stringResource(R.string.collection_delete_cancel),
                 destructive = selectingCollections,
             )
         }
@@ -446,7 +497,9 @@ private fun FrozenEInkLibraryContent(
                 modifier = Modifier.weight(1f).padding(top = 8.dp).testTag("library-scroll-domain"),
             ) {
                 items(nodes, key = { it.key }) { node -> LibraryNodeGridCard(node) }
-                items(visible, key = ::libraryEntryKey) { entry -> LibraryGridCard(entry, onOpenBook) }
+                items(visible, key = ::libraryEntryKey) { entry ->
+                    LibraryGridCard(entry, onOpenBook, entry.book.identity in state.selectedBookIds)
+                }
             }
             LibraryLayout.LIST -> LazyColumn(
                 Modifier.weight(1f).padding(top = 8.dp).testTag("library-scroll-domain"),
@@ -456,7 +509,7 @@ private fun FrozenEInkLibraryContent(
                     HorizontalDivider()
                 }
                 items(visible, key = ::libraryEntryKey) { entry ->
-                    LibraryRow(entry, onOpenBook)
+                    LibraryRow(entry, onOpenBook, entry.book.identity in state.selectedBookIds)
                     HorizontalDivider()
                 }
             }
@@ -468,7 +521,7 @@ private fun FrozenEInkLibraryContent(
                     HorizontalDivider()
                 }
                 items(visible, key = ::libraryEntryKey) { entry ->
-                    LibraryCompactRow(entry, onOpenBook)
+                    LibraryCompactRow(entry, onOpenBook, entry.book.identity in state.selectedBookIds)
                     HorizontalDivider()
                 }
             }
@@ -544,13 +597,15 @@ private fun LibraryNodeRow(node: LibraryNode, compact: Boolean) {
 }
 
 @Composable
-private fun LibraryRow(entry: LibraryEntry, onOpenBook: (LibraryEntry) -> Unit) {
+private fun LibraryRow(entry: LibraryEntry, onOpenBook: (LibraryEntry) -> Unit, chosen: Boolean = false) {
     Surface(
-        modifier = Modifier.fillMaxWidth().clickable(role = Role.Button) { onOpenBook(entry) },
+        modifier = Modifier.fillMaxWidth().semantics { selected = chosen }
+            .clickable(role = Role.Button) { onOpenBook(entry) },
         color = MaterialTheme.colorScheme.surface,
     ) {
         Column(Modifier.padding(horizontal = 4.dp, vertical = 14.dp)) {
             Text(entry.book.title, style = MaterialTheme.typography.titleMedium)
+            if (chosen) Text("已选择", style = MaterialTheme.typography.labelLarge)
             val authors = entry.book.authors.joinToString("、").ifBlank { stringResource(R.string.library_unknown_author) }
             Text(authors, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
             Row(horizontalArrangement = Arrangement.spacedBy(12.dp), modifier = Modifier.padding(top = 6.dp)) {
@@ -563,10 +618,10 @@ private fun LibraryRow(entry: LibraryEntry, onOpenBook: (LibraryEntry) -> Unit) 
 }
 
 @Composable
-private fun LibraryGridCard(entry: LibraryEntry, onOpenBook: (LibraryEntry) -> Unit) {
+private fun LibraryGridCard(entry: LibraryEntry, onOpenBook: (LibraryEntry) -> Unit, chosen: Boolean = false) {
     Card(
         onClick = { onOpenBook(entry) },
-        modifier = Modifier.fillMaxWidth(),
+        modifier = Modifier.fillMaxWidth().semantics { selected = chosen },
     ) {
         Column {
             Box(
@@ -586,14 +641,17 @@ private fun LibraryGridCard(entry: LibraryEntry, onOpenBook: (LibraryEntry) -> U
                 maxLines = 2,
                 modifier = Modifier.padding(horizontal = 8.dp, vertical = 8.dp),
             )
+            if (chosen) Text("已选择", style = MaterialTheme.typography.labelLarge,
+                modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp))
         }
     }
 }
 
 @Composable
-private fun LibraryCompactRow(entry: LibraryEntry, onOpenBook: (LibraryEntry) -> Unit) {
+private fun LibraryCompactRow(entry: LibraryEntry, onOpenBook: (LibraryEntry) -> Unit, chosen: Boolean = false) {
     Surface(
-        modifier = Modifier.fillMaxWidth().clickable(role = Role.Button) { onOpenBook(entry) },
+        modifier = Modifier.fillMaxWidth().semantics { selected = chosen }
+            .clickable(role = Role.Button) { onOpenBook(entry) },
         color = MaterialTheme.colorScheme.surface,
     ) {
         Row(
@@ -601,6 +659,7 @@ private fun LibraryCompactRow(entry: LibraryEntry, onOpenBook: (LibraryEntry) ->
             horizontalArrangement = Arrangement.spacedBy(8.dp),
         ) {
             Text(entry.book.title, style = MaterialTheme.typography.bodyLarge, modifier = Modifier.weight(1f))
+            if (chosen) Text("已选择", style = MaterialTheme.typography.labelMedium)
             if (entry.readLater) {
                 Text(stringResource(R.string.library_filter_read_later), style = MaterialTheme.typography.labelMedium)
             }
