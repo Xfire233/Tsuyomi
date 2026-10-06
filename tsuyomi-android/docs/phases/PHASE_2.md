@@ -68,7 +68,7 @@ Phase 2 stops at progress. Library organization, rating/tags, transfer export/im
 11. Adviser remediation preserves the signed-central-directory executable entry, enforces signed Cookie mode/origins for WebView and transport, discards terminally failed QuickJS contexts, binds cancellation to one operation, closes source clients on Compose-owner disposal, and makes resource-limit increases approval-bound. The focused Android/API 29 run passed QuickJS runtime (5), app (3), and WebView (3) instrumentation tests plus debug assembly; the extension fixture run passed 6/6 tests, two deterministic rebuilds, and the committed checksum.
 12. 最终 Adviser 发现 Android/protocol change detection 在组件 `working-directory` 下使用了错误的相对 pathspec，导致早期 hosted success 实为实质步骤 skip。检测改为 `git -C "$GITHUB_WORKSPACE"` 后，真实 CI 又暴露并修复 JUnit/Compose module verification metadata、缺失的 `androidApis` lock state，以及未 `remember` 的 Navigation back-stack entry。`6544cf49b52d12a9abe6aecfdd6e29327cf01e5b` 随后完成五项 required checks，API job step 证明确实安装/启动 API 29 emulator 并运行 instrumentation。
 
-Phase 2 的交付复盘、challenge WebView 的证据边界和未来 Phase 的 Planner/Designer/Adviser/人工合并流程见 [PHASE_2_RETROSPECTIVE.md](../process/PHASE_2_RETROSPECTIVE.md)。
+Phase 2 的交付复盘与当时的 challenge WebView／代理审阅流程见 [PHASE_2_RETROSPECTIVE.md](../process/PHASE_2_RETROSPECTIVE.md)，仅作为历史记录。当前贡献与审阅要求由[根贡献指南](../../../CONTRIBUTING.md)和 [QUALITY_GATES.md](../process/QUALITY_GATES.md)维护。
 
 ## Evidence boundary
 

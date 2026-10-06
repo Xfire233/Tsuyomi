@@ -3,6 +3,8 @@
 
 # Phase 2 工程复盘与后续执行流程
 
+> **Historical record — Phase 2 retrospective.** The “subsequent phases” Planner/Designer/Adviser workflow below records the process recommendation made at Phase 2 close; its role names and tool assumptions are not current universal contributor prerequisites. Use [`QUALITY_GATES.md`](QUALITY_GATES.md) and the repository [`CONTRIBUTING.md`](../../CONTRIBUTING.md) for current role-neutral review, human-authorization and protected-check requirements. Dated receipts and Phase 2 findings below remain historical evidence and are not rewritten as current claims.
+
 ## 交付结论
 
 Phase 2 交付了签名 Wenku8 只读垂直切片；真正执行 required jobs 的 hosted-admission head `6544cf49b52d12a9abe6aecfdd6e29327cf01e5b` 通过全部检查。后续 Phase 不得把“功能实现完成”或只显示绿色的 check 视为交付；只有计划、独立审阅、实质步骤证据、可回退实现、分层验收和受保护合并门禁都闭合，才算完成。

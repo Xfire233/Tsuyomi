@@ -1,79 +1,102 @@
 <!-- SPDX-FileCopyrightText: 2026 Tsuyomi Contributors -->
 <!-- SPDX-License-Identifier: Apache-2.0 -->
 
-# Contributing
+# Contributing to Tsuyomi for Android
 
-- New source files require SPDX copyright and license identifiers.
-- New dependencies and copied/adapted upstream code require an entry in `THIRD_PARTY_NOTICES.md` with a pinned source revision and adoption scope.
-- Do not add user accounts, cloud synchronization, telemetry, crash reporting, CAPTCHA bypass, or Android-specific APIs to the extension host contract without an ADR.
-- Preserve the dependency direction in `docs/architecture/MODULES.md`.
-- Do not place session credentials, cookies, source content, private signing keys, or local SDK paths under version control.
-- Follow `docs/process/QUALITY_GATES.md`, `docs/process/REPOSITORY_GOVERNANCE.md`, and `docs/design/OPTION_APPLICABILITY.md`; a persisted field or enum is not evidence that a UI control is implemented.
-- Every named admission or review gate approval and finding closure must bind to immutable Git input and be recorded under `docs/phases` / `docs/reviews`.
-- Dependency changes must update the version catalog, Gradle lock state, verification metadata, `THIRD_PARTY_NOTICES.md`, and validation evidence in one reviewable change.
-- Run `python ../tools/check_repository.py --scope android` before release; build output, local SDK state, dumps, credentials, and unknown root files are forbidden.
-- Build, sign, tag and publish an Android release only through `docs/process/RELEASE_PROCEDURE.md`. Signing happens outside Gradle, the private key and its password never enter the worktree, a build scan or CI, and a published asset is only accepted after the `android-release` workflow re-derives its identity, signer and digests from the uploaded file.
-- A manifest, extension parser, Host API or signed-policy change must rebuild and verify the deterministic public HXP fixture before Android instrumentation; stale signed fixtures are invalid evidence, not a runtime fallback.
-- Local API 29 CI is permitted only in explicit `HIGH`; `--build` runs the planner-selected full local preflight on its disposable AVD. The contributor-facing invocation is documented below; `QUALITY_GATES.md` owns gate selection and order.
-- In `HIGH`, follow `exact reproduction → affected test → adjacent sequence → local planner-selected gate → hosted protected checks`. Focused task/class runs are diagnostics, not the full gate; fixture, migration, security and screenshot regressions remain in CI.
-- In `LOW`, never run local API 29 CI, including `--prepare-only`; bounded direct development compilation is separate, and hosted protected checks remain the CI path and final acceptance.
-- Resolve active/deferred profiles from `.agents/skills/tsuyomi-android-review/review-policy.json` before test selection. Frozen-profile screenshot and instrumentation tests remain retained but disabled from routine gates until an explicit policy restoration.
-- Hosted protected checks remain independently required final acceptance: a local result cannot bypass, replace or authorize their success. Compare recorded image revision, system fingerprint and WebView version when diagnosing a host discrepancy; never claim local and hosted emulator builds are identical. Performance comparisons must use equal scope, selected tasks, profile/image revision and host evidence (as well as the same resolved `HEAD` and worktree-overlay policy), and compare recorded phase timings rather than a single total.
-- A repeated failure signature across Journeys or a focused-pass/class-order-fail split is a harness/lifecycle incident until disproved. Capture diagnostic device/log state and classify the shared boundary; never make speculative production patches or modify production behavior solely to satisfy Compose idling.
-- `HIGH` is the only local runner mode and serializes device work while allowing Gradle daemon reuse. `LOW` is for bounded interactive work. `--mode ci` is reserved for hosted execution with `GITHUB_ACTIONS=true`. Disposable CI AVDs never use the dedicated online candidate; automation uses that dedicated debug-signed candidate first, then freezes it for human review. Never run credential-clearing setup on the candidate.
+Start with the [monorepo contribution guide](../CONTRIBUTING.md). Android Studio is optional; command-line builds use the checked-in Gradle Wrapper. OMP, MCP servers, assistant roles and private maintainer devices are not required.
 
 ## Build from source
 
-Prerequisites are listed in the [workspace setup](../WORKSPACE.md#local-prerequisites): JDK17, Android SDK Platform37, Node/npm and Python with REUSE6.2.0. From this component directory on Windows:
+### Prerequisites
+
+- JDK 17, Git and an Android SDK installed for your operating system.
+- SDK Platform 37 and platform-tools. The native runtime also uses NDK `28.2.13676358` and CMake `3.22.1`; install them through the SDK manager and accept the Android SDK licenses.
+- Python 3.11+ for repository verification and the optional local CI runner. Node.js LTS and npm are needed for protocol conformance, not a basic Android build.
+
+Build versions are owned by [`build-logic`](build-logic/src/main/kotlin/org/tsuyomi/buildlogic), the [version catalog](gradle/libs.versions.toml) and the [native module](source/quickjs-runtime/build.gradle.kts). Android 10/API 29 is the runtime minimum, not the compile SDK.
+
+Set `JAVA_HOME` to your JDK and `ANDROID_HOME` to your SDK, or configure the SDK in an ignored `local.properties` through Android Studio. `ANDROID_SDK_ROOT` is also accepted by the local runner. Use your own paths; do not commit SDK configuration. No globally installed Gradle or extension sibling checkout is needed.
+
+From `tsuyomi-android`, choose the command for your shell:
+
+**Windows PowerShell**
 
 ```powershell
-$env:ANDROID_SDK_ROOT = '<your-android-sdk>'
-./tools/Doctor.ps1
-./tools/Run-Gradle-Low.bat --console=plain --dependency-verification strict :app:assembleDebug
+$env:ANDROID_HOME = '<your-android-sdk>'
+./gradlew.bat --console=plain --dependency-verification strict :app:assembleDebug
 ```
 
-The debug APK uses the isolated `.fixture` application identity; it is not a distributable release. Real-service development uses `:app:assembleOnline`. Release assembly, external signing and publication follow [`RELEASE_PROCEDURE.md`](docs/process/RELEASE_PROCEDURE.md).
+**Linux/macOS shell**
+
+```sh
+export ANDROID_HOME='<your-android-sdk>'
+./gradlew --console=plain --dependency-verification strict :app:assembleDebug
+```
+
+Use `gradlew.bat` on Windows and `./gradlew` on Unix-like systems in the remaining Gradle examples. The Windows `Run-Gradle-Low.bat` and `Run-Gradle-High.bat` helpers are optional resource presets, not required entry points.
+
+### Build variants
+
+| Variant | Purpose | Application identity |
+|---|---|---|
+| `debug` | Isolated deterministic fixture development and regression tests | `org.tsuyomi.android.fixture` |
+| `online` | Debug-signed development with real source services | `org.tsuyomi.android` |
+| `release` | Release assembly, followed by external signing | `org.tsuyomi.android` |
+
+The debug APK is produced at `app/build/outputs/apk/debug/app-debug.apk`. Use `:app:assembleOnline` for real-service development on your own isolated test device. `online` shares the release application ID but **not** its signing identity: do not uninstall a user's release installation or clear its data to install a debug-signed build. Release preparation and publication are maintainer operations governed by [`RELEASE_PROCEDURE.md`](docs/process/RELEASE_PROCEDURE.md).
+
+## Contribution rules
+
+- Preserve the dependency direction in [`MODULES.md`](docs/architecture/MODULES.md) and the platform-neutral extension contract.
+- Account/cloud/telemetry changes need an explicit architecture decision; CAPTCHA and anti-bot bypass remain prohibited. Never commit credentials, content dumps or signing material.
+- Dependency changes update the version catalog, lock state, verification metadata and third-party notices together. Do not disable strict dependency verification to get a build through.
+- Follow [`OPTION_APPLICABILITY.md`](docs/design/OPTION_APPLICABILITY.md): a stored field or enum does not prove that a control is implemented.
+- Bind formal gate results to immutable source/artifact inputs. Keep generated logs, device captures and reports ignored; public PRs must still summarize reproducible commands, results and limitations.
+- A manifest, parser, Host API or signed-policy change must verify the affected deterministic public HXP inputs before instrumentation. Signed-fixture regression stays in CI; it is not a second manual acceptance round.
+
+## Verification
+
+Select affected tasks using [`QUALITY_GATES.md`](docs/process/QUALITY_GATES.md) and the [CI planner](../tools/android_ci_plan.py), rather than running every module after every edit. For example, the app's basic build, JVM tests and lint can be invoked together:
+
+```text
+./gradlew --console=plain --dependency-verification strict :app:assembleDebug :app:testDebugUnitTest :app:lintDebug
+```
+
+For UI work, follow [`UI_CONSTITUTION.md`](docs/design/UI_CONSTITUTION.md) and [`UI_ATLAS.md`](docs/design/UI_ATLAS.md); the [review policy](../.agents/skills/tsuyomi-android-review/review-policy.json) selects active/deferred profiles. The repository [review procedure](../.agents/skills/tsuyomi-android-review/SKILL.md) can be read directly without installing an assistant. Equivalent IDE/SDK tools may supply the required evidence; record tool versions and device facts. Human qualitative approval remains separate from tests.
+
+Use a disposable emulator for instrumentation that clears fixture data. Keep it separate from a persistent real-service review candidate or personal installation. Record the actual device identity, API, image, display settings and WebView version; another developer need not possess the maintainer's named AVD or private test account. Required protected GitHub checks remain independent final admission.
 
 ## Local API 29 runner
 
-The runner is optional unless the change requires the explicit-`HIGH` local preflight. `LOW` MUST NOT invoke it, including `--prepare-only`; hosted protected checks remain independent final acceptance. Follow [`QUALITY_GATES.md`](docs/process/QUALITY_GATES.md) for required gate selection and order. The runner uses a disposable AVD, never the dedicated online candidate; candidate automation/review ownership and privacy rules above remain in force.
+The local runner is an optional fast reproduction/preflight tool for contributors with a compatible emulator host. Choosing `--mode high` explicitly opts into its resource-intensive local mode; the full preflight is then the planner-selected `--build` run. `--mode low` is rejected, including for `--prepare-only`; `--mode ci` is reserved for GitHub Actions. Assistant-session scheduling rules are described separately in [`TOOLING.md`](../TOOLING.md#execution-resource-modes).
 
-On Windows, use the native environment first:
+Install SDK command-line tools, emulator, platform-tools and the exact image from [`android_api29_profile.json`](../tools/android_api29_profile.json). The profile currently uses an x86_64 API 29 image; do not assume native support on ARM hosts. Linux requires usable KVM; Windows requires supported emulator acceleration. Hosted Linux CI owns the protected baseline, not a claim of identical Windows/macOS execution. If your host cannot run this image, document the limit and rely on hosted checks for that lane; do not substitute another image and call it equivalent.
+
+From `tsuyomi-android`, with your SDK configured:
+
+**Windows PowerShell**
 
 ```powershell
-$env:ANDROID_SDK_ROOT = '<your-android-sdk>'
-./tools/Doctor.ps1
 $base = git -C .. merge-base origin/main HEAD
 python ../tools/android_api29.py --repo-root .. --base $base --head HEAD --mode high --build
 ```
 
-For one focused diagnosis, select an exact task and test class; this is diagnostic evidence, not the full planner-selected gate:
+**Linux shell**
 
-```powershell
-python ../tools/android_api29.py --repo-root .. --base $base --head HEAD --mode high `
-  --task :app:connectedDebugAndroidTest `
-  --test-class org.tsuyomi.android.UpdatesProductionJourneyInstrumentedTest
-```
-
-Repeat `--task` only for the bounded focused diagnosis. `--prepare-only` is for explicit-HIGH AVD environment/lifecycle inspection, not LOW preflight:
-
-```powershell
-python ../tools/android_api29.py --repo-root .. --base $base --head HEAD --mode high --prepare-only
-```
-
-If Windows native execution cannot resolve a confirmed host discrepancy, WSL2 is a last resort and requires usable KVM. Keep checkout and SDK on the Linux filesystem (not `/mnt/c`) and use the same runner/profile:
-
-```bash
-export ANDROID_SDK_ROOT="$HOME/Android/Sdk"
+```sh
 base="$(git -C .. merge-base origin/main HEAD)"
 python3 ../tools/android_api29.py --repo-root .. --base "$base" --head HEAD --mode high --build
 ```
 
-Runner details, AVD profile, evidence and diagnosis rules are owned by [`QUALITY_GATES.md`](docs/process/QUALITY_GATES.md) and [`tools/android_api29_profile.json`](../tools/android_api29_profile.json); do not reproduce their policy here.
+If the target branch uses another remote, use that branch instead of `origin/main`. If no valid base is available, omit `--base`; the planner falls back conservatively to a full plan. Local runs require `--head HEAD` and include the recorded worktree overlay.
+
+For a focused diagnosis, replace `--build` with `--task :app:connectedDebugAndroidTest --test-class org.tsuyomi.android.UpdatesProductionJourneyInstrumentedTest`. Such a run is diagnostic evidence, not the full gate. Use `--prepare-only` only for emulator lifecycle/environment inspection. Diagnose a failure with the exact affected test, then its adjacent sequence, before one stable full preflight; do not repeatedly run the entire matrix while debugging.
+
+The runner creates and cleans its own disposable AVD. Evidence is saved under `build/api29-ci/`. Compare recorded image revisions, fingerprints, WebView versions and phase timings when diagnosing host differences; a local result never bypasses hosted protected checks. WSL2 is an optional Windows alternative only with usable KVM and checkout/SDK on the Linux filesystem, not a prerequisite for other contributors.
 
 ## Updates verification
 
-- `UpdatesProductionJourneyInstrumentedTest` exercises the real MainActivity, signed fixture, WorkManager, Room, Detail and Reader. Select it through `:app:connectedDebugAndroidTest` and `-Pandroid.testInstrumentationRunnerArguments.class=org.tsuyomi.android.UpdatesProductionJourneyInstrumentedTest`, using the current resource-mode runner and the isolated AVD serial in `ANDROID_SERIAL`.
-- Room migration, exact-anchor handling, recovery, cancellation and live-membership admission are owned by `:core:database:connectedDebugAndroidTest` (`RoomUpdateStoreInstrumentedTest` and the affected `Phase3MigrationInstrumentedTest` method), not an empty database JVM task.
-- Notification-denial scheduling needs an isolated API 33+ device and `UpdateSchedulerInstrumentedTest#notification_denial_does_not_block_periodic_scheduling`; an API 29 run does not supply that evidence.
-- For deliberate diagnostic inspection only, add both `-Ptsuyomi.keepP4cReviewState=true` and `-Pandroid.injected.androidTest.leaveApksInstalledAfterRun=true`. The Journey refuses non-fixture packages; the opt-in retains test data/preferences for host inspection. These flags do not create a separate acceptance obligation and must never be used on a persistent shared candidate or as permission to replace a canonical APK or preserve approval state.
+- `UpdatesProductionJourneyInstrumentedTest` covers MainActivity, signed fixture, WorkManager, Room, Detail and Reader through `:app:connectedDebugAndroidTest`.
+- Storage migration and recovery use `:core:database:connectedDebugAndroidTest` (`RoomUpdateStoreInstrumentedTest` and affected `Phase3MigrationInstrumentedTest` methods), not an empty database JVM task.
+- Notification-denial scheduling requires an isolated API 33+ device and `UpdateSchedulerInstrumentedTest#notification_denial_does_not_block_periodic_scheduling`; API 29 does not cover that permission.
+- For deliberate diagnostic inspection only, `-Ptsuyomi.keepP4cReviewState=true` together with `-Pandroid.injected.androidTest.leaveApksInstalledAfterRun=true` retains fixture test state. Never use these flags on a persistent shared candidate or treat them as permission to replace an approved APK.

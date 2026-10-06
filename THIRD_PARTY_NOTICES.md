@@ -9,16 +9,18 @@ This file records direct runtime/build/test dependencies and the public projects
 
 | Project | Pinned version | License | Scope |
 |---|---:|---|---|
-| Gradle Wrapper | 8.14.3 | Apache-2.0 | Checked-in Android build wrapper |
-| Android Gradle Plugin | 8.13.1 | Apache-2.0 | Android build tooling |
-| Kotlin compiler and Compose plugin | 2.3.0 | Apache-2.0 | Build tooling/runtime metadata |
+| Gradle Wrapper | 9.3.1 | Apache-2.0 | Checked-in Android build wrapper |
+| Android Gradle Plugin | 9.1.1 | Apache-2.0 | Android build tooling |
+| Kotlin compiler and Compose plugin | 2.4.0 | Apache-2.0 | Build tooling/runtime metadata |
 | Kotlin Symbol Processing | 2.3.11 | Apache-2.0 | Room code generation |
-| AndroidX Compose BOM and UI/Foundation/Material3 | 2026.06.01 | Apache-2.0 | Android runtime |
+| AndroidX Compose BOM / UI / Foundation | 2026.08.00 / 1.12.0 | Apache-2.0 | Android runtime and matching screenshot classpaths |
+| AndroidX Compose Material3 | 1.5.0-alpha27 | Apache-2.0 | Android runtime; selective graduated APIs only |
 | AndroidX Core / Activity / Lifecycle / Navigation | 1.19.0 / 1.13.0 / 2.10.0 / 2.9.8 | Apache-2.0 | Android runtime |
 | AndroidX DataStore / Room | 1.2.1 / 2.8.4 | Apache-2.0 | Android runtime and tests |
-| Material3 Adaptive | 1.2.0 | Apache-2.0 | Android runtime |
+| AndroidX WorkManager / Concurrent Futures | 2.11.2 / 1.2.0 | Apache-2.0 | Persistent update scheduling and runtime compatibility |
+| Material3 Adaptive | 1.3.0 | Apache-2.0 | Android runtime |
 | Kotlinx Coroutines | 1.10.2 | Apache-2.0 | Android runtime and tests |
-| Compose Preview Screenshot Testing | 0.0.1-alpha11 | Apache-2.0 | Screenshot test tooling |
+| Compose Preview Screenshot Testing | 0.0.1-alpha15 | Apache-2.0 | AGP9-compatible screenshot test tooling |
 | AndroidX Test runner/JUnit extension/Espresso | 1.7.0 / 1.3.0 / 3.7.0 | Apache-2.0 | Instrumentation tests |
 | JUnit 4 | 4.13.2 | EPL-1.0 | JVM tests; not shipped |
 | Ajv | 8.20.0 | MIT | Protocol JSON Schema conformance tests |

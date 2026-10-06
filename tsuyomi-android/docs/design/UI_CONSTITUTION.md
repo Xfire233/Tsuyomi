@@ -943,7 +943,7 @@ This correction retires Atlas decision `H-source`; the oversized band is rejecte
 
 ### 16.4 Static enforcement (binding; Adviser P1-3 CLOSED — checks owned by `build-logic`)
 
-All checks run in CI and release builds with **no per-file suppression, no lint baseline, no feature allowlist**. A platform-interop exception is implemented in the owning core component and changes the rule itself through Designer+Adviser review — never via a local escape hatch.
+All checks run in CI and release builds with **no per-file suppression, no lint baseline, no feature allowlist**. A platform-interop exception is implemented in the owning core component and changes the rule itself through design and technical review by the maintainers — never via a local escape hatch. Named assistant roles are not required.
 
 1. **Dependency-DAG verification**: the §2.2 DAG is machine-checked; any unlisted edge fails the build.
 2. **Denied imports outside `core:ui`**: interactive Material dialogs/buttons/fields/switches/checkboxes/chips/menus/sheets/snackbars and all animation APIs (`AnimatedContent`, `AnimatedVisibility`, `animateContentSize`, `animate*AsState`, `rememberInfiniteTransition`, …).
