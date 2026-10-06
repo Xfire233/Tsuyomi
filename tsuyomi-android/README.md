@@ -1,11 +1,15 @@
 <!-- SPDX-FileCopyrightText: 2026 Tsuyomi Contributors -->
 <!-- SPDX-License-Identifier: Apache-2.0 -->
 
-# Tsuyomi for Android
+<p align="center">
+  <img src="app/src/main/res/drawable-nodpi/tsuyomi_launcher_artwork.png" alt="Tsuyomi 应用图标" width="128" height="128">
+</p>
 
-<img src="app/src/main/res/drawable-nodpi/tsuyomi_launcher_artwork.png" alt="Tsuyomi F6R 应用图标" width="112" height="112">
+<h1 align="center">Tsuyomi for Android</h1>
 
-本地优先的原生 Android 轻小说阅读器，使用 Kotlin 与 Jetpack Compose 构建，支持 Android 10 及以上版本（`minSdk 29`）。
+<p align="center">本地优先的原生 Android 轻小说阅读器</p>
+
+使用 Kotlin 与 Jetpack Compose 构建，支持 **Android 10 及以上版本**（`minSdk 29`）。
 
 ## 下载与更新
 
@@ -15,12 +19,15 @@
 
 ## 功能与状态
 
-- 搜索、目录与阅读；保存语义阅读进度和书签。
-- 管理本地书架、收藏夹、稍后阅读、排序与布局；缓存章节和封面。
-- 查看网站收藏并在确认后操作；更新检查默认关闭。
-- 通过独立签名扩展支持内容来源；扩展由[独立仓库](https://github.com/Chachaanteng/tsuyomi-extensions)维护。
+- **发现与阅读**：浏览来源、搜索、查看目录与阅读，保存进度和书签。
+- **本地书架**：收藏夹、稍后阅读、标签、排序与多种布局。
+- **离线与备份**：缓存章节和封面，导入或导出本地数据。
+- **网站收藏与更新**：查看网站收藏并在确认后操作；更新检查默认关闭。
+- **来源扩展**：从官方签名目录或本地文件安装扩展，由[独立仓库](https://github.com/Chachaanteng/tsuyomi-extensions)维护。
 
 Wenku8 是当前完成度最高的来源。Standard 界面是维护重点；E-ink 模式保留但暂时冻结，尚未完成新一轮墨水屏适配。应用不提供 CAPTCHA 求解或反爬绕过；安全验证由用户在受控页面完成。
+
+实现计划与 TODO 统一维护在[根 README](../README.md#实现计划--todo)，不在组件入口重复维护。
 
 ## 开发与贡献
 

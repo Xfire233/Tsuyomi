@@ -20,7 +20,7 @@
 - [ ] Relevant unit/JVM/conformance tests
 - [ ] Android instrumentation where lifecycle/API/storage/security changed
 - [ ] Real composable screenshot/golden diff where UI changed
-- [ ] API 29 evidence covers every profile selected by `.agents/skills/tsuyomi-android-review/review-policy.json`; deferred/frozen profiles are recorded but not run as routine gates
-- [ ] Each active profile has separate portrait evidence on its declared AVD/geometry; landscape, split-screen and goldens supplement but do not substitute
+- [ ] API 29 evidence covers profiles required by the repository's current [Android review policy](../.agents/skills/tsuyomi-android-review/review-policy.json); frozen/deferred profiles are recorded but not run as routine gates
+- [ ] Each required active profile has separate portrait evidence on its declared AVD/geometry; landscape, split-screen and goldens supplement but do not substitute
 - [ ] Dependency locks, verification metadata, notices, REUSE, and repository artifact policy
 - [ ] Documentation, changelog, version, and rollback notes updated

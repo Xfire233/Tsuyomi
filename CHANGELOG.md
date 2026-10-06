@@ -5,6 +5,7 @@
 
 ## Unreleased
 
+- Made contribution/build guidance usable without OMP or a maintainer's workstation: documented platform-specific commands and isolated test-device/signing boundaries, separated optional assistant integrations, and corrected stale planning/dependency notices. Centered README branding, split the feature list and added a scoped development TODO.
 - Simplified the public root/Android READMEs into user-facing download, capability and privacy/license entry points; moved developer build and native HIGH API29 invocation guidance to Android CONTRIBUTING without removing local or hosted admission checks.
 - Published Android [`0.3.0-beta.5`](https://github.com/Xfire233/Tsuyomi/releases/tag/android-v0.3.0-beta.5) / versionCode7 from protected PR60 and merged source5de7a78 using the retained release certificate; independent uploaded-asset verification37360974704 passed. The maintainer confirmed recovery custody and the post-check normal merge/publication. Beta.4 tags/assets are unchanged; exact-artifact physical-phone acceptance remains pending and no stable/EINK/canonical approval is implied.
 - Corrected the migrated API29 profile link and beta.5 signing instructions; release tag/asset identity derives from the current receipt, and the release runbook preserves final-head protected PR admission plus separate lightweight main health.

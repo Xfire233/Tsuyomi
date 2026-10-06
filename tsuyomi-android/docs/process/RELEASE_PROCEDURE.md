@@ -13,8 +13,7 @@
 
 - 制品对应源码已通过受保护 PR 正常合并到 `main`，发布工作树干净（`git status --porcelain` 为空）；记录 PR head、base、准入 run、merge commit 与远端 `main`，squash 时核对源树对应关系；
 - 五个 required checks 在最终 PR head 上全部成功（`repository-policy`、`protocol-conformance`、`extensions-baseline`、`android-build-test-lint-goldens`、`android-api29-instrumentation`），且已获 `QUALITY_GATES.md` G4.5 要求的人工合并确认；合并后的三项轻量 main health 单独记录，不重复触发 Android 重型门禁，也不替代 PR 准入；
-- `python tools/check_repository.py`（仓库根执行）通过；
-- 本地 `HIGH` planner-selected 门禁已通过，证据绑定确切源码／版本／资源输入；后续只有文档／工具差异时明确记录差异及其受影响验证，不能把另一输入冒充同一次执行；
+- 在受支持的发布签名主机上，本地 `HIGH` planner-selected 门禁已通过，证据绑定确切源码／版本／资源输入；此仓库的签名脚本与 DPAPI 密钥托管要求 Windows。该本机发布前置条件仅适用于获授权的发布维护者，不是普通贡献者的本地检查要求。后续只有文档／工具差异时明确记录差异及其受影响验证，不能把另一输入冒充同一次执行；
 - 用户已明确授权本次发布；物理手机验收状态按第 8 节如实记录，不得用模拟器证据代替。
 
 ## 2. 版本身份
@@ -25,11 +24,18 @@
 
 ## 3. 构建
 
-在已合并的待发布提交上执行：
+在已合并的待发布提交上构建。Gradle Wrapper 可在已配置 Android SDK/JDK 的 Windows、macOS 或 Linux 上运行；在仓库根目录按当前 shell 选择对应 wrapper：
 
 ```bash
 cd tsuyomi-android
-sh ./gradlew :app:assembleRelease --dependency-verification strict
+./gradlew :app:assembleRelease --dependency-verification strict
+```
+
+PowerShell 使用签入的 Windows wrapper：
+
+```powershell
+Set-Location tsuyomi-android
+.\gradlew.bat :app:assembleRelease --dependency-verification strict
 ```
 
 产物为 `app/build/outputs/apk/release/app-release-unsigned.apk`。不运行 `--write-locks`；依赖锁只由 dependency input 变更时的独立维护步骤更新。
@@ -39,6 +45,8 @@ sh ./gradlew :app:assembleRelease --dependency-verification strict
 ## 4. Gradle 之外签名
 
 签名**不得**在 Gradle 中进行：keystore 口令一旦进入 configuration cache、build scan 或 CI 作业输入即视为泄漏。
+
+下列签名命令仅适用于 Windows PowerShell；脚本依赖 Windows Android SDK build-tools 安装位置、Java 17（默认 `C:\Program Files\Java\jdk-17`）以及获准发布维护者在工作树外托管的签名材料。该私钥/证书与个人机器状态不是普通贡献或构建的前置条件；无权访问签名材料者不得尝试签名或替代密钥。
 
 在 `tsuyomi-android` 目录核对本次已合并源码的版本后设置参数。以下为 beta.5 / versionCode7；后续发布需使用对应源码的实际值，脚本会拒绝 APK 身份不匹配：
 
@@ -67,7 +75,7 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File tools/Publish-AndroidRel
 
 ### 密钥托管边界
 
-私钥、口令文件和证书位于工作树之外（默认 `%USERPROFILE%\.tsuyomi\signing\android-release\`），口令以 Windows 当前用户 DPAPI 保护。该保护是**同机**恢复手段，不构成异地或独立恢复副本；公开发布前必须建立独立恢复托管。这一点由 `release.json` 的 `keyCustody` 字段如实记录。
+私钥、口令文件和证书必须位于工作树之外（Windows 脚本默认 `%USERPROFILE%\.tsuyomi\signing\android-release\`），口令由 Windows 当前用户 DPAPI 保护。脚本和默认密钥保护是 Windows 专用；DPAPI 是**同机**恢复手段，不构成异地或独立恢复副本；公开发布前必须建立独立恢复托管。这一点由 `release.json` 的 `keyCustody` 字段如实记录。
 
 ## 5. 发布制品记录
 

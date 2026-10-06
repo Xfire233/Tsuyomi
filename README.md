@@ -1,11 +1,21 @@
 <!-- SPDX-FileCopyrightText: 2026 Tsuyomi Contributors -->
 <!-- SPDX-License-Identifier: Apache-2.0 -->
 
-# Tsuyomi
+<p align="center">
+  <img src="tsuyomi-android/app/src/main/res/drawable-nodpi/tsuyomi_launcher_artwork.png" alt="Tsuyomi 图标：珊瑚红的开放式つ与奶油色书页" width="128" height="128">
+</p>
 
-<img src="tsuyomi-android/app/src/main/res/drawable-nodpi/tsuyomi_launcher_artwork.png" alt="Tsuyomi 图标：珊瑚红的开放式つ与奶油色书页" width="112" height="112">
+<h1 align="center">Tsuyomi</h1>
 
-Tsuyomi 是一款本地优先的原生 Android 轻小说阅读器，使用 Kotlin 和 Jetpack Compose 开发，支持 Android 10 及以上版本。
+<p align="center">本地优先的原生 Android 轻小说阅读器</p>
+
+<p align="center">
+  <a href="https://github.com/Xfire233/Tsuyomi/releases">下载 APK</a> ·
+  <a href="CONTRIBUTING.md">参与贡献</a> ·
+  <a href="https://github.com/Xfire233/Tsuyomi/issues">反馈问题</a>
+</p>
+
+使用 Kotlin 与 Jetpack Compose 开发，支持 **Android 10 及以上版本**。目前处于 **Beta 预发布阶段**。
 
 ## 下载与安装
 
@@ -15,16 +25,29 @@ Tsuyomi 是一款本地优先的原生 Android 轻小说阅读器，使用 Kotli
 
 ## 功能
 
-- 搜索轻小说、查看详情与目录，并进行分页或连续阅读；保存阅读进度、章节完成状态和书签。
-- 管理本地书架、稍后阅读、收藏夹、布局与排序；缓存章节和封面，导入或导出本地数据。
-- 查看网站收藏并在确认后进行操作；更新检查默认关闭，由用户自行开启。
-- 从官方签名目录或本地文件安装来源扩展；扩展在独立仓库维护：[tsuyomi-extensions](https://github.com/Chachaanteng/tsuyomi-extensions)。
+- **发现与搜索**：浏览来源分类与榜单，搜索轻小说，查看详情和章节目录。
+- **阅读**：分页或连续阅读，调整阅读设置，保存阅读进度、章节完成状态与书签。
+- **本地书架**：管理收藏夹、稍后阅读、标签、布局与排序。
+- **离线与备份**：缓存章节和封面，导入或导出本地数据。
+- **网站收藏与更新**：查看网站收藏，确认后执行网站操作；更新检查默认关闭，可自行开启。
+- **来源扩展**：从官方签名目录或本地文件安装扩展；扩展由[独立仓库](https://github.com/Chachaanteng/tsuyomi-extensions)维护。
 
-目前 Wenku8 是完成度最高的来源。Standard 界面是当前维护重点；E-ink 模式保留但暂时冻结，尚未完成新一轮墨水屏适配。来源需要登录或安全验证时，由用户在受控页面中完成；应用不提供 CAPTCHA 求解或反爬绕过。
+Wenku8 是当前完成度最高的来源，Standard 界面是当前维护重点。登录或安全验证由用户在受控页面中完成，应用不提供 CAPTCHA 求解或反爬绕过。
+
+## 实现计划 · TODO
+
+优先完善现有阅读体验，再扩展来源。以下是开发方向，不代表已完成或承诺发布日期。
+
+- [ ] **Standard 完善**：持续修复浏览、书架与阅读中的问题，完善异常恢复与长时间阅读体验。
+- [ ] **无障碍与适配**：完成 TalkBack、键盘操作、大字号和不同窗口尺寸的体验验证及修正。
+- [ ] **E-ink 适配**：在 Standard 阶段完成后，单独恢复墨水屏适配与实机验证；目前暂时冻结。
+- [ ] **更多来源**：后续评估 ESJZone、Yamibo 等来源；不属于当前开发阶段。
+
+当前范围见 [Phase 4 计划](tsuyomi-android/docs/phases/PHASE_4.md)。
 
 ## 开发
 
-Android 构建、贡献要求与本地验证说明见 [`CONTRIBUTING.md`](tsuyomi-android/CONTRIBUTING.md)。协议组件入口见 [`tsuyomi-protocol`](tsuyomi-protocol)。
+参与贡献请先阅读[贡献指南](CONTRIBUTING.md)。[Android 构建与验证](tsuyomi-android/CONTRIBUTING.md)说明各平台的环境要求和命令；[协议组件](tsuyomi-protocol)维护扩展与数据交换契约。
 
 ## 隐私、内容与许可证
 

@@ -5,10 +5,10 @@
 > Terminology history: Historically planned and delivered as Gate 3; no immutable `gate-3-baseline` tag exists.
 
 
-## Status and review input
+## Historical planning input
 
-- Planner status: **AMENDED DRAFT FOR DESIGNER / ADVISER REVIEW**
-- Implementation authorization: **NOT GRANTED**
+- Planning status at this snapshot: **AMENDED DRAFT FOR DESIGNER / ADVISER REVIEW**
+- Implementation authorization at this snapshot: **NOT GRANTED**. Phase 3 was subsequently delivered; the dated planning/review text below is retained as history, not a current blocker or contributor-tool requirement. Current scope belongs to [Phase 4](PHASE_4.md).
 - Phase 2 baseline tag: `gate-2-baseline`
 - Phase 2 baseline commit: `cfbbf4f5d6af6fc216d85b496a6d7f4362616591`
 - Planning branch: `feature/gate-3-local-library-migration`

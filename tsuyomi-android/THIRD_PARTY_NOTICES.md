@@ -3,7 +3,7 @@
 
 # Third-party notices
 
-Direct dependencies and checked-in build tools in the Phase 1 baseline are recorded below. Transitive artifacts are fixed by Gradle lock state and `gradle/verification-metadata.xml`; their license metadata remains available in the upstream artifacts.
+Direct dependencies and checked-in build tools are recorded below. Current versions are resolved by the version catalog, Gradle Wrapper and lock state; transitive artifact digests are fixed by `gradle/verification-metadata.xml`. Upstream artifacts retain their license metadata.
 
 | Project | Pinned version | License | Scope / distribution |
 |---|---:|---|---|
@@ -31,7 +31,7 @@ Direct dependencies and checked-in build tools in the Phase 1 baseline are recor
 
 ## Research and migration references
 
-The projects below informed migration requirements or architecture research. Except for the explicitly identified MIT-licensed Wenku8 Home taxonomy adaptation, the Phase 1 baseline does not distribute their source files, assets, fonts, logos, binaries, or modified versions. Listing them here preserves provenance; it does not claim affiliation or change their licenses.
+The projects below informed migration requirements or architecture research. Except for the identified MIT-licensed Wenku8 Home taxonomy adaptation and vendored QuickJS-ng runtime, Tsuyomi does not distribute their source files, assets, fonts, logos, binaries, or modified versions. Listing them preserves provenance; it does not claim affiliation or change their licenses.
 
 | Project | Upstream copyright / license | Research boundary | Material distributed by Tsuyomi |
 |---|---|---|---|
@@ -49,4 +49,4 @@ The MIT notices above must accompany any future copy or substantial portion. Apa
 
 ## Asset and source-copy status
 
-No upstream source file, font, image, site logo, layout, component implementation, or other asset is copied or adapted into the Phase 1 application. Dependency upgrades or future source adoption must update this file, the applicable upstream notices/licenses, version catalog or protocol lock state, verification metadata, REUSE metadata, and validation evidence together.
+No upstream site font, image, logo, layout or component implementation is copied or adapted into Tsuyomi. The Wenku8 taxonomy adaptation is identified above; the vendored MIT-licensed QuickJS-ng runtime and its pinned source digest are recorded in the [root notices](../THIRD_PARTY_NOTICES.md), with retained license and provenance under `source/quickjs-runtime/src/main/cpp/quickjs-ng/`. Dependency upgrades or future source adoption must update applicable notices/licenses, version catalog or protocol lock state, verification metadata, REUSE metadata and validation evidence together.

@@ -11,7 +11,8 @@
 - device template：`pixel_2`（只提供基础硬件字段，显示参数由脚本覆盖）
 - locale：`zh-CN`
 - navigation：three-button 与 keyboard/DPAD 场景均验证
-- 启动：验收前 wipe data/cold boot；不得依赖 snapshot 中的应用状态。此 wipe/clean-install 规则适用于 disposable CI AVD 与迁移证据。持久 online review candidate 必须保留同一 APK 签名身份、应用数据与授权 session；不得 `-wipe-data`、clean-install 或运行清凭据 fixture setup/instrumentation。canonical 实机/覆盖安装 look **不得** `-wipe-data`。真实 declared-origin WebView 用 `tools/avd/Start-CanonicalAvd.ps1`：`-dns-server 8.8.8.8,1.1.1.1 -netdelay none -netspeed full`。模拟器 DNS 代理跟随主机解析器，本机代理/TUN 拆除后必须带公共 DNS 重启，否则 WebView 报 `ERR_NAME_NOT_RESOLVED`。DNS 修复只需重启模拟器进程，不必 cold boot。
+- Disposable CI AVD 与迁移证据可 wipe/cold boot 并 clean-install；不得依赖 snapshot 应用状态。此清理规则绝不适用于持久候选或 canonical 实机/覆盖安装验收：这些受保护状态必须保留同一 APK 签名身份、应用数据与获准 session，禁止 `-wipe-data`、clean-install 或清凭据 fixture setup/instrumentation。
+- `tools/avd/Start-CanonicalAvd.ps1` 是 Windows PowerShell 专用的可选启动器，要求已安装 Android SDK Emulator 且设置 `ANDROID_SDK_ROOT` 或 `ANDROID_HOME`。只有在受控 declared-origin WebView 验证且已观察到主机代理/TUN 导致模拟器 DNS 故障时，才使用该启动器配置的 `-dns-server 8.8.8.8,1.1.1.1 -netdelay none -netspeed full`；DNS 修复只需重启模拟器进程，不必 cold boot。常规 Android 贡献不依赖 canonical AVD、私人网络设置或此启动器。
 
 SDK package 和 emulator 的实际 revision 必须记录在 `docs/phases/PHASE_N.md`；升级 revision 会使运行期证据失效并要求重跑。
 
@@ -26,16 +27,16 @@ E-ink AVD 只证明 Android/Compose profile 行为，不证明实体面板 ghost
 
 ## Policy 选择的竖屏基线
 
-每个 Phase exit/admission gate 或 PR 的运行期验收读取 `.agents/skills/tsuyomi-android-review/review-policy.json`，并在同一目标 head 上为每个 `activeProfiles` 项分别完成独立 portrait 验证：
+每个 Phase exit/admission gate 或 PR 的运行期验收以仓库当前生效的 `.agents/skills/tsuyomi-android-review/review-policy.json` 为准，并按其 `activeProfiles` 为每个 profile 分别完成独立 portrait 验证。该版本化 policy 是项目要求；skill 只是可选读取工具，不是参与贡献的前置条件：
 
 | Profile | AVD | 物理分辨率与方向 | 最低证据 |
 |---|---|---|---|
 | `STANDARD`（active 时） | `Tsuyomi_API29` | `1080×2400` portrait | 受影响用户流完成；记录 `wm size`、`wm density`、方向、`font_scale` 和至少一张截图 SHA-256 |
 | `EINK`（active 时） | `Tsuyomi_EInk_API29` | `1264×1680` portrait | 同一受影响用户流完成；记录相同设备事实和截图 SHA-256；发布 E-ink 声明另需物理面板证据 |
 
-active profile 的记录不能用另一 profile、同一 AVD 内切换、Layoutlib golden、横屏、分屏或其他分辨率替代。当前 policy 若把 `EINK` 标为 `FROZEN`/deferred，日常 gate 不要求 E-ink AVD：保留实现与合同，只运行 policy 允许的 direct-change 最小检查；恢复 active 时重跑完整 retained matrix。
+active profile 的记录不能用另一 profile、同一 AVD 内切换、Layoutlib golden、横屏、分屏或其他分辨率替代。当前仓库 policy 若把 `EINK` 标为 `FROZEN`/deferred，日常 gate 不要求 E-ink AVD：保留实现与合同，只运行 policy 允许的 direct-change 最小检查；恢复 active 时重跑完整 retained matrix。
 
-用 `tools/avd/Create-ReviewAvds.ps1` 创建；脚本只读取 `ANDROID_SDK_ROOT`/`ANDROID_HOME`，不写入用户路径到仓库。
+`tools/avd/Create-ReviewAvds.ps1` 是 Windows PowerShell 专用创建器，要求 Android SDK command-line tools（`avdmanager.bat`）、对应 API 29 x86_64 system image，并设置 `ANDROID_SDK_ROOT` 或 `ANDROID_HOME`。其他平台可按表中的已签入矩阵规格创建等价的 disposable AVD，但这些输入一致不意味着跨平台执行等价或声称 CI parity。
 
 ## 每次 active-profile 验收矩阵
 
@@ -48,7 +49,7 @@ active profile 的记录不能用另一 profile、同一 AVD 内切换、Layoutl
 5. clean install、进程重建、应用重启后的持久化；
 6. route、滚动、焦点和可恢复失败状态；
 7. 无裁切、重叠、不可达操作、残留焦点或无效选项；
-8. 受控 WebView：CI 记录 fixture host transport、blocked navigation 与完成/取消 cookie handoff；共享 online candidate 的实际 declared-origin task flow 使用真实来源页面。Dedicated test account 的普通、用户可见 allowlisted WebView 登录可由授权自动化执行；挑战暂停交给人，不绕过。错误页只证明失败恢复，不能冒充成功。Disposable CI 不访问持久候选或其凭据。
+8. 受控 WebView：CI 记录 fixture host transport、blocked navigation 与完成/取消 cookie handoff；若授权的工作范围包含真实 declared-origin 在线流，则必须使用获准的测试环境完成相应用户流。任何共享/持久 online review candidate 及其专用测试账号均为受限的维护者环境，不是普通贡献者前置条件；只有普通用户可见的 allowlisted WebView 登录可由授权自动化执行，挑战暂停交给人，不绕过。错误页只证明失败恢复，不能冒充成功。Disposable CI 不访问持久候选或其凭据。
 
 CI fixture、migration、security 与 screenshot assertions 均是 planner-selected regression evidence，不形成单独 fixture walkthrough 或视觉 acceptance round。若有 opt-in fixture-retention flags，它们仅供诊断检查，不是额外验收义务。
 

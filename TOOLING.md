@@ -1,9 +1,11 @@
 <!-- SPDX-FileCopyrightText: 2026 Tsuyomi Contributors -->
 <!-- SPDX-License-Identifier: Apache-2.0 -->
 
-# Development tooling registry
+# Optional assistant tooling registry
 
-This file is the canonical inventory and dispatch policy for agent-facing development resources. It answers three questions: which resource owns a task, when it is mandatory, and when it must not be invoked. Product behavior, current Phase authorization, generated evidence, machine state, credentials, and provider-private configuration belong to their own authorities and are never copied here.
+This file inventories the maintainer's assistant integrations, primarily OMP. Its client-specific dispatch and scheduling rules apply only when using that integration; they do not require contributors to install OMP, other assistant clients, MCP servers, user-scoped Skills or private memory. Ordinary development uses the [contribution guides](CONTRIBUTING.md) and checked-in build/check scripts with the contributor's chosen editor and SDK tools.
+
+Within a configured integration, the records below identify task owners, invocation conditions and exclusions. Product behavior, Phase authorization, evidence, machine state, credentials and provider-private configuration remain with their own authorities. Tool names, home-directory locations and health commands are integration examples, not a shared workstation contract.
 
 ## Resource record standard
 
@@ -65,7 +67,7 @@ Image viewing is opt-in. Image reads and captures must not automatically invoke 
 
 ## Execution resource modes
 
-Interactive local work has two workstation scheduling modes. The selected mode changes compilation concurrency and resource pressure only; it never removes hosted required evidence, changes authorization, or permits simultaneous Gradle invocations against the same checkout. Explicit `HIGH` is the sole local API 29 CI mode; disposable emulator/device execution stays serialized. `LOW` reserves CI for hosted protected checks and never invokes the local API 29 runner, including `--prepare-only`.
+The optional assistant workflow has two workstation scheduling modes. These are explicit resource choices for that session, not contributor identities or universal build modes. They change compilation concurrency and resource pressure only; they never remove hosted required evidence, change authorization, or permit simultaneous Gradle invocations against the same checkout. The local API 29 runner separately requires explicit `--mode high`; disposable emulator/device execution stays serialized. In an assistant session selecting `LOW`, CI is reserved for hosted protected checks and the local runner is not invoked, including `--prepare-only`.
 
 | Mode | Trigger and persistence | Gradle execution | Other local execution |
 |---|---|---|---|
@@ -199,7 +201,7 @@ Never copy a provider configuration wholesale. It may mix model credentials, env
 
 ## Discovery and health checks
 
-Run read-only checks without printing credentials or raw provider configuration:
+For integration maintenance only, select the read-only discovery command for the client actually installed. The examples below are alternatives, not a checklist requiring all clients on one workstation. Do not print credentials or raw provider configuration:
 
 ```text
 npx skills list -g
@@ -222,7 +224,7 @@ After restarting OMP, read each required `skill://` entry and run only the MCP's
 3. Read the complete Skill/server definition and review provenance, maintenance, license, permissions, secrets, and destructive capabilities.
 4. Define Trigger, Preconditions, Method, Output, Scope, Completion, Do not use, Fallback, and Health check before installation or enablement.
 5. Put user Skills in `~/.agents/skills`; put project Skills in `.agents/skills`; generate provider links instead of copies.
-6. Put shared MCP definitions/deny policy in `~/.omp/agent/mcp.json`; keep provider-native runtime servers with their provider.
+6. Store shared MCP definitions/deny policy with the selected client's owner; OMP uses `~/.omp/agent/mcp.json`. Keep provider-native runtime servers with their provider and never require another contributor to copy private configuration.
 7. Update this registry, affected instructions, and executable governance tests in the same change.
 8. Restart the owning client, validate discovery with non-destructive checks, then remove obsolete copies/settings.
 
