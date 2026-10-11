@@ -40,6 +40,7 @@ import java.util.UUID
 import java.util.zip.ZipEntry
 import java.util.zip.ZipOutputStream
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
@@ -567,53 +568,58 @@ class LocalPublicationProductionJourneyInstrumentedTest {
         val archive = input("originals.zip", byteArrayOf())
         val coordinator = application.transferCoordinator
         runBlocking {
-            coordinator.recoverPendingImport()
-            val prepared = checkNotNull(coordinator.prepareExport(originalReader, includesOriginals = true))
-            coordinator.writePreparedExport(Uri.fromFile(archive), application.contentResolver,
-                prepared.ownerGeneration, prepared.canonicalDigest, prepared.includesOriginals)
-            assertEquals(TransferUiState.Exported, coordinator.state)
-            application.localPublications.originals.deletePublication(identity.publicationId,
-                application.libraryRepository::deleteLocalPublication)
-            assertEquals(null, application.libraryRepository.book(identity))
-            assertEquals(null, application.localPublications.originals.original(identity.publicationId))
-            assertTrue(source.delete())
-            coordinator.readForReview(Uri.fromFile(archive), application.contentResolver)
-            assertTrue("Archive review failed: ${coordinator.state}", coordinator.state is TransferUiState.Review)
-            coordinator.confirmImport()
-            assertTrue("Archive restore failed: ${coordinator.state}", coordinator.state is TransferUiState.Completed)
-            assertTrue(checkNotNull(application.libraryRepository.book(identity)?.localPublication).originalAvailable)
-            assertEquals(original.sha256, checkNotNull(application.localPublications.originals.original(identity.publicationId)).sha256)
-            val restoredProgress = checkNotNull(application.libraryRepository.progress(identity))
-            assertEquals(progress.locator.document, restoredProgress.locator.document)
-            assertEquals(progress.locator.characterOffset, restoredProgress.locator.characterOffset)
-            assertEquals(progress.locator.textAnchorDigest, restoredProgress.locator.textAnchorDigest)
-            val restoredBookmark = application.libraryRepository.bookmarks(identity).single()
-            assertEquals(bookmark.document, restoredBookmark.document)
-            assertEquals(bookmark.characterOffset, restoredBookmark.characterOffset)
-            assertEquals(bookmark.textAnchorDigest, restoredBookmark.textAnchorDigest)
-            coordinator.dismissResult()
-            val retained = checkNotNull(application.libraryRepository.book(identity)?.localPublication)
-            val conflicting = TransferBook(
-                identity = identity,
-                title = "较新的导入资料",
-                updatedAt = Instant.now().plusSeconds(1),
-                localPublication = TransferLocalPublicationMetadata(
-                    retained.format, "b".repeat(64), retained.originalSizeBytes, retained.txtOptions, retained.coverResourceId,
-                ),
-            )
-            val metadata = input("conflicting-metadata.json", TransferCodec.encode(
-                TransferSnapshot(Instant.now(), listOf(conflicting), emptyList()),
-            ))
-            coordinator.readForReview(Uri.fromFile(metadata), application.contentResolver)
-            val review = coordinator.state as TransferUiState.Review
-            assertTrue(review.value.conflictCodes.any { it.startsWith("existing-local-original-retained") })
-            coordinator.confirmImport()
-            assertTrue(coordinator.state is TransferUiState.Completed)
-            val merged = checkNotNull(application.libraryRepository.book(identity))
-            assertEquals(conflicting.title, merged.title)
-            assertEquals(retained, merged.localPublication)
-            assertEquals(original.sha256, checkNotNull(application.localPublications.originals.original(identity.publicationId)).sha256)
-            coordinator.dismissResult()
+            val transfer = async(Dispatchers.IO) {
+                coordinator.recoverPendingImport()
+                val prepared = checkNotNull(coordinator.prepareExport(originalReader, includesOriginals = true))
+                coordinator.writePreparedExport(Uri.fromFile(archive), application.contentResolver,
+                    prepared.ownerGeneration, prepared.canonicalDigest, prepared.includesOriginals)
+                assertEquals(TransferUiState.Exported, coordinator.state)
+                application.localPublications.originals.deletePublication(identity.publicationId,
+                    application.libraryRepository::deleteLocalPublication)
+                assertEquals(null, application.libraryRepository.book(identity))
+                assertEquals(null, application.localPublications.originals.original(identity.publicationId))
+                assertTrue(source.delete())
+                coordinator.readForReview(Uri.fromFile(archive), application.contentResolver)
+                assertTrue("Archive review failed: ${coordinator.state}", coordinator.state is TransferUiState.Review)
+                coordinator.confirmImport()
+                assertTrue("Archive restore failed: ${coordinator.state}", coordinator.state is TransferUiState.Completed)
+                assertTrue(checkNotNull(application.libraryRepository.book(identity)?.localPublication).originalAvailable)
+                assertEquals(original.sha256, checkNotNull(application.localPublications.originals.original(identity.publicationId)).sha256)
+                val restoredProgress = checkNotNull(application.libraryRepository.progress(identity))
+                assertEquals(progress.locator.document, restoredProgress.locator.document)
+                assertEquals(progress.locator.characterOffset, restoredProgress.locator.characterOffset)
+                assertEquals(progress.locator.textAnchorDigest, restoredProgress.locator.textAnchorDigest)
+                val restoredBookmark = application.libraryRepository.bookmarks(identity).single()
+                assertEquals(bookmark.document, restoredBookmark.document)
+                assertEquals(bookmark.characterOffset, restoredBookmark.characterOffset)
+                assertEquals(bookmark.textAnchorDigest, restoredBookmark.textAnchorDigest)
+                coordinator.dismissResult()
+                val retained = checkNotNull(application.libraryRepository.book(identity)?.localPublication)
+                val conflicting = TransferBook(
+                    identity = identity,
+                    title = "较新的导入资料",
+                    updatedAt = Instant.now().plusSeconds(1),
+                    localPublication = TransferLocalPublicationMetadata(
+                        retained.format, "b".repeat(64), retained.originalSizeBytes, retained.txtOptions, retained.coverResourceId,
+                    ),
+                )
+                val metadata = input("conflicting-metadata.json", TransferCodec.encode(
+                    TransferSnapshot(Instant.now(), listOf(conflicting), emptyList()),
+                ))
+                coordinator.readForReview(Uri.fromFile(metadata), application.contentResolver)
+                val review = coordinator.state as TransferUiState.Review
+                assertTrue(review.value.conflictCodes.any { it.startsWith("existing-local-original-retained") })
+                coordinator.confirmImport()
+                assertTrue(coordinator.state is TransferUiState.Completed)
+                val merged = checkNotNull(application.libraryRepository.book(identity))
+                assertEquals(conflicting.title, merged.title)
+                assertEquals(retained, merged.localPublication)
+                assertEquals(original.sha256, checkNotNull(application.localPublications.originals.original(identity.publicationId)).sha256)
+                coordinator.dismissResult()
+            }
+            // Transfer work can await an existing composition-context preference or recovery caller.
+            composeRule.waitUntil(15_000) { transfer.isCompleted }
+            transfer.await()
         }
         startReading()
     }
