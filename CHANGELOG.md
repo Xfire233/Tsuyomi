@@ -5,6 +5,8 @@
 
 ## Unreleased
 
+- Added six pinned MIT-licensed project Skills for agent-facing writing, bounded design clarification, domain modeling, diagnosis, two-axis source review and version-end retrospectives. Matching workflows activate without slash commands, preserve existing authority and verification boundaries, and record evidence-backed retrospective actions once per version/candidate rather than adding per-fix ceremonies.
+- Aligned independent source-review dispatch with the active integration's native agent/model routing and worker limit, retaining resolved-model checks, isolated review axes and the no-nesting boundary.
 - Moved pinned MOBI runtime dependency sources out of ignored installation directories so clean checkouts include every verified build input; retained upstream hashes and notices and added the corresponding REUSE/ISC license metadata.
 - Implemented the local packet targeting planned `0.5.0-beta.1` / versionCode `8`: four-format private publications, shared structured Reader, Room v14/transfer v6 and original-file archives; restored application-wide monochrome E-ink presentation, static controls and application-only manual redraw. Local development regressions and actual APK smoke are recorded separately from full CI, live-source, physical-panel and human acceptance; this prerelease is not yet released.
 - Corrected global E-ink compositing with a framework-managed color-filter layer, keeping native WebView pixels aligned with real touch/input coordinates and preserving form state and Standard colors across profile changes. Native-pointer, text-input and color-restoration regression coverage stays on the existing isolated test seam; no pointer compensation, forced zoom or WebView grayscale exemption is added.

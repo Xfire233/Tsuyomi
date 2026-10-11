@@ -115,3 +115,6 @@ source-revision: <40 hex>
 
 不移动已发布 tag、不替换已发布资产。回退按 [`REPOSITORY_GOVERNANCE.md`](REPOSITORY_GOVERNANCE.md) 执行：revert 引入问题的提交，保留数据，重跑受影响检查，再发布新的 patch 版本。
 
+## 10. 可选助手工作流的版本收尾
+
+在配置了项目助手工作流的会话中，明确版本完成或发布收尾时，按 [`retro`](../../../.agents/skills/retro/SKILL.md) 对本次版本已有证据执行一次复盘；重复收尾只补充新增事实。它记录过程根因、改进责任与验证办法，不重跑发布检查，不代表验收或稳定化批准，也不要求普通贡献者安装助手。触发、发现与输出归属见 [`TOOLING.md`](../../../TOOLING.md#skills)。

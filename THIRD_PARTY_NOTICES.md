@@ -34,6 +34,47 @@ This file records direct runtime/build/test dependencies and the public projects
 | TypeScript | 7.0.2 | Apache-2.0 | Wenku8 fixture extension build tooling; not shipped |
 | [QuickJS-ng](https://github.com/quickjs-ng/quickjs) | v0.16.1 | MIT | Vendored native JavaScript runtime; source archive SHA-256 `4b3c11f37dab2c58bdeccbaeb23b923fa4a9798a45e50be6af55f3e75b616ea0` |
 
+## Optional assistant Skills
+
+The six project Skills below are copied/adapted from [mattpocock/skills](https://github.com/mattpocock/skills/tree/b0618bc436ad893b3c5e84e55fba86586d34a404), pinned at `b0618bc436ad893b3c5e84e55fba86586d34a404` (MIT; Copyright (c) 2026 Matt Pocock). They are documentation-only assistant procedures, not Android/protocol runtime dependencies. Tsuyomi adaptations remain MIT and retain upstream attribution.
+
+| Project directory under `.agents/skills/` | Upstream path under `skills/` | Local adaptation |
+|---|---|---|
+| `writing-for-agents` | `productivity/writing-for-agents/{SKILL.md,SKILL-MECHANICS.md}` | Retains the writing reference; adds project authority, bounded completion and client-discovery caveats |
+| `grill-with-docs` | `engineering/grill-with-docs/SKILL.md`, `productivity/grilling/SKILL.md` | Inlines the interview primitive; automatically handles only unresolved material choices, without a second `grilling` installation |
+| `domain-modeling` | `engineering/domain-modeling/SKILL.md` | Uses existing Tsuyomi contracts rather than generating a parallel root glossary/ADR tree |
+| `diagnosing-bugs` | `engineering/diagnosing-bugs/SKILL.md` | Bounds diagnosis and verification to authorized evidence; preserves reported failures and existing Android scope policy |
+| `code-review` | `engineering/code-review/SKILL.md` | Separates Standards/Spec and covers dirty worktrees; preserves review-only, delegation and product-authority boundaries |
+| `retro` | `engineering/retro/SKILL.md` | Version-end evidence-based retrospective with deduplicated actions, coverage limits and no automatic process/configuration mutation |
+
+Updates are reviewed against the pinned source and merged deliberately into these canonical project directories; bulk upstream replacement would erase project constraints. No upstream scripts, installer hooks, credentials or executable dependencies are included.
+
+### Matt Pocock Skills — retained MIT notice
+
+```text
+MIT License
+
+Copyright (c) 2026 Matt Pocock
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+```
+
 ## Research and migration references
 
 The projects below informed migration requirements, architecture, or product design. Except for the explicitly identified MIT-licensed Wenku8 Home taxonomy adaptation, Tsuyomi does not distribute their source files, assets, fonts, logos, binaries, or modified versions.
@@ -54,4 +95,4 @@ MIT notices must accompany any future copy or substantial portion. Apache-2.0 ad
 
 For the 0.5.0 local-reader plan, the maintainer selected permissive-first candidates with a compliant LGPL fallback, as recorded in [ADR 0001](tsuyomi-android/docs/adr/0001-independent-brand-and-license.md). Candidate research is not runtime adoption: no parser/renderer dependency or copied source is added by that selection. Exact provenance, inherited/transitive grants, library-modification/source/relink obligations and Android behavior must be verified before adoption. GPL/AGPL engine reuse, commercial procurement and external-reader substitution remain unselected.
 
-No upstream site font, image, logo, layout, component implementation, or other site asset is copied or adapted into Tsuyomi. Vendored runtime source includes the MIT-licensed QuickJS-ng runtime identified above; its retained license and provenance are in `tsuyomi-android/source/quickjs-runtime/src/main/cpp/quickjs-ng/`. Android parser adoption has its own component notices.
+No upstream site font, image, logo, layout, component implementation, or other site asset is copied or adapted into Tsuyomi. Vendored runtime source includes the MIT-licensed QuickJS-ng runtime identified above; its retained license and provenance are in `tsuyomi-android/source/quickjs-runtime/src/main/cpp/quickjs-ng/`. Optional assistant documentation adaptations are listed separately above; Android parser adoption has its own component notices.
