@@ -6,6 +6,7 @@
 ## Unreleased
 
 - Initialize the API 29 runner's ADB server before emulator startup so cold-daemon output does not abort bounded boot admission, and preserve generated screenshot validation reports, rendered images and diffs in Android CI for seven days, including failed builds.
+- Added a removable, explicitly dispatched PR64 hosted observation for the original deletion test: after 60 seconds unfinished, collect one bounded owned-process ART/wait-state snapshot and fail the sequence; completion disarms it without capture or retry. Test selection, assertions, required checks and the CI timeout are unchanged.
 - Added six pinned MIT-licensed project Skills for agent-facing writing, bounded design clarification, domain modeling, diagnosis, two-axis source review and version-end retrospectives. Matching workflows activate without slash commands, preserve existing authority and verification boundaries, and record evidence-backed retrospective actions once per version/candidate rather than adding per-fix ceremonies.
 - Aligned independent source-review dispatch with the active integration's native agent/model routing and worker limit, retaining resolved-model checks, isolated review axes and the no-nesting boundary.
 - Moved pinned MOBI runtime dependency sources out of ignored installation directories so clean checkouts include every verified build input; retained upstream hashes and notices and added the corresponding REUSE/ISC license metadata.

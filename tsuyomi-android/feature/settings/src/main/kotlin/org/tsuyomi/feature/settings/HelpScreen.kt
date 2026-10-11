@@ -347,12 +347,39 @@ fun FeatureIntroductionDialog(
         onDismissRequest = onDismiss,
         title = introduction.title,
         body = {
-            Text(introduction.summary)
-            introduction.points.forEach { Text("• $it", modifier = Modifier.padding(top = TsuyomiSpacing.Sm)) }
-            Text(
-                stringResource(R.string.settings_help_introduction_authority_notice),
-                modifier = Modifier.padding(top = TsuyomiSpacing.Md),
-            )
+            if (LocalDisplayEnvironment.current.effectiveProfile == DisplayProfile.EINK) {
+                val notice = stringResource(R.string.settings_help_introduction_authority_notice)
+                TsuyomiMeasuredPager(
+                    itemCount = introduction.points.size + 2,
+                    itemKey = { index -> "introduction:${introduction.id}:$index" },
+                    itemContent = { index ->
+                        val passage = when (index) {
+                            0 -> introduction.summary
+                            introduction.points.size + 1 -> notice
+                            else -> "• ${introduction.points[index - 1]}"
+                        }
+                        TsuyomiMeasuredTextPager(
+                            text = passage,
+                            modifier = Modifier.padding(top = when (index) {
+                                0 -> 0.dp
+                                introduction.points.size + 1 -> TsuyomiSpacing.Md
+                                else -> TsuyomiSpacing.Sm
+                            }),
+                            fillViewport = false,
+                            alwaysShowPageControls = false,
+                        )
+                    },
+                    modifier = Modifier.fillMaxWidth().weight(1f, fill = false),
+                    fillViewport = false,
+                )
+            } else {
+                Text(introduction.summary)
+                introduction.points.forEach { Text("• $it", modifier = Modifier.padding(top = TsuyomiSpacing.Sm)) }
+                Text(
+                    stringResource(R.string.settings_help_introduction_authority_notice),
+                    modifier = Modifier.padding(top = TsuyomiSpacing.Md),
+                )
+            }
         },
         confirmLabel = stringResource(R.string.settings_help_acknowledge),
         onConfirm = onAcknowledged,

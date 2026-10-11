@@ -22,6 +22,8 @@ import org.tsuyomi.core.ui.components.StateView
 import org.tsuyomi.core.ui.components.TsuyomiButton
 import org.tsuyomi.core.ui.components.TsuyomiButtonStyle
 import org.tsuyomi.core.ui.components.TsuyomiDialog
+import org.tsuyomi.core.ui.components.TsuyomiMeasuredPager
+import org.tsuyomi.core.ui.components.TsuyomiMeasuredTextPager
 import org.tsuyomi.core.ui.components.TsuyomiStateKind
 import org.tsuyomi.core.ui.components.TsuyomiTopBar
 import org.tsuyomi.reader.ui.ReaderSurface
@@ -165,17 +167,42 @@ fun ReaderScreen(
             title = stringResource(R.string.reader_chapter_failure),
             text = stringResource(readerFailureMessage(failure.code)),
             body = {
-                Text(stringResource(R.string.reader_diagnostic_id, failure.diagnostic.correlationId))
-                TsuyomiButton(
-                    text = stringResource(R.string.reader_offline),
-                    onClick = onUseOfflineCache,
-                    style = TsuyomiButtonStyle.SECONDARY,
-                )
-                if (failure.code == SourceErrorCode.SESSION_REQUIRED || failure.code == SourceErrorCode.VERIFICATION_REQUIRED) {
-                    TsuyomiButton(
-                        text = stringResource(R.string.reader_open_verification),
-                        onClick = onOpenVerification,
+                val diagnostic = stringResource(R.string.reader_diagnostic_id, failure.diagnostic.correlationId)
+                val needsVerification = failure.code == SourceErrorCode.SESSION_REQUIRED || failure.code == SourceErrorCode.VERIFICATION_REQUIRED
+                if (LocalDisplayEnvironment.current.effectiveProfile == DisplayProfile.EINK) {
+                    TsuyomiMeasuredPager(
+                        itemCount = if (needsVerification) 3 else 2,
+                        itemKey = { index -> "reader-failure:${failure.diagnostic.correlationId}:$index" },
+                        itemContent = { index ->
+                            when (index) {
+                                0 -> TsuyomiMeasuredTextPager(diagnostic, fillViewport = false, alwaysShowPageControls = false)
+                                1 -> TsuyomiButton(
+                                    text = stringResource(R.string.reader_offline),
+                                    onClick = onUseOfflineCache,
+                                    style = TsuyomiButtonStyle.SECONDARY,
+                                )
+                                else -> TsuyomiButton(
+                                    text = stringResource(R.string.reader_open_verification),
+                                    onClick = onOpenVerification,
+                                )
+                            }
+                        },
+                        modifier = Modifier.weight(1f, fill = false),
+                        fillViewport = false,
                     )
+                } else {
+                    Text(diagnostic)
+                    TsuyomiButton(
+                        text = stringResource(R.string.reader_offline),
+                        onClick = onUseOfflineCache,
+                        style = TsuyomiButtonStyle.SECONDARY,
+                    )
+                    if (needsVerification) {
+                        TsuyomiButton(
+                            text = stringResource(R.string.reader_open_verification),
+                            onClick = onOpenVerification,
+                        )
+                    }
                 }
             },
             onDismissRequest = onDismissFailure,

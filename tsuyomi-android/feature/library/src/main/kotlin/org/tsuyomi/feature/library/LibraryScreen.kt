@@ -335,7 +335,8 @@ private fun LibrarySelectionDialogs(
                     } else {
                         TsuyomiMeasuredPager(itemCount = maxOf(1, manualCollections.size),
                             itemKey = { if (manualCollections.isEmpty()) "empty" else "collection:${manualCollections[it].collectionId}" },
-                            modifier = Modifier.fillMaxWidth().weight(1f).testTag("library-add-to-collection-pager"),
+                            modifier = Modifier.fillMaxWidth().weight(1f, fill = false).testTag("library-add-to-collection-pager"),
+                            fillViewport = false,
                             itemContent = { index ->
                                 if (manualCollections.isEmpty()) TsuyomiMeasuredTextPager("没有可用的目标收藏夹。", fillViewport = false, alwaysShowPageControls = false)
                                 else {
@@ -366,7 +367,7 @@ private fun LibrarySelectionDialogs(
                 body = {
                     if (selectingCollections) {
                         if (eInk) {
-                            TsuyomiMeasuredPager(itemCount = 4, itemKey = { "delete:$it" }, modifier = Modifier.fillMaxWidth().weight(1f).testTag("library-collection-delete-pager"),
+                            TsuyomiMeasuredPager(itemCount = 4, itemKey = { "delete:$it" }, modifier = Modifier.fillMaxWidth().weight(1f, fill = false).testTag("library-collection-delete-pager"), fillViewport = false,
                                 itemContent = { index -> when (index) {
                                     0 -> TsuyomiMeasuredTextPager(deletionCopy, fillViewport = false, alwaysShowPageControls = false)
                                     1 -> deletionMessage?.let { TsuyomiMeasuredTextPager(it, Modifier.semantics { liveRegion = LiveRegionMode.Polite }, fillViewport = false, alwaysShowPageControls = false) }

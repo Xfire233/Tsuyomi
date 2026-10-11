@@ -13,9 +13,9 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.imePadding
-import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
@@ -32,6 +32,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.remember
@@ -189,7 +190,6 @@ fun TsuyomiDialogPane(
 ) {
     val dismissActionFocus = remember { FocusRequester() }
     val confirmActionFocus = remember { FocusRequester() }
-    val shape = RoundedCornerShape(if (fullWindow) 0.dp else 16.dp)
 
     val containerModifier = if (fullWindow) {
         modifier
@@ -211,62 +211,125 @@ fun TsuyomiDialogPane(
     if (fullWindow) {
         var initialFocusRequested by remember { mutableStateOf(false) }
         val textCount = if (text == null) 0 else 1
-        val dismissCount = if (dismissLabel != null && onDismiss != null) 1 else 0
         val bodyCount = if (body == null) 0 else 1
-        val confirmCount = if (confirmLabel != null && onConfirm != null) 1 else 0
-        val textIndex = 1 + dismissCount
-        val bodyIndex = textIndex + textCount
-        val confirmIndex = bodyIndex + bodyCount
-        Surface(
-            modifier = containerModifier.semantics { paneTitle = title },
-            color = TsuyomiEInkPalette.Paper,
-            contentColor = TsuyomiEInkPalette.Ink,
+        val hasDismiss = dismissLabel != null && onDismiss != null
+        val hasConfirm = confirmLabel != null && onConfirm != null
+        val pagerState = rememberTsuyomiMeasuredPagerState()
+        val paging = pagerState.canGoPrevious || pagerState.canGoNext || (pagerState.pageCount ?: 1) > 1
+        // A popup is a separate viewport, not a nested page of the route that opened it.
+        CompositionLocalProvider(
+            LocalTsuyomiPagerItemNavigation provides null,
+            LocalTsuyomiPagerMaxContentHeight provides null,
         ) {
-            Column(Modifier.fillMaxSize().padding(TsuyomiSpacing.Sm)) {
-                TsuyomiMeasuredPager(
-                    itemCount = 1 + dismissCount + textCount + bodyCount + confirmCount,
-                    itemKey = { index -> when {
-                        index == 0 -> "dialog-title:$title"
-                        dismissCount == 1 && index == 1 -> "dialog-dismiss:$dismissLabel"
-                        textCount == 1 && index == textIndex -> "dialog-text:$text"
-                        bodyCount == 1 && index == bodyIndex -> "dialog-body"
-                        else -> "dialog-confirm:$confirmLabel"
-                    } },
-                    itemContent = { index -> when {
-                        index == 0 -> TsuyomiMeasuredTextPager(title,
-                            style = MaterialTheme.typography.headlineMedium,
-                            fillViewport = false, alwaysShowPageControls = false)
-                        dismissCount == 1 && index == 1 -> TsuyomiButton(
-                            text = dismissLabel.orEmpty(),
-                            onClick = requireNotNull(onDismiss),
-                            style = TsuyomiButtonStyle.SECONDARY,
-                            modifier = Modifier.focusRequester(dismissActionFocus).onGloballyPositioned {
-                                if (!initialFocusRequested) {
-                                    dismissActionFocus.requestFocus()
-                                    initialFocusRequested = true
+            Surface(
+                modifier = containerModifier.semantics { paneTitle = title },
+                color = TsuyomiEInkPalette.Paper,
+                contentColor = TsuyomiEInkPalette.Ink,
+            ) {
+                Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                    TsuyomiMeasuredPager(
+                        itemCount = 1,
+                        itemKey = { "dialog-content" },
+                        itemContent = {
+                            // Measure one coherent group. The title and persistent footer consume
+                            // space before weighted caller bodies receive their finite viewport.
+                            Column(
+                                Modifier.fillMaxWidth().heightIn(
+                                    max = requireNotNull(LocalTsuyomiPagerMaxContentHeight.current),
+                                ),
+                            ) {
+                                TsuyomiMeasuredTextPager(
+                                    title,
+                                    style = MaterialTheme.typography.headlineMedium,
+                                    fillViewport = false,
+                                    alwaysShowPageControls = false,
+                                )
+                                if (textCount + bodyCount > 0) {
+                                    TsuyomiMeasuredPager(
+                                        itemCount = textCount + bodyCount,
+                                        itemKey = { index ->
+                                            if (textCount == 1 && index == 0) "dialog-text:$text" else "dialog-body"
+                                        },
+                                        itemContent = { index ->
+                                            if (textCount == 1 && index == 0) {
+                                                TsuyomiMeasuredTextPager(
+                                                    text.orEmpty(),
+                                                    fillViewport = false,
+                                                    alwaysShowPageControls = false,
+                                                )
+                                            } else {
+                                                Column(
+                                                    Modifier.fillMaxWidth().heightIn(
+                                                        max = requireNotNull(LocalTsuyomiPagerMaxContentHeight.current),
+                                                    ),
+                                                ) { body?.invoke(this) }
+                                            }
+                                        },
+                                        modifier = Modifier.fillMaxWidth().weight(1f, fill = false)
+                                            .padding(top = TsuyomiSpacing.Md),
+                                        fillViewport = false,
+                                        verticalSpacing = TsuyomiSpacing.Md,
+                                    )
                                 }
-                            },
-                        )
-                        textCount == 1 && index == textIndex -> TsuyomiMeasuredTextPager(text.orEmpty(),
-                            fillViewport = false, alwaysShowPageControls = false)
-                        bodyCount == 1 && index == bodyIndex -> Column(
-                            Modifier.fillMaxWidth().heightIn(max = LocalTsuyomiPagerMaxContentHeight.current ?: androidx.compose.ui.unit.Dp.Unspecified),
-                        ) { body?.invoke(this) }
-                        confirmCount == 1 && index == confirmIndex -> TsuyomiButton(
-                            text = confirmLabel.orEmpty(),
-                            onClick = requireNotNull(onConfirm),
-                            enabled = confirmEnabled,
-                            modifier = Modifier.focusRequester(confirmActionFocus).onGloballyPositioned {
-                                if (dismissCount == 0 && !destructive && !initialFocusRequested) {
-                                    confirmActionFocus.requestFocus()
-                                    initialFocusRequested = true
+                            }
+                        },
+                        modifier = Modifier.widthIn(max = 480.dp).fillMaxWidth().padding(TsuyomiSpacing.Lg),
+                        state = pagerState,
+                        fillViewport = paging,
+                        alwaysShowPageControls = hasDismiss || hasConfirm,
+                        pageControls = { page, previous, next, onPrevious, onNext, pageCount, onFirst, onLast ->
+                            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                if (previous || next || (pageCount ?: 1) > 1) {
+                                    PaginationBar(
+                                        page = page,
+                                        pageCount = pageCount,
+                                        onPrevious = onPrevious,
+                                        onNext = onNext,
+                                        hasPreviousPage = previous,
+                                        hasNextPage = next,
+                                        onFirst = onFirst,
+                                        onLast = onLast,
+                                        modifier = Modifier.padding(top = TsuyomiSpacing.Sm),
+                                    )
                                 }
-                            },
-                        )
-                    } },
-                    modifier = Modifier.fillMaxWidth().weight(1f),
-                    verticalSpacing = TsuyomiSpacing.Sm,
-                )
+                                if (hasDismiss || hasConfirm) {
+                                    FlowRow(
+                                        modifier = Modifier.fillMaxWidth().padding(top = TsuyomiSpacing.Lg),
+                                        horizontalArrangement = Arrangement.spacedBy(TsuyomiSpacing.Lg, Alignment.CenterHorizontally),
+                                        verticalArrangement = Arrangement.spacedBy(TsuyomiSpacing.Sm),
+                                    ) {
+                                        if (hasDismiss) {
+                                            TsuyomiButton(
+                                                text = dismissLabel.orEmpty(),
+                                                onClick = requireNotNull(onDismiss),
+                                                style = TsuyomiButtonStyle.SECONDARY,
+                                                modifier = Modifier.focusRequester(dismissActionFocus).onGloballyPositioned {
+                                                    if (!initialFocusRequested) {
+                                                        dismissActionFocus.requestFocus()
+                                                        initialFocusRequested = true
+                                                    }
+                                                },
+                                            )
+                                        }
+                                        if (hasConfirm) {
+                                            TsuyomiButton(
+                                                text = confirmLabel.orEmpty(),
+                                                onClick = requireNotNull(onConfirm),
+                                                enabled = confirmEnabled,
+                                                modifier = Modifier.focusRequester(confirmActionFocus).onGloballyPositioned {
+                                                    if (!hasDismiss && !destructive && confirmEnabled && !initialFocusRequested) {
+                                                        confirmActionFocus.requestFocus()
+                                                        initialFocusRequested = true
+                                                    }
+                                                },
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+                        },
+                    )
+                }
             }
         }
         return
@@ -274,22 +337,16 @@ fun TsuyomiDialogPane(
 
     Surface(
         modifier = containerModifier.semantics { paneTitle = title },
-        shape = shape,
+        shape = RoundedCornerShape(16.dp),
         color = surfaceColor,
         contentColor = MaterialTheme.colorScheme.onSurface,
-        border = if (fullWindow) {
-            null
-        } else {
-            BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)
-        },
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
     ) {
         Box(
-            modifier = if (fullWindow) Modifier.fillMaxSize() else Modifier,
             contentAlignment = Alignment.Center,
         ) {
             Column(
                 modifier = Modifier
-                    .then(if (fullWindow) Modifier.fillMaxHeight() else Modifier)
                     .widthIn(max = 480.dp)
                     .fillMaxWidth()
                     .padding(TsuyomiSpacing.Lg),
@@ -302,29 +359,14 @@ fun TsuyomiDialogPane(
                 Column(
                     modifier = Modifier
                         .padding(top = TsuyomiSpacing.Md)
-                        .then(
-                            if (fullWindow) {
-                                Modifier.fillMaxWidth().weight(1f)
-                            } else {
-                                Modifier.heightIn(max = 440.dp).verticalScroll(rememberScrollState())
-                            },
-                        ),
+                        .heightIn(max = 440.dp).verticalScroll(rememberScrollState()),
                 ) {
                     if (text != null) {
-                        if (fullWindow && body == null) {
-                            TsuyomiMeasuredTextPager(
-                                text = text,
-                                modifier = Modifier.fillMaxWidth().weight(1f),
-                                style = MaterialTheme.typography.bodyMedium,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            )
-                        } else {
-                            Text(
-                                text = text,
-                                style = MaterialTheme.typography.bodyMedium,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            )
-                        }
+                        Text(
+                            text = text,
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
                     }
                     body?.invoke(this)
                 }

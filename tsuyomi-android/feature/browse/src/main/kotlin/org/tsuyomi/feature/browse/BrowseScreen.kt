@@ -616,7 +616,7 @@ private fun InstalledSourceDetailsDialog(source: BrowseInstalledSource, onDismis
         val values = listOf(source.name, source.sourceId, source.version, source.summary,
             if (source.publisherIdentity == BrowsePublisherIdentity.LOCAL_UNSIGNED) stringResource(R.string.browse_source_details_unsigned_origin) else "") + sourceCapabilityLabels(source)
         TsuyomiDialog(onDismissRequest = onDismiss, title = stringResource(R.string.browse_source_details_title), dismissLabel = stringResource(R.string.browse_close_action),
-            body = { TsuyomiMeasuredPager(itemCount = values.size, itemKey = { "${source.sourceId}:details:$it" }, itemContent = { BrowsePagedText(values[it]) }, modifier = Modifier.fillMaxWidth().weight(1f)) })
+            body = { TsuyomiMeasuredPager(itemCount = values.size, itemKey = { "${source.sourceId}:details:$it" }, itemContent = { BrowsePagedText(values[it]) }, modifier = Modifier.fillMaxWidth().weight(1f, fill = false), fillViewport = false) })
         return
     }
     TsuyomiDialog(
@@ -824,7 +824,7 @@ private fun RepositoryManagementDialog(
                 val fixedCount = 10
                 TsuyomiMeasuredPager(itemCount = fixedCount + catalog.repositories.size,
                     itemKey = { if (it < fixedCount) "subscription:$it" else "repository:${catalog.repositories[it - fixedCount].id}" },
-                    modifier = Modifier.fillMaxWidth().weight(1f), itemContent = { index -> when (index) {
+                    modifier = Modifier.fillMaxWidth().weight(1f, fill = false), fillViewport = false, itemContent = { index -> when (index) {
                         0 -> BrowsePagedText(stringResource(R.string.browse_repository_manage_message))
                         1 -> TsuyomiTextField(subscriptionLink, { subscriptionLink = it }, label = stringResource(R.string.browse_repository_link_label), singleLine = true, modifier = Modifier.fillMaxWidth().testTag("browse-subscription-link"))
                         2 -> TsuyomiButton(stringResource(R.string.browse_repository_inspect_action), { focusManager.clearFocus(); onCatalogAction(BrowseCatalogAction.InspectSubscription(subscriptionLink)) },
@@ -1145,7 +1145,7 @@ private fun BrowseCatalogDetailsDialog(
             stringResource(R.string.browse_catalog_source_url) + "\n" + item.sourceUrl)
         TsuyomiDialog(onDismissRequest = onDismiss, title = stringResource(R.string.browse_catalog_details_title),
             confirmLabel = stringResource(R.string.browse_catalog_open_source_code), onConfirm = onOpenSourceCode, dismissLabel = stringResource(R.string.browse_close_action),
-            body = { TsuyomiMeasuredPager(itemCount = values.size, itemKey = { "${catalogItemKey(item)}:details:$it" }, itemContent = { BrowsePagedText(values[it]) }, modifier = Modifier.fillMaxWidth().weight(1f)) })
+            body = { TsuyomiMeasuredPager(itemCount = values.size, itemKey = { "${catalogItemKey(item)}:details:$it" }, itemContent = { BrowsePagedText(values[it]) }, modifier = Modifier.fillMaxWidth().weight(1f, fill = false), fillViewport = false) })
         return
     }
     TsuyomiDialog(

@@ -152,8 +152,10 @@ fun AboutScreen(
                 if (LocalDisplayEnvironment.current.effectiveProfile == DisplayProfile.EINK) {
                     TsuyomiMeasuredTextPager(
                         text = licenseText,
-                        modifier = Modifier.fillMaxWidth().weight(1f),
+                        modifier = Modifier.fillMaxWidth().weight(1f, fill = false),
                         state = licensePagerState,
+                        fillViewport = false,
+                        alwaysShowPageControls = false,
                     )
                 } else {
                     Text(licenseText)

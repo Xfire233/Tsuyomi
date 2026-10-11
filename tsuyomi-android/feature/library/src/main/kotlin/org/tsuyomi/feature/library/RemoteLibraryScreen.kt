@@ -353,7 +353,8 @@ fun RemoteLibraryScreen(
                 if (eInk) {
                     key(moveTargetSelectionBook.identity.sourceId, moveTargetSelectionBook.identity.remoteBookId) {
                         TsuyomiMeasuredPager(itemCount = targets.size, itemKey = { "target:${targets[it].targetId}" },
-                            modifier = Modifier.fillMaxWidth().weight(1f).testTag("remote-move-target-pager"),
+                            modifier = Modifier.fillMaxWidth().weight(1f, fill = false).testTag("remote-move-target-pager"),
+                            fillViewport = false,
                             state = rememberTsuyomiMeasuredPagerState(pickedTargetId?.let { "target:$it" }),
                             itemContent = { index ->
                                 val target = targets[index]

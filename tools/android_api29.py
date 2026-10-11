@@ -18,6 +18,7 @@ import platform
 import re
 import secrets
 import shutil
+import signal
 import socket
 import subprocess
 import sys
@@ -124,12 +125,22 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         action="store_true",
         help="create, boot, configure, record, and remove the owned emulator without Gradle",
     )
+    parser.add_argument(
+        "--observe-test-stall",
+        help="one-off hosted observation: qualified instrumentation class#method; does not select tests",
+    )
     args = parser.parse_args(argv)
 
     if args.mode == "low":
         parser.error("--mode low is not available locally; choose explicit --mode high for local work")
     if args.mode == "ci" and os.environ.get("GITHUB_ACTIONS") != "true":
         parser.error("--mode ci is reserved for GitHub Actions (GITHUB_ACTIONS=true)")
+    if args.observe_test_stall and (
+        args.mode != "ci" or os.name != "posix" or os.environ.get("GITHUB_EVENT_NAME") != "pull_request"
+        or os.environ.get("GITHUB_RUN_ATTEMPT") != "1" or args.prepare_only
+        or not TEST_CLASS_PATTERN.fullmatch(args.observe_test_stall) or "#" not in args.observe_test_stall
+    ):
+        parser.error("--observe-test-stall requires an initial hosted Linux PR run and exact class#method")
     if args.test_class and not TEST_CLASS_PATTERN.fullmatch(args.test_class):
         parser.error("--test-class must be a Java/Kotlin qualified class, optionally followed by #method")
     for task in args.task:
@@ -329,32 +340,80 @@ def capture_command(
     return CommandResult(tuple(command), completed.returncode, completed.stdout)
 
 
-def run_gradle(command: Sequence[str], *, cwd: Path, env: dict[str, str], log: Path) -> int:
-    append_log(log, f"$ {display_command(command)}")
-    try:
-        process = subprocess.Popen(
-            list(command),
-            cwd=cwd,
-            env=env,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT,
-            text=True,
-            encoding="utf-8",
-            errors="replace",
-            bufsize=1,
-        )
-    except OSError as error:
-        raise RunnerError(f"Could not start Gradle: {error}") from error
+def stop_owned_command(process: subprocess.Popen[Any], *, group: bool = False) -> None:
+    """Bound shutdown of a child (and, when requested, its newly owned POSIX session)."""
+    for attempt in range(2):
+        try:
+            if group:
+                os.killpg(process.pid, signal.SIGTERM if attempt == 0 else signal.SIGKILL)
+            elif process.poll() is None:
+                process.terminate() if attempt == 0 else process.kill()
+        except ProcessLookupError:
+            pass
+        try:
+            process.wait(timeout=2)
+            if attempt == 1 or not group:
+                return
+        except subprocess.TimeoutExpired:
+            if attempt == 1:
+                raise RunnerError("Owned diagnostic child did not exit after terminate/kill")
 
-    assert process.stdout is not None
-    with log.open("a", encoding="utf-8", newline="") as handle:
-        for line in process.stdout:
-            sys.stdout.write(line)
-            sys.stdout.flush()
-            handle.write(line)
-    returncode = process.wait()
-    append_log(log, f"[exit {returncode}]")
-    return returncode
+
+def run_gradle(
+    command: Sequence[str], *, cwd: Path, env: dict[str, str], log: Path,
+    observation: HostedStallObservation | None = None,
+) -> int:
+    append_log(log, f"$ {display_command(command)}")
+    # The opt-in path uses a regular file: inherited pipes cannot block its timer or cancellation.
+    sink = log.open("a", encoding="utf-8", newline="") if observation else None
+    process: subprocess.Popen[str] | None = None
+    try:
+        offset = sink.tell() if sink else 0
+        try:
+            process = subprocess.Popen(
+                list(command), cwd=cwd, env=env,
+                stdout=sink if sink else subprocess.PIPE, stderr=subprocess.STDOUT,
+                text=True, encoding="utf-8", errors="replace", bufsize=1,
+                start_new_session=observation is not None,
+            )
+        except OSError as error:
+            raise RunnerError(f"Could not start Gradle: {error}") from error
+        if observation:
+            with log.open("r", encoding="utf-8", errors="replace") as reader:
+                reader.seek(offset)
+                while process.poll() is None:
+                    sys.stdout.write(reader.read())
+                    sys.stdout.flush()
+                    observation.poll(process)
+                    try:
+                        process.wait(timeout=0.1)
+                    except subprocess.TimeoutExpired:
+                        pass
+                sys.stdout.write(reader.read())
+                sys.stdout.flush()
+                if not observation.disarmed:
+                    observation.drain(bind_identity=False)
+        else:
+            assert process.stdout is not None
+            with log.open("a", encoding="utf-8", newline="") as handle:
+                for line in process.stdout:
+                    sys.stdout.write(line)
+                    sys.stdout.flush()
+                    handle.write(line)
+        returncode = process.wait()
+        append_log(log, f"[exit {returncode}]")
+        return returncode
+    finally:
+        try:
+            if process is not None:
+                stop_owned_command(process, group=observation is not None)
+        finally:
+            if sink:
+                sink.close()
+            if process is not None and process.stdout is not None:
+                process.stdout.close()
+            if observation:
+                observation.close()
 
 
 def clean_gradle_environment(sdk: Path, serial: str | None = None) -> dict[str, str]:
@@ -543,6 +602,185 @@ def adb(
         env=env,
         timeout=timeout,
     )
+
+
+class HostedStallObservation:
+    """Removable, one-shot TestRunner marker observation; never changes test selection."""
+
+    def __init__(
+        self, target: str, tools: SdkTools, serial: str, name: str,
+        emulator: subprocess.Popen[str], env: dict[str, str], directory: Path,
+        receipt: dict[str, Any],
+    ) -> None:
+        self.test_class, self.method = target.split("#", 1)
+        self.tools, self.serial, self.name = tools, serial, name
+        self.emulator, self.env, self.receipt = emulator, env, receipt
+        self.log = directory / "target-stall.txt"
+        self.live_path = directory / "target-test-logcat.txt"
+        self.writer = self.live_path.open("a", encoding="utf-8")
+        self.reader = self.live_path.open("r", encoding="utf-8", errors="replace")
+        self.watcher: subprocess.Popen[str] | None = None
+        self.gradle: subprocess.Popen[str] | None = None
+        self.pending = ""
+        self.anchor = secrets.token_hex(16)
+        self.anchored = False
+        self.fences: set[str] = set()
+        self.pid: int | None = None
+        self.tid: int | None = None
+        self.start_ticks: str | None = None
+        self.started: float | None = None
+        self.disarmed = False
+        receipt.update({"target": target, "state": "arming", "capture_requests": 0})
+        try:
+            require_owned_avd(tools, serial, name, env, self.log, timeout=3)
+            command = [str(tools.adb), "-s", serial, "logcat", "-v", "threadtime", "-T", "1",
+                       "TestRunner:I", "TsuyomiObserve:I", "*:S"]
+            append_log(self.log, f"$ {display_command(command)}")
+            self.watcher = subprocess.Popen(command, env=env, stdout=self.writer,
+                                            stderr=subprocess.STDOUT, text=True)
+            self.fence(self.anchor)
+            receipt["state"] = "waiting_for_target"
+        except BaseException:
+            self.close()
+            raise
+
+    def command(self, arguments: Sequence[str], *, deadline: float | None = None) -> str:
+        if self.emulator.poll() is not None or (self.gradle is not None and self.gradle.poll() is not None):
+            raise RunnerError("Owned emulator/Gradle exited during target observation")
+        remaining = 3 if deadline is None else min(3, deadline - time.monotonic())
+        if remaining <= 0:
+            raise RunnerError(f"Target snapshot deadline expired; see {self.log}")
+        result = adb(self.tools, self.serial, arguments, env=self.env, log=self.log, timeout=remaining)
+        if result.returncode != 0:
+            raise RunnerError(f"Target observation command failed; see {self.log}")
+        return result.output
+
+    def identity(self, *, deadline: float | None = None) -> str:
+        output = self.command(("shell", "cat", f"/proc/{self.pid}/stat", f"/proc/{self.pid}/cmdline"), deadline=deadline)
+        stat, cmdline = output.split("\n", 1)
+        fields = stat.rsplit(")", 1)[1].split()
+        if (cmdline.rstrip("\0\r\n") != "org.tsuyomi.android.fixture"
+                or len(fields) < 20 or not fields[19].isdigit()):
+            raise RunnerError(f"Target PID is not the owned fixture instrumentation process; see {self.log}")
+        return fields[19]  # /proc/<pid>/stat field 22: guards against PID reuse.
+
+    def drain(self, *, bind_identity: bool = True) -> None:
+        self.pending += self.reader.read()
+        lines = self.pending.split("\n")
+        self.pending = lines.pop()
+        started_target = False
+        for line in lines:
+            marker = re.fullmatch(
+                r"\s*\d\d-\d\d\s+\d\d:\d\d:\d\d\.\d+\s+(\d+)\s+(\d+)\s+I\s+"
+                r"(TestRunner|TsuyomiObserve)\s*:\s*(.*)", line.rstrip("\r"),
+            )
+            if not marker:
+                continue
+            pid, tid, tag, text = marker.groups()
+            if tag == "TsuyomiObserve":
+                self.fences.add(text)
+                if text == self.anchor:
+                    self.anchored = True
+                continue
+            if not self.anchored or self.disarmed:
+                continue
+            test = f"{self.method}({self.test_class})"
+            if text == f"started: {test}" and self.pid is None:
+                started_target = True
+                self.pid, self.tid = int(pid), int(tid)
+                self.started = time.monotonic()
+                self.receipt.update({"state": "target_running", "pid": self.pid, "tid": self.tid,
+                                     "started_monotonic": self.started, "deadline_monotonic": self.started + 60})
+            elif text == f"finished: {test}" and int(pid) == self.pid:
+                self.disarmed = True
+                self.receipt["state"] = "completed_without_capture"
+        if self.disarmed:
+            self.close()
+        elif started_target and bind_identity:
+            self.start_ticks = self.identity()
+            self.receipt["process_start_ticks"] = self.start_ticks
+
+    def fence(self, token: str, *, deadline: float | None = None) -> None:
+        limit = min(deadline, time.monotonic() + 5) if deadline is not None else time.monotonic() + 5
+        self.command(("shell", "log", "-p", "i", "-t", "TsuyomiObserve", token), deadline=limit)
+        while token not in self.fences:
+            self.drain()
+            if self.disarmed:
+                return
+            if self.watcher is None or self.watcher.poll() is not None or time.monotonic() >= limit:
+                raise RunnerError(f"Live target logcat fence unavailable; see {self.log}")
+            time.sleep(min(0.05, max(0, limit - time.monotonic())))
+
+    def poll(self, gradle: subprocess.Popen[str]) -> None:
+        self.gradle = gradle
+        if self.disarmed:
+            return
+        if self.watcher is None or self.watcher.poll() is not None:
+            raise RunnerError(f"Live target logcat watcher exited; see {self.log}")
+        self.drain()
+        if self.disarmed or self.started is None or time.monotonic() < self.started + 60:
+            return
+        # Drain through a new device log fence before declaring the target unfinished.
+        deadline = time.monotonic() + 20
+        self.fence(secrets.token_hex(16), deadline=deadline)
+        if self.disarmed:
+            return
+        if self.identity(deadline=deadline) != self.start_ticks:
+            raise RunnerError(f"Target PID changed; refusing snapshot; see {self.log}")
+        require_owned_avd(self.tools, self.serial, self.name, self.env, self.log,
+                          timeout=min(3, max(0.001, deadline - time.monotonic())))
+        before = set(self.command(("shell", "find", "/data/anr", "-maxdepth", "1", "-type", "f"), deadline=deadline).splitlines())
+        self.fence(secrets.token_hex(16), deadline=deadline)
+        if self.disarmed:
+            return
+        self.receipt.update({"state": "snapshot_requested", "capture_requests": 1,
+                             "snapshot_deadline_monotonic": deadline})
+        try:
+            # Recheck process birth in the same device shell immediately before the one SIGQUIT.
+            script = (f'test "$(cut -d " " -f 22 /proc/{self.pid}/stat)" = "{self.start_ticks}" '
+                      f'&& test "$(tr "\\000" "\\n" < /proc/{self.pid}/cmdline)" = "org.tsuyomi.android.fixture" '
+                      f'&& kill -3 {self.pid}')
+            self.command(("shell", script), deadline=deadline)
+            try:
+                self.command(("shell", f'for t in /proc/{self.pid}/task/*; do echo "$t"; cat "$t/comm" "$t/stat" "$t/wchan"; done'),
+                             deadline=deadline)
+            except RunnerError as error:
+                self.receipt["wait_state_gap"] = str(error)
+            while time.monotonic() < deadline:
+                paths = set(self.command(("shell", "find", "/data/anr", "-maxdepth", "1", "-type", "f"), deadline=deadline).splitlines()) - before
+                for path in sorted(paths):
+                    if not re.fullmatch(r"/data/anr/[A-Za-z0-9_.-]+", path):
+                        continue
+                    trace = self.command(("shell", "cat", path), deadline=deadline)
+                    if f"----- pid {self.pid} at " in trace and f"----- end {self.pid} -----" in trace:
+                        self.receipt.update({"state": "snapshot_captured", "art_trace": path,
+                                             "instrumentation_tid_present": f"sysTid={self.tid}" in trace,
+                                             "main_thread_present": '"main" ' in trace,
+                                             "binder_threads_present": f'"Binder:{self.pid}_' in trace,
+                                             "io_worker_threads_present": '"DefaultDispatcher-worker-' in trace,
+                                             "continuation_owner_state": "not inferred from parked coroutine wrappers"})
+                        append_log(self.log, "ART thread stacks and /proc wait states only; parked coroutine wrappers do not prove continuation/owner state.")
+                        raise RunnerError(f"Target remained unfinished for 60s; one snapshot captured; see {self.log}")
+                time.sleep(min(0.1, max(0, deadline - time.monotonic())))
+            raise RunnerError(f"Target remained unfinished for 60s; ART trace unavailable within snapshot bound; see {self.log}")
+        except RunnerError as error:
+            self.receipt["stop_reason"] = str(error)
+            raise
+        finally:
+            self.disarmed = True
+            self.close()
+
+    def close(self) -> None:
+        try:
+            if self.watcher is not None:
+                watcher, self.watcher = self.watcher, None
+                stop_owned_command(watcher)
+        finally:
+            self.disarmed = True
+            if self.receipt["state"] in ("arming", "waiting_for_target", "target_running"):
+                self.receipt["state"] = "closed_without_capture"
+            self.writer.close()
+            self.reader.close()
 
 
 def owned_avd_name(
@@ -1130,6 +1368,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             "build": args.build,
             "prepare_only": args.prepare_only,
             "test_class": args.test_class,
+            "observe_test_stall": args.observe_test_stall,
             "task_override": list(args.task),
         },
         "host": host_evidence(),
@@ -1162,6 +1401,8 @@ def main(argv: Sequence[str] | None = None) -> int:
     serial: str | None = None
     avd_name: str | None = None
     profile: Profile | None = None
+    observation: HostedStallObservation | None = None
+    previous_sigterm: Any = None
     exit_status = 1
 
     try:
@@ -1281,6 +1522,17 @@ def main(argv: Sequence[str] | None = None) -> int:
         if not args.prepare_only:
             command = instrumentation_command(android_root, selected_tasks, args.test_class, args.mode)
             evidence.setdefault("commands", []).append({"phase": "instrumentation", "command": list(command)})
+            if args.observe_test_stall:
+                def interrupt_observation(_signum: int, _frame: Any) -> None:
+                    raise KeyboardInterrupt
+
+                previous_sigterm = signal.signal(signal.SIGTERM, interrupt_observation)
+                evidence["target_observation"] = {}
+                evidence["logs"].update({"target_stall": "target-stall.txt", "target_test_logcat": "target-test-logcat.txt"})
+                observation = HostedStallObservation(
+                    args.observe_test_stall, tools, serial, avd_name, emulator_process,
+                    emulator_env, run_directory, evidence["target_observation"],
+                )
             write_evidence(evidence_path, evidence)
             phase_started = time.monotonic()
             result = run_gradle(
@@ -1288,6 +1540,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                 cwd=android_root,
                 env=clean_gradle_environment(sdk, serial=serial),
                 log=instrumentation_log,
+                observation=observation,
             )
             evidence["timings_seconds"]["instrumentation"] = round(time.monotonic() - phase_started, 3)
             write_evidence(evidence_path, evidence)
@@ -1306,6 +1559,15 @@ def main(argv: Sequence[str] | None = None) -> int:
         evidence["failure"] = f"Unexpected {type(error).__name__}: {error}"
         print(f"API 29 runner failed unexpectedly: {type(error).__name__}: {error}", file=sys.stderr)
     finally:
+        if previous_sigterm is not None:
+            signal.signal(signal.SIGTERM, previous_sigterm)
+        if observation is not None:
+            try:
+                observation.close()
+            except RunnerError as error:
+                evidence["observation_cleanup_warning"] = str(error)
+                evidence["failure"] = evidence["failure"] or str(error)
+                exit_status = 1
         if tools and emulator_process and emulator_process.poll() is None and serial and avd_name and emulator_env:
             try:
                 require_owned_avd(tools, serial, avd_name, emulator_env, adb_log)
