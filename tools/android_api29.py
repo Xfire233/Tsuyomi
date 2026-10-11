@@ -18,7 +18,6 @@ import platform
 import re
 import secrets
 import shutil
-import signal
 import socket
 import subprocess
 import sys
@@ -39,13 +38,6 @@ from android_ci_plan import AndroidCiPlan, git_paths, plan_for_paths
 
 TASK_PATTERN = re.compile(r"^:[A-Za-z0-9_.:-]+$")
 TEST_CLASS_PATTERN = re.compile(r"^[A-Za-z_][A-Za-z0-9_$.]*(?:#[A-Za-z_][A-Za-z0-9_$]*)?$")
-
-# Removable, separately authorized PR64 DataStore observation; never selects tests.
-DATASTORE_OBSERVATION_TARGET = (
-    "org.tsuyomi.android.LocalPublicationProductionJourneyInstrumentedTest"
-    "#missing_original_full_delete_removes_catalog_and_reading_state"
-)
-DATASTORE_OBSERVATION_SUBJECT = "fix(ci): observe preference transaction state [pr64-datastore-20261011]"
 
 
 class RunnerError(RuntimeError):
@@ -132,24 +124,12 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         action="store_true",
         help="create, boot, configure, record, and remove the owned emulator without Gradle",
     )
-    parser.add_argument(
-        "--observe-datastore",
-        action="store_true",
-        help="one-off PR64 hosted logical observation of the original method; does not select tests",
-    )
     args = parser.parse_args(argv)
 
     if args.mode == "low":
         parser.error("--mode low is not available locally; choose explicit --mode high for local work")
     if args.mode == "ci" and os.environ.get("GITHUB_ACTIONS") != "true":
         parser.error("--mode ci is reserved for GitHub Actions (GITHUB_ACTIONS=true)")
-    if args.observe_datastore and (
-        args.mode != "ci" or platform.system() != "Linux"
-        or os.environ.get("GITHUB_EVENT_NAME") != "pull_request"
-        or os.environ.get("GITHUB_RUN_ATTEMPT") != "1"
-        or args.prepare_only or args.test_class or args.task or args.build
-    ):
-        parser.error("--observe-datastore requires the initial hosted Linux PR64 planner-selected run")
     if args.test_class and not TEST_CLASS_PATTERN.fullmatch(args.test_class):
         parser.error("--test-class must be a Java/Kotlin qualified class, optionally followed by #method")
     for task in args.task:
@@ -349,106 +329,28 @@ def capture_command(
     return CommandResult(tuple(command), completed.returncode, completed.stdout)
 
 
-def stop_owned_command(process: subprocess.Popen[Any], *, group: bool = False) -> None:
-    """Bound shutdown of a child and, when requested, its newly owned POSIX session."""
-    for attempt in range(2):
-        try:
-            if group:
-                os.killpg(process.pid, signal.SIGTERM if attempt == 0 else signal.SIGKILL)
-            elif process.poll() is None:
-                process.terminate() if attempt == 0 else process.kill()
-        except ProcessLookupError:
-            pass
-        try:
-            process.wait(timeout=2)
-            if attempt == 1 or not group:
-                return
-        except subprocess.TimeoutExpired:
-            if attempt == 1:
-                raise RunnerError("Owned diagnostic child did not exit after terminate/kill")
-
-
-def run_gradle(
-    command: Sequence[str], *, cwd: Path, env: dict[str, str], log: Path,
-    observation: HostedDataStoreObservation | None = None,
-) -> int:
+def run_gradle(command: Sequence[str], *, cwd: Path, env: dict[str, str], log: Path) -> int:
     append_log(log, f"$ {display_command(command)}")
-    # Regular-file output keeps an inherited pipe from blocking the observation timer/cancellation.
-    sink = log.open("a", encoding="utf-8", newline="") if observation else None
-    process: subprocess.Popen[str] | None = None
-    primary_error: BaseException | None = None
     try:
-        offset = sink.tell() if sink else 0
-        try:
-            process = subprocess.Popen(
-                list(command), cwd=cwd, env=env,
-                stdout=sink if sink else subprocess.PIPE, stderr=subprocess.STDOUT,
-                text=True, encoding="utf-8", errors="replace", bufsize=1,
-                start_new_session=observation is not None,
-            )
-        except OSError as error:
-            raise RunnerError(f"Could not start Gradle: {error}") from error
-        if observation:
-            with log.open("r", encoding="utf-8", errors="replace") as reader:
-                reader.seek(offset)
-                while process.poll() is None:
-                    sys.stdout.write(reader.read())
-                    sys.stdout.flush()
-                    observation.poll(process)
-                    try:
-                        process.wait(timeout=0.1)
-                    except subprocess.TimeoutExpired:
-                        pass
-                sys.stdout.write(reader.read())
+        process = subprocess.Popen(
+            list(command), cwd=cwd, env=env,
+            stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+            text=True, encoding="utf-8", errors="replace", bufsize=1,
+        )
+    except OSError as error:
+        raise RunnerError(f"Could not start Gradle: {error}") from error
+    assert process.stdout is not None
+    try:
+        with log.open("a", encoding="utf-8", newline="") as handle:
+            for line in process.stdout:
+                sys.stdout.write(line)
                 sys.stdout.flush()
-                # Reconcile a final complete log batch without touching a departed target PID.
-                if not observation.disarmed:
-                    observation.finish()
-        else:
-            assert process.stdout is not None
-            with log.open("a", encoding="utf-8", newline="") as handle:
-                for line in process.stdout:
-                    sys.stdout.write(line)
-                    sys.stdout.flush()
-                    handle.write(line)
+                handle.write(line)
         returncode = process.wait()
         append_log(log, f"[exit {returncode}]")
         return returncode
-    except BaseException as error:
-        primary_error = error
-        if observation:
-            observation.receipt.setdefault("stop_reason", f"{type(error).__name__}: {error}")
-        raise
     finally:
-        cleanup_errors: list[BaseException] = []
-        if observation:
-            try:
-                observation.close()
-            except BaseException as error:
-                cleanup_errors.append(error)
-                observation.receipt.setdefault("cleanup_gaps", []).append(
-                    f"Observer cleanup: {type(error).__name__}: {error}"
-                )
-        if process is not None and observation is not None:
-            try:
-                stop_owned_command(process, group=True)
-            except BaseException as error:
-                cleanup_errors.append(error)
-                observation.receipt.setdefault("cleanup_gaps", []).append(
-                    f"Gradle cleanup: {type(error).__name__}: {error}"
-                )
-        for handle in (sink, process.stdout if process is not None else None):
-            if handle is not None:
-                try:
-                    handle.close()
-                except BaseException as error:
-                    cleanup_errors.append(error)
-                    if observation:
-                        observation.receipt.setdefault("cleanup_gaps", []).append(
-                            f"Gradle output cleanup: {type(error).__name__}: {error}"
-                        )
-        if primary_error is None and cleanup_errors:
-            raise cleanup_errors[0]
+        process.stdout.close()
 
 
 def clean_gradle_environment(sdk: Path, serial: str | None = None) -> dict[str, str]:
@@ -637,500 +539,6 @@ def adb(
         env=env,
         timeout=timeout,
     )
-
-
-def validate_datastore_dispatch(repo_root: Path) -> str:
-    """Bind the opt-in to the real PR event and its exact new head subject."""
-    try:
-        event = json.loads(Path(os.environ["GITHUB_EVENT_PATH"]).read_text(encoding="utf-8"))
-        head = event["pull_request"]["head"]["sha"]
-        if event["number"] != 64 or not isinstance(head, str) or not re.fullmatch(r"[0-9a-f]{40}", head):
-            raise ValueError("Not the authorized PR64 head")
-    except (OSError, KeyError, TypeError, ValueError) as error:
-        raise RunnerError("Cannot bind DataStore observation to the authorized PR64 event") from error
-    subject = git_capture(repo_root, ("show", "-s", "--format=%s", head, "--")).decode(errors="replace").strip()
-    if subject != DATASTORE_OBSERVATION_SUBJECT:
-        raise RunnerError("DataStore observation subject is not the separately authorized new dispatch")
-    return head
-
-
-class HostedDataStoreObservation:
-    """Removable logical-state capture; never filters tests or requests a generic thread dump."""
-
-    def __init__(
-        self, tools: SdkTools, serial: str, name: str, emulator: subprocess.Popen[str],
-        env: dict[str, str], directory: Path, repo_root: Path, receipt: dict[str, Any],
-    ) -> None:
-        self.test_class, self.method = DATASTORE_OBSERVATION_TARGET.split("#", 1)
-        self.tools, self.serial, self.name = tools, serial, name
-        self.emulator, self.env, self.receipt = emulator, env, receipt
-        self.probe_source = repo_root / "tools" / "Pr64DataStoreProbe.java"
-        self.log = directory / "target-observation.txt"
-        self.live_path = directory / "target-test-logcat.txt"
-        self.state_path = directory / "target-datastore-state.jsonl"
-        self.stderr_path = directory / "target-datastore-probe-stderr.txt"
-        self.files: list[Any] = []
-        self.watcher: subprocess.Popen[str] | None = None
-        self.collector: subprocess.Popen[str] | None = None
-        self.gradle: subprocess.Popen[str] | None = None
-        self.forward: str | None = None
-        self.forward_before: set[str] | None = None
-        self.pending = ""
-        self.collector_pending = ""
-        self.ready = False
-        self.capture_result: dict[str, Any] | None = None
-        self.anchor = secrets.token_hex(16)
-        self.anchored = False
-        self.fences: set[str] = set()
-        self.pid: int | None = None
-        self.start_ticks: str | None = None
-        self.started: float | None = None
-        self.disarmed = False
-        receipt.update({"target": DATASTORE_OBSERVATION_TARGET, "state": "arming", "capture_requests": 0})
-        try:
-            if not self.probe_source.is_file():
-                raise RunnerError("DataStore logical collector source is unavailable")
-            self.writer = self.open_file(self.live_path, "a")
-            self.reader = self.open_file(self.live_path, "r")
-            self.collector_writer = self.open_file(self.state_path, "a")
-            self.collector_reader = self.open_file(self.state_path, "r")
-            self.collector_stderr = self.open_file(self.stderr_path, "a")
-            require_owned_avd(tools, serial, name, env, self.log, timeout=3)
-            command = [str(tools.adb), "-s", serial, "logcat", "-v", "threadtime", "-T", "1",
-                       "TestRunner:I", "TsuyomiObserve:I", "*:S"]
-            append_log(self.log, f"$ {display_command(command)}")
-            self.watcher = subprocess.Popen(command, env=env, stdout=self.writer,
-                                            stderr=subprocess.STDOUT, text=True)
-            self.fence(self.anchor, deadline=time.monotonic() + 5)
-            receipt["state"] = "waiting_for_target"
-        except BaseException as error:
-            receipt.setdefault("stop_reason", f"{type(error).__name__}: {error}")
-            try:
-                self.close()
-            except BaseException as cleanup_error:
-                receipt.setdefault("cleanup_gaps", []).append(
-                    f"Constructor cleanup: {type(cleanup_error).__name__}: {cleanup_error}"
-                )
-            raise
-
-    def open_file(self, path: Path, mode: str) -> Any:
-        handle = path.open(mode, encoding="utf-8", errors="replace", newline="")
-        self.files.append(handle)
-        return handle
-
-    def command(self, arguments: Sequence[str], *, deadline: float) -> str:
-        if self.emulator.poll() is not None or (self.gradle is not None and self.gradle.poll() is not None):
-            raise RunnerError("Owned emulator/Gradle exited during DataStore observation")
-        remaining = min(3, deadline - time.monotonic())
-        if remaining <= 0:
-            raise RunnerError("DataStore observation command deadline expired")
-        result = adb(self.tools, self.serial, arguments, env=self.env, log=self.log, timeout=remaining)
-        if result.returncode != 0:
-            raise RunnerError(f"DataStore observation command failed; see {self.log}")
-        return result.output
-
-    def identity(self, *, deadline: float) -> str:
-        output = self.command(("shell", "cat", f"/proc/{self.pid}/stat", f"/proc/{self.pid}/cmdline"), deadline=deadline)
-        try:
-            stat, cmdline = output.split("\n", 1)
-            fields = stat.rsplit(")", 1)[1].split()
-            if cmdline.rstrip("\0\r\n") != "org.tsuyomi.android.fixture" or not fields[19].isdigit():
-                raise ValueError("Not the fixture process")
-            return fields[19]  # /proc/<pid>/stat field22 fences PID reuse.
-        except (IndexError, ValueError) as error:
-            raise RunnerError("Target PID is not the bound fixture instrumentation process") from error
-
-    def drain(self) -> None:
-        self.pending += self.reader.read()
-        lines = self.pending.split("\n")
-        self.pending = lines.pop()
-        # Process every complete line before any PID access, attach or capture decision.
-        for line in lines:
-            marker = re.fullmatch(
-                r"\s*\d\d-\d\d\s+\d\d:\d\d:\d\d\.\d+\s+(\d+)\s+(\d+)\s+I\s+"
-                r"(TestRunner|TsuyomiObserve)\s*:\s*(.*)", line.rstrip("\r"),
-            )
-            if not marker:
-                continue
-            pid, tid, tag, text = marker.groups()
-            if tag == "TsuyomiObserve":
-                self.fences.add(text)
-                if text == self.anchor:
-                    self.anchored = True
-                continue
-            if not self.anchored or self.disarmed:
-                continue
-            test = f"{self.method}({self.test_class})"
-            if text == f"started: {test}" and self.pid is None:
-                self.pid = int(pid)
-                self.started = time.monotonic()
-                self.receipt.update({"state": "target_running", "pid": self.pid, "tid": int(tid),
-                                     "started_monotonic": self.started, "deadline_monotonic": self.started + 60})
-            elif text == f"finished: {test}" and int(pid) == self.pid:
-                self.disarmed = True
-                self.receipt["state"] = "completed_without_capture"
-
-    def fence(self, token: str, *, deadline: float) -> None:
-        limit = min(deadline, time.monotonic() + 5)
-        self.command(("shell", "log", "-p", "i", "-t", "TsuyomiObserve", token), deadline=limit)
-        while token not in self.fences:
-            self.drain()
-            if self.disarmed:
-                return
-            if self.watcher is None or self.watcher.poll() is not None or time.monotonic() >= limit:
-                raise RunnerError("Live DataStore target logcat fence unavailable")
-            time.sleep(min(0.05, max(0, limit - time.monotonic())))
-
-    def validate_capture_state(self, value: Any) -> None:
-        """Validate the collector's pinned payload shape, not its causal classification."""
-        def require(item: Any, path: str, kind: type) -> Any:
-            if type(item) is not kind or (kind is str and not item):
-                raise RunnerError(f"{path}: required {kind.__name__}")
-            return item
-
-        def identity(item: Any, path: str) -> dict[str, Any]:
-            item = require(item, path, dict)
-            if require(item.get("id"), f"{path}.id", int) <= 0:
-                raise RunnerError(f"{path}.id: required positive object identity")
-            require(item.get("type"), f"{path}.type", str)
-            return item
-
-        def sequence(item: Any, path: str, limit: int) -> list[Any]:
-            item = require(item, path, list)
-            if len(item) > limit:
-                raise RunnerError(f"{path}: exceeds collector bound {limit}")
-            return item
-
-        state = require(value, "state", dict)
-        for key in (
-            "thread", "test", "store", "consumerTransform", "consumerContinuation",
-            "consumerInterceptor", "consumerDispatcher", "compositionScheduler",
-            "outerRunTestContext", "outerScheduler", "restoreCallerDispatcher",
-        ):
-            identity(state.get(key), f"state.{key}")
-        for key in ("restoreCaller", "storeJob", "restoreAck", "consumerJob", "consumerAck", "consumerCallerJob"):
-            job = identity(state.get(key), f"state.{key}")
-            state_type = require(job.get("stateType"), f"state.{key}.stateType", str)
-            require(job.get("completed"), f"state.{key}.completed", bool)
-            for flag in ("active", "completing", "cancelling"):
-                if flag in job or (state_type == "kotlinx.coroutines.Empty" and flag == "active") or (
-                    state_type == "kotlinx.coroutines.JobSupport$Finishing" and flag != "active"
-                ):
-                    require(job.get(flag), f"state.{key}.{flag}", bool)
-        label = require(state.get("consumerLabel"), "state.consumerLabel", int)
-        stage = require(state.get("consumerStage"), "state.consumerStage", str)
-        if {1: "read", 2: "caller_context_transform", 3: "write"}.get(label) != stage:
-            raise RunnerError("state.consumerStage/consumerLabel: unsupported stage encoding")
-        require(state.get("compositionCurrentTime"), "state.compositionCurrentTime", int)
-        for key in (
-            "compositionEqualsOuterScheduler", "consumerEqualsRestore",
-            "headOfLineClassificationAvailable", "headOfLineOnCompositionQueue",
-        ):
-            require(state.get(key), f"state.{key}", bool)
-        if "consumerScheduler" in state:
-            identity(state["consumerScheduler"], "state.consumerScheduler")
-        elif state["consumerDispatcher"]["type"] == "kotlinx.coroutines.test.StandardTestDispatcherImpl":
-            raise RunnerError("state.consumerScheduler: required for StandardTestDispatcherImpl")
-        if "frameDeferring" in state:
-            require(state["frameDeferring"], "state.frameDeferring", bool)
-        for index, entry in enumerate(sequence(state.get("compositionQueueMatches"), "state.compositionQueueMatches", 32)):
-            path = f"state.compositionQueueMatches[{index}]"
-            require(entry, path, dict)
-            for key in ("event", "marker", "scheduler"):
-                identity(entry.get(key), f"{path}.{key}")
-            require(entry.get("time"), f"{path}.time", int)
-        for index, entry in enumerate(sequence(state.get("frameQueueMatches"), "state.frameQueueMatches", 32)):
-            identity(entry, f"state.frameQueueMatches[{index}]")
-        pump = require(state.get("compositionPump"), "state.compositionPump", dict)
-        require(pump.get("available"), "state.compositionPump.available", bool)
-        identity(pump.get("scheduler"), "state.compositionPump.scheduler")
-        if pump.get("temporalDeadlockProof") is not False:
-            raise RunnerError("state.compositionPump.temporalDeadlockProof: required false")
-        pump_methods = {
-            "kotlinx.coroutines.test.TestCoroutineScheduler": (
-                "tryRunNextTaskUnless$kotlinx_coroutines_test", "advanceUntilIdle",
-                "advanceUntilIdleOr$kotlinx_coroutines_test", "runCurrent", "advanceTimeBy", "advanceTimeBy-LRDsOJo",
-            ),
-            "kotlinx.coroutines.test.TestDispatcher": ("processEvent$kotlinx_coroutines_test",),
-        }
-        for index, entry in enumerate(sequence(pump.get("executingPumpFrames"), "state.compositionPump.executingPumpFrames", 128)):
-            path = f"state.compositionPump.executingPumpFrames[{index}]"
-            require(entry, path, dict)
-            identity(entry.get("thread"), f"{path}.thread")
-            identity(entry.get("scheduler"), f"{path}.scheduler")
-            owner = require(entry.get("owner"), f"{path}.owner", str)
-            method = require(entry.get("method"), f"{path}.method", str)
-            if method not in pump_methods.get(owner, ()):
-                raise RunnerError(f"{path}.owner/method: unsupported pinned pump frame")
-        for index, entry in enumerate(sequence(pump.get("bindingGaps"), "state.compositionPump.bindingGaps", 128)):
-            path = f"state.compositionPump.bindingGaps[{index}]"
-            require(entry, path, dict)
-            require(entry.get("code"), f"{path}.code", str)
-            require(entry.get("bindingRole"), f"{path}.bindingRole", str)
-
-    def read_collector(self) -> None:
-        def gap(code: str, event: Any, detail: str = "") -> None:
-            self.receipt["collector_protocol_gap"] = {"code": code, "event": event, "detail": detail}
-            raise RunnerError(f"Logical collector protocol gap ({code}): {detail}; see {self.state_path}")
-
-        self.collector_pending += self.collector_reader.read()
-        lines = self.collector_pending.split("\n")
-        self.collector_pending = lines.pop()
-        for line in lines:
-            try:
-                event = json.loads(line)
-            except ValueError:
-                gap("invalid_json", line)
-            if not isinstance(event, dict):
-                gap("non_object_event", event)
-            phase = event.get("phase")
-            if phase == "capabilities":
-                if "capabilities" in self.receipt or self.ready or self.receipt["capture_requests"] != 0:
-                    gap("capabilities_out_of_order_or_duplicate", event)
-                if event.get("canGetInstanceInfo") is not True or event.get("status") == "gap":
-                    gap("instance_info_unavailable", event)
-                self.receipt["capabilities"] = event
-            elif phase == "ready":
-                if "capabilities" not in self.receipt or self.ready or self.receipt["capture_requests"] != 0:
-                    gap("ready_out_of_order_or_duplicate", event)
-                if event.get("status") == "gap":
-                    gap("preflight_unavailable", event)
-                self.ready = True
-                self.receipt["capability_preflight"] = "ready"
-            elif phase == "capture":
-                if not self.ready or self.receipt["capture_requests"] != 1 or self.capture_result is not None:
-                    gap("capture_out_of_order_or_duplicate", event)
-                status = event.get("status")
-                if status == "complete":
-                    try:
-                        self.validate_capture_state(event.get("state"))
-                    except RunnerError as error:
-                        gap("capture_schema_invalid", event, str(error))
-                elif status == "gap":
-                    if not isinstance(event.get("code"), str) or not event["code"]:
-                        gap("capture_gap_code_missing", event)
-                else:
-                    gap("capture_status_unsupported", event)
-                # Preserve all diagnostic fields, including partial state and cleanup gaps.
-                self.capture_result = event
-                self.receipt["logical_state"] = event
-            else:
-                gap("preflight_gap" if event.get("status") == "gap" else "phase_unsupported", event)
-
-    def preflight(self) -> None:
-        assert self.started is not None
-        # Attach/metadata checking consumes the original target's60s window, never resets it.
-        deadline = min(self.started + 60, time.monotonic() + 10)
-        self.receipt["preflight_deadline_monotonic"] = deadline
-        self.fence(secrets.token_hex(16), deadline=deadline)
-        if self.disarmed:
-            return
-        self.start_ticks = self.identity(deadline=deadline)
-        self.receipt["process_start_ticks"] = self.start_ticks
-        require_owned_avd(self.tools, self.serial, self.name, self.env, self.log,
-                          timeout=min(3, max(0.001, deadline - time.monotonic())))
-        self.fence(secrets.token_hex(16), deadline=deadline)
-        if self.disarmed:
-            return
-        if self.identity(deadline=deadline) != self.start_ticks:
-            raise RunnerError("Target PID changed before owned JDWP forward")
-        self.forward_before = set(self.command(("forward", "--list"), deadline=deadline).splitlines())
-        port = self.command(("forward", "tcp:0", f"jdwp:{self.pid}"), deadline=deadline).strip()
-        if not port.isascii() or not port.isdecimal() or not 0 < int(port) < 65536:
-            raise RunnerError("Owned JDWP forward returned no valid allocated port")
-        self.forward = f"tcp:{port}"
-        self.receipt["jdwp_forward"] = self.forward
-        self.drain()
-        if self.disarmed:
-            return
-        if self.identity(deadline=deadline) != self.start_ticks:
-            raise RunnerError("Target PID changed after owned JDWP forward")
-        command = ["java", "--add-modules", "jdk.jdi", str(self.probe_source), "127.0.0.1", port]
-        append_log(self.log, f"$ {display_command(command)}")
-        self.collector = subprocess.Popen(
-            command, env=self.env, stdin=subprocess.PIPE, stdout=self.collector_writer,
-            stderr=self.collector_stderr, text=True, encoding="utf-8", start_new_session=True,
-        )
-        while time.monotonic() < deadline:
-            self.drain()
-            if self.disarmed:
-                return
-            self.read_collector()
-            if self.collector.poll() is not None:
-                raise RunnerError(f"Logical collector exited before usable capability; see {self.state_path}")
-            if self.ready:
-                self.receipt["state"] = "logical_collector_ready"
-                return
-            time.sleep(min(0.05, max(0, deadline - time.monotonic())))
-        raise RunnerError(f"Logical collector capability preflight exceeded10s; see {self.state_path}")
-
-    def poll(self, gradle: subprocess.Popen[str]) -> None:
-        self.gradle = gradle
-        if self.disarmed:
-            return
-        try:
-            self.drain()
-            if self.disarmed:
-                self.close()
-                return
-            if self.watcher is None or self.watcher.poll() is not None:
-                raise RunnerError("Live DataStore target logcat watcher exited")
-            if self.started is None:
-                return
-            if self.collector is None:
-                self.preflight()
-            if self.disarmed:
-                self.close()
-                return
-            self.read_collector()
-            if self.collector is None or self.collector.poll() is not None:
-                raise RunnerError("Logical collector exited before the capture boundary")
-            if time.monotonic() < self.started + 60:
-                return
-            # Reconcile completion FIRST, then rebind process identity before exactly one capture.
-            deadline = self.started + 80
-            self.fence(secrets.token_hex(16), deadline=deadline)
-            if self.disarmed:
-                self.close()
-                return
-            require_owned_avd(self.tools, self.serial, self.name, self.env, self.log,
-                              timeout=min(3, max(0.001, deadline - time.monotonic())))
-            if self.identity(deadline=deadline) != self.start_ticks:
-                raise RunnerError("Target PID changed; refusing logical capture")
-            self.fence(secrets.token_hex(16), deadline=deadline)
-            if self.disarmed:
-                self.close()
-                return
-            if self.identity(deadline=deadline) != self.start_ticks:
-                raise RunnerError("Target PID changed at logical capture boundary")
-            self.drain()
-            if self.disarmed:
-                self.close()
-                return
-            if time.monotonic() >= deadline:
-                raise RunnerError("Logical capture deadline expired before request")
-            self.receipt.update({"state": "logical_capture_requested", "capture_requests": 1,
-                                 "snapshot_deadline_monotonic": deadline})
-            assert self.collector.stdin is not None
-            self.collector.stdin.write("CAPTURE\n")
-            self.collector.stdin.flush()
-            while time.monotonic() < deadline:
-                self.read_collector()
-                if self.capture_result is not None:
-                    if self.capture_result["status"] != "complete":
-                        raise RunnerError(f"Logical state unavailable; see {self.state_path}")
-                    try:
-                        exit_code = self.collector.wait(timeout=max(0.001, deadline - time.monotonic()))
-                    except subprocess.TimeoutExpired as error:
-                        raise RunnerError("Logical collector did not finish within the20s capture bound") from error
-                    self.read_collector()
-                    if self.collector_pending:
-                        self.receipt["collector_protocol_gap"] = {"code": "unterminated_event"}
-                        raise RunnerError("Logical collector exited with an unterminated protocol event")
-                    if exit_code != 0:
-                        raise RunnerError("Logical collector reported complete but did not exit successfully")
-                    self.receipt["state"] = "logical_capture_complete"
-                    raise RunnerError(f"Target unfinished at60s; one logical-state capture complete; see {self.state_path}")
-                if self.collector.poll() is not None:
-                    # Read a final complete output batch before declaring an exited collector a gap.
-                    self.read_collector()
-                    if self.capture_result is None:
-                        raise RunnerError(f"Logical collector exited without required state; see {self.state_path}")
-                time.sleep(min(0.05, max(0, deadline - time.monotonic())))
-            raise RunnerError(f"Logical state unavailable within the20s capture bound; see {self.state_path}")
-        except (RunnerError, OSError) as error:
-            self.receipt["stop_reason"] = str(error)
-            if self.receipt["state"] not in ("completed_without_capture", "logical_capture_complete"):
-                self.receipt["state"] = "logical_observation_gap"
-            raise
-
-    def finish(self) -> None:
-        self.drain()
-        if not self.disarmed:
-            self.receipt["state"] = "logical_observation_gap"
-            self.receipt["stop_reason"] = "Original DataStore target completion was not observed before Gradle exit"
-            raise RunnerError(self.receipt["stop_reason"])
-
-    def recover_forward(self) -> None:
-        # An adb timeout/malformed reply can occur after the server allocated our port.
-        if self.forward is not None or self.forward_before is None:
-            return
-        result = adb(self.tools, self.serial, ("forward", "--list"), env=self.env, log=self.log, timeout=3)
-        if result.returncode != 0:
-            raise RunnerError("Cannot account for owned JDWP forward after allocation failure")
-        candidates = []
-        for line in set(result.output.splitlines()) - self.forward_before:
-            fields = line.split()
-            if (len(fields) == 3 and fields[0] == self.serial and fields[2] == f"jdwp:{self.pid}"
-                    and re.fullmatch(r"tcp:[0-9]+", fields[1])
-                    and 0 < int(fields[1].split(":", 1)[1]) < 65536):
-                candidates.append(fields[1])
-        if len(candidates) > 1:
-            raise RunnerError("Owned JDWP forward allocation identity is ambiguous")
-        if candidates:
-            self.forward = candidates[0]
-            self.receipt["jdwp_forward"] = self.forward
-
-    def close(self) -> None:
-        errors: list[str] = []
-        self.disarmed = True
-        if self.collector is not None:
-            collector, self.collector = self.collector, None
-            try:
-                if collector.poll() is None and collector.stdin is not None:
-                    try:
-                        collector.stdin.write("DISARM\n")
-                        collector.stdin.flush()
-                    except OSError:
-                        pass  # It may have exited between poll and the control write.
-                    try:
-                        collector.wait(timeout=2)
-                    except subprocess.TimeoutExpired:
-                        pass
-                stop_owned_command(collector, group=True)
-            except (RunnerError, OSError) as error:
-                errors.append(f"Collector cleanup: {error}")
-            finally:
-                if collector.stdin is not None:
-                    try:
-                        collector.stdin.close()
-                    except OSError as error:
-                        errors.append(f"Collector input cleanup: {error}")
-        if self.watcher is not None:
-            watcher, self.watcher = self.watcher, None
-            try:
-                stop_owned_command(watcher)
-            except (RunnerError, OSError) as error:
-                errors.append(f"Logcat cleanup: {error}")
-        try:
-            self.recover_forward()
-        except (RunnerError, OSError) as error:
-            errors.append(f"Forward allocation cleanup: {error}")
-        finally:
-            self.forward_before = None
-        if self.forward is not None:
-            forward, self.forward = self.forward, None
-            try:
-                # Host-side removal addresses only the port allocated by this observer.
-                result = adb(self.tools, self.serial, ("forward", "--remove", forward),
-                             env=self.env, log=self.log, timeout=3)
-                if result.returncode != 0:
-                    raise RunnerError("Owned JDWP forward removal failed")
-                self.receipt["jdwp_forward_removed"] = True
-            except (RunnerError, OSError) as error:
-                self.receipt["jdwp_forward_removed"] = False
-                errors.append(f"Forward cleanup: {error}")
-        for handle in self.files:
-            try:
-                handle.close()
-            except OSError as error:
-                errors.append(f"Observation file cleanup: {error}")
-        self.files.clear()
-        if self.receipt["state"] in ("arming", "waiting_for_target", "target_running", "logical_collector_ready"):
-            self.receipt["state"] = "closed_without_capture"
-        if errors:
-            self.receipt["cleanup_gaps"] = errors
-            raise RunnerError("; ".join(errors))
 
 
 def owned_avd_name(
@@ -1718,7 +1126,6 @@ def main(argv: Sequence[str] | None = None) -> int:
             "build": args.build,
             "prepare_only": args.prepare_only,
             "test_class": args.test_class,
-            "observe_datastore": args.observe_datastore,
             "task_override": list(args.task),
         },
         "host": host_evidence(),
@@ -1751,15 +1158,11 @@ def main(argv: Sequence[str] | None = None) -> int:
     serial: str | None = None
     avd_name: str | None = None
     profile: Profile | None = None
-    observation: HostedDataStoreObservation | None = None
-    previous_sigterm: Any = None
     exit_status = 1
 
     try:
         if not repo_root.is_dir() or not android_root.is_dir():
             raise RunnerError(f"--repo-root must contain tsuyomi-android: {repo_root}")
-        if args.observe_datastore:
-            evidence["datastore_observation_pr_head"] = validate_datastore_dispatch(repo_root)
         profile = load_profile(profile_path)
         sdk = resolve_sdk(args.sdk)
         tools = require_sdk_tools(sdk, profile.system_image)
@@ -1873,22 +1276,6 @@ def main(argv: Sequence[str] | None = None) -> int:
 
         if not args.prepare_only:
             command = instrumentation_command(android_root, selected_tasks, args.test_class, args.mode)
-            if args.observe_datastore:
-                def interrupt_observation(_signum: int, _frame: Any) -> None:
-                    raise KeyboardInterrupt
-
-                previous_sigterm = signal.signal(signal.SIGTERM, interrupt_observation)
-                evidence["target_observation"] = {}
-                evidence["logs"].update({
-                    "target_observation": "target-observation.txt",
-                    "target_test_logcat": "target-test-logcat.txt",
-                    "target_datastore_state": "target-datastore-state.jsonl",
-                    "target_datastore_stderr": "target-datastore-probe-stderr.txt",
-                })
-                observation = HostedDataStoreObservation(
-                    tools, serial, avd_name, emulator_process, emulator_env,
-                    run_directory, repo_root, evidence["target_observation"],
-                )
             evidence.setdefault("commands", []).append({"phase": "instrumentation", "command": list(command)})
             write_evidence(evidence_path, evidence)
             phase_started = time.monotonic()
@@ -1897,7 +1284,6 @@ def main(argv: Sequence[str] | None = None) -> int:
                 cwd=android_root,
                 env=clean_gradle_environment(sdk, serial=serial),
                 log=instrumentation_log,
-                observation=observation,
             )
             evidence["timings_seconds"]["instrumentation"] = round(time.monotonic() - phase_started, 3)
             write_evidence(evidence_path, evidence)
@@ -1916,16 +1302,6 @@ def main(argv: Sequence[str] | None = None) -> int:
         evidence["failure"] = f"Unexpected {type(error).__name__}: {error}"
         print(f"API 29 runner failed unexpectedly: {type(error).__name__}: {error}", file=sys.stderr)
     finally:
-        if previous_sigterm is not None:
-            signal.signal(signal.SIGTERM, previous_sigterm)
-        if observation is not None:
-            try:
-                observation.close()
-            except RunnerError as error:
-                evidence["observation_cleanup_warning"] = str(error)
-                evidence["failure"] = evidence["failure"] or str(error)
-                if exit_status == 0:
-                    exit_status = 1
         if tools and emulator_process and emulator_process.poll() is None and serial and avd_name and emulator_env:
             try:
                 require_owned_avd(tools, serial, avd_name, emulator_env, adb_log)

@@ -52,6 +52,9 @@ import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertTrue
 import org.junit.runner.RunWith
+import org.junit.rules.ExternalResource
+import org.junit.rules.RuleChain
+import org.junit.rules.TestRule
 import org.tsuyomi.core.preferences.DisplayPreference
 import org.tsuyomi.feature.backup.TransferUiState
 import org.tsuyomi.feature.library.LocalBookImportAction
@@ -73,8 +76,17 @@ import org.tsuyomi.shared.sourcecontract.ReaderInlineKind
 /** Actual provider grants, MainActivity intake, canonical Detail/Reader and durable Room state. */
 @RunWith(AndroidJUnit4::class)
 class LocalPublicationProductionJourneyInstrumentedTest {
-    @get:Rule val composeRule = createAndroidComposeRule<MainActivity>()
-    private val application get() = composeRule.activity.application as TsuyomiApplication
+    val composeRule = createAndroidComposeRule<MainActivity>()
+
+    @get:Rule
+    val journeyRules: TestRule = RuleChain.outerRule(object : ExternalResource() {
+        // Restore shared preferences only after Activity and composition coroutines are disposed.
+        override fun after() {
+            cleanup()
+        }
+    }).around(composeRule)
+
+    private val application get() = InstrumentationRegistry.getInstrumentation().targetContext.applicationContext as TsuyomiApplication
     private val testContext get() = InstrumentationRegistry.getInstrumentation().context
     private val imports get() = ViewModelProvider(composeRule.activity)[PublicationImportCoordinator::class.java]
     private val owned = linkedSetOf<BookIdentity.Local>()
@@ -112,13 +124,18 @@ class LocalPublicationProductionJourneyInstrumentedTest {
         waitFor("书架")
     }
 
-    @After fun cleanup() {
+    @After fun closeReader() {
         application.unregisterActivityLifecycleCallbacks(lifecycleCallbacks)
         if (::baseline.isInitialized) {
             runBlocking(Dispatchers.Main) {
                 val flow = ViewModelProvider(composeRule.activity)[LocalBookFlow::class.java]
                 flow.close()
             }
+        }
+    }
+
+    private fun cleanup() {
+        if (::baseline.isInitialized) {
             runBlocking {
                 application.libraryRepository.localPublications().map { it.identity as BookIdentity.Local }
                     .filter { it !in baseline }.forEach { identity ->

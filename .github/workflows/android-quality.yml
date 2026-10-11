@@ -116,19 +116,9 @@ jobs:
         if: steps.plan.outputs.device_needed == 'true'
         env:
           CI_BASE: ${{ github.event.pull_request.base.sha }}
-          CI_PR_HEAD: ${{ github.event.pull_request.head.sha }}
-          CI_DATASTORE_OBSERVE: ${{ github.event_name == 'pull_request' && github.event.pull_request.number == 64 && github.run_attempt == 1 }}
         run: |
-          observe=()
-          # One separately authorized logical capture; remove this dispatch after consumption.
-          if [ "$CI_DATASTORE_OBSERVE" = "true" ]; then
-            subject=$(git -C "$GITHUB_WORKSPACE" show -s --format=%s "$CI_PR_HEAD" --)
-            if [ "$subject" = 'fix(ci): observe preference transaction state [pr64-datastore-20261011]' ]; then
-              observe=(--observe-datastore)
-            fi
-          fi
           python ../tools/android_api29.py --repo-root "$GITHUB_WORKSPACE" \
-            --mode ci --base "$CI_BASE" --head "$GITHUB_SHA" "${observe[@]}"
+            --mode ci --base "$CI_BASE" --head "$GITHUB_SHA"
       - name: Preserve API 29 diagnostics
         if: always() && steps.plan.outputs.device_needed == 'true'
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
