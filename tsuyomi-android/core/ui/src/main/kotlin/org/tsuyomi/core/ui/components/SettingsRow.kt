@@ -8,8 +8,6 @@ package org.tsuyomi.core.ui.components
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.LocalIndication
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsFocusedAsState
 import androidx.compose.foundation.layout.Column
@@ -34,7 +32,6 @@ import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.semantics.contentDescription
-import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.unit.dp
 import org.tsuyomi.core.display.DisplayProfile
 import org.tsuyomi.core.display.LocalDisplayEnvironment
@@ -54,10 +51,7 @@ fun SettingsGroup(
         modifier = modifier.fillMaxWidth(),
         shape = MaterialTheme.shapes.medium,
         color = MaterialTheme.colorScheme.surfaceContainerLow,
-        border = BorderStroke(
-            width = if (eInk) 1.5.dp else 1.dp,
-            color = if (eInk) TsuyomiEInkPalette.Ink else MaterialTheme.colorScheme.outlineVariant,
-        ),
+        border = if (eInk) null else BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
     ) {
         Column(content = content)
     }
@@ -116,7 +110,6 @@ fun SettingsSwitchRow(
         summary = summary,
         enabled = enabled,
         disabledReason = disabledReason,
-        selected = checked,
         modifier = modifier.semantics {
             stateDescription = if (checked) onDescription else offDescription
         },
@@ -163,7 +156,6 @@ private fun SettingsRowFrame(
     modifier: Modifier = Modifier,
     interaction: @Composable (MutableInteractionSource) -> Modifier,
     trailing: (@Composable () -> Unit)?,
-    selected: Boolean? = null,
 ) {
     val eInk = LocalDisplayEnvironment.current.effectiveProfile == DisplayProfile.EINK
     val interactionSource = remember { MutableInteractionSource() }
@@ -181,19 +173,14 @@ private fun SettingsRowFrame(
         val summaryCount = if (summary == null) 0 else 1
         val reasonCount = if (!enabled && disabledReason != null) 1 else 0
         val maxHeight = LocalTsuyomiPagerMaxContentHeight.current
-        val foreground = if (selected == true) TsuyomiEInkPalette.Paper else if (enabled) TsuyomiEInkPalette.Ink else TsuyomiEInkPalette.N50
         Row(
             modifier = modifier.fillMaxWidth()
                 .then(if (maxHeight == null) Modifier else Modifier.heightIn(max = maxHeight))
-                .heightIn(min = 48.dp)
-                .background(if (selected == true) TsuyomiEInkPalette.Ink else TsuyomiEInkPalette.Paper, shape)
-                .border(1.5.dp, if (enabled) TsuyomiEInkPalette.Ink else TsuyomiEInkPalette.N50, shape)
-                .tsuyomiFocusRing(shape, focused, if (selected == true) TsuyomiEInkPalette.Paper else TsuyomiEInkPalette.Ink,
-                    inset = if (selected == true) 3.dp else 0.dp)
+                .heightIn(min = if (summary == null && disabledReason == null) 48.dp else 64.dp)
+                .tsuyomiFocusRing(shape, focused, MaterialTheme.colorScheme.primary)
                 .then(interaction(interactionSource))
                 .semantics {
                     contentDescription = title
-                    selected?.let { this.selected = it }
                     if (!enabled) stateDescription = disabledDescription
                 }
                 .padding(horizontal = TsuyomiSpacing.Md, vertical = TsuyomiSpacing.Sm),
@@ -214,7 +201,11 @@ private fun SettingsRowFrame(
                             else -> disabledReason.orEmpty()
                         },
                         style = if (index == 0) MaterialTheme.typography.bodyLarge else MaterialTheme.typography.bodyMedium,
-                        color = foreground,
+                        color = when {
+                            index == 0 -> if (enabled) MaterialTheme.colorScheme.onSurface else disabledColor
+                            summaryCount == 1 && index == 1 -> MaterialTheme.colorScheme.onSurfaceVariant
+                            else -> disabledColor
+                        },
                         fillViewport = false,
                         alwaysShowPageControls = false,
                     )

@@ -107,7 +107,7 @@ fun TsuyomiSwitchVisual(
     val trackBorderColor: Color
     val thumbColor: Color
     when {
-        eInk && !enabled && !checked -> {
+        eInk && !enabled -> {
             trackColor = TsuyomiEInkPalette.Paper
             trackBorderColor = TsuyomiEInkPalette.N50
             thumbColor = TsuyomiEInkPalette.N50

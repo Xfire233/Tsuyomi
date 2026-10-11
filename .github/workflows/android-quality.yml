@@ -120,10 +120,10 @@ jobs:
           CI_OBSERVE_STALL: ${{ github.event_name == 'pull_request' && github.event.pull_request.number == 64 && github.run_attempt == 1 }}
         run: |
           observe=()
-          # One-off dispatch token: remove this hook after observation; never reuse the subject.
+          # Separate one-off cleanup dispatch: remove after observation; never reuse this subject.
           if [ "$CI_OBSERVE_STALL" = "true" ]; then
             subject=$(git -C "$GITHUB_WORKSPACE" show -s --format=%s "$CI_PR_HEAD" --)
-            if [ "$subject" = 'fix(android): restore dialog composition [pr64-stall-20261011]' ]; then
+            if [ "$subject" = 'fix(android): preserve display settings [pr64-cleanup-20261011]' ]; then
               observe=(--observe-test-stall 'org.tsuyomi.android.LocalPublicationProductionJourneyInstrumentedTest#missing_original_full_delete_removes_catalog_and_reading_state')
             fi
           fi

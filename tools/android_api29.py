@@ -617,6 +617,7 @@ class HostedStallObservation:
         self.emulator, self.env, self.receipt = emulator, env, receipt
         self.log = directory / "target-stall.txt"
         self.live_path = directory / "target-test-logcat.txt"
+        self.cleanup_log = directory / "target-cleanup-timeline.txt"
         self.writer = self.live_path.open("a", encoding="utf-8")
         self.reader = self.live_path.open("r", encoding="utf-8", errors="replace")
         self.watcher: subprocess.Popen[str] | None = None
@@ -630,11 +631,12 @@ class HostedStallObservation:
         self.start_ticks: str | None = None
         self.started: float | None = None
         self.disarmed = False
-        receipt.update({"target": target, "state": "arming", "capture_requests": 0})
+        receipt.update({"target": target, "state": "arming", "capture_requests": 0,
+                        "cleanup_current_await": None, "cleanup_last_event": None, "cleanup_event_count": 0})
         try:
             require_owned_avd(tools, serial, name, env, self.log, timeout=3)
             command = [str(tools.adb), "-s", serial, "logcat", "-v", "threadtime", "-T", "1",
-                       "TestRunner:I", "TsuyomiObserve:I", "*:S"]
+                       "TestRunner:I", "TsuyomiObserve:I", "TsuyomiCleanup:I", "*:S"]
             append_log(self.log, f"$ {display_command(command)}")
             self.watcher = subprocess.Popen(command, env=env, stdout=self.writer,
                                             stderr=subprocess.STDOUT, text=True)
@@ -672,7 +674,7 @@ class HostedStallObservation:
         for line in lines:
             marker = re.fullmatch(
                 r"\s*\d\d-\d\d\s+\d\d:\d\d:\d\d\.\d+\s+(\d+)\s+(\d+)\s+I\s+"
-                r"(TestRunner|TsuyomiObserve)\s*:\s*(.*)", line.rstrip("\r"),
+                r"(TestRunner|TsuyomiObserve|TsuyomiCleanup)\s*:\s*(.*)", line.rstrip("\r"),
             )
             if not marker:
                 continue
@@ -683,6 +685,21 @@ class HostedStallObservation:
                     self.anchored = True
                 continue
             if not self.anchored or self.disarmed:
+                continue
+            if tag == "TsuyomiCleanup":
+                event = re.fullmatch(
+                    r"(before|after|error):(close_flow|query_local_publications|delete_publication|"
+                    r"restore_reader_preferences|restore_display_preference)", text,
+                )
+                if event and self.pid is not None and int(pid) == self.pid:
+                    phase, operation = event.groups()
+                    append_log(self.cleanup_log, line)
+                    self.receipt["cleanup_event_count"] += 1
+                    self.receipt["cleanup_last_event"] = text
+                    if phase == "before":
+                        self.receipt["cleanup_current_await"] = operation
+                    elif self.receipt["cleanup_current_await"] == operation:
+                        self.receipt["cleanup_current_await"] = None
                 continue
             test = f"{self.method}({self.test_class})"
             if text == f"started: {test}" and self.pid is None:
@@ -734,7 +751,13 @@ class HostedStallObservation:
         if self.disarmed:
             return
         self.receipt.update({"state": "snapshot_requested", "capture_requests": 1,
-                             "snapshot_deadline_monotonic": deadline})
+                             "snapshot_deadline_monotonic": deadline,
+                             "cleanup_at_snapshot": {
+                                 "current_await": self.receipt["cleanup_current_await"],
+                                 "last_event": self.receipt["cleanup_last_event"],
+                                 "event_count": self.receipt["cleanup_event_count"],
+                             }})
+        append_log(self.log, "Observed cleanup markers at snapshot: " + json.dumps(self.receipt["cleanup_at_snapshot"], sort_keys=True))
         try:
             # Recheck process birth in the same device shell immediately before the one SIGQUIT.
             script = (f'test "$(cut -d " " -f 22 /proc/{self.pid}/stat)" = "{self.start_ticks}" '
@@ -1521,18 +1544,20 @@ def main(argv: Sequence[str] | None = None) -> int:
 
         if not args.prepare_only:
             command = instrumentation_command(android_root, selected_tasks, args.test_class, args.mode)
-            evidence.setdefault("commands", []).append({"phase": "instrumentation", "command": list(command)})
             if args.observe_test_stall:
                 def interrupt_observation(_signum: int, _frame: Any) -> None:
                     raise KeyboardInterrupt
 
                 previous_sigterm = signal.signal(signal.SIGTERM, interrupt_observation)
+                command.append("-Pandroid.testInstrumentationRunnerArguments.tsuyomiCleanupObservation=true")
                 evidence["target_observation"] = {}
-                evidence["logs"].update({"target_stall": "target-stall.txt", "target_test_logcat": "target-test-logcat.txt"})
+                evidence["logs"].update({"target_stall": "target-stall.txt", "target_test_logcat": "target-test-logcat.txt",
+                                         "target_cleanup_timeline": "target-cleanup-timeline.txt"})
                 observation = HostedStallObservation(
                     args.observe_test_stall, tools, serial, avd_name, emulator_process,
                     emulator_env, run_directory, evidence["target_observation"],
                 )
+            evidence.setdefault("commands", []).append({"phase": "instrumentation", "command": list(command)})
             write_evidence(evidence_path, evidence)
             phase_started = time.monotonic()
             result = run_gradle(

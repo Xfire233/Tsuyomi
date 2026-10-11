@@ -20,6 +20,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.Dp
 import org.tsuyomi.core.display.DisplayProfile
 import org.tsuyomi.core.display.LocalDisplayEnvironment
 import org.tsuyomi.core.ui.components.SettingsActionRow
@@ -174,6 +175,8 @@ internal fun CenteredSettingsItems(
     itemKey: (Int) -> String,
     itemContent: @Composable (Int) -> Unit,
     groupItems: Boolean = false,
+    standardTopPadding: Dp = TsuyomiSpacing.Sm,
+    standardBottomPadding: Dp = TsuyomiSpacing.Sm,
 ) {
     val eInk = LocalDisplayEnvironment.current.effectiveProfile == DisplayProfile.EINK
     val pagerState = rememberTsuyomiMeasuredPagerState(
@@ -205,7 +208,8 @@ internal fun CenteredSettingsItems(
                     .fillMaxWidth()
                     .widthIn(max = 560.dp)
                     .verticalScroll(rememberScrollState())
-                    .padding(horizontal = TsuyomiSpacing.Md, vertical = TsuyomiSpacing.Sm),
+                    .padding(start = TsuyomiSpacing.Md, end = TsuyomiSpacing.Md,
+                        top = standardTopPadding, bottom = standardBottomPadding),
             ) {
                 repeat(itemCount) { itemContent(it) }
             }

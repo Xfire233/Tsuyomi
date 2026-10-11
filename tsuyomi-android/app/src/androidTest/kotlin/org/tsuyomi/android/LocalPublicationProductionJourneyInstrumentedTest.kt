@@ -11,6 +11,7 @@ import android.content.ClipData
 import android.content.Intent
 import android.net.Uri
 import android.util.Base64
+import android.util.Log
 import androidx.core.content.FileProvider
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.SavedStateHandle
@@ -113,19 +114,41 @@ class LocalPublicationProductionJourneyInstrumentedTest {
     }
 
     @After fun cleanup() {
+        // Removable PR64 cleanup probe: static operation labels only, enabled by the hosted runner.
+        val observeCleanup = InstrumentationRegistry.getArguments()
+            .getString("tsuyomiCleanupObservation") == "true"
+        suspend fun <T> cleanupAwait(operation: String, await: suspend () -> T): T {
+            if (!observeCleanup) return await()
+            Log.i("TsuyomiCleanup", "before:$operation")
+            val result = try {
+                await()
+            } catch (error: Throwable) {
+                Log.i("TsuyomiCleanup", "error:$operation")
+                throw error
+            }
+            Log.i("TsuyomiCleanup", "after:$operation")
+            return result
+        }
         application.unregisterActivityLifecycleCallbacks(lifecycleCallbacks)
         if (::baseline.isInitialized) {
             runBlocking(Dispatchers.Main) {
                 val flow = ViewModelProvider(composeRule.activity)[LocalBookFlow::class.java]
-                flow.close()
+                cleanupAwait("close_flow") { flow.close() }
             }
             runBlocking {
-                application.libraryRepository.localPublications().map { it.identity as BookIdentity.Local }
+                cleanupAwait("query_local_publications") { application.libraryRepository.localPublications() }
+                    .map { it.identity as BookIdentity.Local }
                     .filter { it !in baseline }.forEach { identity ->
-                        application.localPublications.deletePublication(identity, originalOnly = false)
+                        cleanupAwait("delete_publication") {
+                            application.localPublications.deletePublication(identity, originalOnly = false)
+                        }
                     }
-                application.readerPreferencesRepository.update(originalReader)
-                application.displayController.setDisplayPreference(originalDisplay)
+                cleanupAwait("restore_reader_preferences") {
+                    application.readerPreferencesRepository.update(originalReader)
+                }
+                cleanupAwait("restore_display_preference") {
+                    application.displayController.setDisplayPreference(originalDisplay)
+                }
             }
             inputs.forEach(File::delete)
         }

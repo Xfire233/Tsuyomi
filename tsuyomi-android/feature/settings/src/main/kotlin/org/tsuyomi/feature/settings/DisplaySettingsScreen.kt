@@ -6,12 +6,15 @@
 package org.tsuyomi.feature.settings
 
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.unit.dp
 import org.tsuyomi.core.display.DisplayDecisionReason
 import org.tsuyomi.core.display.DisplayEnvironment
 import org.tsuyomi.core.display.DisplayProfile
@@ -19,11 +22,13 @@ import org.tsuyomi.core.preferences.ColorSchemePreference
 import org.tsuyomi.core.preferences.DisplayPreference
 import org.tsuyomi.core.ui.components.InfoBanner
 import org.tsuyomi.core.ui.components.InlineStatus
+import org.tsuyomi.core.ui.components.LocalTsuyomiPagerMaxContentHeight
 import org.tsuyomi.core.ui.components.SegmentedSelector
 import org.tsuyomi.core.ui.components.SettingsActionRow
 import org.tsuyomi.core.ui.components.SettingsGroup
 import org.tsuyomi.core.ui.components.SettingsSectionHeader
 import org.tsuyomi.core.ui.components.SettingsSwitchRow
+import org.tsuyomi.core.ui.components.TsuyomiMeasuredPager
 import org.tsuyomi.core.ui.components.TsuyomiSegment
 import org.tsuyomi.core.ui.theme.TsuyomiSpacing
 import org.tsuyomi.shared.model.CoverCardPresentation
@@ -81,9 +86,13 @@ fun DisplaySettingsScreen(
         }
     }
 
-        items += DisplaySettingsItem("profile") {
-            SettingsSectionHeader(title = stringResource(R.string.settings_display_section_profile))
-            SettingsGroup {
+    items += DisplaySettingsItem("profile") {
+        DisplaySettingsSection(
+            key = "profile",
+            title = stringResource(R.string.settings_display_section_profile),
+            eInk = eInk,
+        ) { index ->
+            if (index == 0) {
                 SegmentedSelector(
                     options = listOf(
                         TsuyomiSegment(DisplayPreference.AUTO, stringResource(R.string.settings_display_profile_auto)),
@@ -94,15 +103,21 @@ fun DisplaySettingsScreen(
                     onSelect = actions.onDisplayPreferenceChange,
                     modifier = Modifier.padding(TsuyomiSpacing.Md),
                 )
+            } else {
                 InlineStatus(
                     text = displayStatusText(environment),
                     modifier = Modifier.padding(horizontal = TsuyomiSpacing.Md, vertical = TsuyomiSpacing.Sm),
                 )
             }
         }
-        items += DisplaySettingsItem("appearance") {
-            SettingsSectionHeader(title = stringResource(R.string.settings_display_section_appearance))
-            SettingsGroup {
+    }
+    items += DisplaySettingsItem("appearance") {
+        DisplaySettingsSection(
+            key = "appearance",
+            title = stringResource(R.string.settings_display_section_appearance),
+            eInk = eInk,
+        ) { index ->
+            if (index == 0) {
                 SegmentedSelector(
                     options = listOf(
                         TsuyomiSegment(ColorSchemePreference.SYSTEM, stringResource(R.string.settings_display_theme_system)),
@@ -115,6 +130,7 @@ fun DisplaySettingsScreen(
                     onSelect = actions.onColorSchemePreferenceChange,
                     modifier = Modifier.padding(TsuyomiSpacing.Md),
                 )
+            } else {
                 SettingsSwitchRow(
                     title = stringResource(R.string.settings_display_dynamic_title),
                     summary = stringResource(R.string.settings_display_dynamic_summary),
@@ -129,14 +145,20 @@ fun DisplaySettingsScreen(
                 )
             }
         }
-        if (eInk) {
-            items += DisplaySettingsItem("refresh") {
-                SettingsSectionHeader(title = stringResource(R.string.settings_display_section_refresh))
-                SettingsGroup {
+    }
+    if (eInk) {
+        items += DisplaySettingsItem("refresh") {
+            DisplaySettingsSection(
+                key = "refresh",
+                title = stringResource(R.string.settings_display_section_refresh),
+                eInk = true,
+            ) { index ->
+                if (index == 0) {
                     InlineStatus(
                         text = stringResource(R.string.settings_display_refresh_note),
                         modifier = Modifier.padding(TsuyomiSpacing.Md),
                     )
+                } else {
                     SettingsActionRow(
                         title = stringResource(R.string.settings_display_refresh_now_title),
                         summary = stringResource(R.string.settings_display_refresh_now_summary, environment.redrawEpoch),
@@ -144,7 +166,8 @@ fun DisplaySettingsScreen(
                     )
                 }
             }
-        } else {
+        }
+    } else {
         items += DisplaySettingsItem("cover-cards") {
             SettingsSectionHeader(title = stringResource(R.string.settings_display_section_cover_cards))
             SettingsGroup {
@@ -176,6 +199,8 @@ fun DisplaySettingsScreen(
     CenteredSettingsItems(
         modifier = modifier,
         itemCount = items.size,
+        standardTopPadding = 0.dp,
+        standardBottomPadding = TsuyomiSpacing.Lg,
         itemKey = { index -> items[index].key },
         itemContent = { index ->
             if (eInk) {
@@ -189,6 +214,35 @@ fun DisplaySettingsScreen(
             }
         },
     )
+}
+
+/** Keep each heading and its complete controls together, paging only the bounded group overflow. */
+@Composable
+private fun DisplaySettingsSection(
+    key: String,
+    title: String,
+    eInk: Boolean,
+    content: @Composable (Int) -> Unit,
+) {
+    Column(
+        Modifier.fillMaxWidth().then(
+            if (eInk) Modifier.heightIn(max = requireNotNull(LocalTsuyomiPagerMaxContentHeight.current)) else Modifier,
+        ),
+    ) {
+        SettingsSectionHeader(title)
+        SettingsGroup(modifier = if (eInk) Modifier.weight(1f, fill = false) else Modifier) {
+            if (eInk) {
+                TsuyomiMeasuredPager(
+                    itemCount = 2,
+                    itemKey = { index -> "$key:$index" },
+                    itemContent = content,
+                    fillViewport = false,
+                )
+            } else {
+                repeat(2) { content(it) }
+            }
+        }
+    }
 }
 
 @Composable
