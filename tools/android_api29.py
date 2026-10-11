@@ -1245,6 +1245,13 @@ def main(argv: Sequence[str] | None = None) -> int:
 
         require_renderer(tools, profile, emulator_env, emulator_log)
         create_avd(tools, profile, avd_name, emulator_env, emulator_log)
+        # Initialize the host daemon before boot queries classify device transport errors.
+        adb_server = capture_command(
+            [str(tools.adb), "start-server"],
+            log=adb_log, cwd=None, env=emulator_env, timeout=10,
+        )
+        if adb_server.returncode != 0:
+            raise RunnerError(f"Could not start adb server; see {adb_log}")
         emulator_process = start_emulator(tools, profile, avd_name, port, emulator_env, emulator_log)
         boot_deadline = time.monotonic() + profile.boot_timeout_seconds
         wait_for_boot(tools, emulator_process, serial, avd_name, profile, emulator_env, adb_log, deadline=boot_deadline)
