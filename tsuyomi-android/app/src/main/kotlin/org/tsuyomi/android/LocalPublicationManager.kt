@@ -242,6 +242,9 @@ internal class LocalPublicationManager(private val application: TsuyomiApplicati
         caller: LocalOwner? = null,
         onDeleted: ((BookIdentity.Local) -> Unit)? = null,
     ): PublicationDeleteStatus = recoveryMutex.withLock {
+        // PR64_INTAKE_STATE: temporary, content-free holder/tail observation; no scheduling change.
+        val observedCallerJob = currentCoroutineContext()[Job]
+        Log.i("PR64_INTAKE_STATE", "deleteStage=lock_acquired mutex=${System.identityHashCode(recoveryMutex)} callerJob=${System.identityHashCode(observedCallerJob)} job=${System.identityHashCode(currentCoroutineContext()[Job])} thread=${Thread.currentThread().id} dispatcherClass=${currentCoroutineContext()[kotlin.coroutines.ContinuationInterceptor]?.javaClass?.name} dispatcherIdentity=${System.identityHashCode(currentCoroutineContext()[kotlin.coroutines.ContinuationInterceptor])}")
         if (caller != null && (caller.book.identity != identity || currentLocalOwner(caller) == null)) {
             return@withLock PublicationDeleteStatus.CATALOG_REJECTED
         }
@@ -254,21 +257,35 @@ internal class LocalPublicationManager(private val application: TsuyomiApplicati
         }
         // Retiring a session only detaches UI/work/handle state. It never acquires this mutex or joins.
         // Admission stays cancellable; retiring the Detail must not cancel its admitted deletion or delivery.
-        withContext(NonCancellable) {
+        val deletionResult = withContext(NonCancellable) {
+            Log.i("PR64_INTAKE_STATE", "deleteStage=retiring_enter mutex=${System.identityHashCode(recoveryMutex)} callerJob=${System.identityHashCode(observedCallerJob)} job=${System.identityHashCode(currentCoroutineContext()[Job])} thread=${Thread.currentThread().id} dispatcherClass=${currentCoroutineContext()[kotlin.coroutines.ContinuationInterceptor]?.javaClass?.name} dispatcherIdentity=${System.identityHashCode(currentCoroutineContext()[kotlin.coroutines.ContinuationInterceptor])}")
             val handles = withContext(Dispatchers.Main.immediate) { affected.mapNotNull { it.retire(it, originalOnly) } }
             withContext(Dispatchers.IO) { handles.forEach(PublicationParseHandle::close) }
             val outcome = withContext(Dispatchers.IO) {
                 coverlessOriginals.removeAll { it.first == identity }
                 resources.revoke(identity.publicationId)
-                if (originalOnly) originals.removeOriginal(identity.publicationId) {
+                val removalResult = if (originalOnly) originals.removeOriginal(identity.publicationId) {
                     application.libraryRepository.setLocalOriginalAvailable(it, false)
                 } else originals.deletePublication(identity.publicationId, application.libraryRepository::deleteLocalPublication)
+                Log.i("PR64_INTAKE_STATE", "deleteStage=storage_complete_io mutex=${System.identityHashCode(recoveryMutex)} callerJob=${System.identityHashCode(observedCallerJob)} job=${System.identityHashCode(currentCoroutineContext()[Job])} thread=${Thread.currentThread().id} dispatcherClass=${currentCoroutineContext()[kotlin.coroutines.ContinuationInterceptor]?.javaClass?.name} dispatcherIdentity=${System.identityHashCode(currentCoroutineContext()[kotlin.coroutines.ContinuationInterceptor])}")
+                removalResult
             }
             if (outcome == PublicationDeleteStatus.COMPLETED && !originalOnly && onDeleted != null) {
-                withContext(Dispatchers.Main.immediate) { onDeleted(identity) }
+                Log.i("PR64_INTAKE_STATE", "deleteStage=callback_requested mutex=${System.identityHashCode(recoveryMutex)} callerJob=${System.identityHashCode(observedCallerJob)} job=${System.identityHashCode(currentCoroutineContext()[Job])} thread=${Thread.currentThread().id} dispatcherClass=${currentCoroutineContext()[kotlin.coroutines.ContinuationInterceptor]?.javaClass?.name} dispatcherIdentity=${System.identityHashCode(currentCoroutineContext()[kotlin.coroutines.ContinuationInterceptor])}")
+                withContext(Dispatchers.Main.immediate) {
+                    Log.i("PR64_INTAKE_STATE", "deleteStage=callback_enter mutex=${System.identityHashCode(recoveryMutex)} callerJob=${System.identityHashCode(observedCallerJob)} job=${System.identityHashCode(currentCoroutineContext()[Job])} thread=${Thread.currentThread().id} dispatcherClass=${currentCoroutineContext()[kotlin.coroutines.ContinuationInterceptor]?.javaClass?.name} dispatcherIdentity=${System.identityHashCode(currentCoroutineContext()[kotlin.coroutines.ContinuationInterceptor])}")
+                    onDeleted(identity)
+                    Log.i("PR64_INTAKE_STATE", "deleteStage=callback_exit mutex=${System.identityHashCode(recoveryMutex)} callerJob=${System.identityHashCode(observedCallerJob)} job=${System.identityHashCode(currentCoroutineContext()[Job])} thread=${Thread.currentThread().id} dispatcherClass=${currentCoroutineContext()[kotlin.coroutines.ContinuationInterceptor]?.javaClass?.name} dispatcherIdentity=${System.identityHashCode(currentCoroutineContext()[kotlin.coroutines.ContinuationInterceptor])}")
+                    Unit
+                }
             }
+            Log.i("PR64_INTAKE_STATE", "deleteStage=non_cancellable_tail mutex=${System.identityHashCode(recoveryMutex)} callerJob=${System.identityHashCode(observedCallerJob)} job=${System.identityHashCode(currentCoroutineContext()[Job])} thread=${Thread.currentThread().id} dispatcherClass=${currentCoroutineContext()[kotlin.coroutines.ContinuationInterceptor]?.javaClass?.name} dispatcherIdentity=${System.identityHashCode(currentCoroutineContext()[kotlin.coroutines.ContinuationInterceptor])}")
             outcome
         }
+        Log.i("PR64_INTAKE_STATE", "deleteStage=lock_tail mutex=${System.identityHashCode(recoveryMutex)} callerJob=${System.identityHashCode(observedCallerJob)} job=${System.identityHashCode(currentCoroutineContext()[Job])} thread=${Thread.currentThread().id} dispatcherClass=${currentCoroutineContext()[kotlin.coroutines.ContinuationInterceptor]?.javaClass?.name} dispatcherIdentity=${System.identityHashCode(currentCoroutineContext()[kotlin.coroutines.ContinuationInterceptor])}")
+        deletionResult
+    }.also {
+        Log.i("PR64_INTAKE_STATE", "deleteStage=unlocked mutex=${System.identityHashCode(recoveryMutex)} job=${System.identityHashCode(currentCoroutineContext()[Job])} thread=${Thread.currentThread().id} dispatcherClass=${currentCoroutineContext()[kotlin.coroutines.ContinuationInterceptor]?.javaClass?.name} dispatcherIdentity=${System.identityHashCode(currentCoroutineContext()[kotlin.coroutines.ContinuationInterceptor])}")
     }
 
     /** Current admission records avoid whole-book reparse; legacy records rebuild under removal fencing. */

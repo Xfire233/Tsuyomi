@@ -843,7 +843,8 @@ class LocalPublicationProductionJourneyInstrumentedTest {
     }
 
     private fun deliver(file: File, action: String) {
-        val previousResults = imports.state.results.size
+        var observedCoordinator = imports
+        val previousResults = observedCoordinator.state.results.size
         val uri = FileProvider.getUriForFile(application, "${application.packageName}.publications", file)
         val intent = Intent(composeRule.activity, MainActivity::class.java).apply {
             component = android.content.ComponentName(application.packageName, MainActivity::class.java.name)
@@ -854,7 +855,83 @@ class LocalPublicationProductionJourneyInstrumentedTest {
             addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP)
         }
         composeRule.activity.startActivity(intent)
-        composeRule.waitUntil(15_000) { imports.state.review != null || imports.state.results.size != previousResults }
+        try {
+            composeRule.waitUntil(15_000) {
+                observedCoordinator = imports
+                observedCoordinator.state.review != null || observedCoordinator.state.results.size != previousResults
+            }
+        } catch (failure: androidx.compose.ui.test.ComposeTimeoutException) {
+            // PR64_INTAKE_STATE: temporary, content-free observation before fixture disposal.
+            try {
+                fun field(instance: Any?, name: String): Any? {
+                    var type: Class<*>? = instance?.javaClass
+                    repeat(8) {
+                        val current = type ?: return null
+                        val declared = current.declaredFields.firstOrNull {
+                            it.name == name || it.name == "${name}\$volatile"
+                        }
+                        if (declared != null) {
+                            declared.isAccessible = true
+                            return declared.get(instance)
+                        }
+                        type = current.superclass
+                    }
+                    return null
+                }
+                val coordinator = observedCoordinator
+                val snapshot = coordinator.state
+                val queueSize = (field(coordinator, "queue") as? Collection<*>)?.size
+                val batch = field(coordinator, "batchJob") as? kotlinx.coroutines.Job
+                val currentBook = field(coordinator, "currentBookJob") as? kotlinx.coroutines.Job
+                val mutex = field(application.localPublications, "recoveryMutex") as? kotlinx.coroutines.sync.Mutex
+                val status = when (snapshot.status) {
+                    null -> "none"
+                    application.getString(R.string.publication_storage_failure) -> "storage_failure"
+                    application.getString(R.string.publication_reading_input) -> "reading_input"
+                    else -> "other_present"
+                }
+                System.err.println(
+                    "PR64_INTAKE_STATE coordinator=${System.identityHashCode(coordinator)} " +
+                        "navigationRequest=${coordinator.navigationRequest} queue=$queueSize " +
+                        "batchPresent=${batch != null} batchActive=${batch?.isActive} batchCompleted=${batch?.isCompleted} " +
+                        "busy=${snapshot.busy} status=$status reviewPresent=${snapshot.review != null} " +
+                        "results=${snapshot.results.size} previousResults=$previousResults currentBookPresent=${currentBook != null} " +
+                        "recoveryMutexIdentity=${System.identityHashCode(mutex)} recoveryMutexLocked=${mutex?.isLocked}"
+                )
+                fun jobSnapshot(name: String, job: kotlinx.coroutines.Job?) {
+                    val context = (job as? kotlinx.coroutines.CoroutineScope)?.coroutineContext
+                    val dispatcher = context?.get(kotlin.coroutines.ContinuationInterceptor)
+                    val state = field(job, "_state")
+                    // Inspect only a direct cancellation handler or direct scoped child, not an object graph.
+                    val direct = field(state, "child") ?: field(state, "childJob")
+                    var frame = direct as? kotlin.coroutines.jvm.internal.CoroutineStackFrame
+                    System.err.println(
+                        "PR64_INTAKE_STATE job=$name class=${job?.javaClass?.name} " +
+                            "active=${job?.isActive} completed=${job?.isCompleted} " +
+                            "dispatcherClass=${dispatcher?.javaClass?.name} dispatcherIdentity=${System.identityHashCode(dispatcher)} " +
+                            "stateClass=${state?.javaClass?.name} directClass=${direct?.javaClass?.name} " +
+                            "jobIdentity=${System.identityHashCode(job)} directContinuationPresent=${frame != null}"
+                    )
+                    repeat(6) { index ->
+                        val current = frame ?: return
+                        val element = current.getStackTraceElement()
+                        System.err.println(
+                            "PR64_INTAKE_STATE job=$name frame=$index class=${current.javaClass.name} " +
+                                "method=${element?.methodName} declaringClass=${element?.className} line=${element?.lineNumber}"
+                        )
+                        frame = current.callerFrame
+                    }
+                }
+                jobSnapshot("batch", batch)
+                jobSnapshot("currentBook", currentBook)
+            } catch (observationFailure: Throwable) {
+                runCatching {
+                    System.err.println("PR64_INTAKE_STATE observationErrorClass=${observationFailure.javaClass.name}")
+                }
+            }
+            runCatching { System.err.println("PR64_INTAKE_STATE capture_complete") }
+            throw failure
+        }
         assertNotNull("Import ${file.name} ended before confirmation: ${imports.state.status}; ${imports.state.results.lastOrNull()?.message}", imports.state.review)
     }
 

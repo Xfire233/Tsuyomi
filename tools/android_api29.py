@@ -17,6 +17,7 @@ import os
 import platform
 import re
 import secrets
+import signal
 import shutil
 import socket
 import subprocess
@@ -38,6 +39,10 @@ from android_ci_plan import AndroidCiPlan, git_paths, plan_for_paths
 
 TASK_PATTERN = re.compile(r"^:[A-Za-z0-9_.:-]+$")
 TEST_CLASS_PATTERN = re.compile(r"^[A-Za-z_][A-Za-z0-9_$.]*(?:#[A-Za-z_][A-Za-z0-9_$]*)?$")
+ANDROID_TEST_FAILURE_PATTERN = re.compile(
+    r"[A-Za-z_$][A-Za-z0-9_$]*(?:\.[A-Za-z_$][A-Za-z0-9_$]*)+ > "
+    r"[^\r\n]+\[[^\r\n\]]+\] FAILED[ \t]*(?:\r?\n)?"
+)
 
 
 class RunnerError(RuntimeError):
@@ -329,28 +334,349 @@ def capture_command(
     return CommandResult(tuple(command), completed.returncode, completed.stdout)
 
 
-def run_gradle(command: Sequence[str], *, cwd: Path, env: dict[str, str], log: Path) -> int:
+class _WindowsInvocationJob:
+    """Fence one suspended invocation before it can create descendants."""
+
+    def __init__(self) -> None:
+        import ctypes
+        from ctypes import wintypes
+
+        # Native JOBOBJECT_EXTENDED_LIMIT_INFORMATION layout, including ABI alignment.
+        class Basic(ctypes.Structure):
+            _fields_ = [
+                ("PerProcessUserTimeLimit", ctypes.c_longlong), ("PerJobUserTimeLimit", ctypes.c_longlong),
+                ("LimitFlags", wintypes.DWORD), ("MinimumWorkingSetSize", ctypes.c_size_t),
+                ("MaximumWorkingSetSize", ctypes.c_size_t), ("ActiveProcessLimit", wintypes.DWORD),
+                ("Affinity", ctypes.c_size_t), ("PriorityClass", wintypes.DWORD), ("SchedulingClass", wintypes.DWORD),
+            ]
+
+        class IO(ctypes.Structure):
+            _fields_ = [(name, ctypes.c_ulonglong) for name in (
+                "ReadOperationCount", "WriteOperationCount", "OtherOperationCount",
+                "ReadTransferCount", "WriteTransferCount", "OtherTransferCount",
+            )]
+
+        class Extended(ctypes.Structure):
+            _fields_ = [
+                ("BasicLimitInformation", Basic), ("IoInfo", IO), ("ProcessMemoryLimit", ctypes.c_size_t),
+                ("JobMemoryLimit", ctypes.c_size_t), ("PeakProcessMemoryUsed", ctypes.c_size_t),
+                ("PeakJobMemoryUsed", ctypes.c_size_t),
+            ]
+
+        class Accounting(ctypes.Structure):
+            _fields_ = [
+                ("TotalUserTime", ctypes.c_longlong), ("TotalKernelTime", ctypes.c_longlong),
+                ("ThisPeriodTotalUserTime", ctypes.c_longlong), ("ThisPeriodTotalKernelTime", ctypes.c_longlong),
+                ("TotalPageFaultCount", wintypes.DWORD), ("TotalProcesses", wintypes.DWORD),
+                ("ActiveProcesses", wintypes.DWORD), ("TotalTerminatedProcesses", wintypes.DWORD),
+            ]
+
+        class ThreadEntry(ctypes.Structure):
+            _fields_ = [
+                ("dwSize", wintypes.DWORD), ("cntUsage", wintypes.DWORD), ("threadID", wintypes.DWORD),
+                ("ownerProcessID", wintypes.DWORD), ("basePriority", wintypes.LONG),
+                ("deltaPriority", wintypes.LONG), ("flags", wintypes.DWORD),
+            ]
+
+        self.ctypes = ctypes
+        self.thread_entry = ThreadEntry
+        self.accounting = Accounting
+        self.api = ctypes.WinDLL("kernel32", use_last_error=True)
+        self.api.CreateJobObjectW.argtypes = [ctypes.c_void_p, wintypes.LPCWSTR]
+        self.api.CreateJobObjectW.restype = wintypes.HANDLE
+        self.api.SetInformationJobObject.argtypes = [wintypes.HANDLE, ctypes.c_int, ctypes.c_void_p, wintypes.DWORD]
+        self.api.SetInformationJobObject.restype = wintypes.BOOL
+        self.api.AssignProcessToJobObject.argtypes = [wintypes.HANDLE, wintypes.HANDLE]
+        self.api.AssignProcessToJobObject.restype = wintypes.BOOL
+        self.api.OpenProcess.argtypes = [wintypes.DWORD, wintypes.BOOL, wintypes.DWORD]
+        self.api.OpenProcess.restype = wintypes.HANDLE
+        self.api.CreateToolhelp32Snapshot.argtypes = [wintypes.DWORD, wintypes.DWORD]
+        self.api.CreateToolhelp32Snapshot.restype = wintypes.HANDLE
+        self.api.Thread32First.argtypes = [wintypes.HANDLE, ctypes.POINTER(ThreadEntry)]
+        self.api.Thread32First.restype = wintypes.BOOL
+        self.api.Thread32Next.argtypes = self.api.Thread32First.argtypes
+        self.api.Thread32Next.restype = wintypes.BOOL
+        self.api.OpenThread.argtypes = [wintypes.DWORD, wintypes.BOOL, wintypes.DWORD]
+        self.api.OpenThread.restype = wintypes.HANDLE
+        self.api.GetProcessIdOfThread.argtypes = [wintypes.HANDLE]
+        self.api.GetProcessIdOfThread.restype = wintypes.DWORD
+        self.api.ResumeThread.argtypes = [wintypes.HANDLE]
+        self.api.ResumeThread.restype = wintypes.DWORD
+        self.api.TerminateJobObject.argtypes = [wintypes.HANDLE, wintypes.UINT]
+        self.api.TerminateJobObject.restype = wintypes.BOOL
+        self.api.QueryInformationJobObject.argtypes = [wintypes.HANDLE, ctypes.c_int, ctypes.c_void_p, wintypes.DWORD, ctypes.POINTER(wintypes.DWORD)]
+        self.api.QueryInformationJobObject.restype = wintypes.BOOL
+        self.api.CloseHandle.argtypes = [wintypes.HANDLE]
+        self.api.CloseHandle.restype = wintypes.BOOL
+        # Unnamed, non-inheritable handle: only this owner can close the job.
+        self.handle = None
+        try:
+            self.handle = self.api.CreateJobObjectW(None, None)
+            if not self.handle:
+                raise ctypes.WinError(ctypes.get_last_error())
+            limits = Extended()
+            limits.BasicLimitInformation.LimitFlags = 0x2000  # JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE; no breakaway.
+            if not self.api.SetInformationJobObject(self.handle, 9, ctypes.byref(limits), ctypes.sizeof(limits)):
+                raise ctypes.WinError(ctypes.get_last_error())
+        except BaseException as error:
+            if self.handle:
+                try:
+                    self.close()
+                except BaseException as cleanup_error:
+                    error.add_note(f"Owned Windows job setup cleanup failed: {type(cleanup_error).__name__}")
+            raise
+
+    def _close_handle(self, handle: Any) -> None:
+        primary_error = sys.exc_info()[1]
+        try:
+            if not self.api.CloseHandle(handle):
+                raise self.ctypes.WinError(self.ctypes.get_last_error())
+        except BaseException as error:
+            if primary_error is None:
+                raise
+            primary_error.add_note(f"Owned Windows auxiliary handle close failed: {type(error).__name__}")
+
+    def assign_and_resume(self, process: subprocess.Popen[str]) -> None:
+        ctypes = self.ctypes
+        handle = None
+        try:
+            handle = self.api.OpenProcess(0x0101, False, process.pid)  # PROCESS_SET_QUOTA | PROCESS_TERMINATE
+            if not handle:
+                raise ctypes.WinError(ctypes.get_last_error())
+            if not self.api.AssignProcessToJobObject(self.handle, handle):
+                raise ctypes.WinError(ctypes.get_last_error())
+        finally:
+            if handle:
+                self._close_handle(handle)
+
+        # Popen closes CreateProcess's primary-thread handle. Enumerate only this
+        # fenced, suspended PID and fail closed if its primary thread is ambiguous.
+        invalid_snapshot = ctypes.c_void_p(-1).value
+        snapshot = None
+        try:
+            snapshot = self.api.CreateToolhelp32Snapshot(0x00000004, 0)  # TH32CS_SNAPTHREAD
+            if snapshot == invalid_snapshot:
+                raise ctypes.WinError(ctypes.get_last_error())
+            thread_id = None
+            entry = self.thread_entry()
+            entry.dwSize = ctypes.sizeof(entry)
+            if not self.api.Thread32First(snapshot, ctypes.byref(entry)):
+                raise ctypes.WinError(ctypes.get_last_error())
+            while True:
+                if entry.dwSize < self.thread_entry.ownerProcessID.offset + 4:
+                    raise RunnerError("Windows thread snapshot omitted process ownership")
+                if entry.ownerProcessID == process.pid:
+                    if thread_id is not None:
+                        raise RunnerError("Owned suspended process has more than one initial thread")
+                    thread_id = entry.threadID
+                entry.dwSize = ctypes.sizeof(entry)
+                if not self.api.Thread32Next(snapshot, ctypes.byref(entry)):
+                    error = ctypes.get_last_error()
+                    if error != 18:  # ERROR_NO_MORE_FILES
+                        raise ctypes.WinError(error)
+                    break
+        finally:
+            if snapshot is not None and snapshot != invalid_snapshot:
+                self._close_handle(snapshot)
+        if thread_id is None:
+            raise RunnerError("Owned suspended process has no initial thread")
+        thread = None
+        try:
+            thread = self.api.OpenThread(0x0802, False, thread_id)  # QUERY_LIMITED_INFORMATION | SUSPEND_RESUME
+            if not thread:
+                raise ctypes.WinError(ctypes.get_last_error())
+            if self.api.GetProcessIdOfThread(thread) != process.pid:
+                raise RunnerError("Windows initial-thread ownership changed before resume")
+            previous_count = self.api.ResumeThread(thread)
+            if previous_count == 0xFFFFFFFF:
+                raise ctypes.WinError(ctypes.get_last_error())
+            if previous_count != 1:
+                raise RunnerError("Owned Windows initial thread did not resume from its creation fence")
+        finally:
+            if thread:
+                self._close_handle(thread)
+
+    def terminate(self) -> None:
+        if self.handle is None:
+            return
+        if not self.api.TerminateJobObject(self.handle, 1):
+            raise self.ctypes.WinError(self.ctypes.get_last_error())
+        accounting = self.accounting()
+        deadline = time.monotonic() + 10
+        while True:
+            if not self.api.QueryInformationJobObject(
+                self.handle, 1, self.ctypes.byref(accounting), self.ctypes.sizeof(accounting), None,
+            ):
+                raise self.ctypes.WinError(self.ctypes.get_last_error())
+            if accounting.ActiveProcesses == 0:
+                return
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise RunnerError("Owned Windows job members did not exit after bounded termination")
+            time.sleep(min(0.05, remaining))
+
+    def close(self) -> None:
+        if self.handle is None:
+            return
+        termination_error = None
+        try:
+            self.terminate()
+        except BaseException as error:
+            termination_error = error
+        finally:
+            try:
+                # KILL_ON_JOB_CLOSE is the final backstop even when accounting fails.
+                if not self.api.CloseHandle(self.handle):
+                    raise self.ctypes.WinError(self.ctypes.get_last_error())
+                self.handle = None
+            except BaseException as error:
+                if termination_error is None:
+                    termination_error = error
+                else:
+                    termination_error.add_note(f"Owned Windows job handle close also failed: {type(error).__name__}")
+        if termination_error is not None:
+            raise termination_error
+
+
+def run_gradle(
+    command: Sequence[str], *, cwd: Path, env: dict[str, str], log: Path,
+    stop_on_test_failure: bool = False,
+) -> int:
     append_log(log, f"$ {display_command(command)}")
+    windows_job = None
+    process = None
+    cleanup_attempted = False
+
+    def stop_owned_invocation() -> int:
+        assert process is not None
+        if windows_job:
+            # Closing this retained handle kills descendants even after the leader exits.
+            windows_job.close()
+            # Assignment can fail while the owned child is still suspended outside the job.
+            if process.poll() is None:
+                process.kill()
+        else:
+            # This group was created by this Popen, not discovered by process name.
+            shutdown_error = None
+            try:
+                try:
+                    os.killpg(process.pid, signal.SIGTERM)
+                except ProcessLookupError:
+                    pass
+                try:
+                    process.wait(timeout=10)
+                except subprocess.TimeoutExpired:
+                    pass
+            except BaseException as error:
+                shutdown_error = error
+                raise
+            finally:
+                # Finish the owned group even if its leader exited or grace was interrupted.
+                try:
+                    try:
+                        os.killpg(process.pid, signal.SIGKILL)
+                    except ProcessLookupError:
+                        pass
+                except BaseException as error:
+                    if shutdown_error is None:
+                        shutdown_error = error
+                        raise
+                    shutdown_error.add_note(f"Owned POSIX group kill also failed: {type(error).__name__}")
+                finally:
+                    try:
+                        returncode = process.wait(timeout=10)
+                    except BaseException as error:
+                        if shutdown_error is None:
+                            if isinstance(error, subprocess.TimeoutExpired):
+                                raise RunnerError(f"Owned Gradle invocation did not exit after bounded shutdown; see {log}") from error
+                            raise
+                        shutdown_error.add_note(f"Owned POSIX group reap also failed: {type(error).__name__}")
+            return returncode
+        try:
+            return process.wait(timeout=10)
+        except subprocess.TimeoutExpired as error:
+            raise RunnerError(f"Owned Gradle invocation did not exit after bounded shutdown; see {log}") from error
+
     try:
-        process = subprocess.Popen(
-            list(command), cwd=cwd, env=env,
-            stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
-            text=True, encoding="utf-8", errors="replace", bufsize=1,
-        )
-    except OSError as error:
-        raise RunnerError(f"Could not start Gradle: {error}") from error
-    assert process.stdout is not None
-    try:
+        try:
+            if stop_on_test_failure and os.name == "nt":
+                windows_job = _WindowsInvocationJob()
+            process = subprocess.Popen(
+                list(command), cwd=cwd, env=env,
+                stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                text=True, encoding="utf-8", errors="replace", bufsize=1,
+                # CREATE_SUSPENDED prevents spawn/exit until job assignment and ResumeThread.
+                creationflags=(subprocess.CREATE_NEW_PROCESS_GROUP | 0x00000004) if windows_job else 0,
+                start_new_session=stop_on_test_failure and os.name != "nt",
+            )
+            if windows_job:
+                windows_job.assign_and_resume(process)
+        except OSError as error:
+            raise RunnerError(f"Could not start Gradle: {error}") from error
+        assert process is not None
+        assert process.stdout is not None
+        first_test_failure = False
         with log.open("a", encoding="utf-8", newline="") as handle:
             for line in process.stdout:
                 sys.stdout.write(line)
                 sys.stdout.flush()
                 handle.write(line)
+                if stop_on_test_failure and ANDROID_TEST_FAILURE_PATTERN.fullmatch(line):
+                    first_test_failure = True
+                    handle.flush()
+                    break
+        if first_test_failure:
+            append_log(log, "First Android per-test FAILED record observed; stopping only the owned Gradle invocation.")
+            cleanup_attempted = True
+            returncode = stop_owned_invocation()
+            append_log(log, f"[exit {returncode}; first Android test failure]")
+            return 1
         returncode = process.wait()
         append_log(log, f"[exit {returncode}]")
         return returncode
     finally:
-        process.stdout.close()
+        primary_error = sys.exc_info()[1]
+        cleanup_error = None
+        try:
+            # Ownership starts before launch and lasts through setup/success/error.
+            if stop_on_test_failure and process is not None and not cleanup_attempted:
+                stop_owned_invocation()
+        except BaseException as error:
+            cleanup_error = error
+        try:
+            if windows_job:
+                windows_job.close()
+        except BaseException as error:
+            if cleanup_error is None:
+                cleanup_error = error
+            else:
+                cleanup_error.add_note(f"Owned Windows job close also failed: {type(error).__name__}")
+        try:
+            # Also reclaim a suspended child if job assignment or termination failed.
+            if windows_job and process is not None and process.poll() is None:
+                process.kill()
+                process.wait(timeout=10)
+        except BaseException as error:
+            if cleanup_error is None:
+                cleanup_error = error
+            else:
+                cleanup_error.add_note(f"Owned Windows child cleanup also failed: {type(error).__name__}")
+        try:
+            if process is not None and process.stdout is not None:
+                process.stdout.close()
+        except BaseException as error:
+            if cleanup_error is None:
+                cleanup_error = error
+            else:
+                cleanup_error.add_note(f"Owned Gradle pipe close also failed: {type(error).__name__}")
+        if cleanup_error is not None:
+            if primary_error is None:
+                raise cleanup_error
+            primary_error.add_note(f"Owned invocation cleanup failed: {type(cleanup_error).__name__}")
+            try:
+                append_log(log, f"Owned invocation cleanup failed while preserving {type(primary_error).__name__}: {type(cleanup_error).__name__}")
+            except BaseException as log_error:
+                primary_error.add_note(f"Cleanup warning could not be recorded: {type(log_error).__name__}")
 
 
 def clean_gradle_environment(sdk: Path, serial: str | None = None) -> dict[str, str]:
@@ -1284,6 +1610,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                 cwd=android_root,
                 env=clean_gradle_environment(sdk, serial=serial),
                 log=instrumentation_log,
+                stop_on_test_failure=True,
             )
             evidence["timings_seconds"]["instrumentation"] = round(time.monotonic() - phase_started, 3)
             write_evidence(evidence_path, evidence)
