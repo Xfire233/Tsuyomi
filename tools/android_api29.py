@@ -43,6 +43,7 @@ ANDROID_TEST_FAILURE_PATTERN = re.compile(
     r"[A-Za-z_$][A-Za-z0-9_$]*(?:\.[A-Za-z_$][A-Za-z0-9_$]*)+ > "
     r"[^\r\n]+\[[^\r\n\]]+\] FAILED[ \t]*(?:\r?\n)?"
 )
+_ANSI_SGR_PATTERN = re.compile(r"\x1b\[[0-9;:]*m")
 
 
 class RunnerError(RuntimeError):
@@ -621,7 +622,7 @@ def run_gradle(
                 sys.stdout.write(line)
                 sys.stdout.flush()
                 handle.write(line)
-                if stop_on_test_failure and ANDROID_TEST_FAILURE_PATTERN.fullmatch(line):
+                if stop_on_test_failure and ANDROID_TEST_FAILURE_PATTERN.fullmatch(_ANSI_SGR_PATTERN.sub("", line)):
                     first_test_failure = True
                     handle.flush()
                     break

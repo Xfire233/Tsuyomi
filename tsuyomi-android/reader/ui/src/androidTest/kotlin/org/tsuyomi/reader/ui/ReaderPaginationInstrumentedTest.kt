@@ -346,6 +346,10 @@ class ReaderPaginationInstrumentedTest {
             }
         }
         fun showEinkColorField() {
+            composeRule.waitUntil(5_000) {
+                composeRule.onAllNodesWithTag("reader-settings-sheet").fetchSemanticsNodes().isEmpty() &&
+                    composeRule.onAllNodesWithTag("reader-eink-setting-controls").fetchSemanticsNodes().size == 1
+            }
             repeat(50) {
                 if (runCatching { composeRule.onNodeWithTag("reader-foreground-color").assertIsDisplayed() }.isSuccess) return
                 composeRule.onNode(hasText("下一页") and hasAnyAncestor(hasTestTag("reader-eink-setting-controls")))
@@ -358,7 +362,16 @@ class ReaderPaginationInstrumentedTest {
         composeRule.onNodeWithTag("reader-foreground-color")
             .performSemanticsAction(SemanticsActions.SetSelection) { it(1, 1, false) }
         composeRule.runOnIdle { environment.value = standardEnvironment() }
-        composeRule.onNodeWithText("全部设置").performClick()
+        // The outgoing E-ink title also reads "全部设置"; target the mounted Standard quick controls.
+        composeRule.waitUntil(5_000) {
+            composeRule.onAllNodesWithTag("reader-settings-page").fetchSemanticsNodes().isEmpty() &&
+                composeRule.onAllNodesWithTag("reader-quick-settings-scroll").fetchSemanticsNodes().size == 1
+        }
+        composeRule.onNode(hasText("全部设置") and hasAnyAncestor(hasTestTag("reader-quick-settings-scroll")))
+            .assertIsDisplayed().performClick()
+        composeRule.waitUntil(5_000) {
+            composeRule.onAllNodesWithTag("reader-full-settings-scroll").fetchSemanticsNodes().size == 1
+        }
         composeRule.onNodeWithTag("reader-full-settings-scroll").performScrollToNode(hasTestTag("reader-foreground-color"))
         val standardField = composeRule.onNodeWithTag("reader-foreground-color").fetchSemanticsNode().config
         assertEquals("#12", standardField[SemanticsProperties.EditableText].text)
