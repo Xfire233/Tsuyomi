@@ -467,6 +467,7 @@ class LibraryProductionJourneyInstrumentedTest {
             waitForText("书架")
             composeRule.onNodeWithContentDescription("更多操作").performClick()
             composeRule.onNodeWithText("新建收藏夹").performClick()
+            waitForText("收藏夹名称")
             composeRule.onNodeWithText("来源未安装").assertDoesNotExist()
             composeRule.onNodeWithText("高级选项", substring = true).performClick()
             composeRule.onNodeWithText("选择书籍（已选 0 本）").assertDoesNotExist()
@@ -825,6 +826,7 @@ class LibraryProductionJourneyInstrumentedTest {
             waitForText("书架")
             composeRule.onNodeWithContentDescription("更多操作").performClick()
             composeRule.onNodeWithText("新建收藏夹").performClick()
+            waitForText("收藏夹名称")
             composeRule.onNodeWithText("高级选项", substring = true).performClick()
             composeRule.onNode(hasSetTextAction() and hasText("收藏夹名称")).performTextReplacement(title)
             composeRule.onNodeWithText("选择已有标签").performScrollTo().performClick()
@@ -928,6 +930,7 @@ class LibraryProductionJourneyInstrumentedTest {
             waitForText("书架")
             composeRule.onNodeWithContentDescription("更多操作").performClick()
             composeRule.onNodeWithText("新建收藏夹").performClick()
+            waitForText("收藏夹名称")
             composeRule.onNodeWithText("高级选项", substring = true).performClick()
             composeRule.onNode(hasSetTextAction() and hasText("收藏夹名称")).performTextReplacement(title)
             if (composeRule.onAllNodes(hasSetTextAction()).fetchSemanticsNodes().size == 1) {

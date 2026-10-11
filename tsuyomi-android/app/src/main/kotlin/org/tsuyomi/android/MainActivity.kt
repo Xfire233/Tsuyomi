@@ -54,7 +54,9 @@ import androidx.navigation.compose.rememberNavController
 import java.time.Instant
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.CoroutineStart
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.collect
 import org.tsuyomi.shared.librarydomain.LibraryEntry
@@ -201,8 +203,10 @@ internal fun TsuyomiApp(
     val importRequest = publicationImports.navigationRequest
     LaunchedEffect(importRequest) {
         if (importRequest > 0L) {
-            navController.navigate(Routes.LocalBookImport) { launchSingleTop = true }
-            publicationImports.consumeNavigation(importRequest)
+            withContext(Dispatchers.Main.immediate) {
+                navController.navigate(Routes.LocalBookImport) { launchSingleTop = true }
+                publicationImports.consumeNavigation(importRequest)
+            }
         }
     }
     fun requestManualUpdate() {
@@ -213,9 +217,11 @@ internal fun TsuyomiApp(
     }
     LaunchedEffect(updateNavigationSignal) {
         if (updateNavigationSignal > 0) {
-            libraryFlow.selectTab(SystemLibraryFilter.ALL)
-            libraryFlow.setUpdateFilter(org.tsuyomi.feature.library.LibraryUpdateFilter.UPDATES_ONLY)
-            navController.navigate(Routes.Library) { launchSingleTop = true }
+            withContext(Dispatchers.Main.immediate) {
+                libraryFlow.selectTab(SystemLibraryFilter.ALL)
+                libraryFlow.setUpdateFilter(org.tsuyomi.feature.library.LibraryUpdateFilter.UPDATES_ONLY)
+                navController.navigate(Routes.Library) { launchSingleTop = true }
+            }
         }
     }
     val currentEntry by navController.currentBackStackEntryAsState()
@@ -235,8 +241,10 @@ internal fun TsuyomiApp(
         val entry = currentEntry ?: return@LaunchedEffect
         if (localPublicationId != null) {
             if (!localBook.admitRoute(entry.id, localPublicationId)) {
-                publicationImports.removeDeletedBookActions(localPublicationId)
-                navController.pruneLocalBookRoutes(localPublicationId)
+                withContext(Dispatchers.Main.immediate) {
+                    publicationImports.removeDeletedBookActions(localPublicationId)
+                    navController.pruneLocalBookRoutes(localPublicationId)
+                }
             }
         } else localBook.close()
     }
@@ -601,7 +609,7 @@ internal fun TsuyomiApp(
                                             },
                                             selected = source.manifest.sourceId == activeSourcePackage?.manifest?.sourceId,
                                             onClick = {
-                                                scope.launch {
+                                                scope.launch(Dispatchers.Main.immediate) {
                                                     sourceSwitchUnavailable = sourceOwner.switchSourceHome(
                                                         source.manifest.sourceId.value,
                                                     ) == SourceHomeSwitchResult.UNAVAILABLE
@@ -619,7 +627,7 @@ internal fun TsuyomiApp(
                                     TsuyomiTopBarAction(
                                         icon = TsuyomiIcons.Search,
                                         label = stringResource(R.string.title_source_home_search),
-                                        onClick = { scope.launch { sourceOwner.openInstalledSource() } },
+                                        onClick = { scope.launch(Dispatchers.Main.immediate) { sourceOwner.openInstalledSource() } },
                                     ),
                                 )
                             },
@@ -629,7 +637,7 @@ internal fun TsuyomiApp(
                                         TsuyomiOverflowAction(
                                             label = stringResource(R.string.title_source_home_remote_library),
                                             icon = TsuyomiIcons.Bookmark,
-                                            onClick = { scope.launch { sourceOwner.openRemoteLibrary() } },
+                                            onClick = { scope.launch(Dispatchers.Main.immediate) { sourceOwner.openRemoteLibrary() } },
                                         ),
                                     )
                                 }
@@ -684,7 +692,7 @@ internal fun TsuyomiApp(
                                 ?: rootRouteFor(chromeRoute),
                             onSelect = { item ->
                                 if (item.route == Routes.Library) {
-                                    scope.launch {
+                                    scope.launch(Dispatchers.Main.immediate) {
                                         libraryFlow.selectTab(SystemLibraryFilter.ALL)
                                         navController.selectRoot(item.route)
                                     }

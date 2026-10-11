@@ -43,6 +43,7 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.compose.ui.zIndex
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlin.coroutines.cancellation.CancellationException
 import org.tsuyomi.core.display.DisplayProfile
@@ -172,7 +173,7 @@ fun ManualVerificationRoute(
             },
             onUseCurrentPage = onUseVerifiedPage?.let { useVerifiedPage ->
                 {
-                    scope.launch {
+                    scope.launch(Dispatchers.Main.immediate) {
                         snapshotWorking = true
                         snapshotFailure = VerifiedPageFailure.NONE
                         snapshotDiagnostic = null
@@ -209,7 +210,7 @@ fun ManualVerificationRoute(
                     }
                 }
             },
-            onCancel = { scope.launch { session.cancel(); onCancel() } },
+            onCancel = { scope.launch(Dispatchers.Main.immediate) { session.cancel(); onCancel() } },
             onComplete = { scope.launch { session.finish(); onCompleted() } },
             modifier = modifier,
         )

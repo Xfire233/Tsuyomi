@@ -37,6 +37,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.lifecycleScope
 import androidx.navigation.NavGraphBuilder
 import androidx.navigation.NavHostController
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.flow.flowOf
 import org.tsuyomi.core.preferences.RequestedReaderFlow
@@ -166,7 +167,7 @@ private fun NavGraphBuilder.browseRoute(navController: NavHostController, owner:
             onSourceAction = { action ->
                 if (!sourceOpening) {
                     sourceOpening = true
-                scope.launch {
+                scope.launch(Dispatchers.Main.immediate) {
                     try {
                     if (action is BrowseSourceAction.Uninstall) {
                         owner.uninstallSource(action.sourceId)
@@ -284,7 +285,7 @@ private fun NavGraphBuilder.sourceHomeRoute(
             onRetryReplacement = { flow.home.retryReplacement(refreshLoad) },
             onUseOfflineCache = { flow.home.useOfflineCache(loadOffline) },
             onOpenBook = { book ->
-                scope.launch {
+                scope.launch(Dispatchers.Main.immediate) {
                     owner.flow.prepareBook(book)
                     navController.navigateToBookRoute(Routes.Detail)
                 }
@@ -401,7 +402,7 @@ private fun NavGraphBuilder.remoteLibraryRoute(
             },
             onOpenVerification = owner::navigateToVerification,
             onOpenBook = { book ->
-                scope.launch {
+                scope.launch(Dispatchers.Main.immediate) {
                     owner.flow.prepareBook(book)
                     navController.navigateToBookRoute(Routes.Detail)
                 }
@@ -490,7 +491,7 @@ private fun NavGraphBuilder.searchRoute(
             onQueryChange = search::updateQuery,
             onSearch = { scope.launch { search.submit() } },
             onSelectBook = { book ->
-                scope.launch {
+                scope.launch(Dispatchers.Main.immediate) {
                     search.select(book)
                     navController.navigateToBookRoute(Routes.Detail)
                 }
@@ -597,7 +598,7 @@ private fun NavGraphBuilder.detailRoute(
         fun openChapter(target: ReaderNavigationTarget) {
             val chapter = (detail.directoryState as? SourceBookState.Content)?.value?.chapters
                 ?.firstOrNull { it.chapterId == target.contentId } ?: return
-            scope.launch {
+            scope.launch(Dispatchers.Main.immediate) {
                 detail.selectChapter(chapter)
                 navController.navigateToBookRoute(Routes.Reader)
             }
@@ -1329,7 +1330,7 @@ private fun NavGraphBuilder.verificationRoute(
             }
             ManualVerificationRoute(
                 packageInfo = packageInfo,
-                onCompleted = { scope.launch { owner.completeVerification() } },
+                onCompleted = { scope.launch(Dispatchers.Main.immediate) { owner.completeVerification() } },
                 onVerifiedPageCompleted = { owner.completeVerifiedPage() },
                 onCancel = { navController.navigateUp() },
                 verifiedPageRequestUrl = pageRequest.url,

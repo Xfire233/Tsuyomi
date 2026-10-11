@@ -924,14 +924,30 @@ class ManualVerificationHandoffInstrumentedTest {
         pressBack()
         waitForText("聚合搜索")
         performPlatformClick("书架")
-        waitForText("书架")
+        composeRule.waitUntil(timeoutMillis = 15_000) {
+            val page = composeRule.onNodeWithTag("library-primary-page-ALL")
+            page.isDisplayed() && composeRule.onNode(librarySurface("ALL")).isDisplayed() &&
+                page.fetchSemanticsNode().boundsInRoot.let { bounds ->
+                    val viewport = composeRule.onNodeWithTag("library-primary-pager").fetchSemanticsNode().boundsInRoot
+                    bounds.left == viewport.left && bounds.right == viewport.right
+                }
+        }
         waitForText("雾港纪事")
-        performPlatformClick("雾港纪事")
+        composeRule.onNode(hasText("雾港纪事") and hasAnyAncestor(librarySurface("ALL"))).performClick()
         waitForText("简介")
         composeRule.onNodeWithTag("detail-cover").fetchSemanticsNode()
         composeRule.activityRule.scenario.recreate()
         waitForText("简介")
         pressBack()
+        // Recreation restores the route before its asynchronously reloaded Library body.
+        composeRule.waitUntil(timeoutMillis = 15_000) {
+            val page = composeRule.onNodeWithTag("library-primary-page-ALL")
+            page.isDisplayed() && composeRule.onNode(librarySurface("ALL")).isDisplayed() &&
+                page.fetchSemanticsNode().boundsInRoot.let { bounds ->
+                    val viewport = composeRule.onNodeWithTag("library-primary-pager").fetchSemanticsNode().boundsInRoot
+                    bounds.left == viewport.left && bounds.right == viewport.right
+                }
+        }
         composeRule.onNodeWithTag("tsuyomi-tab-ALL").assertIsSelected()
         assertEquals(0, Phase2SourceGateway.websiteMutationCount())
 
@@ -992,6 +1008,14 @@ class ManualVerificationHandoffInstrumentedTest {
             pressBack()
             waitForText("聚合搜索")
             performPlatformClick("书架")
+            composeRule.waitUntil(timeoutMillis = 15_000) {
+                val page = composeRule.onNodeWithTag("library-primary-page-ALL")
+                page.isDisplayed() && composeRule.onNode(librarySurface("ALL")).isDisplayed() &&
+                    page.fetchSemanticsNode().boundsInRoot.let { bounds ->
+                        val viewport = composeRule.onNodeWithTag("library-primary-pager").fetchSemanticsNode().boundsInRoot
+                        bounds.left == viewport.left && bounds.right == viewport.right
+                    }
+            }
             composeRule.onNodeWithTag("tsuyomi-tab-CONTINUE").performClick()
             // The Continue tab lists every book with reading progress, including records the user
             // removed from the shelf, so the row is not guaranteed to be inside the first window of
@@ -1001,20 +1025,33 @@ class ManualVerificationHandoffInstrumentedTest {
             }
             composeRule.onNode(librarySurface("CONTINUE")).performScrollToNode(hasText("雾港纪事"))
             waitForText("雾港纪事")
-            performPlatformClick("雾港纪事")
+            composeRule.onNode(hasText("雾港纪事") and hasAnyAncestor(librarySurface("CONTINUE"))).performClick()
             waitForText("设置")
             composeRule.onNodeWithContentDescription("返回").performClick()
+            composeRule.waitUntil(timeoutMillis = 15_000) {
+                val page = composeRule.onNodeWithTag("library-primary-page-CONTINUE")
+                page.isDisplayed() && composeRule.onNode(librarySurface("CONTINUE")).isDisplayed() &&
+                    page.fetchSemanticsNode().boundsInRoot.let { bounds ->
+                        val viewport = composeRule.onNodeWithTag("library-primary-pager").fetchSemanticsNode().boundsInRoot
+                        bounds.left == viewport.left && bounds.right == viewport.right
+                    }
+            }
             composeRule.onNodeWithTag("tsuyomi-tab-CONTINUE").assertIsSelected()
             performPlatformClick("更多")
             waitForText("显示")
             performPlatformClick("书架")
-            composeRule.onNodeWithTag("tsuyomi-tab-ALL").assertIsSelected()
             try {
                 composeRule.waitUntil(timeoutMillis = 15_000) {
-                    composeRule.onAllNodes(librarySurface("ALL")).fetchSemanticsNodes().isNotEmpty()
+                    val page = composeRule.onNodeWithTag("library-primary-page-ALL")
+                    page.isDisplayed() && composeRule.onNode(librarySurface("ALL")).isDisplayed() &&
+                        page.fetchSemanticsNode().boundsInRoot.let { bounds ->
+                            val viewport = composeRule.onNodeWithTag("library-primary-pager").fetchSemanticsNode().boundsInRoot
+                            bounds.left == viewport.left && bounds.right == viewport.right
+                        }
                 }
+                composeRule.onNodeWithTag("tsuyomi-tab-ALL").assertIsSelected()
                 composeRule.onNode(librarySurface("ALL")).performScrollToNode(hasText("雾港纪事"))
-                composeRule.onNodeWithText("雾港纪事").assertIsDisplayed()
+                composeRule.onNode(hasText("雾港纪事") and hasAnyAncestor(librarySurface("ALL"))).assertIsDisplayed()
             } catch (failure: AssertionError) {
                 throw AssertionError("The root list did not show the book\n" + rootDiagnostics(), failure)
             }
@@ -1331,7 +1368,14 @@ class ManualVerificationHandoffInstrumentedTest {
             assertEquals(categoryRequestCount, Phase2SourceGateway.homeRequestCount())
 
             performPlatformClick("书架")
-            waitForText("书架")
+            composeRule.waitUntil(timeoutMillis = 15_000) {
+                val page = composeRule.onNodeWithTag("library-primary-page-ALL")
+                page.isDisplayed() && composeRule.onNode(librarySurface("ALL")).isDisplayed() &&
+                    page.fetchSemanticsNode().boundsInRoot.let { bounds ->
+                        val viewport = composeRule.onNodeWithTag("library-primary-pager").fetchSemanticsNode().boundsInRoot
+                        bounds.left == viewport.left && bounds.right == viewport.right
+                    }
+            }
             performPlatformClick("浏览")
             waitForText("Wenku8 书库")
             composeRule.onNodeWithTag("source-home-book-grid-recommend").assertIsDisplayed()

@@ -125,10 +125,37 @@ class LocalPublicationProductionJourneyInstrumentedTest {
         waitFor("书架")
     }
 
+    private fun awaitMain(block: suspend () -> Unit) {
+        runBlocking {
+            val operation = async(Dispatchers.Main) { block() }
+            // Main work can await a live composition caller; keep its scheduler progressing.
+            try {
+                composeRule.waitUntil(15_000) { operation.isCompleted }
+                operation.await()
+            } catch (failure: Throwable) {
+                operation.cancel()
+                var settlementFailureRecorded = false
+                // NonCancellable owner cleanup can still await a composition-held boundary.
+                while (!operation.isCompleted) {
+                    try {
+                        composeRule.mainClock.advanceTimeByFrame()
+                    } catch (settlementFailure: Throwable) {
+                        if (settlementFailure !== failure && !settlementFailureRecorded) {
+                            failure.addSuppressed(settlementFailure)
+                            settlementFailureRecorded = true
+                        }
+                    }
+                    Thread.yield()
+                }
+                throw failure
+            }
+        }
+    }
+
     @After fun closeReader() {
         application.unregisterActivityLifecycleCallbacks(lifecycleCallbacks)
         if (::baseline.isInitialized) {
-            runBlocking(Dispatchers.Main) {
+            awaitMain {
                 val flow = ViewModelProvider(composeRule.activity)[LocalBookFlow::class.java]
                 flow.close()
             }
@@ -207,7 +234,7 @@ class LocalPublicationProductionJourneyInstrumentedTest {
             val secondaryStore = ViewModelStore()
             val secondary = LocalBookFlow(application, SavedStateHandle()).also { secondaryStore.put("secondary-local-flow", it) }
             try {
-                runBlocking(Dispatchers.Main) { withTimeout(15_000) { secondary.open(identity.publicationId)?.join() } }
+                awaitMain { withTimeout(15_000) { secondary.open(identity.publicationId)?.join() } }
                 val firstOwner = checkNotNull(primary.lifecycleOwner)
                 val secondOwner = checkNotNull(secondary.lifecycleOwner)
                 assertTrue(primary !== secondary)
@@ -216,7 +243,7 @@ class LocalPublicationProductionJourneyInstrumentedTest {
                 val bookmark = runBlocking { application.libraryRepository.bookmarks(identity).single() }
                 val progress = checkNotNull(runBlocking { application.libraryRepository.progress(identity) })
                 val epoch = primary.documentGeneration
-                runBlocking(Dispatchers.Main) {
+                awaitMain {
                     assertEquals(PublicationDeleteStatus.COMPLETED, secondary.delete(originalOnly, secondOwner))
                     assertRetiredCallbacks(primary, firstOwner, bookmark, epoch)
                     assertRetiredCallbacks(secondary, secondOwner, bookmark, epoch)
@@ -238,7 +265,7 @@ class LocalPublicationProductionJourneyInstrumentedTest {
                 assertEquals(unrelatedBookmarks, runBlocking { application.libraryRepository.bookmarks(unrelated) })
                 assertEquals(unrelatedOriginal.sha256, application.localPublications.originals.original(unrelated.publicationId)!!.sha256)
             } finally {
-                runBlocking(Dispatchers.Main) { secondary.close(); secondaryStore.clear() }
+                awaitMain { secondary.close(); secondaryStore.clear() }
             }
         }
     }
@@ -265,16 +292,16 @@ class LocalPublicationProductionJourneyInstrumentedTest {
         try {
             // This is one genuinely stopped Activity plus a distinct production flow, not two Activities.
             composeRule.activityRule.scenario.moveToState(Lifecycle.State.CREATED)
-            runBlocking(Dispatchers.Main) { withTimeout(15_000) { secondary.open(target.publicationId)?.join() } }
+            awaitMain { withTimeout(15_000) { secondary.open(target.publicationId)?.join() } }
             assertNotNull(secondary.publication)
-            runBlocking(Dispatchers.Main) { secondary.close() }
+            awaitMain { secondary.close() }
         } finally {
-            runBlocking(Dispatchers.Main) { secondary.close(); secondaryStore.clear() }
+            awaitMain { secondary.close(); secondaryStore.clear() }
             composeRule.activityRule.scenario.moveToState(Lifecycle.State.RESUMED)
         }
         waitFor("正文：繁體與简体", substring = true)
         val unrelatedOwner = checkNotNull(primary.lifecycleOwner)
-        runBlocking(Dispatchers.Main) { assertEquals(PublicationDeleteStatus.COMPLETED, application.localPublications.deletePublication(target, false)) }
+        awaitMain { assertEquals(PublicationDeleteStatus.COMPLETED, application.localPublications.deletePublication(target, false)) }
         composeRule.waitUntil(15_000) { !imports.state.busy && imports.state.review == null }
         composeRule.runOnUiThread { imports.edit(LocalBookImportAction.Confirm) }
         assertTrue(unrelatedOwner.job.isActive)
@@ -427,7 +454,7 @@ class LocalPublicationProductionJourneyInstrumentedTest {
         val originals = application.localPublications.originals
         val original = checkNotNull(originals.original(identity.publicationId))
         assertNotNull(originals.admissionRecord(original))
-        runBlocking(Dispatchers.Main) {
+        awaitMain {
             ViewModelProvider(composeRule.activity)[LocalBookFlow::class.java].close(retainRoute = true)
         }
         runBlocking {
@@ -760,7 +787,7 @@ class LocalPublicationProductionJourneyInstrumentedTest {
         val sections = checkNotNull(flow.publication).sections
         assertEquals(2, sections.size)
         assertNativeSection(flow, fixture.firstImage, if (fixture.styled) ReaderInlineKind.Emphasis else null)
-        runBlocking(Dispatchers.Main) { withTimeout(15_000) { flow.read(sections[1].contentId, sectionStart = true)?.join() } }
+        awaitMain { withTimeout(15_000) { flow.read(sections[1].contentId, sectionStart = true)?.join() } }
         waitFor(fixture.laterMarker, substring = true)
         assertNativeSection(flow, fixture.laterImage, if (fixture.styled) ReaderInlineKind.Strong else null)
         composeRule.waitUntil(10_000) {
@@ -772,7 +799,7 @@ class LocalPublicationProductionJourneyInstrumentedTest {
         startReading(fixture.laterMarker)
         assertEquals(retained.document, checkNotNull(flow.document).identity)
         assertNativeSection(flow, fixture.laterImage, if (fixture.styled) ReaderInlineKind.Strong else null)
-        runBlocking(Dispatchers.Main) { withTimeout(15_000) { flow.read(sections[0].contentId, sectionStart = true)?.join() } }
+        awaitMain { withTimeout(15_000) { flow.read(sections[0].contentId, sectionStart = true)?.join() } }
         waitFor(if (fixture.styled) "前节样式正文" else "序章：中文 mixed", substring = true)
         assertNativeSection(flow, fixture.firstImage, if (fixture.styled) ReaderInlineKind.Emphasis else null)
     }
