@@ -5,6 +5,8 @@
 package org.tsuyomi.android
 
 import android.webkit.WebView
+import android.view.ViewGroup
+import android.view.ViewTreeObserver
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -38,9 +40,6 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
-import androidx.compose.ui.semantics.LiveRegionMode
-import androidx.compose.ui.semantics.liveRegion
-import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.compose.ui.zIndex
@@ -49,9 +48,8 @@ import kotlin.coroutines.cancellation.CancellationException
 import org.tsuyomi.core.display.DisplayProfile
 import org.tsuyomi.core.display.LocalDisplayEnvironment
 import org.tsuyomi.core.security.SourceCredentialStore
+import org.tsuyomi.core.ui.components.PAGINATION_JUMP_THRESHOLD
 import org.tsuyomi.core.ui.components.StateView
-import org.tsuyomi.core.ui.components.TsuyomiButton
-import org.tsuyomi.core.ui.components.TsuyomiButtonStyle
 import org.tsuyomi.core.ui.components.TsuyomiStateKind
 import org.tsuyomi.core.ui.components.TsuyomiVerificationToolbar
 import org.tsuyomi.core.ui.components.TsuyomiVerificationAction
@@ -154,13 +152,6 @@ fun ManualVerificationRoute(
             title = stringResource(R.string.verification_loading),
             modifier = modifier,
         )
-        LocalDisplayEnvironment.current.effectiveProfile == DisplayProfile.EINK -> FrozenEInkVerificationContent(
-            webView = requireNotNull(webView),
-            blockedNavigation = blockedNavigation,
-            onCancel = { scope.launch { session.cancel(); onCancel() } },
-            onComplete = { scope.launch { session.finish(); onCompleted() } },
-            modifier = modifier,
-        )
         else -> VerificationContent(
             sourceName = packageInfo.manifest.displayName,
             webView = requireNotNull(webView),
@@ -185,31 +176,36 @@ fun ManualVerificationRoute(
                         snapshotWorking = true
                         snapshotFailure = VerifiedPageFailure.NONE
                         snapshotDiagnostic = null
-                        val accepted = runCatching {
-                            val snapshot = session.captureCurrentPage(
-                                packageInfo.manifest.capabilities.network.maxResponseBytes
-                                    .coerceAtMost(MAX_VERIFIED_PAGE_BYTES),
-                            )
-                            if (snapshot.requestUrl != verifiedPageRequestUrl) {
+                        try {
+                            val accepted = try {
+                                val snapshot = session.captureCurrentPage(
+                                    packageInfo.manifest.capabilities.network.maxResponseBytes
+                                        .coerceAtMost(MAX_VERIFIED_PAGE_BYTES),
+                                )
+                                if (snapshot.requestUrl != verifiedPageRequestUrl) {
+                                    snapshotFailure = VerifiedPageFailure.UNBOUND
+                                    false
+                                } else {
+                                    val result = useVerifiedPage(snapshot)
+                                    snapshotDiagnostic = result.diagnostic
+                                    if (!result.accepted) snapshotFailure = VerifiedPageFailure.REJECTED
+                                    result.accepted
+                                }
+                            } catch (cancelled: CancellationException) {
+                                throw cancelled
+                            } catch (_: Throwable) {
                                 snapshotFailure = VerifiedPageFailure.UNBOUND
                                 false
-                            } else {
-                                val result = useVerifiedPage(snapshot)
-                                snapshotDiagnostic = result.diagnostic
-                                if (!result.accepted) snapshotFailure = VerifiedPageFailure.REJECTED
-                                result.accepted
                             }
-                        }.getOrElse {
-                            snapshotFailure = VerifiedPageFailure.UNBOUND
-                            false
+                            if (accepted) {
+                                session.finish()
+                                onVerifiedPageCompleted()
+                            } else if (snapshotFailure == VerifiedPageFailure.NONE) {
+                                snapshotFailure = VerifiedPageFailure.REJECTED
+                            }
+                        } finally {
+                            snapshotWorking = false
                         }
-                        if (accepted) {
-                            session.finish()
-                            onVerifiedPageCompleted()
-                        } else if (snapshotFailure == VerifiedPageFailure.NONE) {
-                            snapshotFailure = VerifiedPageFailure.REJECTED
-                        }
-                        snapshotWorking = false
                     }
                 }
             },
@@ -241,6 +237,29 @@ private fun VerificationContent(
         if (webView.canGoBack()) webView.goBack() else onCancel()
     }
 
+    val eInk = LocalDisplayEnvironment.current.effectiveProfile == DisplayProfile.EINK
+    var canGoPrevious by remember(webView) { mutableStateOf(false) }
+    var canGoNext by remember(webView) { mutableStateOf(false) }
+    var showPageEndpoints by remember(webView) { mutableStateOf(false) }
+    DisposableEffect(webView, eInk) {
+        val observer = webView.viewTreeObserver
+        val listener = ViewTreeObserver.OnPreDrawListener {
+            if (eInk) {
+                canGoPrevious = webView.canScrollVertically(-1)
+                canGoNext = webView.canScrollVertically(1)
+                // WebView owns native page geometry; this does not inspect or rewrite the DOM.
+                @Suppress("DEPRECATION")
+                val renderedHeight = webView.contentHeight * webView.scale
+                val viewportHeight = webView.height - webView.paddingTop - webView.paddingBottom
+                showPageEndpoints = viewportHeight > 0 &&
+                    renderedHeight > viewportHeight.toFloat() * PAGINATION_JUMP_THRESHOLD
+            }
+            true
+        }
+        if (eInk) observer.addOnPreDrawListener(listener)
+        onDispose { if (observer.isAlive) observer.removeOnPreDrawListener(listener) }
+    }
+
     Box(modifier.fillMaxSize()) {
         TsuyomiVerificationToolbar(
             modifier = Modifier
@@ -253,9 +272,39 @@ private fun VerificationContent(
         ) {
             TsuyomiTonalIconButton(
                 imageVector = TsuyomiIcons.Close,
-                contentDescription = stringResource(R.string.verification_cancel_action),
+                contentDescription = stringResource(if (eInk) R.string.verification_cancel else R.string.verification_cancel_action),
                 onClick = onCancel,
             )
+            if (eInk && (canGoPrevious || canGoNext)) {
+                if (showPageEndpoints) {
+                    TsuyomiTonalIconButton(
+                        imageVector = TsuyomiIcons.ToTop,
+                        contentDescription = stringResource(org.tsuyomi.core.ui.R.string.coreui_pagination_first),
+                        onClick = { webView.pageUp(true) },
+                        enabled = canGoPrevious,
+                    )
+                }
+                TsuyomiTonalIconButton(
+                    imageVector = TsuyomiIcons.ToTop,
+                    contentDescription = stringResource(org.tsuyomi.core.ui.R.string.coreui_pagination_previous),
+                    onClick = { webView.pageUp(false) },
+                    enabled = canGoPrevious,
+                )
+                TsuyomiTonalIconButton(
+                    imageVector = TsuyomiIcons.ToBottom,
+                    contentDescription = stringResource(org.tsuyomi.core.ui.R.string.coreui_pagination_next),
+                    onClick = { webView.pageDown(false) },
+                    enabled = canGoNext,
+                )
+                if (showPageEndpoints) {
+                    TsuyomiTonalIconButton(
+                        imageVector = TsuyomiIcons.ToBottom,
+                        contentDescription = stringResource(org.tsuyomi.core.ui.R.string.coreui_pagination_last),
+                        onClick = { webView.pageDown(true) },
+                        enabled = canGoNext,
+                    )
+                }
+            }
             if (onOpenRequestedPage != null) {
                 TsuyomiTonalIconButton(
                     imageVector = TsuyomiIcons.Refresh,
@@ -274,7 +323,7 @@ private fun VerificationContent(
                 )
             }
             TsuyomiVerificationAction(
-                text = stringResource(R.string.verification_complete_action),
+                text = stringResource(if (eInk) R.string.verification_done else R.string.verification_complete_action),
                 onClick = onComplete,
                 enabled = !snapshotWorking,
                 tonal = snapshotActionAvailable,
@@ -282,7 +331,15 @@ private fun VerificationContent(
         }
 
         AndroidView(
-            factory = { webView },
+            factory = {
+                webView.apply {
+                    // WebView uses native LayoutParams, not Compose's measured bounds, for CSS vh.
+                    layoutParams = ViewGroup.LayoutParams(
+                        ViewGroup.LayoutParams.MATCH_PARENT,
+                        ViewGroup.LayoutParams.MATCH_PARENT,
+                    )
+                }
+            },
             modifier = Modifier
                 .fillMaxSize()
                 .testTag("verification-webview"),
@@ -297,7 +354,7 @@ private fun VerificationContent(
                 .zIndex(2f),
             shape = CircleShape,
             color = MaterialTheme.colorScheme.surfaceContainerHigh,
-            shadowElevation = 2.dp,
+            shadowElevation = if (eInk) 0.dp else 2.dp,
         ) {
             Row(
                 modifier = Modifier.padding(horizontal = TsuyomiSpacing.Md, vertical = TsuyomiSpacing.Sm),
@@ -331,7 +388,7 @@ private fun VerificationContent(
                     .zIndex(2f),
                 color = MaterialTheme.colorScheme.errorContainer,
                 shape = MaterialTheme.shapes.medium,
-                shadowElevation = 2.dp,
+                shadowElevation = if (eInk) 0.dp else 2.dp,
             ) {
                 Column(Modifier.padding(TsuyomiSpacing.Md)) {
                     if (blockedNavigation) {
@@ -368,51 +425,6 @@ private fun VerificationContent(
     }
 }
 
-@Composable
-private fun FrozenEInkVerificationContent(
-    webView: WebView,
-    blockedNavigation: Boolean,
-    onCancel: () -> Unit,
-    onComplete: () -> Unit,
-    modifier: Modifier,
-) {
-    Column(
-        modifier
-            .fillMaxSize()
-            .windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Bottom)),
-    ) {
-        Text(
-            text = stringResource(R.string.verification_notice),
-            modifier = Modifier.fillMaxWidth().padding(16.dp),
-        )
-        if (blockedNavigation) {
-            Text(
-                text = stringResource(R.string.verification_navigation_blocked),
-                modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
-            )
-        }
-        AndroidView(
-            factory = { webView },
-            modifier = Modifier.weight(1f).fillMaxWidth(),
-        )
-        Row(
-            modifier = Modifier.fillMaxWidth().padding(12.dp),
-            horizontalArrangement = Arrangement.spacedBy(12.dp),
-        ) {
-            TsuyomiButton(
-                text = stringResource(R.string.verification_cancel),
-                onClick = onCancel,
-                modifier = Modifier.weight(1f),
-                style = TsuyomiButtonStyle.SECONDARY,
-            )
-            TsuyomiButton(
-                text = stringResource(R.string.verification_done),
-                onClick = onComplete,
-                modifier = Modifier.weight(1f),
-            )
-        }
-    }
-}
 
 private val VerificationToolbarMaxWidth = 560.dp
 private val VerificationFeedbackMaxWidth = 560.dp

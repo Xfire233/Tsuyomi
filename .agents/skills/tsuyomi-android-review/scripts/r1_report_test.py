@@ -137,6 +137,50 @@ class ReportBuilderTest(unittest.TestCase):
         self.assertEqual(["E01"], report["summary"]["deferredNodes"])
         self.assertEqual(["S01"], report["next"]["evidencePlan"]["sharedCandidateTaskFlowNodes"])
 
+
+    def test_active_eink_is_conditional_even_when_all_nodes_are_selected(self) -> None:
+        context = self.context(
+            changes=[self.change("review-request", ["B03", "X06"])],
+            affected_reasons={node: ["full node accounting"] for node in ("B03", "X06")},
+            force_full_review=True,
+        )
+        context.review_policy["activeProfiles"] = ["STANDARD", "EINK"]
+        context.review_policy["deferredProfiles"] = []
+
+        report = build_report(context)
+
+        self.assertEqual(["STANDARD"], report["summary"]["requiresDeviceProfiles"])
+        self.assertEqual(["EINK"], report["summary"]["conditionalDeviceProfiles"])
+        self.assertEqual(["B03", "X06"], report["summary"]["currentStageNodes"])
+
+    def test_initial_global_restoration_requires_both_active_device_profiles(self) -> None:
+        context = self.context(
+            changes=[self.change("runtime", ["B03"])],
+            affected_reasons={"B03": ["reader restoration"]},
+        )
+        context.review_policy["mode"] = "full-eink-restoration"
+        context.review_policy["activeProfiles"] = ["STANDARD", "EINK"]
+        context.review_policy["deferredProfiles"] = []
+
+        report = build_report(context)
+
+        self.assertEqual(["STANDARD", "EINK"], report["summary"]["requiresDeviceProfiles"])
+        self.assertEqual([], report["summary"]["conditionalDeviceProfiles"])
+
+    def test_contract_only_change_does_not_select_eink_device_assessment(self) -> None:
+        context = self.context(
+            changes=[self.change("contract", ["B03"])],
+            affected_reasons={"B03": ["contract update"]},
+        )
+        context.review_policy["activeProfiles"] = ["STANDARD", "EINK"]
+        context.review_policy["deferredProfiles"] = []
+
+        report = build_report(context)
+
+        self.assertEqual([], report["summary"]["requiresDeviceProfiles"])
+        self.assertEqual([], report["summary"]["conditionalDeviceProfiles"])
+        self.assertFalse(report["summary"]["requiresDevicePass"])
+
     @staticmethod
     def change(change_class: str, nodes: list[str]) -> dict:
         return {"class": change_class, "affectedNodes": nodes}
@@ -166,6 +210,10 @@ class ReportBuilderTest(unittest.TestCase):
                 "activeProfiles": ["STANDARD"],
                 "deferredProfiles": [{"profile": "EINK"}],
                 "resume": {"trigger": "explicit"},
+                "einkVerification": {
+                    "selection": "impact-based",
+                    "fullRestorationMode": "full-eink-restoration",
+                },
                 "nodeExecution": {
                     "activeStage": "PHASE4A_PRODUCTION_IMPLEMENTATION",
                     "activeNodePrefixes": ["L", "B", "M", "S", "X"],

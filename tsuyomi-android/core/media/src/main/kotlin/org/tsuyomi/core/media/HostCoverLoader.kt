@@ -285,35 +285,7 @@ internal class HostCoverLoader(
         }
 
     private suspend fun decodeValidated(bytes: ByteArray, targetWidthPx: Int, targetHeightPx: Int): Bitmap =
-        withContext(Dispatchers.Default) {
-            if (bytes.isEmpty() || bytes.size > maxResponseBytes) throw MediaLoadException(MediaFailure.RESPONSE_TOO_LARGE)
-            try {
-                ImageDecoder.decodeBitmap(ImageDecoder.createSource(ByteBuffer.wrap(bytes))) { decoder, info, _ ->
-                    val width = info.size.width
-                    val height = info.size.height
-                    if (width <= 0 || height <= 0 || width.toLong() * height.toLong() > MAX_SOURCE_PIXELS) {
-                        throw MediaLoadException(MediaFailure.DECODE_FAILED)
-                    }
-                    val scale = minOf(
-                        targetWidthPx.toDouble() / width.toDouble(),
-                        targetHeightPx.toDouble() / height.toDouble(),
-                        1.0,
-                    )
-                    val decodedWidth = floor(width * scale).toInt().coerceIn(1, targetWidthPx)
-                    val decodedHeight = floor(height * scale).toInt().coerceIn(1, targetHeightPx)
-                    decoder.allocator = ImageDecoder.ALLOCATOR_SOFTWARE
-                    decoder.setTargetSize(decodedWidth, decodedHeight)
-                }
-            } catch (error: MediaLoadException) {
-                throw error
-            } catch (error: java.io.IOException) {
-                throw MediaLoadException(MediaFailure.DECODE_FAILED, error)
-            } catch (error: IllegalArgumentException) {
-                throw MediaLoadException(MediaFailure.DECODE_FAILED, error)
-            } catch (error: IllegalStateException) {
-                throw MediaLoadException(MediaFailure.DECODE_FAILED, error)
-            }
-        }
+        decodeValidatedBitmap(bytes, targetWidthPx, targetHeightPx, maxResponseBytes)
 
     private suspend fun readDisk(path: String): ByteArray? = withContext(Dispatchers.IO) {
         try {
@@ -372,4 +344,38 @@ internal class HostCoverLoader(
     private fun sha256(value: String): String = MessageDigest.getInstance("SHA-256")
         .digest(value.toByteArray(Charsets.UTF_8))
         .joinToString("") { byte -> "%02x".format(byte.toInt() and 0xff) }
+}
+
+/** Shared source/publication decoder. Input bytes and decoded pixels have independent bounds. */
+internal suspend fun decodeValidatedBitmap(
+    bytes: ByteArray,
+    targetWidthPx: Int,
+    targetHeightPx: Int,
+    maxResponseBytes: Int,
+    expectedMimeType: String? = null,
+): Bitmap = withContext(Dispatchers.Default) {
+    if (bytes.isEmpty() || bytes.size > maxResponseBytes) throw MediaLoadException(MediaFailure.RESPONSE_TOO_LARGE)
+    try {
+        ImageDecoder.decodeBitmap(ImageDecoder.createSource(ByteBuffer.wrap(bytes))) { decoder, info, _ ->
+            val width = info.size.width
+            val height = info.size.height
+            if (width <= 0 || height <= 0 || width.toLong() * height > MAX_SOURCE_PIXELS ||
+                (expectedMimeType != null && info.mimeType != expectedMimeType)
+            ) throw MediaLoadException(MediaFailure.DECODE_FAILED)
+            val scale = minOf(targetWidthPx.toDouble() / width, targetHeightPx.toDouble() / height, 1.0)
+            decoder.allocator = ImageDecoder.ALLOCATOR_SOFTWARE
+            decoder.setTargetSize(
+                floor(width * scale).toInt().coerceIn(1, targetWidthPx),
+                floor(height * scale).toInt().coerceIn(1, targetHeightPx),
+            )
+        }
+    } catch (error: MediaLoadException) {
+        throw error
+    } catch (error: java.io.IOException) {
+        throw MediaLoadException(MediaFailure.DECODE_FAILED, error)
+    } catch (error: IllegalArgumentException) {
+        throw MediaLoadException(MediaFailure.DECODE_FAILED, error)
+    } catch (error: IllegalStateException) {
+        throw MediaLoadException(MediaFailure.DECODE_FAILED, error)
+    }
 }

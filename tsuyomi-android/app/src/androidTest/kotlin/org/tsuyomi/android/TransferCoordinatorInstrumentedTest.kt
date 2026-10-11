@@ -4,6 +4,7 @@
  */
 package org.tsuyomi.android
 import android.net.Uri
+import android.os.ParcelFileDescriptor
 import androidx.datastore.preferences.preferencesDataStoreFile
 import androidx.datastore.preferences.core.PreferenceDataStoreFactory
 import androidx.room.Room
@@ -13,6 +14,14 @@ import java.io.File
 import java.time.Instant
 import java.util.UUID
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.TimeoutCancellationException
+import kotlinx.coroutines.async
+import kotlinx.coroutines.ensureActive
+import kotlinx.coroutines.withTimeout
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
@@ -20,6 +29,11 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.tsuyomi.core.database.ImportSessionStatus
+import org.tsuyomi.core.files.StorageRoots
+import org.tsuyomi.core.publication.OriginalCatalogState
+import org.tsuyomi.core.publication.PublicationOriginalStore
+import org.tsuyomi.shared.backup.TransferLocalPublicationMetadata
+import org.tsuyomi.shared.librarydomain.LocalPublicationFormat
 import org.tsuyomi.core.database.RoomTransferRepository
 import org.tsuyomi.core.database.TsuyomiDatabase
 import org.tsuyomi.shared.librarydomain.LibraryBook
@@ -38,6 +52,38 @@ import org.tsuyomi.shared.model.BookIdentity
 @RunWith(AndroidJUnit4::class)
 class TransferCoordinatorInstrumentedTest {
     private val context = InstrumentationRegistry.getInstrumentation().targetContext
+
+    @Test
+    fun cancellingAStalledImportProviderReturnsBeforeEof() = runBlocking {
+        val pipe = ParcelFileDescriptor.createPipe()
+        val readJob = Job()
+        val prefixRead = CompletableDeferred<Unit>()
+        try {
+            ParcelFileDescriptor.AutoCloseOutputStream(pipe[1]).use { output ->
+                output.write('a'.code)
+                val reading = async(Dispatchers.IO) {
+                    PolledPublicationInput(pipe[0], readJob::ensureActive).use { input ->
+                        assertEquals('a'.code, input.read())
+                        prefixRead.complete(Unit)
+                        input.read()
+                    }
+                }
+                withTimeout(5_000) { prefixRead.await() }
+                readJob.cancel()
+                val failure = try {
+                    withTimeout(5_000) { reading.await() }
+                    null
+                } catch (error: CancellationException) {
+                    error
+                }
+                assertTrue("Cancellation must finish while the provider remains open",
+                    failure is CancellationException && failure !is TimeoutCancellationException)
+            }
+        } finally {
+            readJob.cancel()
+            pipe.forEach { it.close() }
+        }
+    }
 
     @Test
     fun recoveryCompletesEveryDurableImportStage() = runBlocking {
@@ -69,6 +115,98 @@ class TransferCoordinatorInstrumentedTest {
             } finally {
                 fixture.close()
             }
+        }
+    }
+
+    @Test
+    fun preparedArchiveRecoveryPreservesOriginalAndRetryRejectsStaleRestoredId() = runBlocking {
+        val sessionId = "prepared-archive-${UUID.randomUUID()}"
+        val database = Room.inMemoryDatabaseBuilder(context, TsuyomiDatabase::class.java).allowMainThreadQueries().build()
+        val repository = RoomTransferRepository(database)
+        val publicationId = UUID.randomUUID().toString()
+        val identity = BookIdentity.Local(publicationId)
+        val originalBytes = "promoted archive original".toByteArray()
+        val expected = OriginalCatalogState(
+            LocalPublicationFormat.EPUB,
+            TransferCodec.digest(originalBytes),
+            originalBytes.size.toLong(),
+            false,
+        )
+        val storeRoot = File(context.noBackupFilesDir, "transfer-originals-$sessionId")
+        val originals = PublicationOriginalStore(StorageRoots(File(storeRoot, "no-backup"), File(storeRoot, "cache")))
+        val plan = ImportPlan(
+            kind = ImportKind.TSUYOMI_TRANSFER,
+            sourceCreatedAt = Instant.EPOCH,
+            books = listOf(
+                TransferBook(
+                    identity = identity,
+                    title = "恢复的本地书",
+                    updatedAt = Instant.EPOCH,
+                    localPublication = TransferLocalPublicationMetadata(
+                        format = expected.format,
+                        originalSha256 = expected.sha256,
+                        originalSizeBytes = expected.sizeBytes,
+                    ),
+                ),
+            ),
+            shelves = emptyList(),
+            readerPreferences = null,
+        )
+        val planBytes = ImportPlanCodec.encode(plan)
+        val digest = TransferCodec.digest(planBytes)
+        val planFile = File(context.noBackupFilesDir, "import-plans/$sessionId.json").apply {
+            parentFile?.mkdirs()
+            writeBytes(planBytes)
+        }
+        val presentation = TransferPresentationState()
+        val owner = TransferImportSessionOwner(context, repository, { _, _, _ -> }, presentation) { originals }
+        try {
+            val staged = originals.stage(originalBytes.inputStream())
+            try {
+                originals.commit(staged, publicationId, expected.format)
+            } finally {
+                staged.close()
+            }
+            repository.prepare(
+                sessionId,
+                plan,
+                digest,
+                planFile.absolutePath,
+                """{"reader":false,"forceManualEInk":false,"restoredPublications":["$publicationId"]}""",
+                Instant.EPOCH,
+            )
+            planFile.writeText("{}")
+
+            owner.recoverPendingImport()
+
+            assertTrue(presentation.state is TransferUiState.RecoveryFailure)
+            val transferOwnedIds = checkNotNull(owner.pendingPreparedPublicationIds())
+            assertEquals(setOf(publicationId), transferOwnedIds)
+            val storeResult = originals.recover(emptyMap(), transferOwnedIds).single()
+            assertEquals(org.tsuyomi.core.publication.PublicationJobStatus.PRESERVED, storeResult.status)
+            val originalFile = File(storeRoot, "no-backup/publication-originals/books/$publicationId/original.bin")
+            assertTrue(originalFile.isFile)
+            assertTrue(originals.verifyOriginalForTransferRecovery(publicationId, expected))
+
+            assertTrue(originalFile.delete())
+            planFile.writeBytes(planBytes)
+            owner.retryRecovery()
+
+            assertTrue(presentation.state is TransferUiState.RecoveryFailure)
+            assertEquals(ImportSessionStatus.PREPARED, repository.pending()?.status)
+            assertNull(RoomLibraryRepository(database).book(identity))
+
+            originalFile.writeBytes(originalBytes)
+            owner.retryRecovery()
+
+            assertTrue(presentation.state is TransferUiState.Completed)
+            assertNull(repository.pending())
+            val imported = checkNotNull(RoomLibraryRepository(database).book(identity))
+            assertTrue(checkNotNull(imported.localPublication).originalAvailable)
+        } finally {
+            database.close()
+            planFile.delete()
+            storeRoot.deleteRecursively()
         }
     }
 
@@ -445,7 +583,7 @@ class TransferCoordinatorInstrumentedTest {
         val plan = ImportPlan(
             kind = ImportKind.TSUYOMI_TRANSFER,
             sourceCreatedAt = Instant.EPOCH,
-            books = listOf(TransferBook(BookIdentity("org.tsuyomi.wenku8", sessionId), "恢复测试", updatedAt = Instant.EPOCH)),
+            books = listOf(TransferBook(BookIdentity.Remote("org.tsuyomi.wenku8", sessionId), "恢复测试", updatedAt = Instant.EPOCH)),
             shelves = emptyList(),
             readerPreferences = PortableReaderPreferences(flow = "paged"),
         )

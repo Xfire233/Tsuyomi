@@ -75,8 +75,8 @@ internal fun NavGraphBuilder.updateSettingsRoute(
                 currentSnapshot.updates.forEach { update -> putIfAbsent(update.identity, update.title) }
             }
             val knownSourceIds = buildSet {
-                addAll(libraryFlow.searchableEntries.map { item -> item.book.identity.sourceId })
-                addAll(libraryFlow.updatePresentationBooks.keys.map(BookIdentity::sourceId))
+                addAll(libraryFlow.searchableEntries.mapNotNull { item -> (item.book.identity as? BookIdentity.Remote)?.sourceId })
+                addAll(libraryFlow.updatePresentationBooks.keys.mapNotNull { (it as? BookIdentity.Remote)?.sourceId })
                 addAll(libraryFlow.state.mirrorShortcuts.map { mirror -> mirror.sourceId })
                 addAll(currentSnapshot.updates.map { update -> update.identity.sourceId })
                 addAll(currentSnapshot.sessionItems.map { item -> item.identity.sourceId })

@@ -7,6 +7,8 @@
 
 ### Added
 
+- Strict `tsuyomi-transfer` v6 schema and conformance fixtures add explicit remote/local book identity, portable local-publication metadata, TXT normalization choices and optional bounded progress document revision. Locator bookmarks must belong to their enclosing book; originals, provider paths, URI grants and network authority remain excluded. V1–v5 stay closed legacy inputs.
+- ReaderDocument source-wire v2 adds semantic rich-content spans, ruby, links, notes, lists, tables and anchors while retaining remote-only identity and HTTPS-only resources. Source payloads cannot manufacture host-owned local identities or resource grants.
 - Optional signed read-only source Home capability and versioned normalized `SourceHomePage` projection, with strict schema and conformance coverage.
 - Source Home pages may expose up to four optional typed feature destinations as bounded display text plus opaque normalized selections; URLs and source-controlled UI remain forbidden.
 - Optional normalized Detail `lastUpdatedDate` and a bounded read-only author-search request entry point, with explicit-action-only invocation, preserved verification identity, and no silent title-search fallback.

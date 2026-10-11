@@ -29,7 +29,7 @@ class RoomRemoteLibraryInstrumentedTest {
     @Test
     fun remoteLibraryMergeRejectsStaleOrUnavailableLeaseWithoutPartialRows() = runBlocking {
         val sourceId = "org.tsuyomi.wenku8"
-        val identity = BookIdentity(sourceId, "remote-42")
+        val identity = BookIdentity.Remote(sourceId, "remote-42")
         repository.setSourceAvailability(sourceId, "0.2.0", true, 4)
         repository.saveSourceRemotePolicy(SourceRemotePolicy(sourceId, "publisher", "capability", "https://www.wenku8.net", false, false))
         val book = LibraryBook(identity, "远程收藏", Instant.EPOCH, Instant.EPOCH)
@@ -60,7 +60,7 @@ class RoomRemoteLibraryInstrumentedTest {
 
     @Test
     fun remoteAddTransitionNeverTreatsPostAcceptanceFailureAsSafeCancellation() = runBlocking {
-        val identity = BookIdentity("org.tsuyomi.wenku8", "add-42")
+        val identity = BookIdentity.Remote("org.tsuyomi.wenku8", "add-42")
         val id = repository.beginRemoteAdd(
             RemoteAddRequest(
                 book = LibraryBook(identity, "待同步", Instant.EPOCH, Instant.EPOCH),
@@ -82,7 +82,7 @@ class RoomRemoteLibraryInstrumentedTest {
 
     @Test
     fun confirmedRemoteAddRetryClosesEveryPriorUnresolvedAttempt() = runBlocking {
-        val identity = BookIdentity("org.tsuyomi.wenku8", "retry-add-42")
+        val identity = BookIdentity.Remote("org.tsuyomi.wenku8", "retry-add-42")
         fun request(startedAt: Instant) = RemoteAddRequest(
             book = LibraryBook(identity, "重试同步", Instant.EPOCH, Instant.EPOCH),
             packageDigest = "digest",
@@ -111,7 +111,7 @@ class RoomRemoteLibraryInstrumentedTest {
 
     @Test
     fun genericMutationRetryPreservesPriorUnresolvedUntilConfirmation() = runBlocking {
-        val identity = BookIdentity("org.tsuyomi.wenku8", "retry-move-42")
+        val identity = BookIdentity.Remote("org.tsuyomi.wenku8", "retry-move-42")
         fun request(startedAt: Instant) = RemoteMutationRequest(
             book = LibraryBook(identity, "重试移动", Instant.EPOCH, Instant.EPOCH),
             operation = "move",
@@ -141,7 +141,7 @@ class RoomRemoteLibraryInstrumentedTest {
 
     @Test
     fun acknowledgementCancelsEveryUnresolvedRetryOfOneOperation() = runBlocking {
-        val identity = BookIdentity("org.tsuyomi.wenku8", "ack-move-42")
+        val identity = BookIdentity.Remote("org.tsuyomi.wenku8", "ack-move-42")
         fun request(startedAt: Instant) = RemoteMutationRequest(
             book = LibraryBook(identity, "解除移动锁", Instant.EPOCH, Instant.EPOCH),
             operation = "move",
@@ -169,8 +169,8 @@ class RoomRemoteLibraryInstrumentedTest {
     @Test
     fun remoteMirrorSnapshotRestoresTargetsAndAppliesIncrementalWrites() = runBlocking {
         val sourceId = "org.tsuyomi.wenku8"
-        val first = LibraryBook(BookIdentity(sourceId, "book-1"), "第一本", Instant.EPOCH, Instant.EPOCH)
-        val second = LibraryBook(BookIdentity(sourceId, "book-2"), "第二本", Instant.EPOCH, Instant.EPOCH)
+        val first = LibraryBook(BookIdentity.Remote(sourceId, "book-1"), "第一本", Instant.EPOCH, Instant.EPOCH)
+        val second = LibraryBook(BookIdentity.Remote(sourceId, "book-2"), "第二本", Instant.EPOCH, Instant.EPOCH)
         repository.saveBook(
             first.copy(
                 author = "作者甲",
@@ -201,8 +201,8 @@ class RoomRemoteLibraryInstrumentedTest {
         assertEquals("ongoing", preserved.status)
         assertEquals(setOf("奇幻"), preserved.remoteTags)
 
-        assertTrue(repository.updateRemoteMirrorBookTarget(first.identity, "0", Instant.ofEpochSecond(20)))
-        assertTrue(repository.removeRemoteMirrorBook(second.identity))
+        assertTrue(repository.updateRemoteMirrorBookTarget(first.identity as BookIdentity.Remote, "0", Instant.ofEpochSecond(20)))
+        assertTrue(repository.removeRemoteMirrorBook(second.identity as BookIdentity.Remote))
         repository.saveRemoteMirrorSnapshot(
             RemoteMirrorReplaceRequest(
                 sourceId,
@@ -223,7 +223,7 @@ class RoomRemoteLibraryInstrumentedTest {
     @Test
     fun mirrorReadAndSuccessfulEmptyReplaceNeverAcknowledgeUnresolvedAdd() = runBlocking {
         val sourceId = "org.tsuyomi.wenku8"
-        val book = LibraryBook(BookIdentity(sourceId, "pending-add"), "待确认网站收藏", Instant.EPOCH, Instant.EPOCH)
+        val book = LibraryBook(BookIdentity.Remote(sourceId, "pending-add"), "待确认网站收藏", Instant.EPOCH, Instant.EPOCH)
         val receipt = repository.beginRemoteAdd(
             RemoteAddRequest(
                 book = book,
@@ -243,13 +243,13 @@ class RoomRemoteLibraryInstrumentedTest {
             ),
         )
         assertEquals(1, requireNotNull(repository.remoteMirrorSnapshot(sourceId)).books.size)
-        assertEquals(RemoteReconciliationState.UNRESOLVED, repository.bookReconciliation(sourceId, book.identity.remoteBookId)?.state)
+        assertEquals(RemoteReconciliationState.UNRESOLVED, repository.bookReconciliation(sourceId, (book.identity as BookIdentity.Remote).remoteBookId)?.state)
 
         repository.saveRemoteMirrorSnapshot(
             RemoteMirrorReplaceRequest(sourceId, "文库8", emptyList(), emptyList(), Instant.EPOCH.plusSeconds(4)),
         )
         assertTrue(requireNotNull(repository.remoteMirrorSnapshot(sourceId)).books.isEmpty())
-        assertEquals(RemoteReconciliationState.UNRESOLVED, repository.bookReconciliation(sourceId, book.identity.remoteBookId)?.state)
+        assertEquals(RemoteReconciliationState.UNRESOLVED, repository.bookReconciliation(sourceId, (book.identity as BookIdentity.Remote).remoteBookId)?.state)
         assertEquals(RemoteReconciliationState.UNRESOLVED, repository.libraryEntry(book.identity)?.reconciliation)
     }
 }

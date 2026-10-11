@@ -49,7 +49,7 @@ class SourceFlowSnapshotStore(private val dataStore: DataStore<Preferences>) {
         val title = values[BookTitle] ?: return@map null
         val canonicalUrl = values[CanonicalUrl] ?: return@map null
         val book = SourceBookSummary(
-            identity = BookIdentity(sourceId, remoteBookId),
+            identity = BookIdentity.Remote(sourceId, remoteBookId),
             title = title,
             author = values[BookAuthor],
             coverUrl = values[CoverUrl],

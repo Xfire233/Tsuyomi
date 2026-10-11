@@ -10,7 +10,7 @@ import org.junit.Test
 import org.tsuyomi.shared.model.BookIdentity
 
 class SourceUpdateContractsTest {
-    private val identity = BookIdentity("org.tsuyomi.wenku8", "1234")
+    private val identity = BookIdentity.Remote("org.tsuyomi.wenku8", "1234")
     private val chapters = listOf(
         SourceUpdateChapter("10001", "第一章 雾中的灯塔"),
         SourceUpdateChapter("10002", "第二章 旧船票"),

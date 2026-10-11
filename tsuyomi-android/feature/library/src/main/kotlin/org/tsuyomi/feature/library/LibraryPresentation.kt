@@ -19,6 +19,7 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
+import androidx.compose.runtime.saveable.rememberSaveableStateHolder
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
@@ -27,6 +28,7 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.filterNotNull
 import kotlinx.coroutines.launch
+import org.tsuyomi.core.display.DisplayProfile
 import org.tsuyomi.core.display.LocalDisplayEnvironment
 import org.tsuyomi.core.media.api.CoverUiState
 import org.tsuyomi.core.ui.components.StateView
@@ -59,6 +61,7 @@ internal fun LibraryPresentation(
     onRefreshUpdates: () -> Unit,
     onEditFilter: () -> Unit,
     onRetry: () -> Unit,
+    onImportLocalBooks: (() -> Unit)?,
     coverState: @Composable (LibraryEntry) -> CoverUiState,
     onCoverVisibility: (LibraryEntry, Boolean) -> Unit,
     onLongPressBook: (BookIdentity) -> Unit,
@@ -75,6 +78,8 @@ internal fun LibraryPresentation(
     currentCollectionId: String? = null,
 ) {
     val scope = rememberCoroutineScope()
+    val einkPageStateHolder = rememberSaveableStateHolder()
+    val eink = LocalDisplayEnvironment.current.effectiveProfile == DisplayProfile.EINK
     val snackbarHostState = rememberTsuyomiSnackbarState()
     val ignoreUpdateMessage = stringResource(R.string.updates_ignore_confirmed)
     val undoLabel = stringResource(R.string.updates_undo)
@@ -89,10 +94,15 @@ internal fun LibraryPresentation(
     if (!showNavigationNodes) {
         val dragCoordinator = remember { LibraryDragCoordinator() }
         Box(modifier.fillMaxSize()) {
+            einkPageStateHolder.SaveableStateProvider(
+                "library-child:${currentCollectionId ?: state.filter.name}:${state.updateFilter}:${state.sortMode}:${state.sortDescending}:${state.layout}:${if (eink) "EINK" else "STANDARD"}",
+            ) {
             LibraryPrimaryTabPage(
                 state = state,
                 collections = collections,
                 currentCollectionId = currentCollectionId,
+                isEink = eink,
+                onImportLocalBooks = onImportLocalBooks,
                 active = true,
                 dragCoordinator = dragCoordinator,
                 onOpenCollection = onOpenCollection,
@@ -111,6 +121,7 @@ internal fun LibraryPresentation(
                 onViewportSettled = onViewportSettled,
                 reorderEnabled = reorderEnabled,
             )
+            }
             TsuyomiSnackbarHost(snackbarHostState, modifier = Modifier.align(Alignment.BottomCenter))
         }
         return
@@ -132,7 +143,7 @@ internal fun LibraryPresentation(
     val currentDragActive by rememberUpdatedState(activeDragCoordinator.activePayload != null)
     val structuralCollections = collections.filter { it.parentCollectionId == null }
     val rootMirrors = state.mirrorShortcuts.filter { it.targetId == null }
-    val showDestinationRail = showNavigationNodes && state.isRootProjection &&
+    val showDestinationRail = !eink && showNavigationNodes && state.isRootProjection &&
         activeDragCoordinator.activeBookIds.isNotEmpty()
 
     LaunchedEffect(selectedTab) {
@@ -141,13 +152,16 @@ internal fun LibraryPresentation(
             .values
             .forEach(LibraryDragCoordinator::cancel)
     }
-    LaunchedEffect(selectedTab, instantMotion) {
-        val target = libraryPrimaryPageFor(selectedTab)
-        if (pagerState.settledPage != target) {
-            if (instantMotion) pagerState.scrollToPage(target) else pagerState.animateScrollToPage(target)
+    LaunchedEffect(selectedTab, instantMotion, eink) {
+        if (!eink) {
+            val target = libraryPrimaryPageFor(selectedTab)
+            if (pagerState.settledPage != target) {
+                if (instantMotion) pagerState.scrollToPage(target) else pagerState.animateScrollToPage(target)
+            }
         }
     }
-    LaunchedEffect(pagerState) {
+    LaunchedEffect(pagerState, eink) {
+        if (eink) return@LaunchedEffect
         // Nested pre-fling can briefly report idle before the page is aligned.
         snapshotFlow {
             pagerState.settledPage.takeIf {
@@ -179,16 +193,23 @@ internal fun LibraryPresentation(
                             },
                         )
                     },
-                    selectedKey = libraryPrimaryTabAt(pagerState.currentPage)?.name ?: selectedTab.name,
+                    selectedKey = if (eink) selectedTab.name
+                    else libraryPrimaryTabAt(pagerState.currentPage)?.name ?: selectedTab.name,
                     onSelect = { key ->
                         val target = primaryTabs.indexOfFirst { it.name == key }
-                        if (target >= 0 && !currentDragActive &&
-                            (target != pagerState.settledPage || pagerState.isScrollInProgress)
-                        ) {
-                            tabTransitionJob?.cancel()
-                            tabTransitionJob = scope.launch {
-                                if (instantMotion) pagerState.scrollToPage(target)
-                                else pagerState.animateScrollToPage(target)
+                        if (target >= 0 && !currentDragActive) {
+                            val targetTab = primaryTabs[target]
+                            if (eink) {
+                                if (targetTab != selectedTab) {
+                                    tabTransitionJob?.cancel()
+                                    tabTransitionJob = scope.launch { currentOnSelectTab(targetTab) }
+                                }
+                            } else if (target != pagerState.settledPage || pagerState.isScrollInProgress) {
+                                tabTransitionJob?.cancel()
+                                tabTransitionJob = scope.launch {
+                                    if (instantMotion) pagerState.scrollToPage(target)
+                                    else pagerState.animateScrollToPage(target)
+                                }
                             }
                         }
                     },
@@ -232,6 +253,8 @@ internal fun LibraryPresentation(
                     LibraryPrimaryTabPage(
                         state = pageState,
                         collections = collections,
+                        isEink = false,
+                        onImportLocalBooks = onImportLocalBooks,
                         active = page == pagerState.settledPage && tab == selectedTab,
                         dragCoordinator = pageDragCoordinators.getValue(tab),
                         onOpenCollection = onOpenCollection,
@@ -252,7 +275,37 @@ internal fun LibraryPresentation(
                     )
                 }
             }
-            if (showNavigationNodes && state.isRootProjection) {
+            if (eink) {
+                Box(Modifier.weight(1f)) {
+                    einkPageStateHolder.SaveableStateProvider(
+                        "library-root:${selectedTab.name}:${state.updateFilter}:${state.sortMode}:${state.sortDescending}:${state.layout}",
+                    ) {
+                    LibraryPrimaryTabPage(
+                        state = state,
+                        collections = collections,
+                        isEink = true,
+                        onImportLocalBooks = onImportLocalBooks,
+                        active = true,
+                        dragCoordinator = activeDragCoordinator,
+                        onOpenCollection = onOpenCollection,
+                        onOpenBook = onOpenBook,
+                        onOpenMirror = onOpenMirror,
+                        onRetry = onRetry,
+                        coverState = coverState,
+                        onCoverVisibility = onCoverVisibility,
+                        onLongPressBook = onLongPressBook,
+                        onToggleBookSelection = onToggleBookSelection,
+                        onLongPressCollection = onLongPressCollection,
+                        onToggleCollectionSelection = onToggleCollectionSelection,
+                        onDropBooks = onDropBooks,
+                        onIgnoreUpdate = ignoreUpdate,
+                        onViewportChanged = onViewportChanged,
+                        onViewportSettled = onViewportSettled,
+                        reorderEnabled = reorderEnabled,
+                    )
+                }
+                }
+            } else if (showNavigationNodes && state.isRootProjection) {
                 org.tsuyomi.core.ui.components.TsuyomiPullToRefresh(
                     isRefreshing = state.updateSession?.state in setOf(
                         org.tsuyomi.shared.librarydomain.UpdateSessionStates.QUEUED,
@@ -274,6 +327,8 @@ private fun LibraryPrimaryTabPage(
     state: LibraryUiState,
     collections: List<LibraryCollection>,
     currentCollectionId: String? = null,
+    isEink: Boolean,
+    onImportLocalBooks: (() -> Unit)?,
     active: Boolean,
     dragCoordinator: LibraryDragCoordinator,
     onOpenCollection: (LibraryCollection) -> Unit,
@@ -313,6 +368,11 @@ private fun LibraryPrimaryTabPage(
     } else {
         null
     }
+    val viewportScopeKey = when {
+        currentCollectionId != null -> "collection:$currentCollectionId:${state.filter}:${state.updateFilter}"
+        state.isRootProjection -> "root:${state.filter}:${state.updateFilter}"
+        else -> "library:${state.filter}:${state.updateFilter}"
+    }
 
     Box(Modifier.fillMaxSize().testTag("library-primary-page-${state.filter.name}").libraryDragOverlayHost(dragCoordinator)) {
         key(active) {
@@ -323,19 +383,24 @@ private fun LibraryPrimaryTabPage(
                 onLongPressBook = onLongPressBook,
                 onToggleBookSelection = onToggleBookSelection,
                 dragCoordinator = dragCoordinator,
-                dragEnabled = active,
-                reorderEnabled = active && reorderEnabled,
+                dragEnabled = active && !isEink,
+                reorderEnabled = active && reorderEnabled && !isEink,
+                manualReorderEnabled = active && isEink && reorderEnabled,
                 coverState = coverState,
                 onCoverVisibility = { entry, visible -> if (active) onCoverVisibility(entry, visible) },
                 onIgnoreUpdate = onIgnoreUpdate,
-                onViewportChanged = { viewport -> if (active) onViewportChanged(viewport) },
-                onViewportSettled = { index, offset -> if (active) onViewportSettled(index, offset) },
+                onViewportChanged = { viewport -> if (active && !isEink) onViewportChanged(viewport) },
+                onViewportSettled = { index, offset -> if (active && !isEink) onViewportSettled(index, offset) },
+                viewportScopeKey = viewportScopeKey,
                 rootItems = rootItems,
                 onOpenCollection = onOpenCollection,
                 onOpenMirror = onOpenMirror,
                 onLongPressCollection = onLongPressCollection,
                 onToggleCollectionSelection = onToggleCollectionSelection,
+                onManualMove = onDropBooks,
                 empty = {
+                    val showImport = state.isRootProjection && state.filter == SystemLibraryFilter.ALL &&
+                        state.updateFilter == LibraryUpdateFilter.ALL && onImportLocalBooks != null
                     StateView(
                         kind = TsuyomiStateKind.EMPTY,
                         title = when {
@@ -350,14 +415,22 @@ private fun LibraryPrimaryTabPage(
                             state.filter == SystemLibraryFilter.READ_LATER -> "在书籍详情中加入稍后再读。"
                             else -> "从浏览或搜索中加入书籍。"
                         },
-                        actionLabel = if (state.isRootProjection) null else "刷新",
-                        onAction = if (state.isRootProjection) null else onRetry,
+                        actionLabel = when {
+                            showImport -> stringResource(R.string.library_action_import_local_books)
+                            !state.isRootProjection -> "刷新"
+                            else -> null
+                        },
+                        onAction = when {
+                            showImport -> onImportLocalBooks
+                            !state.isRootProjection -> onRetry
+                            else -> null
+                        },
                     )
                 },
                 modifier = Modifier.fillMaxSize(),
             )
         }
-        if (active) {
+        if (active && !isEink) {
             LibraryDragVisualOverlay(
                 coordinator = dragCoordinator,
                 entries = state.entries,

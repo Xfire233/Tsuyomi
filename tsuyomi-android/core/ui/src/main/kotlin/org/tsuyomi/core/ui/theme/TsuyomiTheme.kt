@@ -63,11 +63,7 @@ fun TsuyomiTheme(
     val instant = environment.instantMotion
     val reducedMotion = rememberSystemReducedMotion()
     val staticMotion = instant || reducedMotion
-    val motionScheme = when {
-        environment.effectiveProfile == DisplayProfile.EINK -> MaterialTheme.motionScheme
-        instant || reducedMotion -> TsuyomiInstantMotionScheme
-        else -> TsuyomiStandardMotionScheme
-    }
+    val motionScheme = if (staticMotion) TsuyomiInstantMotionScheme else TsuyomiStandardMotionScheme
     val indication: Indication = when {
         instant -> remember { TsuyomiInstantIndication(TsuyomiEInkPalette.N30) }
         reducedMotion -> remember(colorScheme.onSurface) { TsuyomiInstantIndication(colorScheme.onSurface) }

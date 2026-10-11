@@ -4,15 +4,24 @@
  */
 package org.tsuyomi.feature.library
 
-import androidx.compose.foundation.clickable
-import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.BoxWithConstraints
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.runtime.key
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.ui.semantics.clearAndSetSemantics
+import androidx.compose.ui.semantics.contentDescription
+import org.tsuyomi.core.display.DisplayProfile
+import org.tsuyomi.core.display.LocalDisplayEnvironment
+import org.tsuyomi.core.ui.components.TsuyomiMeasuredPager
+import org.tsuyomi.core.ui.components.rememberTsuyomiMeasuredPagerState
+import org.tsuyomi.core.ui.components.TsuyomiMenuItem
+import androidx.compose.runtime.saveable.rememberSaveableStateHolder
+import org.tsuyomi.core.ui.components.TsuyomiMeasuredTextPager
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.width
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
@@ -29,8 +38,6 @@ import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
-import org.tsuyomi.core.display.DisplayProfile
-import org.tsuyomi.core.display.LocalDisplayEnvironment
 import org.tsuyomi.core.ui.components.StateView
 import org.tsuyomi.core.ui.components.TsuyomiButton
 import org.tsuyomi.core.ui.components.TsuyomiButtonStyle
@@ -112,13 +119,11 @@ fun RemoteLibraryScreen(
     onRequestRemoveBook: (SourceBookSummary) -> Unit = {},
     onRequestMoveBook: (SourceBookSummary) -> Unit = {},
 ) {
-    if (LocalDisplayEnvironment.current.effectiveProfile == DisplayProfile.EINK) {
-        FrozenEInkRemoteLibraryScreen(books, state, message, onRefresh, onOpenBook, modifier)
-        return
-    }
 
+    val contentStateHolder = rememberSaveableStateHolder()
     val selectedCount = selectedIds.size
     var layout by remember { mutableStateOf(LibraryLayout.GRID) }
+    val surfacePagerState = key(sourceId, selectedTargetId, layout) { rememberTsuyomiMeasuredPagerState() }
     val selectedBook = books.firstOrNull { remoteLibrarySelectionId(it) in selectedIds }
     val allVisibleSelected = books.isNotEmpty() && books.all { remoteLibrarySelectionId(it) in selectedIds }
     val overflowActions = if (selectedCount == 0) {
@@ -207,31 +212,8 @@ fun RemoteLibraryScreen(
             )
         },
     ) { padding ->
-        Column(
-            Modifier.fillMaxSize().padding(padding).testTag("remote-library-surface"),
-        ) {
-            if (message != null && state != RemoteLibraryViewState.ERROR) {
-                Row(
-                    modifier = Modifier.fillMaxWidth()
-                        .semantics { liveRegion = LiveRegionMode.Polite }
-                        .padding(horizontal = 20.dp, vertical = 12.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Text(
-                        text = message,
-                        modifier = Modifier.weight(1f),
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                    if (refreshFailure) {
-                        TsuyomiButton(
-                            text = stringResource(R.string.remote_library_retry),
-                            onClick = onRefresh,
-                            style = TsuyomiButtonStyle.TEXT,
-                        )
-                    }
-                }
-            }
+        val mirrorContent = @Composable {
+            contentStateHolder.SaveableStateProvider("mirror-content:$sourceId:$selectedTargetId:$layout:${LocalDisplayEnvironment.current.effectiveProfile.name}") {
             when (state) {
                 RemoteLibraryViewState.LOADING -> StateView(
                     kind = TsuyomiStateKind.LOADING,
@@ -304,6 +286,33 @@ fun RemoteLibraryScreen(
                 )
             }
         }
+        }
+        if (LocalDisplayEnvironment.current.effectiveProfile == DisplayProfile.EINK) {
+            val showMessage = message != null && state != RemoteLibraryViewState.ERROR
+            TsuyomiMeasuredPager(itemCount = if (showMessage) 2 else 1, itemKey = { "mirror-surface:$it" },
+                modifier = Modifier.fillMaxSize().padding(padding).testTag("remote-library-surface"),
+                state = surfacePagerState,
+                itemContent = { index ->
+                    if (showMessage && index == 0) {
+                        TsuyomiMeasuredPager(itemCount = if (refreshFailure) 2 else 1, itemKey = { "mirror-status:$it" }, fillViewport = false,
+                            itemContent = { statusIndex ->
+                                if (statusIndex == 0) TsuyomiMeasuredTextPager(message.orEmpty(), fillViewport = false, alwaysShowPageControls = false)
+                                else TsuyomiButton(stringResource(R.string.remote_library_retry), onRefresh)
+                            })
+                    } else mirrorContent()
+                })
+        } else {
+            Column(Modifier.fillMaxSize().padding(padding).testTag("remote-library-surface")) {
+                if (message != null && state != RemoteLibraryViewState.ERROR) {
+                    Row(Modifier.fillMaxWidth().semantics { liveRegion = LiveRegionMode.Polite }.padding(horizontal = 20.dp, vertical = 12.dp),
+                        verticalAlignment = Alignment.CenterVertically) {
+                        Text(message, modifier = Modifier.weight(1f), style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        if (refreshFailure) TsuyomiButton(stringResource(R.string.remote_library_retry), onRefresh, style = TsuyomiButtonStyle.TEXT)
+                    }
+                }
+                mirrorContent()
+            }
+        }
     }
 
     if (copyConfirmationVisible) {
@@ -330,21 +339,38 @@ fun RemoteLibraryScreen(
     }
 
     if (groupingEnabled && moveTargetSelectionBook != null) {
-        var pickedTargetId by remember(moveTargetSelectionBook, selectedTargetId) {
+        var pickedTargetId by rememberSaveable(
+            moveTargetSelectionBook.identity.sourceId,
+            moveTargetSelectionBook.identity.remoteBookId,
+        ) {
             mutableStateOf(selectedTargetId ?: targets.firstOrNull()?.targetId.orEmpty())
         }
+        val eInk = LocalDisplayEnvironment.current.effectiveProfile == DisplayProfile.EINK
         TsuyomiDialog(
             onDismissRequest = onDismissMoveSelection,
             title = "移至网站分组",
             body = {
-                targets.forEach { target ->
-                    TsuyomiSelectableRow(
-                        selected = pickedTargetId == target.targetId,
-                        onClick = { pickedTargetId = target.targetId },
-                        onLongClick = null,
-                        modifier = Modifier.padding(vertical = 4.dp),
-                    ) {
-                        Text(target.displayName, style = MaterialTheme.typography.bodyLarge)
+                if (eInk) {
+                    key(moveTargetSelectionBook.identity.sourceId, moveTargetSelectionBook.identity.remoteBookId) {
+                        TsuyomiMeasuredPager(itemCount = targets.size, itemKey = { "target:${targets[it].targetId}" },
+                            modifier = Modifier.fillMaxWidth().weight(1f).testTag("remote-move-target-pager"),
+                            state = rememberTsuyomiMeasuredPagerState(pickedTargetId?.let { "target:$it" }),
+                            itemContent = { index ->
+                                val target = targets[index]
+                                TsuyomiMenuItem(target.displayName, { pickedTargetId = target.targetId }, selected = pickedTargetId == target.targetId,
+                                    modifier = Modifier.testTag("remote-move-target-${target.targetId}"))
+                            })
+                    }
+                } else {
+                    targets.forEach { target ->
+                        TsuyomiSelectableRow(
+                            selected = pickedTargetId == target.targetId,
+                            onClick = { pickedTargetId = target.targetId },
+                            onLongClick = null,
+                            modifier = Modifier.padding(vertical = 4.dp),
+                        ) {
+                            Text(target.displayName, style = MaterialTheme.typography.bodyLarge)
+                        }
                     }
                 }
             },
@@ -376,30 +402,3 @@ fun RemoteLibraryScreen(
     }
 }
 
-@Composable
-private fun FrozenEInkRemoteLibraryScreen(
-    books: List<SourceBookSummary>,
-    state: RemoteLibraryViewState,
-    message: String?,
-    onRefresh: () -> Unit,
-    onOpenBook: (SourceBookSummary) -> Unit,
-    modifier: Modifier,
-) {
-    Column(modifier.fillMaxSize().padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-        Text(stringResource(R.string.remote_library_manual_notice))
-        TsuyomiButton(
-            text = stringResource(R.string.remote_library_refresh),
-            onClick = onRefresh,
-            modifier = Modifier.fillMaxWidth(),
-            style = TsuyomiButtonStyle.PRIMARY,
-        )
-        message?.let { Text(it) }
-        if (state == RemoteLibraryViewState.LOADING) {
-            Text(stringResource(R.string.remote_library_loading))
-        } else {
-            books.forEach { book ->
-                Text(book.title, Modifier.fillMaxWidth().clickable { onOpenBook(book) }.padding(vertical = 12.dp))
-            }
-        }
-    }
-}

@@ -28,7 +28,7 @@ internal class RoomReadingProgressStore(
         require(incoming.isSemanticallyValid()) { "Invalid semantic progress" }
         val entity = incoming.toEntity()
         return database.withTransaction {
-            when (val existing = dao.progress(entity.sourceId, entity.remoteBookId)) {
+            when (val existing = dao.progressByIdentityKey(entity.identityKey)) {
                 null -> if (dao.insertProgressIfAbsent(entity) != -1L) {
                     ProgressWriteResult.APPLIED
                 } else {
@@ -38,9 +38,8 @@ internal class RoomReadingProgressStore(
                     check(dao.replaceProgress(entity) == 1)
                     ProgressWriteResult.APPLIED
                 } else if (
-                    dao.updateProgressIfNewer(
-                        sourceId = entity.sourceId,
-                        remoteBookId = entity.remoteBookId,
+                    dao.updateProgressIfNewerByIdentityKey(
+                        identityKey = entity.identityKey,
                         contentId = entity.contentId,
                         revision = entity.revision,
                         blockId = entity.blockId,
@@ -61,14 +60,16 @@ internal class RoomReadingProgressStore(
     }
 
     suspend fun progress(identity: BookIdentity): ReadingProgress? =
-        dao.progress(identity.sourceId, identity.remoteBookId)?.toDomainOrNull()
+        dao.progressByIdentityKey(identity.storageKey)?.toDomainOrNull(identity)
 
     suspend fun markChapterCompleted(identity: BookIdentity, chapterId: String, completedAt: Instant): Boolean {
         require(chapterId.isNotBlank() && chapterId.codePointCount(0, chapterId.length) <= 512) { "Invalid chapter ID" }
+        val remote = identity as? BookIdentity.Remote
         return dao.insertCompletedChapter(
             org.tsuyomi.core.database.room.CompletedChapterEntity(
-                sourceId = identity.sourceId,
-                remoteBookId = identity.remoteBookId,
+                identityKey = identity.storageKey,
+                sourceId = remote?.sourceId,
+                remoteBookId = remote?.remoteBookId,
                 chapterId = chapterId,
                 completedAtEpochSecond = completedAt.epochSecond,
                 completedAtNano = completedAt.nano,
@@ -77,34 +78,51 @@ internal class RoomReadingProgressStore(
     }
 
     suspend fun completedChapterIds(identity: BookIdentity): Set<String> =
-        dao.completedChapterIds(identity.sourceId, identity.remoteBookId).toSet()
+        dao.completedChapterIdsByIdentityKey(identity.storageKey).toSet()
 }
 
-private fun ReadingProgress.toEntity() = ReadingProgressEntity(
-    sourceId = identity.sourceId,
-    remoteBookId = identity.remoteBookId,
-    contentId = locator.document.contentId,
-    revision = locator.document.revision,
-    blockId = locator.blockId,
-    textAnchorDigest = locator.textAnchorDigest,
-    characterOffset = locator.characterOffset,
-    chapterProgress = locator.chapterProgress,
-    bookProgress = locator.bookProgress,
-    updatedAtEpochSecond = updatedAt.epochSecond,
-    updatedAtNano = updatedAt.nano,
-)
+private fun ReadingProgress.toEntity(): ReadingProgressEntity {
+    val remote = identity as? BookIdentity.Remote
+    return ReadingProgressEntity(
+        identityKey = identity.storageKey,
+        sourceId = remote?.sourceId,
+        remoteBookId = remote?.remoteBookId,
+        contentId = locator.document.contentId,
+        revision = locator.document.revision,
+        blockId = locator.blockId,
+        textAnchorDigest = locator.textAnchorDigest,
+        characterOffset = locator.characterOffset,
+        chapterProgress = locator.chapterProgress,
+        bookProgress = locator.bookProgress,
+        updatedAtEpochSecond = updatedAt.epochSecond,
+        updatedAtNano = updatedAt.nano,
+    )
+}
 
 private fun ReadingProgressEntity.timestamp(): Instant =
     Instant.ofEpochSecond(updatedAtEpochSecond, updatedAtNano.toLong())
 
-internal fun ReadingProgressEntity.isSemanticallyValid(): Boolean = toDomainOrNull() != null
+private fun ReadingProgressEntity.identity(): BookIdentity = when {
+    sourceId != null && remoteBookId != null -> BookIdentity.Remote(sourceId, remoteBookId).also {
+        check(it.storageKey == identityKey)
+    }
+    sourceId == null && remoteBookId == null -> BookIdentity.Local(identityKey.substringAfter(':')).also {
+        check(it.storageKey == identityKey)
+    }
+    else -> error("Invalid persisted book identity")
+}
 
-internal fun ReadingProgressEntity.toDomainOrNull(): ReadingProgress? = runCatching {
+internal fun ReadingProgressEntity.isSemanticallyValid(): Boolean = runCatching { toDomainOrNull(identity()) != null }.getOrDefault(false)
+
+internal fun ReadingProgressEntity.toDomainOrNull(identity: BookIdentity): ReadingProgress? = runCatching {
+    require(identityKey == identity.storageKey)
+    val remote = identity as? BookIdentity.Remote
+    require(sourceId == remote?.sourceId && remoteBookId == remote?.remoteBookId)
     val timestamp = timestamp()
     ReadingProgress(
-        identity = BookIdentity(sourceId, remoteBookId),
+        identity = identity,
         locator = ReaderLocator(
-            document = DocumentIdentity(sourceId, remoteBookId, contentId, revision),
+            document = DocumentIdentity(identity, contentId, revision),
             blockId = blockId,
             textAnchorDigest = textAnchorDigest,
             characterOffset = characterOffset,
@@ -118,12 +136,11 @@ internal fun ReadingProgressEntity.toDomainOrNull(): ReadingProgress? = runCatch
 
 private fun ReadingProgress.isSemanticallyValid(): Boolean = runCatching {
     val locator = locator
+    require(locator.document.book == identity)
+    require(updatedAt == locator.capturedAt)
     val characterOffset = locator.characterOffset
     val chapterProgress = locator.chapterProgress
     val bookProgress = locator.bookProgress
-    require(locator.document.sourceId == identity.sourceId)
-    require(locator.document.remoteBookId == identity.remoteBookId)
-    require(updatedAt == locator.capturedAt)
     require(characterOffset == null || characterOffset >= 0)
     require(chapterProgress == null || chapterProgress.isFinite() && chapterProgress in 0.0..1.0)
     require(bookProgress == null || bookProgress.isFinite() && bookProgress in 0.0..1.0)

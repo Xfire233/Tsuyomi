@@ -16,6 +16,9 @@ import java.util.zip.ZipOutputStream
 import org.json.JSONObject
 import java.time.Instant
 import org.junit.After
+import java.util.concurrent.Executor
+import java.util.concurrent.atomic.AtomicBoolean
+import kotlinx.coroutines.Job
 import org.junit.Before
 import org.tsuyomi.core.database.RoomLibraryRepository
 import org.tsuyomi.core.database.TsuyomiDatabase
@@ -52,11 +55,37 @@ internal abstract class SourceFlowInstrumentedTestFixture {
     protected lateinit var library: RoomLibraryRepository
     protected lateinit var directActionTokens: DirectActionTokenRegistry
 
+    @Volatile
+    private var queryObserver: ((String) -> Unit)? = null
+
+    // Run on Room's query thread so cancellation happens inside the chosen lookup,
+    // not after an independently scheduled observer has raced the transport.
+    protected fun cancelAtPostBeginLookup(table: String, job: Job): AtomicBoolean {
+        val began = AtomicBoolean()
+        val cancelled = AtomicBoolean()
+        queryObserver = { sql ->
+            if (sql.startsWith("INSERT", ignoreCase = true) &&
+                sql.contains("remote_library_reconciliation", ignoreCase = true)
+            ) {
+                began.set(true)
+            }
+            if (began.get() && sql.startsWith("SELECT", ignoreCase = true) &&
+                sql.contains("FROM $table", ignoreCase = true) &&
+                cancelled.compareAndSet(false, true)
+            ) {
+                job.cancel()
+            }
+        }
+        return cancelled
+    }
+
     @Before
     fun setUpSourceFlowFixture() {
         cleanFixtureState()
+        queryObserver = null
         database = Room.inMemoryDatabaseBuilder(context, TsuyomiDatabase::class.java)
             .allowMainThreadQueries()
+            .setQueryCallback({ sql, _ -> queryObserver?.invoke(sql) }, Executor { it.run() })
             .build()
         library = RoomLibraryRepository(database)
         directActionTokens = DirectActionTokenRegistry()
@@ -64,6 +93,7 @@ internal abstract class SourceFlowInstrumentedTestFixture {
 
     @After
     fun tearDownSourceFlowFixture() {
+        queryObserver = null
         database.close()
         cleanFixtureState()
     }
@@ -130,7 +160,7 @@ internal abstract class SourceFlowInstrumentedTestFixture {
         }
 
     protected fun summary(sourceId: String, remoteBookId: String, title: String) = SourceBookSummary(
-        identity = BookIdentity(sourceId, remoteBookId),
+        identity = BookIdentity.Remote(sourceId, remoteBookId),
         title = title,
         author = "测试作者",
         coverUrl = null,
@@ -280,6 +310,9 @@ internal abstract class SourceFlowInstrumentedTestFixture {
         private val detail: suspend (SourceBookSummary) -> SourceBookDetail = { SourceBookDetail(it, null, emptyList(), null) },
         private val directoryResult: suspend (String) -> SourceDirectory = { error("Unexpected directory") },
         private val chapterResult: suspend (SourceChapter, String) -> ReaderDocument = { _, _ -> error("Unexpected chapter") },
+        private val chapterVerifiedResult: suspend (SourceChapter, String, CapturedVerifiedPage) -> ReaderDocument = { _, _, _ ->
+            error("Unexpected verified chapter")
+        },
         private val addRemote: suspend (String, String) -> RemoteLibraryAddResult = { _, _ -> error("Unexpected remote add") },
         private val removeRemote: suspend (String, String) -> RemoteLibraryRemoveResult = { _, _ -> error("Unexpected remote remove") },
         private val moveRemote: suspend (String, String, String) -> RemoteLibraryMoveResult = { _, _, _ -> error("Unexpected remote move") },
@@ -307,7 +340,7 @@ internal abstract class SourceFlowInstrumentedTestFixture {
 
         override suspend fun detail(remoteBookId: String, offlineOnly: Boolean): SourceBookDetail = detail(
             SourceBookSummary(
-                identity = BookIdentity(SOURCE_FLOW_TEST_SOURCE_ID, remoteBookId),
+                identity = BookIdentity.Remote(SOURCE_FLOW_TEST_SOURCE_ID, remoteBookId),
                 title = "详情",
                 author = "测试作者",
                 coverUrl = null,
@@ -323,6 +356,12 @@ internal abstract class SourceFlowInstrumentedTestFixture {
             remoteBookId: String,
             offlineOnly: Boolean,
         ): ReaderDocument = chapterResult(chapter, remoteBookId)
+
+        override suspend fun chapterVerifiedPage(
+            chapter: SourceChapter,
+            remoteBookId: String,
+            snapshot: CapturedVerifiedPage,
+        ): ReaderDocument = chapterVerifiedResult(chapter, remoteBookId, snapshot)
 
         override suspend fun listRemoteLibrary(cursor: String?): RemoteLibraryPage = listRemote(cursor)
 

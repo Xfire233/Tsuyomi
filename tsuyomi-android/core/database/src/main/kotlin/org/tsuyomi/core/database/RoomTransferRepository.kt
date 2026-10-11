@@ -24,12 +24,14 @@ import org.tsuyomi.shared.backup.TransferBook
 import org.tsuyomi.shared.backup.TransferProgress
 import org.tsuyomi.shared.backup.TransferShelf
 import org.tsuyomi.shared.backup.TransferSnapshot
+import org.tsuyomi.shared.backup.TransferLocalPublicationMetadata
 import org.tsuyomi.shared.locator.DocumentIdentity
 import org.tsuyomi.shared.locator.ReaderLocator
 import org.tsuyomi.shared.model.BookIdentity
 import org.tsuyomi.shared.librarydomain.CollectionKind
 import org.tsuyomi.shared.librarydomain.LibraryBook
 import org.tsuyomi.shared.librarydomain.ReadingProgress
+import org.tsuyomi.shared.librarydomain.LocalPublicationMetadata
 import org.tsuyomi.shared.smartshelf.SmartRuleCodec
 
 enum class ImportSessionStatus {
@@ -91,18 +93,26 @@ class RoomTransferRepository(private val database: TsuyomiDatabase) {
             }
         }
         plan.books.forEach { incoming ->
-            val safeRef = "${incoming.identity.sourceId}:${incoming.identity.remoteBookId}"
+            val safeRef = incoming.identity.safeTransferReference()
             val existingBook = library.book(incoming.identity)
             val metadataAccepted = existingBook == null || incoming.updatedAt > existingBook.metadataUpdatedAt
             if (existingBook != null && !metadataAccepted && incoming.metadataDiffersFrom(existingBook)) {
                 conflict("existing-book-metadata-retained", safeRef, "metadata")
             }
-            val existingEntry = dao.libraryEntry(incoming.identity.sourceId, incoming.identity.remoteBookId)
+            incoming.localPublication?.let { original ->
+                val current = existingBook?.localPublication ?: return@let
+                if (original.format != current.format || original.originalSha256 != current.originalSha256 ||
+                    original.originalSizeBytes != current.originalSizeBytes
+                ) {
+                    conflict("existing-local-original-retained", safeRef, "localPublication")
+                }
+            }
+            val existingEntry = dao.libraryEntryByIdentityKey(incoming.identity.storageKey)
             val incomingRating = incoming.rating?.takeIf { it > 0.0 }?.toInt()?.coerceIn(1, 5)
             if (incomingRating != null && existingEntry != null && incomingRating != existingEntry.rating && !metadataAccepted) {
                 conflict("existing-rating-retained", safeRef, "rating")
             }
-            val existingTags = dao.localTags(incoming.identity.sourceId, incoming.identity.remoteBookId)
+            val existingTags = dao.localTagsByIdentityKey(incoming.identity.storageKey)
                 .mapNotNull { normalizedLocalTag(it.displayTag)?.first }
                 .toSet()
             val incomingTags = incoming.localTags.mapNotNull { normalizedLocalTag(it)?.first }.toSet()
@@ -110,9 +120,8 @@ class RoomTransferRepository(private val database: TsuyomiDatabase) {
                 conflict("local-tags-capacity-conflict", safeRef, "localTags")
             }
             incoming.progress?.let { progress ->
-                val existingProgress = dao.progress(incoming.identity.sourceId, incoming.identity.remoteBookId)
-                val existingUpdatedAt = existingProgress
-                    ?.takeIf { it.isSemanticallyValid() }
+                val existingProgress = dao.progressByIdentityKey(incoming.identity.storageKey)
+                val existingUpdatedAt = existingProgress?.takeIf { it.isSemanticallyValid() }
                     ?.let { Instant.ofEpochSecond(it.updatedAtEpochSecond, it.updatedAtNano.toLong()) }
                 if (existingUpdatedAt != null && progress.updatedAt <= existingUpdatedAt) {
                     conflict("existing-progress-retained", safeRef, "progress")
@@ -150,11 +159,19 @@ class RoomTransferRepository(private val database: TsuyomiDatabase) {
         })
     }
 
-    suspend fun applyRoomPlan(sessionId: String, digest: String, plan: ImportPlan) = database.withTransaction {
+    suspend fun applyRoomPlan(
+        sessionId: String,
+        digest: String,
+        plan: ImportPlan,
+        restoredPublications: Set<BookIdentity.Local> = emptySet(),
+    ) = database.withTransaction {
         val session = requireNotNull(dao.importSession(sessionId)) { "Unknown import session" }
         require(session.planDigest == digest) { "Import digest mismatch" }
         if (session.status == ImportSessionStatus.ROOM_APPLIED.name) return@withTransaction
         require(session.status == ImportSessionStatus.PREPARED.name) { "Import is not prepared" }
+        require(restoredPublications.all { restored -> plan.books.any { it.identity == restored } }) {
+            "Restored original is not part of the reviewed transfer"
+        }
 
         val shelves = parentFirst(plan.shelves)
         shelves.forEach { shelf ->
@@ -224,34 +241,44 @@ class RoomTransferRepository(private val database: TsuyomiDatabase) {
         plan.books.forEach { incoming ->
             val existing = library.book(incoming.identity)
             val accepted = existing == null || incoming.updatedAt > existing.metadataUpdatedAt
-            val book = requireNotNull(if (accepted) incoming.toLibraryBook(plan.sourceCreatedAt) else existing)
+            val candidate = if (accepted) incoming.toLibraryBook(plan.sourceCreatedAt) else requireNotNull(existing)
+            val book = candidate.preserveOriginalDescriptorFrom(existing)
             require(incoming.localPin || incoming.shelfIds.isEmpty()) {
                 "Unpinned transfer books cannot have manual collection memberships"
             }
             library.saveBook(book)
+            val identity = incoming.identity
+            if (identity in restoredPublications) {
+                val incomingOriginal = requireNotNull(incoming.localPublication)
+                val retainedOriginal = requireNotNull(book.localPublication)
+                require(incomingOriginal.format == retainedOriginal.format &&
+                    incomingOriginal.originalSha256 == retainedOriginal.originalSha256 &&
+                    incomingOriginal.originalSizeBytes == retainedOriginal.originalSizeBytes)
+                check(dao.setLocalOriginalAvailable(identity.storageKey, true) == 1)
+            }
+            val remote = identity as? BookIdentity.Remote
+            val addedAt = incoming.addedAt ?: plan.sourceCreatedAt
             val entryInserted = dao.insertLibraryEntry(
                 org.tsuyomi.core.database.room.LibraryEntryEntity(
-                    incoming.identity.sourceId,
-                    incoming.identity.remoteBookId,
-                    (incoming.addedAt ?: plan.sourceCreatedAt).epochSecond,
-                    (incoming.addedAt ?: plan.sourceCreatedAt).nano,
-                    incoming.rating?.takeIf { it > 0.0 }?.toInt()?.coerceIn(1, 5),
-                    incoming.readLater,
+                    identityKey = identity.storageKey,
+                    sourceId = remote?.sourceId,
+                    remoteBookId = remote?.remoteBookId,
+                    addedAtEpochSecond = addedAt.epochSecond,
+                    addedAtNano = addedAt.nano,
+                    rating = incoming.rating?.takeIf { it > 0.0 }?.toInt()?.coerceIn(1, 5),
+                    readLater = incoming.readLater,
                     locallyPinned = incoming.localPin,
                 ),
             )
-            if (entryInserted == -1L && incoming.localPin) {
-                dao.pinLibraryEntry(incoming.identity.sourceId, incoming.identity.remoteBookId)
-            }
+            if (entryInserted == -1L && incoming.localPin) dao.pinLibraryEntryByIdentityKey(identity.storageKey)
             val incomingRating = incoming.rating
             if (entryInserted == -1L && accepted && incomingRating != null && incomingRating > 0.0) {
-                dao.updateRating(incoming.identity.sourceId, incoming.identity.remoteBookId, incomingRating.toInt().coerceIn(1, 5))
+                dao.updateRatingByIdentityKey(identity.storageKey, incomingRating.toInt().coerceIn(1, 5))
             }
-            if (entryInserted == -1L && incoming.readLater) {
-                dao.updateReadLater(incoming.identity.sourceId, incoming.identity.remoteBookId, true)
-            }
+            if (entryInserted == -1L && incoming.readLater) dao.updateReadLaterByIdentityKey(identity.storageKey, true)
+
             val mergedTags = linkedMapOf<String, String>()
-            dao.localTags(incoming.identity.sourceId, incoming.identity.remoteBookId).forEach { tag ->
+            dao.localTagsByIdentityKey(identity.storageKey).forEach { tag ->
                 normalizedLocalTag(tag.displayTag)?.let { (key, display) -> mergedTags.putIfAbsent(key, display) }
             }
             incoming.localTags.sorted().forEach { tag ->
@@ -259,34 +286,34 @@ class RoomTransferRepository(private val database: TsuyomiDatabase) {
                     if (key in mergedTags || mergedTags.size < MAX_LOCAL_TAGS) mergedTags.putIfAbsent(key, display)
                 }
             }
-            library.setLocalTags(incoming.identity, mergedTags.values)
+            library.setLocalTags(identity, mergedTags.values)
             incoming.progress?.let { progress ->
-                val existingProgress = dao.progress(incoming.identity.sourceId, incoming.identity.remoteBookId)
-                val existingUpdatedAt = existingProgress
-                    ?.takeIf { it.isSemanticallyValid() }
+                val existingProgress = dao.progressByIdentityKey(identity.storageKey)
+                val existingUpdatedAt = existingProgress?.takeIf { it.isSemanticallyValid() }
                     ?.let { Instant.ofEpochSecond(it.updatedAtEpochSecond, it.updatedAtNano.toLong()) }
                 if (existingUpdatedAt == null || progress.updatedAt > existingUpdatedAt) {
-                    library.saveProgress(progress.toReadingProgress(incoming.identity))
+                    library.saveProgress(progress.toReadingProgress(identity))
                 }
             }
             incoming.completedChapterIds.sorted().forEach { chapterId ->
-                library.markChapterCompleted(incoming.identity, chapterId, plan.sourceCreatedAt)
+                library.markChapterCompleted(identity, chapterId, plan.sourceCreatedAt)
             }
-            library.addBookmarks(incoming.identity, incoming.bookmarks)
+            library.addBookmarks(identity, incoming.bookmarks)
             if (incoming.localPin) {
                 incoming.shelfIds.sorted().forEach { shelfId ->
                     if (dao.collection(shelfId)?.kind == CollectionKind.MANUAL) {
                         val existingMemberships = dao.manualMemberships(shelfId)
-                        if (existingMemberships.none { it.sourceId == incoming.identity.sourceId && it.remoteBookId == incoming.identity.remoteBookId }) {
-                            val addedAt = incoming.addedAt ?: plan.sourceCreatedAt
+                        if (existingMemberships.none { it.identityKey == identity.storageKey }) {
+                            val remoteIdentity = identity as? BookIdentity.Remote
                             dao.insertManualMembership(
                                 ManualCollectionMembershipEntity(
-                                    shelfId,
-                                    incoming.identity.sourceId,
-                                    incoming.identity.remoteBookId,
-                                    addedAt.epochSecond,
-                                    addedAt.nano,
-                                    dao.nextManualMembershipOrder(shelfId),
+                                    collectionId = shelfId,
+                                    identityKey = identity.storageKey,
+                                    sourceId = remoteIdentity?.sourceId,
+                                    remoteBookId = remoteIdentity?.remoteBookId,
+                                    addedAtEpochSecond = addedAt.epochSecond,
+                                    addedAtNano = addedAt.nano,
+                                    displayOrder = dao.nextManualMembershipOrder(shelfId),
                                 ),
                             )
                         }
@@ -302,7 +329,7 @@ class RoomTransferRepository(private val database: TsuyomiDatabase) {
             )
         }
         plan.browsingHistory.forEach {
-            if (dao.book(it.identity.sourceId, it.identity.remoteBookId) != null) dao.upsertBrowsingHistory(
+            if (dao.bookByIdentityKey(it.identity.storageKey) != null) dao.upsertBrowsingHistory(
                 BrowsingHistoryEntity(it.identity.sourceId, it.identity.remoteBookId, it.lastViewedAt.epochSecond, it.lastViewedAt.nano),
             )
         }
@@ -350,18 +377,21 @@ class RoomTransferRepository(private val database: TsuyomiDatabase) {
 
     suspend fun exportSnapshot(createdAt: Instant, readerPreferences: org.tsuyomi.shared.backup.PortableReaderPreferences?): TransferSnapshot =
         database.withTransaction {
-            val books = dao.allBooks().associateBy { BookIdentity(it.sourceId, it.remoteBookId) }
-            val entries = dao.allLibraryEntries().associateBy { BookIdentity(it.sourceId, it.remoteBookId) }
-            val memberships = dao.allManualMemberships().groupBy { BookIdentity(it.sourceId, it.remoteBookId) }
-            val bookmarkedIdentities = dao.readerBookmarkIdentities().map { BookIdentity(it.sourceId, it.remoteBookId) }
-            val exportedIdentities = (entries.keys + bookmarkedIdentities).toSortedSet(compareBy(BookIdentity::sourceId, BookIdentity::remoteBookId))
+            val books = dao.allBooks().associateBy { it.toIdentity() }
+            val entries = dao.allLibraryEntries().associateBy { it.identityKey }
+            val memberships = dao.allManualMemberships().groupBy { it.identityKey }
+            val bookmarkedIdentities = dao.readerBookmarkIdentities().map { it.toIdentity() }
+            val localIdentities = books.keys.filterIsInstance<BookIdentity.Local>()
+            val retainedIdentities = books.keys.filter { it.storageKey in entries }
+            val exportedIdentities = (retainedIdentities + bookmarkedIdentities + localIdentities).toSortedSet()
             val exportedBooks = exportedIdentities.mapNotNull { identity ->
                 val domain = books[identity]?.toDomain() ?: return@mapNotNull null
-                val entry = entries[identity]
-                val shelfIds = memberships[identity].orEmpty().mapTo(sortedSetOf()) { it.collectionId }
+                val entry = entries[identity.storageKey]
+                val shelfIds = memberships[identity.storageKey].orEmpty().mapTo(sortedSetOf()) { it.collectionId }
                 require(entry?.locallyPinned != false || shelfIds.isEmpty()) {
                     "Unpinned library entries cannot have manual collection memberships"
                 }
+                val semanticProgress = dao.progressByIdentityKey(identity.storageKey)?.toDomainOrNull(identity)
                 TransferBook(
                     identity = identity,
                     title = domain.title,
@@ -370,25 +400,29 @@ class RoomTransferRepository(private val database: TsuyomiDatabase) {
                     coverUrl = domain.coverUrl,
                     status = domain.status ?: "unknown",
                     remoteTags = domain.remoteTags,
-                    localTags = dao.localTags(identity.sourceId, identity.remoteBookId).mapTo(sortedSetOf()) { it.displayTag },
+                    localTags = dao.localTagsByIdentityKey(identity.storageKey).mapTo(sortedSetOf()) { it.displayTag },
                     shelfIds = shelfIds,
                     rating = entry?.rating?.toDouble(),
                     readLater = entry?.readLater ?: false,
                     localPin = entry?.locallyPinned ?: false,
                     addedAt = entry?.let { Instant.ofEpochSecond(it.addedAtEpochSecond, it.addedAtNano.toLong()) } ?: domain.addedAt,
                     updatedAt = domain.metadataUpdatedAt,
-                    progress = dao.progress(identity.sourceId, identity.remoteBookId)?.let { progress ->
+                    progress = semanticProgress?.let { progress ->
                         TransferProgress(
-                            chapterId = progress.contentId,
-                            textAnchor = progress.textAnchorDigest,
-                            characterOffset = progress.characterOffset,
-                            chapterProgress = progress.chapterProgress,
-                            bookProgress = progress.bookProgress,
-                            updatedAt = Instant.ofEpochSecond(progress.updatedAtEpochSecond, progress.updatedAtNano.toLong()),
+                            chapterId = progress.locator.document.contentId,
+                            textAnchor = progress.locator.textAnchorDigest,
+                            characterOffset = progress.locator.characterOffset,
+                            chapterProgress = progress.locator.chapterProgress,
+                            bookProgress = progress.locator.bookProgress,
+                            updatedAt = progress.updatedAt,
+                            revision = progress.locator.document.revision,
                         )
                     },
-                    completedChapterIds = dao.completedChapterIds(identity.sourceId, identity.remoteBookId).toSortedSet(),
+                    completedChapterIds = dao.completedChapterIdsByIdentityKey(identity.storageKey).toSortedSet(),
                     bookmarks = library.bookmarks(identity),
+                    localPublication = domain.localPublication?.let { local ->
+                        TransferLocalPublicationMetadata(local.format, local.originalSha256, local.originalSizeBytes, local.txtOptions, local.coverResourceId)
+                    },
                 )
             }
             val shelves = dao.allCollections().filter { it.kind == CollectionKind.MANUAL }.map {
@@ -419,7 +453,18 @@ private fun TransferBook.metadataDiffersFrom(existing: LibraryBook): Boolean =
         canonicalUrl != existing.canonicalUrl ||
         coverUrl != existing.coverUrl ||
         (status != "unknown" && status != existing.status) ||
-        remoteTags != existing.remoteTags
+        remoteTags != existing.remoteTags ||
+        localPublication?.let { imported ->
+            val stored = existing.localPublication
+            stored == null || imported.format != stored.format || imported.originalSha256 != stored.originalSha256 ||
+                imported.originalSizeBytes != stored.originalSizeBytes || imported.txtOptions != stored.txtOptions ||
+                imported.coverResourceId != stored.coverResourceId
+        } == true || (localPublication == null && existing.localPublication != null)
+
+private fun BookIdentity.safeTransferReference(): String = when (this) {
+    is BookIdentity.Remote -> "$sourceId:$remoteBookId"
+    is BookIdentity.Local -> "local:$publicationId"
+}
 
 
 private fun normalizedLocalTag(raw: String): Pair<String, String>? {
@@ -438,14 +483,34 @@ private fun TransferBook.toLibraryBook(fallbackAddedAt: Instant) = LibraryBook(
     canonicalUrl = canonicalUrl,
     status = status,
     remoteTags = remoteTags,
+    localPublication = localPublication?.let { portable ->
+        LocalPublicationMetadata(
+            format = portable.format,
+            originalSha256 = portable.originalSha256,
+            originalSizeBytes = portable.originalSizeBytes,
+            originalAvailable = false,
+            txtOptions = portable.txtOptions,
+            coverResourceId = portable.coverResourceId,
+        )
+    },
 )
+
+private fun LibraryBook.preserveOriginalDescriptorFrom(existing: LibraryBook?): LibraryBook {
+    val incoming = localPublication ?: return this
+    val current = existing?.localPublication ?: return this
+    val sameOriginal = incoming.format == current.format && incoming.originalSha256 == current.originalSha256 &&
+        incoming.originalSizeBytes == current.originalSizeBytes
+    if (!sameOriginal) return copy(localPublication = current)
+    return if (incoming.originalAvailable == current.originalAvailable) this
+    else copy(localPublication = incoming.copy(originalAvailable = current.originalAvailable))
+}
 
 private fun TransferProgress.toReadingProgress(identity: BookIdentity): ReadingProgress {
     val blockId = if (textAnchor != null || characterOffset != null) "transfer-anchor" else null
     return ReadingProgress(
         identity,
         ReaderLocator(
-            document = DocumentIdentity(identity.sourceId, identity.remoteBookId, chapterId ?: "unknown"),
+            document = DocumentIdentity(identity, chapterId ?: "unknown", revision),
             blockId = blockId,
             textAnchorDigest = textAnchor,
             characterOffset = characterOffset,

@@ -215,7 +215,7 @@ internal class SourceInstallControllerInstrumentedTest : SourceFlowInstrumentedT
         val progress = org.tsuyomi.shared.librarydomain.ReadingProgress(
             book.identity,
             org.tsuyomi.shared.locator.ReaderLocator(
-                document = org.tsuyomi.shared.locator.DocumentIdentity(sourceId, "transition", "chapter-1"),
+                document = org.tsuyomi.shared.locator.DocumentIdentity(book.identity, "chapter-1"),
                 blockId = "p1", characterOffset = 7, chapterProgress = 0.4,
                 capturedAt = SOURCE_FLOW_TEST_TIME,
             ),
@@ -404,7 +404,7 @@ internal class SourceInstallControllerInstrumentedTest : SourceFlowInstrumentedT
         addedAt = SOURCE_FLOW_TEST_TIME, metadataUpdatedAt = SOURCE_FLOW_TEST_TIME,))
         val progress = org.tsuyomi.shared.librarydomain.ReadingProgress(book.identity,
         org.tsuyomi.shared.locator.ReaderLocator(
-            document = org.tsuyomi.shared.locator.DocumentIdentity(sourceId, "1001", "chapter-1"),
+            document = org.tsuyomi.shared.locator.DocumentIdentity(book.identity, "chapter-1"),
             blockId = "p1", characterOffset = 7, chapterProgress = 0.4, capturedAt = SOURCE_FLOW_TEST_TIME,
         ),)
         library.saveProgress(progress)

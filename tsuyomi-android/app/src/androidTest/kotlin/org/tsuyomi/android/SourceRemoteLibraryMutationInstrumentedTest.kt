@@ -7,6 +7,8 @@ package org.tsuyomi.android
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import org.tsuyomi.feature.book.SourceBookState
 import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.CoroutineStart
+import java.util.concurrent.atomic.AtomicInteger
 import kotlinx.coroutines.async
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
@@ -27,6 +29,82 @@ import org.tsuyomi.source.extensionmanager.RemoteOperation
 
 @RunWith(AndroidJUnit4::class)
 internal class SourceRemoteLibraryMutationInstrumentedTest : SourceFlowInstrumentedTestFixture() {
+    @Test
+    fun cancellationDuringPostBeginRemoveAvailabilityLookupCancelsAndUnblocksExplicitRemove() = runBlocking {
+        assertPostBeginMutationCancellation(RemoteOperation.REMOVE, "source_availability")
+    }
+
+    @Test
+    fun cancellationDuringPostBeginRemovePolicyLookupCancelsAndUnblocksExplicitRemove() = runBlocking {
+        assertPostBeginMutationCancellation(RemoteOperation.REMOVE, "source_remote_policy")
+    }
+
+    @Test
+    fun cancellationDuringPostBeginMoveAvailabilityLookupCancelsAndUnblocksExplicitMove() = runBlocking {
+        assertPostBeginMutationCancellation(RemoteOperation.MOVE, "source_availability")
+    }
+
+    @Test
+    fun cancellationDuringPostBeginMovePolicyLookupCancelsAndUnblocksExplicitMove() = runBlocking {
+        assertPostBeginMutationCancellation(RemoteOperation.MOVE, "source_remote_policy")
+    }
+
+    private suspend fun assertPostBeginMutationCancellation(operation: RemoteOperation, table: String) =
+        kotlinx.coroutines.coroutineScope {
+            val packageInfo = installFixture()
+            val sourceId = packageInfo.manifest.sourceId.value
+            val book = summary(sourceId, "post-begin-mutation", "取消后显式操作")
+            putCredential(sourceId)
+            val calls = AtomicInteger()
+            val flow = controller {
+                FakeSession(
+                    removeRemote = { remoteBookId, token ->
+                        calls.incrementAndGet()
+                        directActionTokens.accept(sourceId, remoteBookId, token)
+                        RemoteLibraryRemoveResult(book.identity, RemoteLibraryRemoveOutcome.APPLIED)
+                    },
+                    moveRemote = { remoteBookId, targetId, token ->
+                        calls.incrementAndGet()
+                        directActionTokens.accept(sourceId, remoteBookId, token)
+                        RemoteLibraryMoveResult(book.identity, targetId, RemoteLibraryMoveOutcome.APPLIED)
+                    },
+                )
+            }
+            suspend fun mutate(at: java.time.Instant): RemoteMutationUiResult = when (operation) {
+                RemoteOperation.REMOVE -> flow.removeSelectedBookFromWebsite(at)
+                RemoteOperation.MOVE -> flow.moveSelectedBookOnWebsite("favorites", "特别收藏", at)
+                else -> error("Unsupported regression operation")
+            }
+            try {
+                val policy = requireNotNull(library.sourceRemotePolicy(sourceId))
+                assertTrue(library.setRemoveWritebackEnabled(sourceId, policy.capabilitySetFingerprint, true))
+                assertTrue(library.setMoveWritebackEnabled(sourceId, policy.capabilitySetFingerprint, true))
+                flow.open(packageInfo)
+                flow.selectBook(book)
+                val mutation = async(start = CoroutineStart.LAZY) { mutate(SOURCE_FLOW_TEST_TIME) }
+                val cancelledAtLookup = cancelAtPostBeginLookup(table, mutation)
+                mutation.start()
+                withTimeout(5_000) { mutation.join() }
+
+                assertTrue("The post-begin lookup must be reached", cancelledAtLookup.get())
+                assertTrue(mutation.isCancelled)
+                assertEquals(0, calls.get())
+                val record = requireNotNull(library.bookReconciliation(sourceId, book.identity.remoteBookId))
+                assertEquals(operation.name.lowercase(), record.operation)
+                assertEquals(RemoteReconciliationState.CANCELLED, record.state)
+                assertEquals("CANCELLED", reconciliationState(record.id))
+                assertTrue(library.unresolvedReconciliationsForSource(sourceId).isEmpty())
+                assertEquals(RemoteMutationUiResult.Confirmed, mutate(SOURCE_FLOW_TEST_TIME.plusSeconds(1)))
+                assertEquals(1, calls.get())
+                assertEquals(
+                    RemoteReconciliationState.CONFIRMED,
+                    library.bookReconciliation(sourceId, book.identity.remoteBookId)?.state,
+                )
+            } finally {
+                flow.close()
+            }
+        }
+
 
     @Test
     fun removeBookFromWebsiteConfirmsReconciliationAndRetainsLocalData() = runBlocking {
@@ -268,7 +346,9 @@ internal class SourceRemoteLibraryMutationInstrumentedTest : SourceFlowInstrumen
         val controller = controller { session }
         try {
             controller.open(packageInfo)
-            val targets = controller.listRemoteTargets()
+            val result = controller.listRemoteTargets()
+            assertTrue(result is RemoteTargetReadResult.Success)
+            val targets = (result as RemoteTargetReadResult.Success).targets
             assertEquals(3, targets.size)
             assertEquals("default", targets[0].targetId)
             assertEquals("特别收藏", targets[1].displayName)

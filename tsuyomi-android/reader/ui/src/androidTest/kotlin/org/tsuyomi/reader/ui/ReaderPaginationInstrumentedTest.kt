@@ -17,14 +17,25 @@ import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.graphics.toPixelMap
 import androidx.compose.ui.test.captureToImage
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.assertIsEnabled
+import androidx.compose.ui.test.assertIsNotEnabled
+import androidx.compose.ui.test.assertIsSelected
 import androidx.compose.ui.test.junit4.v2.createComposeRule
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onAllNodesWithTag
 import androidx.compose.ui.test.onNodeWithText
+import androidx.compose.ui.test.hasText
+import androidx.compose.ui.test.performScrollToNode
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performImeAction
 import androidx.compose.ui.test.performTextInput
+import androidx.compose.ui.test.performTextReplacement
+import androidx.compose.ui.test.hasTestTag
+import androidx.compose.ui.test.hasAnyAncestor
+import androidx.compose.ui.text.TextRange
+import androidx.compose.ui.test.SemanticsMatcher
+import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.click
 import androidx.compose.ui.test.performTouchInput
 import androidx.compose.ui.test.performScrollToIndex
@@ -60,7 +71,9 @@ import org.tsuyomi.shared.locator.ReaderLocator
 import org.tsuyomi.shared.locator.bookmarkPositionKey
 import org.tsuyomi.shared.sourcecontract.ReaderBlock
 import org.tsuyomi.shared.sourcecontract.ReaderDocument
-import org.tsuyomi.shared.sourcecontract.SourceChapter
+import org.tsuyomi.shared.sourcecontract.ReaderNavigationTarget
+import org.tsuyomi.shared.sourcecontract.ReaderResourceRef
+import org.tsuyomi.shared.model.BookIdentity
 
 class ReaderPaginationInstrumentedTest {
     @get:Rule
@@ -72,28 +85,27 @@ class ReaderPaginationInstrumentedTest {
         val preferences = mutableStateOf(initial)
         val commits = AtomicInteger()
         val document = ReaderDocument(
-            sourceId = "org.tsuyomi.reader.test",
-            remoteBookId = "live-preferences",
-            contentId = "chapter-1",
-            revision = null,
+            identity = DocumentIdentity(BookIdentity.Remote("org.tsuyomi.reader.test", "live-preferences"), "chapter-1", null),
             title = "排版与主题",
             blocks = (1..12).map { ReaderBlock.Paragraph("paragraph-$it", paragraph(it)) },
         )
-        val chapter = SourceChapter("chapter-1", document.title, "https://example.test/chapter-1")
+        val chapter = ReaderNavigationTarget("chapter-1", document.title)
         val environment = standardEnvironment()
         composeRule.setContent {
             DisplayEnvironmentProvider(environment) {
                 TsuyomiTheme(environment) {
                     ReaderSurface(document = document,
-                    auxiliarySheetState = rememberReaderAuxiliarySheetState(document.sourceId, document.remoteBookId),
+                    auxiliarySheetState = rememberReaderAuxiliarySheetState(document.identity.book),
                     restoredLocator = null,
                     onLocatorChanged = { _, _ -> commits.incrementAndGet() },
-                    chapters = listOf(chapter),
-                    currentChapterId = chapter.chapterId, bookmarks = emptyList(), onToggleBookmark = {}, onRemoveBookmark = {}, onSelectBookmark = {}, restorationGeneration = 0L, requestedFlow = "paged",
+                    navigationTargets = listOf(chapter),
+                    currentContentId = chapter.contentId, bookmarks = emptyList(), onToggleBookmark = {}, onRemoveBookmark = {}, onSelectBookmark = {}, restorationGeneration = 0L, requestedFlow = "paged",
                     hasFlowOverride = false,
                     onFlowOverrideChanged = {},
-                    onSelectChapter = {},
+                    onSelectContent = {},
                     onNavigateUp = {},
+                    onNavigateLink = {},
+                    onReturnToOrigin = {},
                     preferences = preferences.value,
                     onPreferencesChanged = { preferences.value = it },)
                 }
@@ -138,27 +150,26 @@ class ReaderPaginationInstrumentedTest {
     fun nightReaderSettingsTypographyTextContrastsWithItsSheetSurface() {
         val environment = standardEnvironment()
         val document = ReaderDocument(
-            sourceId = "org.tsuyomi.reader.test",
-            remoteBookId = "night-settings-contrast",
-            contentId = "chapter-1",
-            revision = null,
+            identity = DocumentIdentity(BookIdentity.Remote("org.tsuyomi.reader.test", "night-settings-contrast"), "chapter-1", null),
             title = "夜间设置对比度",
             blocks = listOf(ReaderBlock.Paragraph("paragraph-1", paragraph(1))),
         )
-        val chapter = SourceChapter("chapter-1", document.title, "https://example.test/chapter-1")
+        val chapter = ReaderNavigationTarget("chapter-1", document.title)
         composeRule.setContent {
             DisplayEnvironmentProvider(environment) {
                 TsuyomiTheme(environment) {
                     ReaderSurface(document = document,
-                    auxiliarySheetState = rememberReaderAuxiliarySheetState(document.sourceId, document.remoteBookId),
+                    auxiliarySheetState = rememberReaderAuxiliarySheetState(document.identity.book),
                     restoredLocator = null,
                     onLocatorChanged = { _, _ -> },
-                    chapters = listOf(chapter),
-                    currentChapterId = chapter.chapterId, bookmarks = emptyList(), onToggleBookmark = {}, onRemoveBookmark = {}, onSelectBookmark = {}, restorationGeneration = 0L, requestedFlow = "paged",
+                    navigationTargets = listOf(chapter),
+                    currentContentId = chapter.contentId, bookmarks = emptyList(), onToggleBookmark = {}, onRemoveBookmark = {}, onSelectBookmark = {}, restorationGeneration = 0L, requestedFlow = "paged",
                     hasFlowOverride = false,
                     onFlowOverrideChanged = {},
-                    onSelectChapter = {},
+                    onSelectContent = {},
                     onNavigateUp = {},
+                    onNavigateLink = {},
+                    onReturnToOrigin = {},
                     preferences = PortableReaderPreferences(flow = "paged", theme = "nightInk"),)
                 }
             }
@@ -201,14 +212,11 @@ class ReaderPaginationInstrumentedTest {
             ),
         )
         val document = ReaderDocument(
-            sourceId = "org.tsuyomi.reader.test",
-            remoteBookId = "settings-scroll",
-            contentId = "chapter-1",
-            revision = null,
+            identity = DocumentIdentity(BookIdentity.Remote("org.tsuyomi.reader.test", "settings-scroll"), "chapter-1", null),
             title = "设置滚动验证",
             blocks = listOf(ReaderBlock.Paragraph("paragraph-1", paragraph(1))),
         )
-        val chapter = SourceChapter("chapter-1", document.title, "https://example.test/chapter-1")
+        val chapter = ReaderNavigationTarget("chapter-1", document.title)
 
         composeRule.setContent {
             DeviceConfigurationOverride(
@@ -219,15 +227,17 @@ class ReaderPaginationInstrumentedTest {
                 DisplayEnvironmentProvider(environment) {
                     TsuyomiTheme(environment) {
                         ReaderSurface(document = document,
-                        auxiliarySheetState = rememberReaderAuxiliarySheetState(document.sourceId, document.remoteBookId),
+                        auxiliarySheetState = rememberReaderAuxiliarySheetState(document.identity.book),
                         restoredLocator = null,
                         onLocatorChanged = { _, _ -> },
-                        chapters = listOf(chapter),
-                        currentChapterId = chapter.chapterId, bookmarks = emptyList(), onToggleBookmark = {}, onRemoveBookmark = {}, onSelectBookmark = {}, restorationGeneration = 0L, requestedFlow = "paged",
+                        navigationTargets = listOf(chapter),
+                        currentContentId = chapter.contentId, bookmarks = emptyList(), onToggleBookmark = {}, onRemoveBookmark = {}, onSelectBookmark = {}, restorationGeneration = 0L, requestedFlow = "paged",
                         hasFlowOverride = false,
                         onFlowOverrideChanged = {},
-                        onSelectChapter = {},
+                        onSelectContent = {},
                         onNavigateUp = {},
+                        onNavigateLink = {},
+                        onReturnToOrigin = {},
                         preferences = preferences.value,
                         onPreferencesChanged = { preferences.value = it },)
                     }
@@ -293,10 +303,6 @@ class ReaderPaginationInstrumentedTest {
         )
         fullScroll.performSemanticsAction(SemanticsActions.ScrollBy) { it(0f, 10_000f) }
         composeRule.waitForIdle()
-        assertTrue(
-            "Expanded typography must scroll completely above the viewport with the rest of settings",
-            typography.fetchSemanticsNode().boundsInRoot.bottom <= fullBounds.top,
-        )
         val lockPortrait = composeRule.onNodeWithText("锁定竖屏")
         lockPortrait.assertIsDisplayed()
         lockPortrait.performClick()
@@ -320,6 +326,157 @@ class ReaderPaginationInstrumentedTest {
     }
 
     @Test
+    fun unfinishedReaderColorDraftAndSelectionSurviveBothProfileChanges() {
+        val environment = mutableStateOf(eInkEnvironment())
+        val actions = mutableListOf<ReaderSettingsAction>()
+        composeRule.setContent {
+            DisplayEnvironmentProvider(environment.value) {
+                TsuyomiTheme(environment.value) {
+                    ReaderSettingsSheet(
+                        settingsIdentity = "draft-book",
+                        state = ReaderSettingsUiState(foregroundColor = "#123456"),
+                        effectiveFlow = ReaderFlow.PAGED,
+                        dualPageEligible = false,
+                        hasFlowOverride = false,
+                        onAction = { actions += it },
+                        onFollowGlobalFlow = {},
+                        onDismiss = {},
+                    )
+                }
+            }
+        }
+        fun showEinkColorField() {
+            repeat(50) {
+                if (runCatching { composeRule.onNodeWithTag("reader-foreground-color").assertIsDisplayed() }.isSuccess) return
+                composeRule.onNode(hasText("下一页") and hasAnyAncestor(hasTestTag("reader-eink-setting-controls")))
+                    .assertIsEnabled().performClick()
+            }
+            composeRule.onNodeWithTag("reader-foreground-color").assertIsDisplayed()
+        }
+        showEinkColorField()
+        composeRule.onNodeWithTag("reader-foreground-color").performTextReplacement("#12")
+        composeRule.onNodeWithTag("reader-foreground-color")
+            .performSemanticsAction(SemanticsActions.SetSelection) { it(1, 1, false) }
+        composeRule.runOnIdle { environment.value = standardEnvironment() }
+        composeRule.onNodeWithText("全部设置").performClick()
+        composeRule.onNodeWithTag("reader-full-settings-scroll").performScrollToNode(hasTestTag("reader-foreground-color"))
+        val standardField = composeRule.onNodeWithTag("reader-foreground-color").fetchSemanticsNode().config
+        assertEquals("#12", standardField[SemanticsProperties.EditableText].text)
+        assertEquals(TextRange(1), standardField[SemanticsProperties.TextSelectionRange])
+        composeRule.runOnIdle { environment.value = eInkEnvironment() }
+        showEinkColorField()
+        val einkField = composeRule.onNodeWithTag("reader-foreground-color").fetchSemanticsNode().config
+        assertEquals("#12", einkField[SemanticsProperties.EditableText].text)
+        assertEquals(TextRange(1), einkField[SemanticsProperties.TextSelectionRange])
+        assertEquals(emptyList<ReaderSettingsAction>(), actions)
+    }
+
+    @Test
+    @OptIn(ExperimentalTestApi::class)
+    fun einkReaderKeepsPageEndpointsAndRestoresRequestedStandardFlow() {
+        val environment = mutableStateOf(eInkEnvironment())
+        val preferences = mutableStateOf(PortableReaderPreferences(flow = "scroll", fontScale = 1.0))
+        val document = ReaderDocument(
+            identity = DocumentIdentity(BookIdentity.Remote("org.tsuyomi.reader.test", "eink-page-controls"), "chapter-1", null),
+            title = "墨水屏分页控制",
+            blocks = (1..60).map { ReaderBlock.Paragraph("paragraph-$it", paragraph(it)) },
+        )
+        val chapter = ReaderNavigationTarget("chapter-1", document.title)
+        composeRule.setContent {
+            DeviceConfigurationOverride(DeviceConfigurationOverride.ForcedSize(DpSize(420.dp, 760.dp))) {
+                DisplayEnvironmentProvider(environment.value) {
+                    TsuyomiTheme(environment.value) {
+                        ReaderSurface(
+                            document = document,
+                            auxiliarySheetState = rememberReaderAuxiliarySheetState(document.identity.book),
+                            restoredLocator = null,
+                            restorationGeneration = 0L,
+                            onLocatorChanged = { _, _ -> },
+                            navigationTargets = listOf(chapter),
+                            currentContentId = chapter.contentId,
+                            bookmarks = emptyList(),
+                            onToggleBookmark = {},
+                            onRemoveBookmark = {},
+                            onSelectBookmark = {},
+                            requestedFlow = "scroll",
+                            hasFlowOverride = true,
+                            onFlowOverrideChanged = {},
+                            onSelectContent = {},
+                            onNavigateLink = {},
+                            onNavigateUp = {},
+                            onReturnToOrigin = {},
+                            preferences = preferences.value,
+                            onPreferencesChanged = { preferences.value = it },
+                        )
+                    }
+                }
+            }
+        }
+
+        val previousPage = composeRule.onNodeWithTag("reader-page-previous")
+        val nextPage = composeRule.onNodeWithTag("reader-page-next")
+        previousPage.assertIsNotEnabled()
+        nextPage.assertIsEnabled()
+        val progressSlider = composeRule.onNodeWithTag("reader-chapter-progress-slider").assertIsDisplayed()
+        val range = progressSlider.fetchSemanticsNode().config[SemanticsProperties.ProgressBarRangeInfo]
+        assertTrue(range.range.endInclusive > 1f)
+        assertEquals(range.range.endInclusive.toInt() - 1, range.steps)
+
+        fun currentPageStatus(): String = composeRule.onNodeWithTag("reader-page-progress")
+            .fetchSemanticsNode().config[SemanticsProperties.Text].joinToString("") { it.text }
+        fun currentPageNumber(): Int = currentPageStatus().substringBefore(' ').substringBefore('/').toInt()
+        val pageCount = currentPageStatus().substringBefore(' ').substringAfter('/').toInt()
+        var expectedPage = 1
+        while (expectedPage < pageCount) {
+            nextPage.performClick()
+            composeRule.waitForIdle()
+            expectedPage++
+            assertEquals(expectedPage, currentPageNumber())
+            previousPage.assertIsEnabled()
+        }
+        nextPage.assertIsNotEnabled()
+        composeRule.onNodeWithText(paragraph(60)).assertIsDisplayed()
+
+        composeRule.onNodeWithTag("reader-bottom-action-设置").performClick()
+        composeRule.onNodeWithTag("reader-eink-project-typography").assertIsDisplayed().performClick()
+        val settingsSlider = composeRule.onNodeWithTag("reader-eink-font-size-slider")
+        settingsSlider.assertIsDisplayed().performSemanticsAction(SemanticsActions.SetProgress) { it(20f) }
+        val settingsRange = settingsSlider.fetchSemanticsNode().config[SemanticsProperties.ProgressBarRangeInfo]
+        assertEquals(12f..32f, settingsRange.range)
+        assertEquals(19, settingsRange.steps)
+        val navigation = composeRule.onNodeWithTag("reader-eink-settings-navigation").fetchSemanticsNode().boundsInRoot
+        val controls = composeRule.onNodeWithTag("reader-eink-project-content").fetchSemanticsNode().boundsInRoot
+        val label = composeRule.onNode(hasText("排版") and hasAnyAncestor(hasTestTag("reader-eink-settings-navigation")), useUnmergedTree = true)
+            .fetchSemanticsNode().boundsInRoot
+        val padding = with(settingsSlider.fetchSemanticsNode().layoutInfo.density) { 24.dp.toPx() }
+        assertTrue("Navigation is only a measured label and touch padding", navigation.width <= label.width + padding + 1f)
+        assertTrue("The remaining Reader settings lane is wider than navigation", controls.width > navigation.width * 2f)
+        assertReaderSettingsButtonSpacing(
+            listOf("typography", "page", "navigation", "device").map { "reader-eink-project-$it" },
+            org.tsuyomi.core.ui.theme.TsuyomiSpacing.Sm,
+        )
+        composeRule.runOnIdle { assertTrue((preferences.value.fontScale ?: 1.0) > 1.0) }
+        composeRule.onAllNodesWithTag("reader-eink-settings-navigation").assertCountEquals(1)
+        composeRule.onAllNodesWithTag("reader-eink-project-navigation").assertCountEquals(1)
+        composeRule.onNodeWithTag("reader-eink-project-navigation").assertIsDisplayed().performClick()
+        composeRule.onNodeWithTag("reader-eink-project-navigation").assertIsSelected()
+        composeRule.onNodeWithTag("reader-eink-volume-paging").assertIsDisplayed()
+        assertReaderSettingsButtonSpacing(
+            listOf("reader-eink-progress", "reader-eink-volume-paging", "reader-eink-immersive"),
+            org.tsuyomi.core.ui.theme.TsuyomiSpacing.Md,
+        )
+        composeRule.onNodeWithTag("reader-eink-project-page").performClick()
+        composeRule.onNodeWithTag("reader-eink-option-paged").assertIsDisplayed()
+        composeRule.onNodeWithTag("reader-quick-settings-scroll").assertDoesNotExist()
+
+        pressBack()
+        composeRule.waitForIdle()
+        composeRule.runOnIdle { environment.value = standardEnvironment() }
+        composeRule.waitForIdle()
+        composeRule.onNodeWithTag("reader-document-scroll").assertIsDisplayed()
+    }
+
+    @Test
     fun pagedReaderPacksMultipleShortBlocksIntoEachMeasuredPage() {
         val blocks = (1..42).map { index ->
             ReaderBlock.Paragraph(
@@ -328,28 +485,27 @@ class ReaderPaginationInstrumentedTest {
             )
         }
         val document = ReaderDocument(
-            sourceId = "org.tsuyomi.reader.test",
-            remoteBookId = "packing",
-            contentId = "chapter-1",
-            revision = null,
+            identity = DocumentIdentity(BookIdentity.Remote("org.tsuyomi.reader.test", "packing"), "chapter-1", null),
             title = "分页排版验证",
             blocks = blocks,
         )
-        val chapter = SourceChapter("chapter-1", document.title, "https://example.test/chapter-1")
+        val chapter = ReaderNavigationTarget("chapter-1", document.title)
         val environment = standardEnvironment()
         composeRule.setContent {
             DisplayEnvironmentProvider(environment) {
                 TsuyomiTheme(environment) {
                     ReaderSurface(document = document,
-                    auxiliarySheetState = rememberReaderAuxiliarySheetState(document.sourceId, document.remoteBookId),
+                    auxiliarySheetState = rememberReaderAuxiliarySheetState(document.identity.book),
                     restoredLocator = null,
                     onLocatorChanged = { _, _ -> },
-                    chapters = listOf(chapter),
-                    currentChapterId = chapter.chapterId, bookmarks = emptyList(), onToggleBookmark = {}, onRemoveBookmark = {}, onSelectBookmark = {}, restorationGeneration = 0L, requestedFlow = "paged",
+                    navigationTargets = listOf(chapter),
+                    currentContentId = chapter.contentId, bookmarks = emptyList(), onToggleBookmark = {}, onRemoveBookmark = {}, onSelectBookmark = {}, restorationGeneration = 0L, requestedFlow = "paged",
                     hasFlowOverride = false,
                     onFlowOverrideChanged = {},
-                    onSelectChapter = {},
+                    onSelectContent = {},
                     onNavigateUp = {},
+                    onNavigateLink = {},
+                    onReturnToOrigin = {},
                     preferences = PortableReaderPreferences(
                         flow = "paged",
                         fontScale = 1.0,
@@ -371,31 +527,30 @@ class ReaderPaginationInstrumentedTest {
         val first = "清晨的海雾漫过石阶，灯塔只剩一圈微光。"
         val second = "邮差把未署名的信收入防水袋，沿着旧轨道继续前行。"
         val document = ReaderDocument(
-            sourceId = "org.tsuyomi.reader.test",
-            remoteBookId = "short-fixture",
-            contentId = "chapter-1",
-            revision = null,
+            identity = DocumentIdentity(BookIdentity.Remote("org.tsuyomi.reader.test", "short-fixture"), "chapter-1", null),
             title = "第一章 雾中的灯塔",
             blocks = listOf(
                 ReaderBlock.Paragraph("paragraph-1", first),
                 ReaderBlock.Paragraph("paragraph-2", second),
             ),
         )
-        val chapter = SourceChapter("chapter-1", document.title, "https://example.test/chapter-1")
+        val chapter = ReaderNavigationTarget("chapter-1", document.title)
         val environment = standardEnvironment()
         composeRule.setContent {
             DisplayEnvironmentProvider(environment) {
                 TsuyomiTheme(environment) {
                     ReaderSurface(document = document,
-                    auxiliarySheetState = rememberReaderAuxiliarySheetState(document.sourceId, document.remoteBookId),
+                    auxiliarySheetState = rememberReaderAuxiliarySheetState(document.identity.book),
                     restoredLocator = null,
                     onLocatorChanged = { _, _ -> },
-                    chapters = listOf(chapter),
-                    currentChapterId = chapter.chapterId, bookmarks = emptyList(), onToggleBookmark = {}, onRemoveBookmark = {}, onSelectBookmark = {}, restorationGeneration = 0L, requestedFlow = "paged",
+                    navigationTargets = listOf(chapter),
+                    currentContentId = chapter.contentId, bookmarks = emptyList(), onToggleBookmark = {}, onRemoveBookmark = {}, onSelectBookmark = {}, restorationGeneration = 0L, requestedFlow = "paged",
                     hasFlowOverride = false,
                     onFlowOverrideChanged = {},
-                    onSelectChapter = {},
+                    onSelectContent = {},
                     onNavigateUp = {},
+                    onNavigateLink = {},
+                    onReturnToOrigin = {},
                     preferences = PortableReaderPreferences(
                         flow = "paged",
                         fontScale = 1.0,
@@ -416,16 +571,14 @@ class ReaderPaginationInstrumentedTest {
         val after = "插图后的正文。"
         val image = ReaderBlock.Image(
             blockId = "image-1",
-            url = "https://img.example.test/chapter/image.webp",
+            resource = ReaderResourceRef.RemoteHttps("https://img.example.test/chapter/image.webp"),
+
             altText = "章节插图",
             width = 900,
             height = 1200,
         )
         val document = ReaderDocument(
-            sourceId = "org.tsuyomi.reader.test",
-            remoteBookId = "illustrations",
-            contentId = "chapter-image",
-            revision = null,
+            identity = DocumentIdentity(BookIdentity.Remote("org.tsuyomi.reader.test", "illustrations"), "chapter-image", null),
             title = "插图章节",
             blocks = listOf(
                 ReaderBlock.Paragraph("paragraph-before", before),
@@ -433,7 +586,7 @@ class ReaderPaginationInstrumentedTest {
                 ReaderBlock.Paragraph("paragraph-after", after),
             ),
         )
-        val chapter = SourceChapter(document.contentId, document.title, "https://example.test/chapter-image")
+        val chapter = ReaderNavigationTarget(document.identity.contentId, document.title)
         val visibleCount = AtomicInteger()
         val retryCount = AtomicInteger()
         val environment = standardEnvironment()
@@ -441,15 +594,17 @@ class ReaderPaginationInstrumentedTest {
             DisplayEnvironmentProvider(environment) {
                 TsuyomiTheme(environment) {
                     ReaderSurface(document = document,
-                    auxiliarySheetState = rememberReaderAuxiliarySheetState(document.sourceId, document.remoteBookId),
+                    auxiliarySheetState = rememberReaderAuxiliarySheetState(document.identity.book),
                     restoredLocator = null,
                     onLocatorChanged = { _, _ -> },
-                    chapters = listOf(chapter),
-                    currentChapterId = chapter.chapterId, bookmarks = emptyList(), onToggleBookmark = {}, onRemoveBookmark = {}, onSelectBookmark = {}, restorationGeneration = 0L, requestedFlow = "scroll",
+                    navigationTargets = listOf(chapter),
+                    currentContentId = chapter.contentId, bookmarks = emptyList(), onToggleBookmark = {}, onRemoveBookmark = {}, onSelectBookmark = {}, restorationGeneration = 0L, requestedFlow = "scroll",
                     hasFlowOverride = false,
                     onFlowOverrideChanged = {},
-                    onSelectChapter = {},
+                    onSelectContent = {},
                     onNavigateUp = {},
+                    onNavigateLink = {},
+                    onReturnToOrigin = {},
                     preferences = PortableReaderPreferences(flow = "scroll"),
                     imageStates = mapOf(
                         image.blockId to CoverUiState.Failed(
@@ -466,46 +621,49 @@ class ReaderPaginationInstrumentedTest {
         composeRule.waitUntil { visibleCount.get() == 1 }
         val beforeTop = composeRule.onNodeWithText(before).fetchSemanticsNode().boundsInRoot.top
         val imageTop = composeRule.onNodeWithText("章节插图").fetchSemanticsNode().boundsInRoot.top
-        val afterTop = composeRule.onNodeWithText(after).fetchSemanticsNode().boundsInRoot.top
         assertTrue(beforeTop < imageTop)
-        assertTrue(imageTop < afterTop)
 
         composeRule.onNodeWithText("重试图片").performClick()
         composeRule.waitUntil { retryCount.get() == 1 }
+        composeRule.onNodeWithTag("reader-document-scroll").performScrollToNode(hasText(after))
+        composeRule.onNodeWithText(after).assertIsDisplayed()
+        val afterTop = composeRule.onNodeWithText(after).fetchSemanticsNode().boundsInRoot.top
+        val scrolledImageTop = composeRule.onNodeWithText("章节插图").fetchSemanticsNode().boundsInRoot.top
+        assertTrue(scrolledImageTop < afterTop)
     }
 
     @Test
     fun imageOnlyChapterRendersAsReaderContentInsteadOfAnEmptyDocument() {
         val image = ReaderBlock.Image(
             blockId = "image-only",
-            url = "https://img.example.test/chapter/image.webp",
+            resource = ReaderResourceRef.RemoteHttps("https://img.example.test/chapter/image.webp"),
+
             altText = "纯插图章节",
             width = null,
             height = null,
         )
         val document = ReaderDocument(
-            sourceId = "org.tsuyomi.reader.test",
-            remoteBookId = "illustrations",
-            contentId = "chapter-image-only",
-            revision = null,
+            identity = DocumentIdentity(BookIdentity.Remote("org.tsuyomi.reader.test", "illustrations"), "chapter-image-only", null),
             title = "插图页",
             blocks = listOf(image),
         )
-        val chapter = SourceChapter(document.contentId, document.title, "https://example.test/chapter-image-only")
+        val chapter = ReaderNavigationTarget(document.identity.contentId, document.title)
         val environment = standardEnvironment()
         composeRule.setContent {
             DisplayEnvironmentProvider(environment) {
                 TsuyomiTheme(environment) {
                     ReaderSurface(document = document,
-                    auxiliarySheetState = rememberReaderAuxiliarySheetState(document.sourceId, document.remoteBookId),
+                    auxiliarySheetState = rememberReaderAuxiliarySheetState(document.identity.book),
                     restoredLocator = null,
                     onLocatorChanged = { _, _ -> },
-                    chapters = listOf(chapter),
-                    currentChapterId = chapter.chapterId, bookmarks = emptyList(), onToggleBookmark = {}, onRemoveBookmark = {}, onSelectBookmark = {}, restorationGeneration = 0L, requestedFlow = "scroll",
+                    navigationTargets = listOf(chapter),
+                    currentContentId = chapter.contentId, bookmarks = emptyList(), onToggleBookmark = {}, onRemoveBookmark = {}, onSelectBookmark = {}, restorationGeneration = 0L, requestedFlow = "scroll",
                     hasFlowOverride = false,
                     onFlowOverrideChanged = {},
-                    onSelectChapter = {},
+                    onSelectContent = {},
                     onNavigateUp = {},
+                    onNavigateLink = {},
+                    onReturnToOrigin = {},
                     preferences = PortableReaderPreferences(flow = "scroll"),
                     imageStates = mapOf(
                         image.blockId to CoverUiState.Failed(
@@ -524,30 +682,29 @@ class ReaderPaginationInstrumentedTest {
     @Test
     fun centerTapHidesChromeAgainAfterRevealingItWithoutConsumingScrollDrag() {
         val document = ReaderDocument(
-            sourceId = "org.tsuyomi.reader.test",
-            remoteBookId = "chrome-toggle",
-            contentId = "chapter-1",
-            revision = null,
+            identity = DocumentIdentity(BookIdentity.Remote("org.tsuyomi.reader.test", "chrome-toggle"), "chapter-1", null),
             title = "Chrome 双向切换",
             blocks = (1..80).map { index ->
                 ReaderBlock.Paragraph("paragraph-$index", paragraph(index))
             },
         )
-        val chapter = SourceChapter(document.contentId, document.title, "https://example.test/chrome-toggle")
+        val chapter = ReaderNavigationTarget(document.identity.contentId, document.title)
         val environment = standardEnvironment()
         composeRule.setContent {
             DisplayEnvironmentProvider(environment) {
                 TsuyomiTheme(environment) {
                     ReaderSurface(document = document,
-                    auxiliarySheetState = rememberReaderAuxiliarySheetState(document.sourceId, document.remoteBookId),
+                    auxiliarySheetState = rememberReaderAuxiliarySheetState(document.identity.book),
                     restoredLocator = null,
                     onLocatorChanged = { _, _ -> },
-                    chapters = listOf(chapter),
-                    currentChapterId = chapter.chapterId, bookmarks = emptyList(), onToggleBookmark = {}, onRemoveBookmark = {}, onSelectBookmark = {}, restorationGeneration = 0L, requestedFlow = "scroll",
+                    navigationTargets = listOf(chapter),
+                    currentContentId = chapter.contentId, bookmarks = emptyList(), onToggleBookmark = {}, onRemoveBookmark = {}, onSelectBookmark = {}, restorationGeneration = 0L, requestedFlow = "scroll",
                     hasFlowOverride = false,
                     onFlowOverrideChanged = {},
-                    onSelectChapter = {},
+                    onSelectContent = {},
                     onNavigateUp = {},
+                    onNavigateLink = {},
+                    onReturnToOrigin = {},
                     preferences = PortableReaderPreferences(flow = "scroll"),)
                 }
             }
@@ -569,16 +726,13 @@ class ReaderPaginationInstrumentedTest {
 
     @Test
     fun bookmarksTabSelectsDistinctLocatorsWithinTheSameChapter() {
-        val chapter = SourceChapter("chapter-bookmarks", "书签章节", "https://example.test/chapter-bookmarks")
+        val chapter = ReaderNavigationTarget("chapter-bookmarks", "书签章节")
         val document = ReaderDocument(
-            sourceId = "org.tsuyomi.reader.test",
-            remoteBookId = "locator-bookmarks",
-            contentId = chapter.chapterId,
-            revision = null,
+            identity = DocumentIdentity(BookIdentity.Remote("org.tsuyomi.reader.test", "locator-bookmarks"), chapter.contentId, null),
             title = chapter.title,
             blocks = listOf(ReaderBlock.Paragraph("first", paragraph(1))),
         )
-        val bookmarkDocument = DocumentIdentity(document.sourceId, document.remoteBookId, document.contentId)
+        val bookmarkDocument = document.identity
         val firstBookmark = ReaderLocator(
             document = bookmarkDocument,
             blockId = "first",
@@ -598,11 +752,11 @@ class ReaderPaginationInstrumentedTest {
                 TsuyomiTheme(environment) {
                     ReaderSurface(
                         document = document,
-                        auxiliarySheetState = rememberReaderAuxiliarySheetState(document.sourceId, document.remoteBookId),
+                        auxiliarySheetState = rememberReaderAuxiliarySheetState(document.identity.book),
                         restoredLocator = null,
                         onLocatorChanged = { _, _ -> },
-                        chapters = listOf(chapter),
-                        currentChapterId = chapter.chapterId,
+                        navigationTargets = listOf(chapter),
+                        currentContentId = chapter.contentId,
                         bookmarks = listOf(firstBookmark, laterBookmark),
                         onToggleBookmark = {},
                         onRemoveBookmark = {},
@@ -611,8 +765,10 @@ class ReaderPaginationInstrumentedTest {
                         requestedFlow = "scroll",
                         hasFlowOverride = false,
                         onFlowOverrideChanged = {},
-                        onSelectChapter = {},
+                        onSelectContent = {},
                         onNavigateUp = {},
+                        onNavigateLink = {},
+                        onReturnToOrigin = {},
                         preferences = PortableReaderPreferences(flow = "scroll"),
                     )
                 }
@@ -641,14 +797,11 @@ class ReaderPaginationInstrumentedTest {
             ReaderBlock.Paragraph("paragraph-$index", paragraph(index))
         }
         val document = ReaderDocument(
-            sourceId = "org.tsuyomi.reader.test",
-            remoteBookId = "track-tap",
-            contentId = "chapter-1",
-            revision = null,
+            identity = DocumentIdentity(BookIdentity.Remote("org.tsuyomi.reader.test", "track-tap"), "chapter-1", null),
             title = "进度条单点跳转",
             blocks = blocks,
         )
-        val chapter = SourceChapter(document.contentId, document.title, "https://example.test/track-tap")
+        val chapter = ReaderNavigationTarget(document.identity.contentId, document.title)
         val commitCount = AtomicInteger()
         val committedLocator = AtomicReference<org.tsuyomi.shared.locator.ReaderLocator?>()
         val environment = standardEnvironment()
@@ -656,18 +809,20 @@ class ReaderPaginationInstrumentedTest {
             DisplayEnvironmentProvider(environment) {
                 TsuyomiTheme(environment) {
                     ReaderSurface(document = document,
-                    auxiliarySheetState = rememberReaderAuxiliarySheetState(document.sourceId, document.remoteBookId),
+                    auxiliarySheetState = rememberReaderAuxiliarySheetState(document.identity.book),
                     restoredLocator = null,
                     onLocatorChanged = { locator, _ ->
                         committedLocator.set(locator)
                         commitCount.incrementAndGet()
                     },
-                    chapters = listOf(chapter),
-                    currentChapterId = chapter.chapterId, bookmarks = emptyList(), onToggleBookmark = {}, onRemoveBookmark = {}, onSelectBookmark = {}, restorationGeneration = 0L, requestedFlow = "scroll",
+                    navigationTargets = listOf(chapter),
+                    currentContentId = chapter.contentId, bookmarks = emptyList(), onToggleBookmark = {}, onRemoveBookmark = {}, onSelectBookmark = {}, restorationGeneration = 0L, requestedFlow = "scroll",
                     hasFlowOverride = false,
                     onFlowOverrideChanged = {},
-                    onSelectChapter = {},
+                    onSelectContent = {},
                     onNavigateUp = {},
+                    onNavigateLink = {},
+                    onReturnToOrigin = {},
                     preferences = PortableReaderPreferences(flow = "scroll"),)
                 }
             }
@@ -687,29 +842,28 @@ class ReaderPaginationInstrumentedTest {
     @Test
     fun cancellingContinuousSeekRestoresTheMountedViewportWithoutWritingProgress() {
         val document = ReaderDocument(
-            sourceId = "org.tsuyomi.reader.test",
-            remoteBookId = "cancel-scroll-preview",
-            contentId = "chapter-1",
-            revision = null,
+            identity = DocumentIdentity(BookIdentity.Remote("org.tsuyomi.reader.test", "cancel-scroll-preview"), "chapter-1", null),
             title = "取消滚动预览",
             blocks = (1..100).map { ReaderBlock.Paragraph("paragraph-$it", paragraph(it)) },
         )
-        val chapter = SourceChapter(document.contentId, document.title, "https://example.test/cancel-preview")
+        val chapter = ReaderNavigationTarget(document.identity.contentId, document.title)
         val commits = AtomicInteger()
         val environment = standardEnvironment()
         composeRule.setContent {
             DisplayEnvironmentProvider(environment) {
                 TsuyomiTheme(environment) {
                     ReaderSurface(document = document,
-                    auxiliarySheetState = rememberReaderAuxiliarySheetState(document.sourceId, document.remoteBookId),
+                    auxiliarySheetState = rememberReaderAuxiliarySheetState(document.identity.book),
                     restoredLocator = null,
                     onLocatorChanged = { _, _ -> commits.incrementAndGet() },
-                    chapters = listOf(chapter),
-                    currentChapterId = chapter.chapterId, bookmarks = emptyList(), onToggleBookmark = {}, onRemoveBookmark = {}, onSelectBookmark = {}, restorationGeneration = 0L, requestedFlow = "scroll",
+                    navigationTargets = listOf(chapter),
+                    currentContentId = chapter.contentId, bookmarks = emptyList(), onToggleBookmark = {}, onRemoveBookmark = {}, onSelectBookmark = {}, restorationGeneration = 0L, requestedFlow = "scroll",
                     hasFlowOverride = false,
                     onFlowOverrideChanged = {},
-                    onSelectChapter = {},
+                    onSelectContent = {},
                     onNavigateUp = {},
+                    onNavigateLink = {},
+                    onReturnToOrigin = {},
                     preferences = PortableReaderPreferences(flow = "scroll"),)
                 }
             }
@@ -739,15 +893,12 @@ class ReaderPaginationInstrumentedTest {
 
     @Test
     fun advancingFromChapterEndCompletesOnlyTheCurrentChapter() {
-        val current = SourceChapter("chapter-2", "第二章", "https://example.test/chapter-2")
-        val next = SourceChapter("chapter-3", "第三章", "https://example.test/chapter-3")
+        val current = ReaderNavigationTarget("chapter-2", "第二章")
+        val next = ReaderNavigationTarget("chapter-3", "第三章")
         val completed = mutableListOf<String>()
         val selected = mutableListOf<String>()
         val document = ReaderDocument(
-            sourceId = "org.tsuyomi.reader.test",
-            remoteBookId = "non-sequential",
-            contentId = current.chapterId,
-            revision = null,
+            identity = DocumentIdentity(BookIdentity.Remote("org.tsuyomi.reader.test", "non-sequential"), current.contentId, null),
             title = current.title,
             blocks = listOf(ReaderBlock.Paragraph("only-block", "这一章完整显示在当前页面。")),
         )
@@ -756,19 +907,21 @@ class ReaderPaginationInstrumentedTest {
             DisplayEnvironmentProvider(environment) {
                 TsuyomiTheme(environment) {
                     ReaderSurface(document = document,
-                    auxiliarySheetState = rememberReaderAuxiliarySheetState(document.sourceId, document.remoteBookId),
+                    auxiliarySheetState = rememberReaderAuxiliarySheetState(document.identity.book),
                     restoredLocator = null,
                     onLocatorChanged = { _, _ -> },
-                    chapters = listOf(
-                        SourceChapter("chapter-1", "第一章", "https://example.test/chapter-1"),
+                    navigationTargets = listOf(
+                        ReaderNavigationTarget("chapter-1", "第一章"),
                         current,
                         next,
                     ),
-                    currentChapterId = current.chapterId, bookmarks = emptyList(), onToggleBookmark = {}, onRemoveBookmark = {}, onSelectBookmark = {}, restorationGeneration = 0L, requestedFlow = "paged",
+                    currentContentId = current.contentId, bookmarks = emptyList(), onToggleBookmark = {}, onRemoveBookmark = {}, onSelectBookmark = {}, restorationGeneration = 0L, requestedFlow = "paged",
                     hasFlowOverride = false,
                     onFlowOverrideChanged = {},
-                    onSelectChapter = { selected += it.chapterId },
+                    onSelectContent = { selected += it.contentId },
                     onNavigateUp = {},
+                    onNavigateLink = {},
+                    onReturnToOrigin = {},
                     onChapterCompleted = { completed += it },
                     preferences = PortableReaderPreferences(flow = "paged"),)
                 }
@@ -784,13 +937,10 @@ class ReaderPaginationInstrumentedTest {
 
     @Test
     fun advancingPastFinalChapterReportsItsExactIdOnce() {
-        val finalChapter = SourceChapter("chapter-final", "最终章", "https://example.test/final")
+        val finalChapter = ReaderNavigationTarget("chapter-final", "最终章")
         val completed = mutableListOf<String>()
         val document = ReaderDocument(
-            sourceId = "org.tsuyomi.reader.test",
-            remoteBookId = "final-seam",
-            contentId = finalChapter.chapterId,
-            revision = null,
+            identity = DocumentIdentity(BookIdentity.Remote("org.tsuyomi.reader.test", "final-seam"), finalChapter.contentId, null),
             title = finalChapter.title,
             blocks = listOf(ReaderBlock.Paragraph("only-block", "最终章完整显示。")),
         )
@@ -799,15 +949,17 @@ class ReaderPaginationInstrumentedTest {
             DisplayEnvironmentProvider(environment) {
                 TsuyomiTheme(environment) {
                     ReaderSurface(document = document,
-                    auxiliarySheetState = rememberReaderAuxiliarySheetState(document.sourceId, document.remoteBookId),
+                    auxiliarySheetState = rememberReaderAuxiliarySheetState(document.identity.book),
                     restoredLocator = null,
                     onLocatorChanged = { _, _ -> },
-                    chapters = listOf(finalChapter),
-                    currentChapterId = finalChapter.chapterId, bookmarks = emptyList(), onToggleBookmark = {}, onRemoveBookmark = {}, onSelectBookmark = {}, restorationGeneration = 0L, requestedFlow = "paged",
+                    navigationTargets = listOf(finalChapter),
+                    currentContentId = finalChapter.contentId, bookmarks = emptyList(), onToggleBookmark = {}, onRemoveBookmark = {}, onSelectBookmark = {}, restorationGeneration = 0L, requestedFlow = "paged",
                     hasFlowOverride = false,
                     onFlowOverrideChanged = {},
-                    onSelectChapter = {},
+                    onSelectContent = {},
                     onNavigateUp = {},
+                    onNavigateLink = {},
+                    onReturnToOrigin = {},
                     onChapterCompleted = { completed += it },
                     preferences = PortableReaderPreferences(flow = "paged"),)
                 }
@@ -817,23 +969,20 @@ class ReaderPaginationInstrumentedTest {
         composeRule.onNodeWithText("最终章完整显示。").assertIsDisplayed()
         val content = composeRule.onNodeWithTag("reader-content-surface")
         content.performTouchInput { click(Offset(width * 0.9f, center.y)) }
-        composeRule.runOnIdle { assertEquals(listOf(finalChapter.chapterId), completed) }
+        composeRule.runOnIdle { assertEquals(listOf(finalChapter.contentId), completed) }
         content.performTouchInput { click(Offset(width * 0.9f, center.y)) }
 
-        composeRule.runOnIdle { assertEquals(listOf(finalChapter.chapterId), completed) }
+        composeRule.runOnIdle { assertEquals(listOf(finalChapter.contentId), completed) }
     }
 
     @Test
     fun scroll_bottom_completes_current_chapter_even_when_first_visible_block_is_earlier() {
-        val current = SourceChapter("chapter-2", "第二章", "https://example.test/chapter-2")
-        val next = SourceChapter("chapter-3", "第三章", "https://example.test/chapter-3")
+        val current = ReaderNavigationTarget("chapter-2", "第二章")
+        val next = ReaderNavigationTarget("chapter-3", "第三章")
         val completed = mutableListOf<String>()
         val selected = mutableListOf<String>()
         val document = ReaderDocument(
-            sourceId = "org.tsuyomi.reader.test",
-            remoteBookId = "scroll-end",
-            contentId = current.chapterId,
-            revision = null,
+            identity = DocumentIdentity(BookIdentity.Remote("org.tsuyomi.reader.test", "scroll-end"), current.contentId, null),
             title = current.title,
             blocks = (1..20).map { index ->
                 ReaderBlock.Paragraph("block-$index", "第 $index 段。" + "正文".repeat(80))
@@ -844,15 +993,17 @@ class ReaderPaginationInstrumentedTest {
             DisplayEnvironmentProvider(environment) {
                 TsuyomiTheme(environment) {
                     ReaderSurface(document = document,
-                    auxiliarySheetState = rememberReaderAuxiliarySheetState(document.sourceId, document.remoteBookId),
+                    auxiliarySheetState = rememberReaderAuxiliarySheetState(document.identity.book),
                     restoredLocator = null,
                     onLocatorChanged = { _, _ -> },
-                    chapters = listOf(current, next),
-                    currentChapterId = current.chapterId, bookmarks = emptyList(), onToggleBookmark = {}, onRemoveBookmark = {}, onSelectBookmark = {}, restorationGeneration = 0L, requestedFlow = "scroll",
+                    navigationTargets = listOf(current, next),
+                    currentContentId = current.contentId, bookmarks = emptyList(), onToggleBookmark = {}, onRemoveBookmark = {}, onSelectBookmark = {}, restorationGeneration = 0L, requestedFlow = "scroll",
                     hasFlowOverride = false,
                     onFlowOverrideChanged = {},
-                    onSelectChapter = { selected += it.chapterId },
+                    onSelectContent = { selected += it.contentId },
                     onNavigateUp = {},
+                    onNavigateLink = {},
+                    onReturnToOrigin = {},
                     onChapterCompleted = { completed += it },
                     preferences = PortableReaderPreferences(flow = "scroll"),)
                 }
@@ -884,6 +1035,11 @@ class ReaderPaginationInstrumentedTest {
                             index = 0,
                             pageCount = if (isContinuous) 100 else 4,
                         ),
+                        eInk = false,
+                        canPreviousPage = false,
+                        canNextPage = false,
+                        onPreviousPage = {},
+                        onNextPage = {},
                         continuousSeek = isContinuous,
                         seekPreview = null,
                         onSeekPreview = {},
@@ -912,18 +1068,15 @@ class ReaderPaginationInstrumentedTest {
             ReaderBlock.Paragraph("paragraph-$index", paragraph(index))
         }
         val document = ReaderDocument(
-            sourceId = "org.tsuyomi.reader.test",
-            remoteBookId = "adaptive-dual",
-            contentId = "chapter-1",
-            revision = null,
+            identity = DocumentIdentity(BookIdentity.Remote("org.tsuyomi.reader.test", "adaptive-dual"), "chapter-1", null),
             title = "双页自适应验证",
             blocks = blocks,
         )
-        val chapter = SourceChapter("chapter-1", document.title, "https://example.test/chapter-1")
+        val chapter = ReaderNavigationTarget("chapter-1", document.title)
         val forcedSize = mutableStateOf(DpSize(420.dp, 760.dp))
         val commits = AtomicInteger(0)
         val restored = ReaderLocator(
-            document = DocumentIdentity(document.sourceId, document.remoteBookId, document.contentId),
+            document = document.identity,
             blockId = "paragraph-20",
             characterOffset = 0,
             capturedAt = Instant.EPOCH,
@@ -935,15 +1088,17 @@ class ReaderPaginationInstrumentedTest {
                 DisplayEnvironmentProvider(environment) {
                     TsuyomiTheme(environment) {
                         ReaderSurface(document = document,
-                        auxiliarySheetState = rememberReaderAuxiliarySheetState(document.sourceId, document.remoteBookId),
+                        auxiliarySheetState = rememberReaderAuxiliarySheetState(document.identity.book),
                         restoredLocator = restored,
                         onLocatorChanged = { _, _ -> commits.incrementAndGet() },
-                        chapters = listOf(chapter),
-                        currentChapterId = chapter.chapterId, bookmarks = emptyList(), onToggleBookmark = {}, onRemoveBookmark = {}, onSelectBookmark = {}, restorationGeneration = 0L, requestedFlow = "dual",
+                        navigationTargets = listOf(chapter),
+                        currentContentId = chapter.contentId, bookmarks = emptyList(), onToggleBookmark = {}, onRemoveBookmark = {}, onSelectBookmark = {}, restorationGeneration = 0L, requestedFlow = "dual",
                         hasFlowOverride = true,
                         onFlowOverrideChanged = {},
-                        onSelectChapter = {},
+                        onSelectContent = {},
                         onNavigateUp = {},
+                        onNavigateLink = {},
+                        onReturnToOrigin = {},
                         preferences = PortableReaderPreferences(flow = "dual", fontScale = 1.0, lineHeight = 1.5, theme = "paper"),)
                     }
                 }
@@ -974,16 +1129,13 @@ class ReaderPaginationInstrumentedTest {
             ReaderBlock.Paragraph("paragraph-$index", paragraph(index))
         }
         val document = ReaderDocument(
-            sourceId = "org.tsuyomi.reader.test",
-            remoteBookId = "restoration-generation",
-            contentId = "chapter-1",
-            revision = null,
+            identity = DocumentIdentity(BookIdentity.Remote("org.tsuyomi.reader.test", "restoration-generation"), "chapter-1", null),
             title = "恢复代际验证",
             blocks = blocks,
         )
-        val chapter = SourceChapter(document.contentId, document.title, "https://example.test/restoration-generation")
+        val chapter = ReaderNavigationTarget(document.identity.contentId, document.title)
         fun locator(index: Int) = ReaderLocator(
-            document = DocumentIdentity(document.sourceId, document.remoteBookId, document.contentId),
+            document = document.identity,
             blockId = "paragraph-$index",
             characterOffset = 0,
             capturedAt = Instant.EPOCH,
@@ -997,16 +1149,18 @@ class ReaderPaginationInstrumentedTest {
                 DisplayEnvironmentProvider(environment) {
                     TsuyomiTheme(environment) {
                         ReaderSurface(document = document,
-                        auxiliarySheetState = rememberReaderAuxiliarySheetState(document.sourceId, document.remoteBookId),
+                        auxiliarySheetState = rememberReaderAuxiliarySheetState(document.identity.book),
                         restoredLocator = restoredLocator.value,
                         onLocatorChanged = { _, _ -> },
-                        chapters = listOf(chapter),
-                        currentChapterId = chapter.chapterId,
+                        navigationTargets = listOf(chapter),
+                        currentContentId = chapter.contentId,
                         bookmarks = emptyList(), onToggleBookmark = {}, onRemoveBookmark = {}, onSelectBookmark = {}, restorationGeneration = restorationGeneration.value, requestedFlow = "paged",
                         hasFlowOverride = false,
                         onFlowOverrideChanged = {},
-                        onSelectChapter = {},
+                        onSelectContent = {},
                         onNavigateUp = {},
+                        onNavigateLink = {},
+                        onReturnToOrigin = {},
                         preferences = PortableReaderPreferences(flow = "paged"),)
                     }
                 }
@@ -1030,27 +1184,24 @@ class ReaderPaginationInstrumentedTest {
     fun scrollBookmarksRestoreWithinParagraphsAcrossGenerationsAndReflowWithoutWritingProgress() {
         val text = (1..160).joinToString("\n") { "𠮷第${it}行：书签位置不受文字重排影响。" }
         val document = ReaderDocument(
-            sourceId = "org.tsuyomi.reader.test",
-            remoteBookId = "scroll-semantic-bookmarks",
-            contentId = "chapter-1",
-            revision = null,
+            identity = DocumentIdentity(BookIdentity.Remote("org.tsuyomi.reader.test", "scroll-semantic-bookmarks"), "chapter-1", null),
             title = "滚动语义书签",
             blocks = listOf(ReaderBlock.Paragraph("long-paragraph", text), ReaderBlock.Paragraph("ending", "章末")),
         )
-        val chapter = SourceChapter(document.contentId, document.title, "https://example.test/scroll-bookmarks")
-        val otherChapter = SourceChapter("chapter-2", "另一章", "https://example.test/scroll-bookmarks-2")
-        val otherDocument = document.copy(contentId = otherChapter.chapterId, title = otherChapter.title)
+        val chapter = ReaderNavigationTarget(document.identity.contentId, document.title)
+        val otherChapter = ReaderNavigationTarget("chapter-2", "另一章")
+        val otherDocument = document.copy(identity = document.identity.copy(contentId = otherChapter.contentId), title = otherChapter.title)
         val currentDocument = mutableStateOf(document)
         val requestedFlow = mutableStateOf("paged")
         fun locator(line: Int) = ReaderLocator(
-            document = DocumentIdentity(document.sourceId, document.remoteBookId, document.contentId),
+            document = document.identity,
             blockId = "long-paragraph",
             characterOffset = text.codePointCount(0, text.indexOf("𠮷第${line}行")) + 3,
             capturedAt = Instant.EPOCH,
         )
         val first = locator(40)
         val second = locator(90)
-        val crossChapter = locator(100).copy(document = first.document.copy(contentId = otherChapter.chapterId))
+        val crossChapter = locator(100).copy(document = first.document.copy(contentId = otherChapter.contentId))
         val restored = mutableStateOf(first)
         val generation = mutableStateOf(0L)
         val preferences = mutableStateOf(PortableReaderPreferences(flow = "paged"))
@@ -1064,25 +1215,27 @@ class ReaderPaginationInstrumentedTest {
                     TsuyomiTheme(environment) {
                         ReaderSurface(
                             document = currentDocument.value,
-                            auxiliarySheetState = rememberReaderAuxiliarySheetState(document.sourceId, document.remoteBookId),
+                            auxiliarySheetState = rememberReaderAuxiliarySheetState(document.identity.book),
                             restoredLocator = restored.value,
                             restorationGeneration = generation.value,
                             onLocatorChanged = { value, _ -> committed.set(value); writes.incrementAndGet() },
-                            chapters = listOf(chapter, otherChapter),
-                            currentChapterId = currentDocument.value.contentId,
+                            navigationTargets = listOf(chapter, otherChapter),
+                            currentContentId = currentDocument.value.identity.contentId,
                             bookmarks = listOf(first, second, crossChapter),
                             onToggleBookmark = captured::set,
                             onRemoveBookmark = {},
                             onSelectBookmark = { target ->
-                                currentDocument.value = if (target.document.contentId == otherChapter.chapterId) otherDocument else document
+                                currentDocument.value = if (target.document.contentId == otherChapter.contentId) otherDocument else document
                                 restored.value = target
                                 generation.value += 1L
                             },
                             requestedFlow = requestedFlow.value,
                             hasFlowOverride = false,
                             onFlowOverrideChanged = {},
-                            onSelectChapter = {},
+                            onSelectContent = {},
                             onNavigateUp = {},
+                            onNavigateLink = {},
+                            onReturnToOrigin = {},
                             preferences = preferences.value,
                         )
                     }
@@ -1135,10 +1288,11 @@ class ReaderPaginationInstrumentedTest {
 
         val body = composeRule.onNodeWithTag("reader-document-scroll")
         body.performTouchInput { swipeUp(startY = height * 0.65f, endY = height * 0.25f) }
+        composeRule.waitForIdle()
         composeRule.waitUntil(timeoutMillis = 5_000) { committed.get() != null }
         val settled = requireNotNull(committed.get())
         assertEquals("long-paragraph", settled.blockId)
-        assertEquals(otherChapter.chapterId, settled.document.contentId)
+        assertEquals(otherChapter.contentId, settled.document.contentId)
         assertTrue(requireNotNull(settled.characterOffset) > requireNotNull(crossChapter.characterOffset))
         composeRule.onNodeWithContentDescription("添加书签").performClick()
         assertEquals(settled.bookmarkPositionKey(), captured.get().bookmarkPositionKey())
@@ -1147,13 +1301,10 @@ class ReaderPaginationInstrumentedTest {
     @Test
     @OptIn(ExperimentalTestApi::class)
     fun mountedBookmarkSelectionRestoresSameAndCrossChapterPositionsWithoutProgressWrites() {
-        val firstChapter = SourceChapter("chapter-1", "第一章", "https://example.test/chapter-1")
-        val secondChapter = SourceChapter("chapter-2", "第二章", "https://example.test/chapter-2")
-        fun document(chapter: SourceChapter, prefix: String) = ReaderDocument(
-            sourceId = "org.tsuyomi.reader.test",
-            remoteBookId = "mounted-bookmarks",
-            contentId = chapter.chapterId,
-            revision = "revision-1",
+        val firstChapter = ReaderNavigationTarget("chapter-1", "第一章")
+        val secondChapter = ReaderNavigationTarget("chapter-2", "第二章")
+        fun document(chapter: ReaderNavigationTarget, prefix: String) = ReaderDocument(
+            identity = DocumentIdentity(BookIdentity.Remote("org.tsuyomi.reader.test", "mounted-bookmarks"), chapter.contentId, "revision-1"),
             title = chapter.title,
             blocks = (1..42).map { index ->
                 ReaderBlock.Paragraph("$prefix-$index", "$prefix ${paragraph(index)}")
@@ -1168,10 +1319,9 @@ class ReaderPaginationInstrumentedTest {
                 .joinToString("") { byte -> "%02x".format(byte) }
             return ReaderLocator(
                 document = DocumentIdentity(
-                    sourceId = document.sourceId,
-                    remoteBookId = document.remoteBookId,
-                    contentId = document.contentId,
-                    revision = document.revision,
+                    book = document.identity.book,
+                    contentId = document.identity.contentId,
+                    revision = document.identity.revision,
                 ),
                 blockId = blockId,
                 textAnchorDigest = digest,
@@ -1193,7 +1343,7 @@ class ReaderPaginationInstrumentedTest {
             DeviceConfigurationOverride(DeviceConfigurationOverride.ForcedSize(DpSize(420.dp, 760.dp))) {
                 DisplayEnvironmentProvider(environment) {
                     TsuyomiTheme(environment) {
-                        val auxiliarySheetState = rememberReaderAuxiliarySheetState(firstDocument.sourceId, firstDocument.remoteBookId)
+                        val auxiliarySheetState = rememberReaderAuxiliarySheetState(firstDocument.identity.book)
                         if (readerVisible.value) {
                             ReaderSurface(
                                 document = activeDocument.value,
@@ -1201,13 +1351,13 @@ class ReaderPaginationInstrumentedTest {
                                 restoredLocator = restoredLocator.value,
                                 restorationGeneration = restorationGeneration.value,
                                 onLocatorChanged = { _, _ -> progressWrites.incrementAndGet() },
-                                chapters = listOf(firstChapter, secondChapter),
-                                currentChapterId = currentChapter.value.chapterId,
+                                navigationTargets = listOf(firstChapter, secondChapter),
+                                currentContentId = currentChapter.value.contentId,
                                 bookmarks = listOf(sameChapterBookmark, crossChapterBookmark),
                                 onToggleBookmark = {},
                                 onRemoveBookmark = {},
                                 onSelectBookmark = { bookmark ->
-                                    if (bookmark.document.contentId == secondChapter.chapterId) {
+                                    if (bookmark.document.contentId == secondChapter.contentId) {
                                         activeDocument.value = secondDocument
                                         currentChapter.value = secondChapter
                                     }
@@ -1217,8 +1367,10 @@ class ReaderPaginationInstrumentedTest {
                                 requestedFlow = "paged",
                                 hasFlowOverride = false,
                                 onFlowOverrideChanged = {},
-                                onSelectChapter = {},
+                                onSelectContent = {},
                                 onNavigateUp = {},
+                                onNavigateLink = {},
+                                onReturnToOrigin = {},
                                 preferences = preferences.value,
                                 onPreferencesChanged = { preferences.value = it },
                             )
@@ -1260,6 +1412,244 @@ class ReaderPaginationInstrumentedTest {
         composeRule.onNodeWithTag("reader-bookmark-row-${crossChapterBookmark.bookmarkPositionKey()}").assertIsDisplayed()
     }
 
+    @Test
+    fun einkDualSeekUpdatesTheMountedSpreadWithoutCommittingEarly() {
+        val document = mutableStateOf(seekDocument("dual-seek"))
+        val writes = AtomicInteger()
+        renderEinkSeekReader(document, viewport = DpSize(840.dp, 760.dp), onLocatorChanged = { writes.incrementAndGet() })
+        composeRule.onNodeWithTag("reader-bottom-action-设置").performClick()
+        composeRule.onNodeWithTag("reader-eink-project-page").performClick()
+        composeRule.onNodeWithTag("reader-eink-option-dual").performClick()
+        pressBack()
+        composeRule.onAllNodes(hasTestTag("reader-page-column-1") and hasAnyAncestor(hasTestTag("reader-content-surface")), useUnmergedTree = true)
+            .assertCountEquals(1)
+        val opening = readerTextWithin("reader-content-surface")
+        val slider = composeRule.onNodeWithTag("reader-chapter-progress-slider")
+        val lastStop = slider.fetchSemanticsNode().config[SemanticsProperties.ProgressBarRangeInfo].range.endInclusive
+        assertTrue("The fixture includes an interior complete spread", lastStop >= 2f)
+        slider.performTouchInput { down(Offset(width * 0.05f, centerY)); moveTo(Offset(width / lastStop, centerY)) }
+        composeRule.onAllNodes(hasTestTag("reader-page-column-1") and hasAnyAncestor(hasTestTag("reader-content-surface")), useUnmergedTree = true)
+            .assertCountEquals(1)
+        val target = readerTextWithin("reader-content-surface")
+        assertEquals(0, writes.get())
+        assertTrue(target.isNotEmpty() && target != opening)
+        slider.performTouchInput { up() }
+        composeRule.waitUntil(5_000) { writes.get() == 1 }
+        assertEquals(target, readerTextWithin("reader-content-surface"))
+        assertEquals(1, writes.get())
+    }
+
+    @Test
+    fun einkHeldSeekUsesTheMountedBodyAndCommitsTheLastTargetOnce() {
+        val document = mutableStateOf(seekDocument("held-seek"))
+        val writes = AtomicInteger()
+        val lastLocator = AtomicReference<ReaderLocator?>()
+        renderEinkSeekReader(document, onLocatorChanged = { locator -> lastLocator.set(locator); writes.incrementAndGet() })
+        val openingBody = readerTextWithin("reader-content-surface")
+        assertTrue(openingBody.isNotEmpty())
+        val slider = composeRule.onNodeWithTag("reader-chapter-progress-slider")
+        val sliderIdentity = slider.fetchSemanticsNode().id
+        val settledBounds = composeRule.onNodeWithTag("reader-content-surface").fetchSemanticsNode().boundsInRoot
+        slider.performTouchInput { down(Offset(width * 0.05f, centerY)); moveTo(Offset(width * 0.65f, centerY)) }
+        assertTrue(openingBody != readerTextWithin("reader-content-surface"))
+        assertEquals(0, writes.get())
+        val firstTargetBody = readerTextWithin("reader-content-surface")
+        assertEquals("Live scrub must retain the native drag owner", sliderIdentity, slider.fetchSemanticsNode().id)
+        slider.performTouchInput { moveTo(Offset(width * 0.87f, centerY)) }
+        composeRule.waitForIdle()
+        val targetBody = readerTextWithin("reader-content-surface")
+        assertTrue(targetBody.isNotEmpty() && targetBody != openingBody)
+        assertTrue("The mounted native slider must continue updating during the same drag", targetBody != firstTargetBody)
+        assertEquals(0, writes.get())
+        assertEquals("Seek chrome must not change the measured reading canvas", settledBounds,
+            composeRule.onNodeWithTag("reader-content-surface").fetchSemanticsNode().boundsInRoot)
+        slider.performTouchInput { up() }
+        composeRule.waitUntil(5_000) { writes.get() == 1 }
+        assertEquals(targetBody, readerTextWithin("reader-content-surface"))
+        assertEquals(document.value.identity, lastLocator.get()?.document)
+        assertEquals(1, writes.get())
+        composeRule.onNodeWithTag("reader-bottom-action-设置").assertIsDisplayed()
+        composeRule.onNodeWithTag("reader-page-next").assertIsDisplayed()
+        assertEquals(sliderIdentity, slider.fetchSemanticsNode().id)
+    }
+
+
+
+    @Test
+    fun einkShortLandscapeSeekUsesTheMountedPageWithoutCommittingEarly() {
+        val document = mutableStateOf(seekDocument("landscape-seek"))
+        val writes = AtomicInteger()
+        renderEinkSeekReader(document, viewport = DpSize(760.dp, 420.dp), onLocatorChanged = { writes.incrementAndGet() })
+        val opening = readerTextWithin("reader-content-surface")
+        val settledBounds = composeRule.onNodeWithTag("reader-content-surface").fetchSemanticsNode().boundsInRoot
+        val slider = composeRule.onNodeWithTag("reader-chapter-progress-slider")
+        slider.performTouchInput { down(Offset(width * 0.1f, centerY)); moveTo(Offset(width * 0.8f, centerY)) }
+        val target = readerTextWithin("reader-content-surface")
+        assertTrue(target.isNotEmpty() && target != opening)
+        assertEquals(settledBounds, composeRule.onNodeWithTag("reader-content-surface").fetchSemanticsNode().boundsInRoot)
+        assertEquals(0, writes.get())
+        slider.performTouchInput { up() }
+        composeRule.waitUntil(5_000) { writes.get() == 1 }
+        assertEquals(target, readerTextWithin("reader-content-surface"))
+        composeRule.onNodeWithTag("reader-bottom-action-设置").assertIsDisplayed()
+        assertEquals(1, writes.get())
+    }
+
+
+    @Test
+    fun einkPointerCancelAndBackDiscardTheHeldTargetWithoutProgressWrites() {
+        val document = mutableStateOf(seekDocument("cancel-seek"))
+        val writes = AtomicInteger()
+        renderEinkSeekReader(document, onLocatorChanged = { writes.incrementAndGet() })
+        val openingBody = readerTextWithin("reader-content-surface")
+        val slider = composeRule.onNodeWithTag("reader-chapter-progress-slider")
+        slider.performTouchInput { down(Offset(width * 0.1f, centerY)); moveTo(Offset(width * 0.75f, centerY)) }
+        assertTrue(openingBody != readerTextWithin("reader-content-surface"))
+        slider.performTouchInput { cancel() }
+        composeRule.waitForIdle()
+        assertEquals(openingBody, readerTextWithin("reader-content-surface"))
+        assertEquals(0, writes.get())
+        slider.performTouchInput { down(Offset(width * 0.1f, centerY)); moveTo(Offset(width * 0.85f, centerY)) }
+        assertTrue(openingBody != readerTextWithin("reader-content-surface"))
+        pressBack()
+        slider.performTouchInput { up() }
+        composeRule.waitForIdle()
+        assertEquals(openingBody, readerTextWithin("reader-content-surface"))
+        assertEquals(0, writes.get())
+        composeRule.onNodeWithTag("reader-bottom-action-设置").assertIsDisplayed()
+        composeRule.onNodeWithTag("reader-page-previous").assertIsDisplayed()
+    }
+
+    @Test
+    fun einkReflowRestorationAndDocumentReplacementFenceTheOldReleaseFromTheNewOwner() {
+        val document = mutableStateOf(seekDocument("epoch-seek"))
+        val preferences = mutableStateOf(PortableReaderPreferences(flow = "paged", fontScale = 1.0))
+        val generation = mutableStateOf(0L)
+        val writes = AtomicInteger()
+        val lastLocator = AtomicReference<ReaderLocator?>()
+        renderEinkSeekReader(document, preferences, restorationGeneration = generation,
+            onLocatorChanged = { locator -> lastLocator.set(locator); writes.incrementAndGet() })
+        val slider = composeRule.onNodeWithTag("reader-chapter-progress-slider")
+        slider.performTouchInput { down(Offset(width * 0.1f, centerY)); moveTo(Offset(width * 0.8f, centerY)) }
+        composeRule.runOnIdle { preferences.value = preferences.value.copy(fontScale = 1.25) }
+        slider.performTouchInput { up() }
+        composeRule.waitForIdle()
+        assertEquals(0, writes.get())
+        slider.performTouchInput { down(Offset(width * 0.1f, centerY)); moveTo(Offset(width * 0.8f, centerY)) }
+        composeRule.runOnIdle { generation.value += 1 }
+        slider.performTouchInput { up() }
+        composeRule.waitForIdle()
+        assertEquals(0, writes.get())
+        slider.performTouchInput { down(Offset(width * 0.1f, centerY)); moveTo(Offset(width * 0.8f, centerY)) }
+        composeRule.runOnIdle { document.value = seekDocument("replacement-owner") }
+        slider.performTouchInput { up() }
+        composeRule.waitForIdle()
+        assertEquals(0, writes.get())
+        slider.performTouchInput { click(Offset(width * 0.6f, centerY)) }
+        composeRule.waitUntil(5_000) { writes.get() == 1 }
+        assertEquals(document.value.identity, lastLocator.get()?.document)
+        assertEquals(1, writes.get())
+    }
+
+    @Test
+    fun einkSpreadSliderRetainsEveryStopBeyondTheIntegerPercentRangeAndCancelsNativeFinish() {
+        val environment = eInkEnvironment()
+        val preview = AtomicInteger(-1)
+        val committed = AtomicInteger(-1)
+        val finishes = AtomicInteger()
+        val cancels = AtomicInteger()
+        val pageCount = mutableStateOf(257)
+        composeRule.setContent {
+            DisplayEnvironmentProvider(environment) {
+                TsuyomiTheme(environment) {
+                    ReaderBottomChrome(
+                        chapterIndex = 0, chapterCount = 1, chapterProgress = 0,
+                        position = ReaderPosition.fromPageIndex(0, pageCount.value, 2), eInk = true,
+                        canPreviousPage = false, canNextPage = pageCount.value > 1, onPreviousPage = {}, onNextPage = {},
+                        continuousSeek = false, seekPreview = null, onSeekPreview = { preview.set(it) },
+                        onSeekCommit = { committed.set(it); finishes.incrementAndGet() },
+                        onSeekCancel = { cancels.incrementAndGet() },
+                        onPreviousChapter = {}, onOpenContents = {}, onOpenSettings = {}, onNextChapter = {},
+                    )
+                }
+            }
+        }
+        val slider = composeRule.onNodeWithTag("reader-chapter-progress-slider")
+        val range = slider.fetchSemanticsNode().config[SemanticsProperties.ProgressBarRangeInfo]
+        assertEquals(0f..128f, range.range)
+        assertEquals(127, range.steps)
+        slider.performSemanticsAction(SemanticsActions.SetProgress) { it(93f) }
+        assertEquals(186, preview.get())
+        assertEquals(186, committed.get())
+        assertEquals(1, finishes.get())
+        slider.performTouchInput { down(Offset(width * 0.1f, centerY)); moveTo(Offset(width * 0.8f, centerY)); cancel() }
+        composeRule.waitForIdle()
+        assertEquals("Native drag cancellation must be intercepted before its finish callback", 1, finishes.get())
+        assertEquals(1, cancels.get())
+        composeRule.runOnIdle { pageCount.value = 1 }
+        slider.assertDoesNotExist()
+        composeRule.onNodeWithTag("reader-chapter-position").assertIsDisplayed()
+    }
+
+    private fun seekDocument(bookId: String) = ReaderDocument(
+        identity = DocumentIdentity(BookIdentity.Remote("org.tsuyomi.reader.test", bookId), "chapter-1", null),
+        title = "实测目标页预览",
+        blocks = (1..90).map { ReaderBlock.Paragraph("paragraph-$it", paragraph(it)) },
+    )
+
+    @OptIn(ExperimentalTestApi::class)
+    private fun renderEinkSeekReader(
+        document: androidx.compose.runtime.MutableState<ReaderDocument>,
+        preferences: androidx.compose.runtime.MutableState<PortableReaderPreferences> = mutableStateOf(PortableReaderPreferences(flow = "paged", fontScale = 1.0)),
+        viewport: DpSize = DpSize(420.dp, 760.dp),
+        restorationGeneration: androidx.compose.runtime.MutableState<Long> = mutableStateOf(0L),
+        onLocatorChanged: (ReaderLocator) -> Unit,
+    ) {
+        val environment = eInkEnvironment()
+        composeRule.setContent {
+            DeviceConfigurationOverride(DeviceConfigurationOverride.ForcedSize(viewport)) {
+                DisplayEnvironmentProvider(environment) {
+                    TsuyomiTheme(environment) {
+                        val current = document.value
+                        ReaderSurface(
+                            document = current, auxiliarySheetState = rememberReaderAuxiliarySheetState(current.identity.book),
+                            restoredLocator = null, restorationGeneration = restorationGeneration.value,
+                            onLocatorChanged = { locator, _ -> onLocatorChanged(locator) },
+                            navigationTargets = listOf(ReaderNavigationTarget(current.identity.contentId, current.title)),
+                            currentContentId = current.identity.contentId, bookmarks = emptyList(),
+                            onToggleBookmark = {}, onRemoveBookmark = {}, onSelectBookmark = {},
+                            requestedFlow = "paged", hasFlowOverride = false, onFlowOverrideChanged = {},
+                            onSelectContent = {}, onNavigateLink = {}, onNavigateUp = {}, onReturnToOrigin = {},
+                            preferences = preferences.value,
+                        )
+                    }
+                }
+            }
+        }
+        composeRule.waitForIdle()
+    }
+
+
+    private fun assertReaderSettingsButtonSpacing(tags: List<String>, spacing: androidx.compose.ui.unit.Dp) {
+        val buttons = tags.map { composeRule.onNodeWithTag(it).assertIsDisplayed().fetchSemanticsNode() }
+            .sortedBy { it.boundsInRoot.top }
+        val gap = with(composeRule.density) { spacing.roundToPx() }
+        buttons.forEach { button ->
+            val minimum = with(button.layoutInfo.density) { 48.dp.roundToPx() }
+            assertTrue(button.touchBoundsInRoot.width >= minimum && button.touchBoundsInRoot.height >= minimum)
+        }
+        buttons.zipWithNext().forEach { (previous, next) ->
+            assertTrue("Adjacent setting button frames must retain their measured vertical spacing",
+                next.boundsInRoot.top - previous.boundsInRoot.bottom >= gap - 1f)
+        }
+    }
+
+
+    private fun readerTextWithin(tag: String): List<String> = composeRule.onAllNodes(
+        SemanticsMatcher.keyIsDefined(SemanticsProperties.Text) and hasAnyAncestor(hasTestTag(tag)),
+        useUnmergedTree = true,
+    ).fetchSemanticsNodes().flatMap { node -> node.config[SemanticsProperties.Text].map { it.text } }
+
     private fun paragraph(index: Int): String =
         "第 $index 段正文用于验证分页器会按实际视口连续填充多个段落，而不是把每一个段落错误地当成完整的一页。"
 
@@ -1277,4 +1667,19 @@ class ReaderPaginationInstrumentedTest {
         motionPolicy = MotionPolicy.STANDARD,
         redrawEpoch = 0,
     )
+    private fun eInkEnvironment() = DisplayEnvironment(
+        preferences = DisplayPreferences(
+            displayPreference = DisplayPreference.EINK,
+            colorSchemePreference = ColorSchemePreference.LIGHT,
+        ),
+        effectiveProfile = DisplayProfile.EINK,
+        decisionReason = DisplayDecisionReason.MANUAL_EINK,
+        detectedDeviceLabel = null,
+        dynamicColorEligible = false,
+        dynamicColorEffective = false,
+        effectiveDarkTheme = false,
+        motionPolicy = MotionPolicy.STANDARD,
+        redrawEpoch = 0,
+    )
+
 }

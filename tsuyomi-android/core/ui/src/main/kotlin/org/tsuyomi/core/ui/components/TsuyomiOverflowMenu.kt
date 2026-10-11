@@ -4,6 +4,10 @@
  */
 package org.tsuyomi.core.ui.components
 
+import androidx.compose.foundation.shape.RoundedCornerShape
+import org.tsuyomi.core.display.DisplayProfile
+import org.tsuyomi.core.display.LocalDisplayEnvironment
+import org.tsuyomi.core.display.displayGrayscaleLayer
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.PaddingValues
@@ -36,6 +40,7 @@ import androidx.compose.ui.platform.LocalWindowInfo
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.selected
+import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.DpOffset
@@ -56,6 +61,7 @@ data class TsuyomiOverflowAction(
     /** Optional non-interactive heading rendered before this item in an anchored menu. */
     val section: String? = null,
     val selected: Boolean? = null,
+    val stateDescription: String? = null,
 )
 
 /** Material 3 action menu anchored to its own 48dp overflow trigger. */
@@ -99,7 +105,66 @@ fun TsuyomiOverflowMenu(
         } else {
             trigger { setExpanded(true) }
         }
+        val eInk = LocalDisplayEnvironment.current.effectiveProfile == DisplayProfile.EINK
         key(submenuPath.lastOrNull()?.label) {
+        if (eInk) {
+            val visibleActions = submenuPath.lastOrNull()?.menu ?: actions
+            val titleCount = if (panelTitle == null) 0 else 1
+            val backCount = if (submenuPath.isEmpty()) 0 else 1
+            val prefixCount = titleCount + backCount
+            TsuyomiDropdownMenu(
+                expanded = isExpanded,
+                onDismissRequest = {
+                    if (submenuPath.isNotEmpty()) submenuPath = submenuPath.dropLast(1) else setExpanded(false)
+                },
+                itemCount = visibleActions.size + prefixCount,
+                itemKey = { index ->
+                    when {
+                        index < titleCount -> "panel-title"
+                        index < prefixCount -> "submenu-back"
+                        else -> "action:${index - prefixCount}:${visibleActions[index - prefixCount].label}"
+                    }
+                },
+                itemContent = { index ->
+                    when {
+                        index < titleCount -> TsuyomiMeasuredTextPager(
+                            text = panelTitle.orEmpty(),
+                            modifier = Modifier.padding(TsuyomiSpacing.Sm).semantics { heading() },
+                            style = MaterialTheme.typography.titleSmall,
+                            fillViewport = false,
+                            alwaysShowPageControls = false,
+                        )
+                        index < prefixCount -> TsuyomiMenuItem(
+                            label = stringResource(R.string.coreui_menu_back_to,
+                                submenuPath.dropLast(1).lastOrNull()?.label ?: panelTitle ?: stringResource(R.string.coreui_more_actions)),
+                            onClick = { submenuPath = submenuPath.dropLast(1) },
+                        )
+                        else -> {
+                            val actionIndex = index - prefixCount
+                            val action = visibleActions[actionIndex]
+                            val section = action.section?.takeIf {
+                                actionIndex == 0 || visibleActions[actionIndex - 1].section != it
+                            }
+                            TsuyomiMenuItem(
+                                label = listOfNotNull(section, action.label).joinToString("\n"),
+                                selected = action.selected == true,
+                                enabled = action.enabled,
+                                modifier = Modifier.semantics { action.stateDescription?.let { stateDescription = it } },
+                                onClick = {
+                                    if (action.menu.isEmpty()) {
+                                        setExpanded(false)
+                                        submenuPath = emptyList()
+                                        action.onClick()
+                                    } else submenuPath = submenuPath + action
+                                },
+                            )
+                        }
+                    }
+                },
+                modifier = Modifier.widthIn(min = 176.dp, max = 320.dp),
+                offset = DpOffset(x = 0.dp, y = TsuyomiSpacing.Xs),
+            )
+        } else {
         DropdownMenu(
             expanded = isExpanded,
             onDismissRequest = {
@@ -109,13 +174,16 @@ fun TsuyomiOverflowMenu(
                     setExpanded(false)
                 }
             },
-            modifier = Modifier.widthIn(min = 176.dp, max = 320.dp).heightIn(max = panelMaxHeight),
+            modifier = Modifier.widthIn(min = 176.dp, max = 320.dp).heightIn(max = panelMaxHeight).displayGrayscaleLayer(),
             offset = DpOffset(x = 0.dp, y = TsuyomiSpacing.Xs),
-            shape = MaterialTheme.shapes.medium,
+            shape = if (eInk) RoundedCornerShape(4.dp) else MaterialTheme.shapes.medium,
             containerColor = MaterialTheme.colorScheme.surfaceContainer,
-            tonalElevation = 3.dp,
-            shadowElevation = 6.dp,
-            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+            tonalElevation = if (eInk) 0.dp else 3.dp,
+            shadowElevation = if (eInk) 0.dp else 6.dp,
+            border = BorderStroke(
+                1.dp,
+                if (eInk) MaterialTheme.colorScheme.outline else MaterialTheme.colorScheme.outlineVariant,
+            ),
         ) {
             panelTitle?.let { title ->
                 Text(
@@ -225,10 +293,14 @@ fun TsuyomiOverflowMenu(
                         else -> null
                     },
                     enabled = action.enabled,
-                    modifier = Modifier.semantics { action.selected?.let { selected = it } },
+                    modifier = Modifier.semantics {
+                        action.selected?.let { selected = it }
+                        action.stateDescription?.let { stateDescription = it }
+                    },
                     contentPadding = PaddingValues(horizontal = TsuyomiSpacing.Md),
                 )
             }
+        }
         }
         }
     }

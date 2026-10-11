@@ -1,0 +1,36 @@
+{
+  "format": "tsuyomi-transfer",
+  "version": 6,
+  "createdAt": "2026-10-07T00:00:00Z",
+  "library": [
+    {
+      "identity": {
+        "origin": "local",
+        "publicationId": "f2b8ef64-9375-4fc1-b7c9-274b4beafed1"
+      },
+      "localPublication": {
+        "format": "mobi",
+        "originalSha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+        "originalSizeBytes": 88
+      },
+      "title": "本地电子书",
+      "localPin": true,
+      "updatedAt": "2026-10-07T00:00:00Z",
+      "bookmarks": [
+        {
+          "document": {
+            "book": {
+              "origin": "local",
+              "publicationId": "f2b8ef64-9375-4fc1-b7c9-274b4beafed2"
+            },
+            "contentId": "section-1"
+          },
+          "blockId": "paragraph-1",
+          "characterOffset": 0,
+          "capturedAt": "2026-10-07T00:00:00Z"
+        }
+      ]
+    }
+  ],
+  "shelves": []
+}

@@ -39,6 +39,7 @@ fun LibraryTopBar(
     onSelectSortDirection: (Boolean) -> Unit,
     onTags: () -> Unit,
     onCreateCollection: () -> Unit,
+    onImportLocalBook: (() -> Unit)? = null,
     smartCollection: Boolean = false,
     collectionPage: Boolean = false,
     onEditRule: () -> Unit = {},
@@ -240,6 +241,12 @@ fun LibraryTopBar(
                 ))
             }
             if (root) {
+                onImportLocalBook?.let { importBook ->
+                    add(TsuyomiOverflowAction(
+                        label = stringResource(R.string.local_book_import),
+                        onClick = importBook,
+                    ))
+                }
                 add(TsuyomiOverflowAction(
                     label = stringResource(R.string.library_action_create_collection),
                     onClick = onCreateCollection,

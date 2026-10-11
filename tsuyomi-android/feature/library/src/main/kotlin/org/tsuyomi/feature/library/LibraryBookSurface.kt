@@ -51,6 +51,8 @@ import androidx.compose.ui.platform.LocalWindowInfo
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.clearAndSetSemantics
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import org.tsuyomi.shared.librarydomain.LibraryEntry
@@ -58,6 +60,14 @@ import org.tsuyomi.core.display.LocalDisplayEnvironment
 import org.tsuyomi.core.media.api.CoverUiState
 import org.tsuyomi.core.ui.components.CoverImage
 import org.tsuyomi.core.ui.components.TsuyomiAdaptiveListFab
+import org.tsuyomi.core.ui.components.PaginationBar
+import org.tsuyomi.core.ui.components.TsuyomiMeasuredPager
+import org.tsuyomi.core.ui.components.rememberTsuyomiMeasuredPagerState
+import org.tsuyomi.core.ui.components.LocalTsuyomiPagerMaxContentHeight
+import org.tsuyomi.core.ui.components.LocalTsuyomiPagerItemVisible
+import org.tsuyomi.core.ui.components.TsuyomiIconButton
+import org.tsuyomi.core.ui.components.TsuyomiToggleChip
+import androidx.compose.foundation.layout.FlowRow
 import org.tsuyomi.core.ui.components.TsuyomiCoverCardContent
 import org.tsuyomi.core.ui.components.currentCoverCardLayout
 
@@ -83,8 +93,9 @@ data class LibraryViewport(
     val firstVisibleOffset: Int,
 )
 
-internal fun entryKey(entry: LibraryEntry): String =
-    "${entry.book.identity.sourceId}\u0000${entry.book.identity.remoteBookId}"
+internal fun entryKey(entry: LibraryEntry): String = entry.book.identity.storageKey
+
+internal fun libraryBookTestTag(identity: BookIdentity): String = "library-book-${identity.storageKey}"
 
 @Composable
 internal fun LibraryBookSurface(
@@ -97,10 +108,14 @@ internal fun LibraryBookSurface(
     dragCoordinator: LibraryDragCoordinator,
     dragEnabled: Boolean,
     reorderEnabled: Boolean,
+    manualReorderEnabled: Boolean = false,
     canRemove: Boolean = true,
     coverState: @Composable (LibraryEntry) -> CoverUiState,
     onCoverVisibility: (LibraryEntry, Boolean) -> Unit,
     header: (@Composable () -> Unit)? = null,
+    leadingItemCount: Int = 0,
+    leadingItemKey: (Int) -> String = { "leading:$it" },
+    leadingItemContent: @Composable (Int) -> Unit = {},
     onViewportChanged: ((LibraryViewport) -> Unit)? = null,
     onViewportSettled: suspend (Int, Int) -> Unit = { _, _ -> },
     rootItems: List<LibraryRootItem>? = null,
@@ -108,30 +123,188 @@ internal fun LibraryBookSurface(
     onOpenMirror: (LibraryMirrorShortcut) -> Unit = {},
     onLongPressCollection: (String) -> Unit = {},
     onToggleCollectionSelection: (String) -> Unit = {},
+    viewportScopeKey: String = "library",
+    onManualMove: (LibraryDragPayload, LibraryDropDestination) -> Unit = { _, _ -> },
     empty: @Composable () -> Unit,
     modifier: Modifier,
 ) {
-    val items = rootItems ?: entries.map { LibraryRootItem.Book(it) }
-    if (items.isEmpty()) {
+    val eink = LocalDisplayEnvironment.current.effectiveProfile == org.tsuyomi.core.display.DisplayProfile.EINK
+    val projectedItems = rootItems ?: entries.map { LibraryRootItem.Book(it) }
+    val manualOrderBookOffset = if (state.isRootProjection) 0 else {
+        projectedItems.indexOfFirst { it is LibraryRootItem.Book }.takeIf { it >= 0 } ?: projectedItems.size
+    }
+    val manualOrderItemCount = if (state.isRootProjection) projectedItems.size else projectedItems.size - manualOrderBookOffset
+    if (projectedItems.isEmpty() && (!eink || leadingItemCount == 0)) {
         Column(modifier.fillMaxSize()) {
             header?.invoke()
             Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { empty() }
         }
         return
     }
+    val items = projectedItems
     val bookSelectionActive = state.selectionKind == LibrarySelectionKind.BOOK
     val nodeSelectionActive = state.selectionKind != null
+    var selectedBookFirstManualOrderIndex = -1
+    var selectedBookLastManualOrderIndex = -1
+    if (manualReorderEnabled && bookSelectionActive && state.selectedBookIds.isNotEmpty()) {
+        for (projectedIndex in manualOrderBookOffset..projectedItems.lastIndex) {
+            val item = projectedItems[projectedIndex]
+            if (item is LibraryRootItem.Book && item.entry.book.identity in state.selectedBookIds) {
+                val manualOrderIndex = projectedIndex - manualOrderBookOffset
+                if (selectedBookFirstManualOrderIndex < 0) selectedBookFirstManualOrderIndex = manualOrderIndex
+                selectedBookLastManualOrderIndex = manualOrderIndex
+            }
+        }
+    }
+    val viewportWidth = with(LocalDensity.current) {
+        LocalWindowInfo.current.containerSize.width.toDp()
+    }
+    val initialAnchorKey = if (leadingItemCount > 0) {
+        leadingItemKey(0)
+    } else {
+        projectedItems.getOrNull(state.firstVisibleIndex.coerceAtLeast(0))?.key
+            ?: projectedItems.firstOrNull()?.key
+    }
+    val pagerState = rememberTsuyomiMeasuredPagerState(initialAnchorKey)
+    if (eink) {
+        val measuredItemCount = leadingItemCount + projectedItems.size
+        val pageItemContent: @Composable (Int, Boolean) -> Unit = { itemIndex, grid ->
+            if (itemIndex < leadingItemCount) leadingItemContent(itemIndex)
+            else {
+                val projectedIndex = itemIndex - leadingItemCount
+                val item = projectedItems[projectedIndex]
+                val manualOrderIndex = if (item is LibraryRootItem.Book && !state.isRootProjection) projectedIndex - manualOrderBookOffset else projectedIndex
+                val movesSelectedBooks = item is LibraryRootItem.Book && bookSelectionActive && item.entry.book.identity in state.selectedBookIds
+                val moveUpIndex = if (movesSelectedBooks && selectedBookFirstManualOrderIndex >= 0) selectedBookFirstManualOrderIndex else manualOrderIndex
+                val moveDownIndex = if (movesSelectedBooks && selectedBookLastManualOrderIndex >= 0) selectedBookLastManualOrderIndex else manualOrderIndex
+                val selected = when (item) {
+                    is LibraryRootItem.Book -> item.entry.book.identity in state.selectedBookIds
+                    is LibraryRootItem.Collection -> item.collection.collectionId in state.selectedCollectionIds
+                    is LibraryRootItem.Mirror -> false
+                }
+                Column(Modifier.fillMaxWidth()) {
+                    when (item) {
+                        is LibraryRootItem.Book -> when (state.layout) {
+                            LibraryLayout.GRID -> LibraryBookGridCard(
+                                item.entry, state.updates[item.entry.book.identity], projectedIndex,
+                                selected, bookSelectionActive, state.selectedBookIds, dragCoordinator,
+                                false, canRemove, coverState, onCoverVisibility, onOpenBook,
+                                onLongPressBook, onToggleBookSelection, onIgnoreUpdate,
+                            )
+                            LibraryLayout.LIST -> LibraryBookListRow(
+                                item.entry, state.updates[item.entry.book.identity], projectedIndex,
+                                selected, bookSelectionActive, state.selectedBookIds, dragCoordinator,
+                                false, canRemove, coverState, onCoverVisibility, onOpenBook,
+                                onLongPressBook, onToggleBookSelection, onIgnoreUpdate,
+                            )
+                            LibraryLayout.COMPACT -> LibraryCompactBookRow(
+                                item.entry, state.updates[item.entry.book.identity], projectedIndex,
+                                selected, bookSelectionActive, state.selectedBookIds, dragCoordinator,
+                                false, canRemove, onOpenBook, onLongPressBook,
+                                onToggleBookSelection, onIgnoreUpdate,
+                            )
+                        }
+                        is LibraryRootItem.Collection, is LibraryRootItem.Mirror -> if (grid) {
+                            LibraryRootNodeGridCard(
+                                item, projectedIndex, selected, nodeSelectionActive, false,
+                                dragCoordinator, onOpenCollection, onOpenMirror,
+                                onLongPressCollection, onToggleCollectionSelection,
+                            )
+                        } else {
+                            LibraryRootNodeListRow(
+                                item, projectedIndex, state.layout == LibraryLayout.COMPACT,
+                                selected, nodeSelectionActive, false, dragCoordinator,
+                                onOpenCollection, onOpenMirror, onLongPressCollection,
+                                onToggleCollectionSelection,
+                            )
+                        }
+                    }
+                    FlowRow(horizontalArrangement = Arrangement.spacedBy(TsuyomiSpacing.Xs)) {
+                        when (item) {
+                            is LibraryRootItem.Book -> Unit
+                            is LibraryRootItem.Collection -> TsuyomiToggleChip("选择", selected, if (selected) "已选择" else "未选择", {
+                                if (nodeSelectionActive) onToggleCollectionSelection(item.collection.collectionId)
+                                else onLongPressCollection(item.collection.collectionId)
+                            }, modifier = Modifier.semantics {
+                                contentDescription = "选择收藏夹${item.collection.title}"
+                            })
+                            is LibraryRootItem.Mirror -> Unit
+                        }
+                        LibraryManualOrderControls(
+                            item, moveUpIndex, manualOrderItemCount, moveDownIndex,
+                            state.isRootProjection,
+                            if (item is LibraryRootItem.Book) bookSelectionActive else nodeSelectionActive,
+                            state.selectedBookIds, manualReorderEnabled, onManualMove,
+                        )
+                    }
+                    if (!grid) HorizontalDivider()
+                }
+            }
+        }
+        val itemKey: (Int) -> String = { index ->
+            if (index < leadingItemCount) leadingItemKey(index)
+            else projectedItems[index - leadingItemCount].key
+        }
+        val pageControls: @Composable (Int, Boolean, Boolean, () -> Unit, () -> Unit, Int?, () -> Unit, () -> Unit) -> Unit =
+            { page, canGoPrevious, canGoNext, onPrevious, onNext, pageCount, onFirst, onLast ->
+                PaginationBar(
+                    page = page,
+                    pageCount = pageCount,
+                    onPrevious = onPrevious,
+                    onNext = onNext,
+                    hasPreviousPage = canGoPrevious,
+                    hasNextPage = canGoNext,
+                    onFirst = onFirst,
+                    onLast = onLast,
+                    modifier = Modifier.testTag("library-eink-pagination")
+                        .padding(horizontal = TsuyomiSpacing.Sm, vertical = TsuyomiSpacing.Xs),
+                )
+            }
+        val measuredModifier = (LocalTsuyomiPagerMaxContentHeight.current?.let { modifier.heightIn(max = it) } ?: modifier)
+            .fillMaxSize().testTag("library-book-surface")
+        when (state.layout) {
+            LibraryLayout.GRID -> BoxWithConstraints(
+                modifier = measuredModifier.padding(start = 8.dp, top = 8.dp, end = 8.dp),
+            ) {
+                val columns = if (maxWidth >= 600.dp) {
+                    ((maxWidth + 8.dp) / (150.dp + 8.dp)).toInt().coerceAtLeast(1)
+                } else 3
+                TsuyomiMeasuredPager(
+                    itemCount = measuredItemCount,
+                    itemKey = itemKey,
+                    itemContent = { index -> pageItemContent(index, true) },
+                    modifier = Modifier.fillMaxSize(),
+                    state = pagerState,
+                    columns = columns,
+                    horizontalSpacing = 8.dp,
+                    verticalSpacing = 8.dp,
+                    pageControls = pageControls,
+                )
+            }
+            LibraryLayout.LIST, LibraryLayout.COMPACT -> TsuyomiMeasuredPager(
+                itemCount = measuredItemCount,
+                itemKey = itemKey,
+                itemContent = { index -> pageItemContent(index, false) },
+                modifier = measuredModifier,
+                state = pagerState,
+                pageControls = pageControls,
+            )
+        }
+        return
+    }
+    val viewportChanged = onViewportChanged
+    val viewportSettled = onViewportSettled
     val libraryGapIndex = dragCoordinator.libraryInsertionIndex
         .takeIf { dragCoordinator.activePayload != null && it >= 0 }
         ?.coerceIn(0, items.size)
     val surfaceModifier = Modifier.fillMaxSize()
         .testTag("library-book-surface")
-        .libraryContentDropTarget(dragCoordinator, reorderEnabled)
-    val scrollKey = "${state.isRootProjection}:${state.filter}:${state.layout}"
+        .libraryContentDropTarget(dragCoordinator, reorderEnabled && !eink)
+    val scrollKey = "$viewportScopeKey:${state.isRootProjection}:${state.filter}:${state.layout}:${if (eink) "EINK" else "STANDARD"}"
     androidx.compose.runtime.key(scrollKey) {
         when (state.layout) {
             LibraryLayout.GRID -> {
-                val wide = with(LocalDensity.current) { LocalWindowInfo.current.containerSize.width.toDp() >= 600.dp }
+                val wide = viewportWidth >= 600.dp
                 val gridState = rememberLazyGridState(
                     initialFirstVisibleItemIndex = state.firstVisibleIndex.coerceAtMost(items.lastIndex),
                     initialFirstVisibleItemScrollOffset = state.firstVisibleOffset,
@@ -141,8 +314,8 @@ internal fun LibraryBookSurface(
                     firstVisibleOffset = { gridState.firstVisibleItemScrollOffset },
                     isScrollInProgress = { gridState.isScrollInProgress },
                     hasHeader = header != null,
-                    onChanged = onViewportChanged,
-                    onSettled = onViewportSettled,
+                    onChanged = viewportChanged,
+                    onSettled = viewportSettled,
                 )
                 Box(modifier.fillMaxSize()) {
                     LazyVerticalGrid(
@@ -168,12 +341,13 @@ internal fun LibraryBookSurface(
                                 LibraryBookInsertionGap(LibraryLayout.GRID, Modifier.optionalAnimateItem(this))
                             } else {
                                 val index = if (libraryGapIndex != null && visualIndex > libraryGapIndex) visualIndex - 1 else visualIndex
+                                val projectedIndex = index
                                 when (val item = items[index]) {
-                                    is LibraryRootItem.Book -> Box(Modifier.fillMaxWidth().optionalAnimateItem(this)) {
+                                    is LibraryRootItem.Book -> Column(Modifier.fillMaxWidth().optionalAnimateItem(this)) {
                                         LibraryBookGridCard(
                                             entry = item.entry,
                                             update = state.updates[item.entry.book.identity],
-                                            index = index,
+                                            index = projectedIndex,
                                             selected = item.entry.book.identity in state.selectedBookIds,
                                             selectionActive = bookSelectionActive,
                                             selectedBookIds = state.selectedBookIds,
@@ -188,12 +362,12 @@ internal fun LibraryBookSurface(
                                             onIgnoreUpdate = onIgnoreUpdate,
                                         )
                                     }
-                                    is LibraryRootItem.Collection, is LibraryRootItem.Mirror -> Box(
+                                    is LibraryRootItem.Collection, is LibraryRootItem.Mirror -> Column(
                                         Modifier.fillMaxWidth().optionalAnimateItem(this),
                                     ) {
                                         LibraryRootNodeGridCard(
                                             item = item,
-                                            index = index,
+                                            index = projectedIndex,
                                             selected = item is LibraryRootItem.Collection &&
                                                 item.collection.collectionId in state.selectedCollectionIds,
                                             selectionActive = nodeSelectionActive,
@@ -209,12 +383,6 @@ internal fun LibraryBookSurface(
                             }
                         }
                     }
-                    TsuyomiAdaptiveListFab(
-                        state = gridState,
-                        topLabel = "顶部",
-                        endLabel = "末尾",
-                        modifier = Modifier.align(Alignment.BottomEnd).padding(TsuyomiSpacing.Md),
-                    )
                 }
             }
             LibraryLayout.LIST, LibraryLayout.COMPACT -> {
@@ -228,8 +396,8 @@ internal fun LibraryBookSurface(
                     firstVisibleOffset = { listState.firstVisibleItemScrollOffset },
                     isScrollInProgress = { listState.isScrollInProgress },
                     hasHeader = header != null,
-                    onChanged = onViewportChanged,
-                    onSettled = onViewportSettled,
+                    onChanged = viewportChanged,
+                    onSettled = viewportSettled,
                 )
                 Box(modifier.fillMaxSize()) {
                     LazyColumn(
@@ -251,12 +419,14 @@ internal fun LibraryBookSurface(
                             } else {
                                 val index = if (libraryGapIndex != null && visualIndex > libraryGapIndex) visualIndex - 1 else visualIndex
                                 Column(Modifier.fillMaxWidth().optionalAnimateItem(this)) {
-                                    when (val item = items[index]) {
+                                    val projectedIndex = index
+                                    val item = items[index]
+                                    when (item) {
                                         is LibraryRootItem.Book -> if (compact) {
                                             LibraryCompactBookRow(
                                                 entry = item.entry,
                                                 update = state.updates[item.entry.book.identity],
-                                                index = index,
+                                                index = projectedIndex,
                                                 selected = item.entry.book.identity in state.selectedBookIds,
                                                 selectionActive = bookSelectionActive,
                                                 selectedBookIds = state.selectedBookIds,
@@ -272,7 +442,7 @@ internal fun LibraryBookSurface(
                                             LibraryBookListRow(
                                                 entry = item.entry,
                                                 update = state.updates[item.entry.book.identity],
-                                                index = index,
+                                                index = projectedIndex,
                                                 selected = item.entry.book.identity in state.selectedBookIds,
                                                 selectionActive = bookSelectionActive,
                                                 selectedBookIds = state.selectedBookIds,
@@ -289,7 +459,7 @@ internal fun LibraryBookSurface(
                                         }
                                         is LibraryRootItem.Collection, is LibraryRootItem.Mirror -> LibraryRootNodeListRow(
                                             item = item,
-                                            index = index,
+                                            index = projectedIndex,
                                             compact = compact,
                                             selected = item is LibraryRootItem.Collection &&
                                                 item.collection.collectionId in state.selectedCollectionIds,
@@ -317,6 +487,64 @@ internal fun LibraryBookSurface(
             }
         }
     }
+}
+
+
+@Composable
+private fun LibraryManualOrderControls(
+    item: LibraryRootItem,
+    moveUpIndex: Int,
+    itemCount: Int,
+    moveDownIndex: Int = moveUpIndex,
+    isRootProjection: Boolean,
+    selectionActive: Boolean,
+    selectedBookIds: Set<BookIdentity>,
+    enabled: Boolean,
+    onMove: (LibraryDragPayload, LibraryDropDestination) -> Unit,
+) {
+    if (!enabled || itemCount < 2 || (!isRootProjection && item !is LibraryRootItem.Book)) return
+    val title = when (item) {
+        is LibraryRootItem.Book -> item.entry.book.title
+        is LibraryRootItem.Collection -> item.collection.title
+        is LibraryRootItem.Mirror -> item.mirror.label
+    }
+    val moveUpDescription = stringResource(R.string.library_eink_move_up_accessibility, title)
+    val moveDownDescription = stringResource(R.string.library_eink_move_down_accessibility, title)
+    val payload = when (item) {
+        is LibraryRootItem.Book -> if (item.entry.localMembership) {
+            val identity = item.entry.book.identity
+            LibraryDragPayload.Books(
+                if (selectionActive && identity in selectedBookIds) selectedBookIds else setOf(identity),
+            )
+        } else {
+            null
+        }
+        is LibraryRootItem.Collection, is LibraryRootItem.Mirror -> LibraryDragPayload.Shortcut(item.key)
+    } ?: return
+    val move: (Int) -> Unit = { delta ->
+        val target = if (delta > 0) moveDownIndex + delta + 1 else moveUpIndex + delta
+        if (target in 0..itemCount) {
+            val destination = when (item) {
+                is LibraryRootItem.Book -> LibraryDropDestination.Library(target)
+                is LibraryRootItem.Collection, is LibraryRootItem.Mirror -> LibraryDropDestination.Root(target)
+            }
+            onMove(payload, destination)
+        }
+    }
+    TsuyomiIconButton(
+        imageVector = TsuyomiIcons.ToTop,
+        contentDescription = moveUpDescription,
+        onClick = { move(-1) },
+        modifier = Modifier.testTag("library-eink-move-up-${item.key}"),
+        enabled = moveUpIndex > 0,
+    )
+    TsuyomiIconButton(
+        imageVector = TsuyomiIcons.ToBottom,
+        contentDescription = moveDownDescription,
+        onClick = { move(1) },
+        modifier = Modifier.testTag("library-eink-move-down-${item.key}"),
+        enabled = moveDownIndex < itemCount - 1,
+    )
 }
 
 @Composable
@@ -384,7 +612,8 @@ internal fun LibraryEntry.readingStatusLabel(): String? = progress?.let { readin
 internal fun LibraryEntry.libraryStatusLabel(): String = readingStatusLabel()
     ?: when {
         readLater -> "稍后再读"
-        !sourceAvailable -> "来源未安装"
+        book.identity is BookIdentity.Remote && !sourceAvailable -> "来源未安装"
+        book.identity is BookIdentity.Local && book.localPublication?.originalAvailable == false -> "原书文件缺失，可重新关联"
         else -> "未开始"
     }
 
@@ -428,7 +657,7 @@ internal fun LibraryBookGridCard(
     )
     Card(
         modifier = Modifier.fillMaxWidth()
-            .testTag("library-book-${identity.sourceId}-${identity.remoteBookId}")
+            .testTag(libraryBookTestTag(identity))
             .libraryBookDropTarget(dragCoordinator, identity, index)
             .libraryBookGestures(
                 identity = identity,
@@ -460,7 +689,7 @@ internal fun LibraryBookGridCard(
             cover = {
                 ProductionBookCover(entry, coverState, onCoverVisibility, Modifier.fillMaxSize())
             },
-            metadataModifier = Modifier.testTag("library-book-metadata-${identity.sourceId}-${identity.remoteBookId}"),
+            metadataModifier = Modifier.testTag("library-book-metadata-${identity.storageKey}"),
             artworkOverlay = {
                 update?.let { unresolved ->
                     Surface(
@@ -554,7 +783,7 @@ internal fun LibraryBookListRow(
             else -> null
         },
         modifier = Modifier.fillMaxWidth()
-            .testTag("library-book-${identity.sourceId}-${identity.remoteBookId}")
+            .testTag(libraryBookTestTag(identity))
             .libraryBookDropTarget(dragCoordinator, identity, index)
             .libraryBookGestures(
                 identity = identity,
@@ -611,7 +840,7 @@ internal fun LibraryCompactBookRow(
             else -> entry.rating?.let { rating -> { Text("★ $rating") } }
         },
         modifier = Modifier.fillMaxWidth().heightIn(min = 52.dp)
-            .testTag("library-book-${identity.sourceId}-${identity.remoteBookId}")
+            .testTag(libraryBookTestTag(identity))
             .libraryBookDropTarget(dragCoordinator, identity, index)
             .libraryBookGestures(
                 identity = identity,
@@ -640,9 +869,10 @@ internal fun ProductionBookCover(
     onCoverVisibility: (LibraryEntry, Boolean) -> Unit,
     modifier: Modifier,
 ) {
-    DisposableEffect(entryKey(entry)) {
-        onCoverVisibility(entry, true)
-        onDispose { onCoverVisibility(entry, false) }
+    val visible = LocalTsuyomiPagerItemVisible.current
+    DisposableEffect(entryKey(entry), visible) {
+        if (visible) onCoverVisibility(entry, true)
+        onDispose { if (visible) onCoverVisibility(entry, false) }
     }
     val unresolved = entry.reconciliation == org.tsuyomi.shared.librarydomain.RemoteReconciliationState.UNRESOLVED
     val unresolvedDescription = if (unresolved) stringResource(

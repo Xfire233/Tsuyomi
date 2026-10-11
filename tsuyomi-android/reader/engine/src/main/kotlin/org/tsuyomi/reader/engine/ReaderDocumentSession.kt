@@ -10,6 +10,9 @@ import org.tsuyomi.shared.locator.LocatorPrecision
 import org.tsuyomi.shared.locator.ReaderLocator
 import org.tsuyomi.shared.sourcecontract.ReaderBlock
 import org.tsuyomi.shared.sourcecontract.ReaderDocument
+import org.tsuyomi.shared.sourcecontract.ReaderResourceRef
+import org.tsuyomi.shared.sourcecontract.canonicalAnchorText
+import org.tsuyomi.shared.sourcecontract.inlineSpans
 
 enum class ReaderPresentation { SCROLL, PAGED, DUAL_PAGE }
 
@@ -42,13 +45,8 @@ class ReaderDocumentSession(
     initialLocator: ReaderLocator?,
     initialPresentation: ReaderPresentation,
 ) {
-    val identity: DocumentIdentity = DocumentIdentity(
-        sourceId = document.sourceId,
-        remoteBookId = document.remoteBookId,
-        contentId = document.contentId,
-        revision = document.revision,
-    )
-    val documentRevision: String = document.revision ?: "unversioned"
+    val identity: DocumentIdentity = document.identity
+    val documentRevision: String = document.identity.revision ?: "unversioned"
     val contentDigest: String = readerContentDigest(document)
 
     private val blockCodePointLengths = IntArray(document.blocks.size) { index ->
@@ -71,20 +69,20 @@ class ReaderDocumentSession(
     }
 
     /** Immediate semantic navigation; no animation, debounce, or renderer-specific offset. */
-    fun navigateToBlock(blockIndex: Int, characterOffset: Int = 0): ResolvedReaderPosition {
+    fun navigateToBlock(blockIndex: Int, characterOffset: Int = 0, exact: Boolean = true): ResolvedReaderPosition {
         val boundedIndex = blockIndex.coerceIn(document.blocks.indices)
         val block = document.blocks[boundedIndex]
         val boundedOffset = characterOffset.coerceIn(0, block.textLengthCodePoints())
-        position = exactPosition(boundedIndex, boundedOffset)
+        position = if (exact) exactPosition(boundedIndex, boundedOffset) else degradedAt(boundedIndex, boundedOffset)
         return position
     }
 
     /** Resolves a preview target without moving the durable semantic position. */
-    fun previewPositionAtBlock(blockIndex: Int, characterOffset: Int = 0): ResolvedReaderPosition {
+    fun previewPositionAtBlock(blockIndex: Int, characterOffset: Int = 0, exact: Boolean = true): ResolvedReaderPosition {
         val boundedIndex = blockIndex.coerceIn(document.blocks.indices)
         val block = document.blocks[boundedIndex]
         val boundedOffset = characterOffset.coerceIn(0, block.textLengthCodePoints())
-        return exactPosition(boundedIndex, boundedOffset)
+        return if (exact) exactPosition(boundedIndex, boundedOffset) else degradedAt(boundedIndex, boundedOffset)
     }
 
     fun navigateByBlock(delta: Int): ResolvedReaderPosition = navigateToBlock(position.blockIndex + delta)
@@ -93,20 +91,25 @@ class ReaderDocumentSession(
 
     private fun resolve(candidate: ReaderLocator?): ResolvedReaderPosition {
         if (candidate == null || !candidate.document.namesSameDocumentAs(identity)) return degradedAt(0, 0)
-        val blockIndex = candidate.blockId?.let { id -> document.blocks.indexOfFirst { it.blockId == id } } ?: -1
+        val blockIndex = candidate.blockId?.let { id ->
+            document.blocks.indexOfFirst { it.semanticBlockId() == id || it.blockId == id }
+        } ?: -1
         if (blockIndex >= 0) {
             val block = document.blocks[blockIndex]
-            val digestMatches = candidate.textAnchorDigest == null || candidate.textAnchorDigest == block.anchorDigest()
-            val offset = candidate.characterOffset?.coerceIn(0, block.textLengthCodePoints()) ?: 0
-            if (digestMatches && candidate.textAnchorDigest != null && candidate.characterOffset != null) {
-                return exactPosition(blockIndex, offset)
+            val offset = candidate.characterOffset ?: 0
+            if (candidate.textAnchorDigest == block.anchorDigest()) {
+                if (candidate.characterOffset != null && offset <= blockCodePointLengths[blockIndex]) {
+                    return exactPosition(blockIndex, offset)
+                }
+                return degradedAt(blockIndex, offset)
             }
-            return degradedAt(blockIndex, offset)
+            if (candidate.textAnchorDigest == null) return degradedAt(blockIndex, offset)
         }
         candidate.textAnchorDigest?.let { digest ->
             val anchorIndex = document.blocks.indexOfFirst { it.anchorDigest() == digest }
             if (anchorIndex >= 0) return degradedAt(anchorIndex, candidate.characterOffset ?: 0)
         }
+        if (blockIndex >= 0) return degradedAt(blockIndex, 0)
         val progress = candidate.chapterProgress ?: return degradedAt(0, 0)
         if (totalCodePoints == 0L) {
             val fallbackIndex = (progress * (document.blocks.size - 1)).toInt().coerceIn(document.blocks.indices)
@@ -154,7 +157,7 @@ class ReaderDocumentSession(
         }
         val locator = ReaderLocator(
             document = identity,
-            blockId = block.blockId,
+            blockId = block.semanticBlockId(),
             textAnchorDigest = block.anchorDigest().takeIf { includeExactAnchor },
             characterOffset = boundedOffset.takeIf { includeExactAnchor },
             chapterProgress = progress,
@@ -176,17 +179,21 @@ class ReaderDocumentCache(private val capacity: Int = 5) {
 
     @Synchronized
     fun put(document: ReaderDocument) {
-        documents[key(document.sourceId, document.remoteBookId, document.contentId)] = document
+        documents[key(document.identity)] = document
     }
 
     @Synchronized
-    fun get(sourceId: String, remoteBookId: String, contentId: String): ReaderDocument? =
-        documents[key(sourceId, remoteBookId, contentId)]
+    fun get(identity: DocumentIdentity): ReaderDocument? = documents[key(identity)]
 
     @Synchronized
     fun size(): Int = documents.size
 
-    private fun key(sourceId: String, remoteBookId: String, contentId: String) = "$sourceId\u0000$remoteBookId\u0000$contentId"
+    private fun key(identity: DocumentIdentity): String = buildString {
+        append(identity.book.storageKey.length).append(':').append(identity.book.storageKey)
+        append(identity.contentId.encodeToByteArray().size).append(':').append(identity.contentId)
+        val revision = identity.revision
+        if (revision == null) append("-:") else append(revision.encodeToByteArray().size).append(':').append(revision)
+    }
 }
 
 fun defaultReaderPresentation(isEInk: Boolean): ReaderPresentation =
@@ -194,25 +201,95 @@ fun defaultReaderPresentation(isEInk: Boolean): ReaderPresentation =
 
 private fun readerContentDigest(document: ReaderDocument): String {
     val digest = MessageDigest.getInstance("SHA-256")
-    digest.update(document.sourceId.encodeToByteArray())
-    digest.update(document.remoteBookId.encodeToByteArray())
-    digest.update(document.contentId.encodeToByteArray())
-    digest.update((document.revision ?: "").encodeToByteArray())
-    document.blocks.forEach { block ->
-        digest.update(block.blockId.encodeToByteArray())
-        digest.update(block.anchorText().encodeToByteArray())
+    digest.updateField(document.identity.book.storageKey)
+    digest.updateField(document.identity.contentId)
+    digest.updateField(document.identity.revision)
+    digest.updateField(document.title)
+    document.blocks.forEach { it.updateDigest(digest) }
+    document.anchors.toSortedMap().forEach { (anchorId, target) ->
+        digest.updateField(anchorId)
+        digest.updateField(target.blockId)
+        digest.updateField(target.codePointOffset.toString())
     }
     return digest.digest().joinToString("") { "%02x".format(it) }
 }
 
-private fun ReaderBlock.anchorDigest(): String = MessageDigest.getInstance("SHA-256")
-    .digest(anchorText().encodeToByteArray())
-    .joinToString("") { "%02x".format(it) }
-
-private fun ReaderBlock.anchorText(): String = when (this) {
-    is ReaderBlock.Paragraph -> text
-    is ReaderBlock.Heading -> text
-    is ReaderBlock.Image -> altText.orEmpty()
+private fun ReaderBlock.updateDigest(digest: MessageDigest) {
+    digest.updateField(when (this) {
+        is ReaderBlock.Paragraph -> "paragraph"
+        is ReaderBlock.Heading -> "heading"
+        is ReaderBlock.Image -> "image"
+        is ReaderBlock.Divider -> "divider"
+        is ReaderBlock.Quote -> "quote"
+        is ReaderBlock.Listing -> "list"
+        is ReaderBlock.Note -> "note"
+        is ReaderBlock.Table -> "table"
+        is ReaderBlock.Post -> "post"
+        is ReaderBlock.Unsupported -> "unsupported"
+    })
+    digest.updateField(blockId)
+    digest.updateField(anchorId)
+    digest.updateField(canonicalAnchorText())
+    inlineSpans().forEach { span ->
+        digest.updateField(span.startCodePoint.toString())
+        digest.updateField(span.endCodePoint.toString())
+        digest.updateField(span.kind.toString())
+    }
+    when (this) {
+        is ReaderBlock.Paragraph -> digest.updateField(preformatted.toString())
+        is ReaderBlock.Heading -> digest.updateField(level.toString())
+        is ReaderBlock.Image -> {
+            when (val ref = resource) {
+                is ReaderResourceRef.RemoteHttps -> { digest.updateField("https"); digest.updateField(ref.url) }
+                is ReaderResourceRef.Local -> {
+                    digest.updateField("local"); digest.updateField(ref.publicationId); digest.updateField(ref.resourceId)
+                    digest.updateField(ref.mimeType); digest.updateField(ref.sha256)
+                }
+            }
+            digest.updateField(width?.toString()); digest.updateField(height?.toString())
+            aspectRatio?.let { digest.updateField("aspectRatio"); digest.updateField(it.toString()) }
+        }
+        is ReaderBlock.Divider -> Unit
+        is ReaderBlock.Quote -> digest.updateField(attribution)
+        is ReaderBlock.Listing -> {
+            digest.updateField(ordered.toString()); digest.updateField(start.toString())
+            items.forEach { item -> digest.updateField(item.itemId); item.blocks.forEach { it.updateDigest(digest) } }
+        }
+        is ReaderBlock.Note -> {
+            digest.updateField(noteId); digest.updateField(label); blocks.forEach { it.updateDigest(digest) }
+        }
+        is ReaderBlock.Table -> rows.forEach { row -> row.cells.forEach { cell ->
+            digest.updateField(cell.text); digest.updateField(cell.header.toString())
+            cell.spans.forEach { span -> digest.updateField("${span.startCodePoint}:${span.endCodePoint}:${span.kind}") }
+        } }
+        is ReaderBlock.Post -> {
+            digest.updateField(postId); digest.updateField(authorId); digest.updateField(authorName); digest.updateField(floor?.toString())
+            digest.updateField(createdAt); digest.updateField(replyToPostId); blocks.forEach { it.updateDigest(digest) }
+        }
+        is ReaderBlock.Unsupported -> digest.updateField(featureCode)
+    }
 }
 
-private fun ReaderBlock.textLengthCodePoints(): Int = anchorText().codePointCount(0, anchorText().length)
+private fun MessageDigest.updateField(value: String?) {
+    if (value == null) {
+        update(0xFF.toByte())
+        return
+    }
+    val bytes = value.encodeToByteArray()
+    update((bytes.size ushr 24).toByte())
+    update((bytes.size ushr 16).toByte())
+    update((bytes.size ushr 8).toByte())
+    update(bytes.size.toByte())
+    update(bytes)
+}
+
+private fun ReaderBlock.semanticBlockId(): String = (this as? ReaderBlock.Post)?.postId ?: blockId
+
+private fun ReaderBlock.anchorDigest(): String = MessageDigest.getInstance("SHA-256")
+    .digest(canonicalAnchorText().encodeToByteArray())
+    .joinToString("") { "%02x".format(it) }
+
+private fun ReaderBlock.textLengthCodePoints(): Int {
+    val text = canonicalAnchorText()
+    return text.codePointCount(0, text.length)
+}

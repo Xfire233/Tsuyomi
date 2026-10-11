@@ -1,0 +1,82 @@
+{
+  "cases": [
+    {
+      "name": "automatic-charset-and-sections",
+      "schemaValid": true,
+      "semanticallyValid": true,
+      "options": { "charsetName": null, "headingSelections": [], "paragraphsPerSection": 128 }
+    },
+    {
+      "name": "ordered-manual-unicode-headings",
+      "schemaValid": true,
+      "semanticallyValid": true,
+      "options": { "charsetName": "GB18030", "headingSelections": [{ "paragraphOrdinal": 0, "title": "序章" }, { "paragraphOrdinal": 20000, "title": "最终章 😀" }], "paragraphsPerSection": 4096 }
+    },
+    {
+      "name": "descending-headings",
+      "schemaValid": true,
+      "semanticallyValid": false,
+      "options": { "charsetName": "UTF-8", "headingSelections": [{ "paragraphOrdinal": 42, "title": "第二节" }, { "paragraphOrdinal": 0, "title": "序章" }], "paragraphsPerSection": 128 }
+    },
+    {
+      "name": "duplicate-ordinal-despite-different-title",
+      "schemaValid": true,
+      "semanticallyValid": false,
+      "options": { "charsetName": null, "headingSelections": [{ "paragraphOrdinal": 0, "title": "序章" }, { "paragraphOrdinal": 0, "title": "另一标题" }], "paragraphsPerSection": 128 }
+    },
+    {
+      "name": "charset-alias-is-not-canonical",
+      "schemaValid": false,
+      "semanticallyValid": false,
+      "options": { "charsetName": "utf-8", "headingSelections": [], "paragraphsPerSection": 128 }
+    },
+    {
+      "name": "missing-required-automatic-charset",
+      "schemaValid": false,
+      "semanticallyValid": false,
+      "options": { "headingSelections": [], "paragraphsPerSection": 128 }
+    },
+    {
+      "name": "zero-section-size",
+      "schemaValid": false,
+      "semanticallyValid": false,
+      "options": { "charsetName": null, "headingSelections": [], "paragraphsPerSection": 0 }
+    },
+    {
+      "name": "oversized-section-size",
+      "schemaValid": false,
+      "semanticallyValid": false,
+      "options": { "charsetName": null, "headingSelections": [], "paragraphsPerSection": 4097 }
+    },
+    {
+      "name": "string-instead-of-numeric-section-size",
+      "schemaValid": false,
+      "semanticallyValid": false,
+      "options": { "charsetName": null, "headingSelections": [], "paragraphsPerSection": "128" }
+    },
+    {
+      "name": "negative-paragraph-ordinal",
+      "schemaValid": false,
+      "semanticallyValid": false,
+      "options": { "charsetName": null, "headingSelections": [{ "paragraphOrdinal": -1, "title": "序章" }], "paragraphsPerSection": 128 }
+    },
+    {
+      "name": "oversized-paragraph-ordinal",
+      "schemaValid": false,
+      "semanticallyValid": false,
+      "options": { "charsetName": null, "headingSelections": [{ "paragraphOrdinal": 20001, "title": "末章" }], "paragraphsPerSection": 128 }
+    },
+    {
+      "name": "blank-heading",
+      "schemaValid": false,
+      "semanticallyValid": false,
+      "options": { "charsetName": null, "headingSelections": [{ "paragraphOrdinal": 0, "title": " " }], "paragraphsPerSection": 128 }
+    },
+    {
+      "name": "raw-provider-permission-in-options",
+      "schemaValid": false,
+      "semanticallyValid": false,
+      "options": { "charsetName": null, "headingSelections": [], "paragraphsPerSection": 128, "providerUri": "content://fixture/book" }
+    }
+  ]
+}

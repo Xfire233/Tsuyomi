@@ -14,6 +14,7 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.test.click
 import androidx.compose.ui.test.assertHasClickAction
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.isDisplayed
 import androidx.compose.ui.test.assertIsEnabled
 import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.assertIsFocused
@@ -561,6 +562,74 @@ class BrowseScreenInstrumentedTest {
         assertEquals(listOf(Triple(false, true, true)), approvals)
         composeRule.onNodeWithTag("browse-approval-unsigned-risk").performScrollTo().performClick().assertIsOff()
         composeRule.onNodeWithText("确认安装").assertIsNotEnabled()
+    }
+
+    @Test
+    fun einkKeepsUnsignedApprovalAndRejectsIdentityRetry() {
+        val approvals = mutableListOf<Triple<Boolean, Boolean, Boolean>>()
+        var state by mutableStateOf<BrowseUiState>(
+            BrowseUiState.Approval(
+                sourceName = "本地候选",
+                sourceId = "org.tsuyomi.wenku8",
+                version = "0.2.38",
+                publisherFingerprint = null,
+                capabilities = listOf("网站收藏读取"),
+                resourceLimitIncreases = emptyList(),
+                isDowngrade = false,
+                packageSha256 = "a1".repeat(32),
+                publisherIdentity = BrowsePublisherIdentity.LOCAL_UNSIGNED,
+                requiresUnsignedIdentityTransition = true,
+            ),
+        )
+        var importRequests = 0
+        var failureDismissals = 0
+        val einkEnvironment = standardEnvironment.copy(
+            preferences = standardEnvironment.preferences.copy(displayPreference = DisplayPreference.EINK),
+            effectiveProfile = DisplayProfile.EINK,
+            decisionReason = DisplayDecisionReason.MANUAL_EINK,
+            motionPolicy = MotionPolicy.INSTANT,
+        )
+
+        composeRule.setContent {
+            DisplayEnvironmentProvider(einkEnvironment) {
+                TsuyomiTheme(einkEnvironment) {
+                    BrowseScreen(
+                        state = state,
+                        installedSources = emptyList(),
+                        catalog = BrowseCatalogState(),
+                        onRequestImport = { importRequests += 1 },
+                        onApproveInstall = { _, _, _ -> error("Unsigned candidate reached signed approval") },
+                        onApproveUnsigned = { downgrade, risk, transition ->
+                            approvals += Triple(downgrade, risk, transition)
+                        },
+                        onDismissApproval = {},
+                        onDismissFailure = { failureDismissals += 1 },
+                        onCatalogAction = {},
+                        onSourceAction = {},
+                    )
+                }
+            }
+        }
+
+        fun advanceUntil(matcher: SemanticsMatcher) {
+            repeat(100) {
+                if (composeRule.onNode(matcher).isDisplayed()) return
+                composeRule.onNodeWithText("下一页").assertIsEnabled().performClick()
+            }
+            error("Approval action was unreachable")
+        }
+        advanceUntil(androidx.compose.ui.test.hasTestTag("browse-approval-unsigned-risk"))
+        composeRule.onNodeWithTag("browse-approval-unsigned-risk").assertIsOff().performClick().assertIsOn()
+        advanceUntil(androidx.compose.ui.test.hasTestTag("browse-approval-unsigned-transition"))
+        composeRule.onNodeWithTag("browse-approval-unsigned-transition").assertIsOff().performClick().assertIsOn()
+        advanceUntil(androidx.compose.ui.test.hasText("确认安装"))
+        composeRule.onNodeWithText("确认安装").assertIsEnabled().performClick()
+        assertEquals(listOf(Triple(false, true, true)), approvals)
+
+        composeRule.runOnIdle { state = BrowseUiState.Failure(BrowseInstallFailure.IDENTITY_CONFLICT) }
+        composeRule.onNodeWithText("关闭提示").performClick()
+        assertEquals(1, failureDismissals)
+        assertEquals(0, importRequests)
     }
 
     @Test

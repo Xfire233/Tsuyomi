@@ -8,12 +8,14 @@ import android.graphics.Bitmap
 import androidx.lifecycle.SavedStateHandle
 import androidx.compose.ui.test.junit4.v2.createAndroidComposeRule
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.test.SemanticsMatcher
 import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.onAllNodesWithTag
 import androidx.compose.ui.test.isDisplayed
+import androidx.compose.ui.test.isSelected
 import androidx.compose.ui.test.onAllNodesWithContentDescription
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithContentDescription
@@ -25,11 +27,14 @@ import androidx.compose.ui.test.hasTestTag
 import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.longClick
 import androidx.compose.ui.test.assertIsSelected
+import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.assert
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
+import androidx.compose.ui.test.click
 import androidx.compose.ui.test.performTouchInput
 import androidx.compose.ui.test.performTextReplacement
 import androidx.compose.ui.test.performSemanticsAction
@@ -51,6 +56,8 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import androidx.datastore.preferences.core.PreferenceDataStoreFactory
 import org.tsuyomi.core.preferences.LibraryPreferencesRepository
+import org.tsuyomi.core.preferences.LibraryRootNodePreference
+import org.tsuyomi.core.preferences.LibraryTabPresentationPreferences
 import java.io.File
 import java.util.UUID
 import kotlin.math.abs
@@ -76,20 +83,55 @@ import org.tsuyomi.shared.locator.ReaderLocator
 import org.tsuyomi.core.preferences.DisplayPreference
 import org.tsuyomi.shared.model.BookIdentity
 import org.tsuyomi.feature.library.projectedEntries
+import org.tsuyomi.feature.library.libraryCollectionRootId
 import org.tsuyomi.feature.library.SmartDraftNode
 import org.tsuyomi.feature.library.updateAt
+import androidx.compose.ui.test.SemanticsNodeInteraction
+import androidx.compose.ui.test.hasContentDescription
+import java.io.ByteArrayInputStream
+import java.security.MessageDigest
+import java.util.Base64
+import java.util.zip.ZipInputStream
+import org.bouncycastle.crypto.params.Ed25519PrivateKeyParameters
+import org.bouncycastle.crypto.signers.Ed25519Signer
+import org.erdtman.jcs.JsonCanonicalizer
+import org.json.JSONArray
+import org.json.JSONObject
+import org.tsuyomi.source.extensionmanager.RepositoryFetcher
+import org.tsuyomi.source.extensionmanager.RepositorySubscriptionRegistry
+import org.tsuyomi.source.extensiontestkit.Phase2TestPublisher
+import androidx.compose.ui.test.hasAnyAncestor
+import androidx.test.platform.app.InstrumentationRegistry
+import org.junit.rules.RuleChain
+import org.junit.rules.TestRule
+import org.junit.runners.model.Statement
+import org.tsuyomi.core.ui.components.TSUYOMI_NAVIGATION_TAG_PREFIX
 
 @RunWith(AndroidJUnit4::class)
 class LibraryProductionJourneyInstrumentedTest {
-    @get:Rule
     val composeRule = createAndroidComposeRule<MainActivity>()
 
-    private val identity = BookIdentity("fixture.production.library", "journey-read-later")
-    private val behaviorNewer = BookIdentity("fixture.production.library", "behavior-newer")
+    @get:Rule
+    val journeyRules: TestRule = RuleChain.outerRule(TestRule { base, description ->
+        when (description.methodName) {
+            "einkBrowseSectionAndQueryDraftRestoreAfterRootSwitch",
+            "standardBrowseSectionAndQueryDraftRestoreAfterRootSwitch" -> object : Statement() {
+                override fun evaluate() {
+                    val application = InstrumentationRegistry.getInstrumentation().targetContext.applicationContext as TsuyomiApplication
+                    // Admit the signed replay before the Activity-owned installer reads its cache.
+                    withSignedBrowseCatalog(application) { base.evaluate() }
+                }
+            }
+            else -> base
+        }
+    }).around(composeRule)
+
+    private val identity = BookIdentity.Remote("fixture.production.library", "journey-read-later")
+    private val behaviorNewer = BookIdentity.Remote("fixture.production.library", "behavior-newer")
     private val selectionCollectionTitle = "批量选择收藏夹"
     private val rootBatchCollectionTitle = "根书架批量收藏夹"
-    private val behaviorOlder = BookIdentity("fixture.production.library", "behavior-older")
-    private val behaviorUnstarted = BookIdentity("fixture.production.library", "behavior-unstarted")
+    private val behaviorOlder = BookIdentity.Remote("fixture.production.library", "behavior-older")
+    private val behaviorUnstarted = BookIdentity.Remote("fixture.production.library", "behavior-unstarted")
     private val behaviorCollectionId = "behavior-collection"
     private val searchCollectionId = "local-search-collection"
 
@@ -122,6 +164,211 @@ class LibraryProductionJourneyInstrumentedTest {
                     repository.removeFromLibrary(it)
                 }
             }
+        }
+    }
+
+    @Test
+    fun einkNavigationCommitsRootsAndBackWithoutIntermediateDestination() {
+        val application = composeRule.activity.application as TsuyomiApplication
+        val previous = runBlocking { application.displayController.preferences.first().displayPreference }
+        var rootBarBounds: androidx.compose.ui.geometry.Rect? = null
+        var rootNavigationBounds: List<androidx.compose.ui.geometry.Rect>? = null
+        fun assertCommittedRoot(label: String) {
+            // Assert the settled visible owner; native frame recording owns intermediate/no-blank proof.
+            visibleJourneyNode(rootNavigationItem(label) and isSelected()).assertIsDisplayed()
+            val bar = visibleJourneyNode(
+                SemanticsMatcher.expectValue(SemanticsProperties.PaneTitle, label),
+            ).fetchSemanticsNode().boundsInRoot
+            val navigation = listOf("书架", "浏览", "更多").map {
+                visibleJourneyNode(rootNavigationItem(it)).fetchSemanticsNode().boundsInRoot
+            }
+            rootBarBounds?.let { expected ->
+                assertEquals("Root AppBar start must not move across destinations", expected.left, bar.left, 1f)
+                assertEquals("Root AppBar end must not move across destinations", expected.right, bar.right, 1f)
+                assertEquals("Root AppBar top must not move across destinations", expected.top, bar.top, 1f)
+                assertEquals("Root AppBar bottom must not move across destinations", expected.bottom, bar.bottom, 1f)
+            } ?: run { rootBarBounds = bar }
+            rootNavigationBounds?.zip(navigation)?.forEach { (expected, actual) ->
+                assertEquals("Root navigation must retain its full touch bounds", expected, actual)
+            } ?: run { rootNavigationBounds = navigation }
+            val rails = composeRule.onAllNodesWithTag("${TSUYOMI_NAVIGATION_TAG_PREFIX}rail")
+            rails.fetchSemanticsNodes().indices.filter { rails[it].isDisplayed() }.forEach { index ->
+                val rail = rails[index].fetchSemanticsNode().boundsInRoot
+                assertTrue("AppBar must not intrude into the rail", bar.left >= rail.right - 1f)
+            }
+        }
+        try {
+            runBlocking { application.displayController.setDisplayPreference(DisplayPreference.EINK) }
+            composeRule.activityRule.scenario.recreate()
+            try {
+                composeRule.waitUntil(timeoutMillis = 10_000) {
+                    composeRule.onNodeWithTag("tsuyomi-tab-ALL").isDisplayed()
+                }
+            } catch (failure: Exception) {
+                val allTabBounds = composeRule.onAllNodesWithTag("tsuyomi-tab-ALL")
+                    .fetchSemanticsNodes().map { it.boundsInRoot }
+                val tabRowBounds = composeRule.onAllNodesWithTag("library-primary-tabs")
+                    .fetchSemanticsNodes().map { it.boundsInRoot }
+                throw AssertionError(
+                    "Recreated Library ALL-tab readiness failed (10s bound); " +
+                        "ALL bounds=$allTabBounds, fixed-tab row bounds=$tabRowBounds",
+                    failure,
+                )
+            }
+            composeRule.onNodeWithTag("tsuyomi-tab-ALL").assertIsDisplayed()
+            assertCommittedRoot("书架")
+            visibleJourneyNode(rootNavigationItem("更多")).performTouchInput { click() }
+            assertCommittedRoot("更多")
+            visibleJourneyNode(hasText("显示") and hasClickAction()).performTouchInput { click() }
+            visibleJourneyNode(hasText("墨水屏")).assertIsDisplayed()
+            visibleJourneyNode(hasContentDescription("返回")).performTouchInput { click() }
+            assertCommittedRoot("更多")
+            visibleJourneyNode(hasText("显示") and hasClickAction()).performTouchInput { click() }
+            visibleJourneyNode(hasText("墨水屏")).assertIsDisplayed()
+            pressBack()
+            assertCommittedRoot("更多")
+            visibleJourneyNode(hasText("显示") and hasClickAction()).assertIsDisplayed()
+            visibleJourneyNode(rootNavigationItem("浏览")).performTouchInput { click() }
+            assertCommittedRoot("浏览")
+            composeRule.onNodeWithTag("tsuyomi-tab-INSTALLED").assertIsDisplayed()
+            visibleJourneyNode(rootNavigationItem("书架")).performTouchInput { click() }
+            composeRule.onNodeWithTag("tsuyomi-tab-ALL").assertIsDisplayed()
+            assertCommittedRoot("书架")
+        } finally {
+            runBlocking { application.displayController.setDisplayPreference(previous) }
+        }
+    }
+
+    @Test
+    fun einkBrowseSectionAndQueryDraftRestoreAfterRootSwitch() {
+        assertBrowseDraftRestoresAfterRootSwitch(DisplayPreference.EINK)
+    }
+
+    @Test
+    fun standardBrowseSectionAndQueryDraftRestoreAfterRootSwitch() {
+        assertBrowseDraftRestoresAfterRootSwitch(DisplayPreference.STANDARD)
+    }
+
+    private fun assertBrowseDraftRestoresAfterRootSwitch(profile: DisplayPreference) {
+        val application = composeRule.activity.application as TsuyomiApplication
+        val previous = runBlocking { application.displayController.preferences.first().displayPreference }
+        val draft = "插件目录草稿 ${profile.name} 123"
+        fun assertRestoredDraft() {
+            visibleJourneyNode(rootNavigationItem("浏览") and isSelected()).assertIsDisplayed()
+            composeRule.onNodeWithTag("tsuyomi-tab-AVAILABLE").assertIsDisplayed().assertIsSelected()
+            composeRule.onNodeWithTag("browse-catalog-search").assertIsDisplayed().assert(
+                SemanticsMatcher.expectValue(SemanticsProperties.EditableText, AnnotatedString(draft)),
+            )
+        }
+        try {
+            runBlocking { application.displayController.setDisplayPreference(profile) }
+            composeRule.activityRule.scenario.recreate()
+            visibleJourneyNode(rootNavigationItem("浏览")).performClick()
+            composeRule.onNodeWithTag("tsuyomi-tab-AVAILABLE").assertIsDisplayed().performClick()
+            composeRule.waitUntil(timeoutMillis = 10_000) {
+                composeRule.onNodeWithTag("browse-catalog-search").isDisplayed()
+            }
+            // Catalog search is inline and only exists for a populated authenticated catalog.
+            // The Browse toolbar's search action opens book search, not this field.
+            visibleJourneyNode(hasTestTag("browse-catalog-search")).performClick()
+            composeRule.onNodeWithTag("browse-catalog-search").performTextReplacement(draft)
+            closeSoftKeyboard()
+            assertRestoredDraft()
+
+            visibleJourneyNode(rootNavigationItem("更多")).performClick()
+            visibleJourneyNode(hasText("显示") and hasClickAction()).assertIsDisplayed()
+            visibleJourneyNode(rootNavigationItem("更多") and isSelected()).assertIsDisplayed()
+            visibleJourneyNode(rootNavigationItem("浏览")).performClick()
+            assertRestoredDraft()
+
+            // Navigation must also save Browse's draft while its root is absent.
+            visibleJourneyNode(rootNavigationItem("更多")).performClick()
+            visibleJourneyNode(hasText("显示") and hasClickAction()).assertIsDisplayed()
+            composeRule.activityRule.scenario.recreate()
+            visibleJourneyNode(hasText("显示") and hasClickAction()).assertIsDisplayed()
+            visibleJourneyNode(rootNavigationItem("更多") and isSelected()).assertIsDisplayed()
+            visibleJourneyNode(rootNavigationItem("浏览")).performClick()
+            assertRestoredDraft()
+        } finally {
+            runBlocking { application.displayController.setDisplayPreference(previous) }
+        }
+    }
+
+    private fun rootNavigationItem(label: String): SemanticsMatcher =
+        hasText(label) and hasClickAction() and hasAnyAncestor(
+            hasTestTag("${TSUYOMI_NAVIGATION_TAG_PREFIX}bottom_bar") or
+                hasTestTag("${TSUYOMI_NAVIGATION_TAG_PREFIX}compact_bottom_bar") or
+                hasTestTag("${TSUYOMI_NAVIGATION_TAG_PREFIX}rail"),
+        )
+
+    private fun visibleJourneyNode(matcher: SemanticsMatcher): SemanticsNodeInteraction {
+        composeRule.waitForIdle()
+        val matches = composeRule.onAllNodes(matcher)
+        val displayed = matches.fetchSemanticsNodes().indices.filter { matches[it].isDisplayed() }
+        assertEquals("Exactly one visible destination owner must match $matcher", 1, displayed.size)
+        return matches[displayed.single()].assertIsDisplayed()
+    }
+
+    private fun withSignedBrowseCatalog(application: TsuyomiApplication, block: () -> Unit) {
+        val subscriptions = application.repositorySubscriptions
+        val directory = File(application.noBackupFilesDir, "repository-subscriptions")
+        val stateFile = File(directory, "repository-subscriptions-v1.state")
+        val previousState = stateFile.takeIf { it.isFile }?.readBytes()
+        val repositoryId = "org.tsuyomi.browse-draft-${UUID.randomUUID()}"
+        val indexUrl = "https://repository.example/browse-draft/index-v1.json"
+        val rootKeyId = "browse-draft-test-root"
+        val rootKey = Ed25519PrivateKeyParameters(ByteArray(32) { (it + 121).toByte() }, 0)
+        val archive = application.assets.open("wenku8-fixture.hxp").use { it.readBytes() }
+        val manifest = ZipInputStream(ByteArrayInputStream(archive)).use { input ->
+            var entry = input.nextEntry
+            while (entry != null && entry.name != "manifest.json") entry = input.nextEntry
+            check(entry != null) { "The signed replay archive must contain its manifest" }
+            JSONObject(input.readBytes().toString(Charsets.UTF_8))
+        }
+        fun digest(bytes: ByteArray) = MessageDigest.getInstance("SHA-256").digest(bytes)
+            .joinToString("") { "%02x".format(it.toInt() and 0xff) }
+        val publisher = Phase2TestPublisher.key
+        val now = Instant.now()
+        // Match RepositorySubscriptionInstrumentedTest's root-signed, JCS-canonicalized replay.
+        val signed = JSONObject()
+            .put("repositoryId", repositoryId).put("sequence", 1)
+            .put("issuedAt", now.minusSeconds(1).toString()).put("expiresAt", now.plusSeconds(86400).toString())
+            .put("publishers", JSONArray().put(JSONObject()
+                .put("keyId", publisher.keyId).put("publicKey", Base64.getEncoder().encodeToString(publisher.publicKey))
+                .put("fingerprint", publisher.fingerprint)))
+            .put("packages", JSONArray().put(JSONObject()
+                .put("id", manifest.getString("id")).put("name", manifest.getJSONObject("display").getString("name"))
+                .put("version", manifest.getString("version"))
+                .put("summary", manifest.getJSONObject("display").getString("summary"))
+                .put("language", "JavaScript").put("license", "Apache-2.0")
+                .put("sourceUrl", "https://github.com/Chachaanteng/tsuyomi-extensions")
+                .put("sourceRevision", "b6cb6d33e67d7ab56b8af195ab294a75da0ac230")
+                .put("downloadUrl", "https://repository.example/browse-draft/wenku8-fixture.hxp")
+                .put("size", archive.size).put("sha256", digest(archive))
+                .put("hostApi", manifest.getJSONObject("hostApi")).put("publisherKeyId", publisher.keyId)))
+            .put("revocations", JSONObject().put("publisherFingerprints", JSONArray()).put("packageDigests", JSONArray()))
+        val message = "tsuyomi-repository-v1\u0000".toByteArray(Charsets.US_ASCII) + JsonCanonicalizer(signed.toString()).encodedUTF8
+        val signature = Ed25519Signer().apply { init(true, rootKey); update(message, 0, message.size) }.generateSignature()
+        val envelope = JSONObject().put("format", "tsuyomi-repository").put("version", 1)
+            .put("keyId", rootKeyId).put("signed", signed)
+            .put("signature", Base64.getEncoder().encodeToString(signature)).toString().toByteArray(Charsets.UTF_8)
+        val replay = RepositorySubscriptionRegistry(directory, object : RepositoryFetcher {
+            override fun fetch(url: String, maxBytes: Int): ByteArray {
+                check(url == indexUrl && envelope.size <= maxBytes)
+                return envelope
+            }
+        })
+        try {
+            replay.add("$indexUrl#repositoryId=$repositoryId&keyId=$rootKeyId&publicKey=${Base64.getEncoder().encodeToString(rootKey.generatePublicKey().encoded)}")
+            val catalog = requireNotNull(replay.client(repositoryId)).refresh()
+            assertEquals(manifest.getString("id"), catalog.packages.single().id)
+            subscriptions.reload()
+            block()
+        } finally {
+            // Restore the exact prior registry, including tombstones; remove only this test's cache.
+            if (previousState == null) stateFile.delete() else stateFile.writeBytes(previousState)
+            File(directory, "repository-catalogs/$repositoryId").deleteRecursively()
+            subscriptions.reload()
         }
     }
 
@@ -904,8 +1151,8 @@ class LibraryProductionJourneyInstrumentedTest {
         composeRule.activityRule.scenario.recreate()
         waitForText("选择测试 A")
 
-        val first = composeRule.onNodeWithTag("library-book-${behaviorNewer.sourceId}-${behaviorNewer.remoteBookId}")
-        val second = composeRule.onNodeWithTag("library-book-${behaviorOlder.sourceId}-${behaviorOlder.remoteBookId}")
+        val first = composeRule.onNodeWithTag("library-book-${behaviorNewer.storageKey}")
+        val second = composeRule.onNodeWithTag("library-book-${behaviorOlder.storageKey}")
         first.performSemanticsAction(SemanticsActions.OnLongClick)
         waitForText("已选 1 项")
         first.assertIsSelected()
@@ -940,8 +1187,8 @@ class LibraryProductionJourneyInstrumentedTest {
         composeRule.activityRule.scenario.recreate()
         waitForText("拖放测试 A")
 
-        val firstTag = "library-book-${behaviorNewer.sourceId}-${behaviorNewer.remoteBookId}"
-        val secondTag = "library-book-${behaviorOlder.sourceId}-${behaviorOlder.remoteBookId}"
+        val firstTag = "library-book-${behaviorNewer.storageKey}"
+        val secondTag = "library-book-${behaviorOlder.storageKey}"
         val first = composeRule.onNodeWithTag(firstTag)
         first.performTouchInput {
             down(center)
@@ -968,6 +1215,142 @@ class LibraryProductionJourneyInstrumentedTest {
     }
 
     @Test
+    fun einkRootBookMoveDownProducesTheNextVisibleOrder() {
+        val application = composeRule.activity.application as TsuyomiApplication
+        val token = UUID.randomUUID().toString()
+        val first = BookIdentity.Remote("fixture.eink.reorder", "$token-first")
+        val second = BookIdentity.Remote("fixture.eink.reorder", "$token-second")
+        val firstTag = "library-book-${first.storageKey}"
+        val secondTag = "library-book-${second.storageKey}"
+
+        withEinkManualOrderFixture(
+            application = application,
+            fixtureBooks = listOf(first to "EINK 单本顺序 A", second to "EINK 单本顺序 B"),
+        ) {
+            composeRule.activityRule.scenario.recreate()
+            waitForText("EINK 单本顺序 A")
+            waitForRootCardOrder(firstTag, secondTag)
+
+            composeRule.onNodeWithTag("library-eink-move-down-book:${first.storageKey}")
+                .assertIsDisplayed()
+                .performClick()
+
+            waitForRootCardOrder(secondTag, firstTag)
+        }
+    }
+
+    @Test
+    fun einkRootCollectionAndManualBookMoveDownUseInsertionSlots() {
+        val application = composeRule.activity.application as TsuyomiApplication
+        val token = UUID.randomUUID().toString()
+        val first = BookIdentity.Remote("fixture.eink.reorder", "$token-first")
+        val second = BookIdentity.Remote("fixture.eink.reorder", "$token-second")
+        val collectionId = "eink-node-$token"
+        val collection = LibraryCollection(
+            collectionId = collectionId,
+            kind = CollectionKind.MANUAL,
+            title = "EINK 顺序结构节点",
+            parentCollectionId = null,
+            displayOrder = Long.MAX_VALUE,
+        )
+        val collectionTag = "library-root-node-${libraryCollectionRootId(collectionId)}"
+        val firstTag = "library-book-${first.storageKey}"
+        val secondTag = "library-book-${second.storageKey}"
+
+        withEinkManualOrderFixture(
+            application = application,
+            fixtureBooks = listOf(first to "EINK 节点顺序 A", second to "EINK 节点顺序 B"),
+            collection = collection,
+            collectionPlacement = FixtureRootNodePlacement.FIRST,
+        ) {
+            runBlocking {
+                val repository = application.libraryRepository
+                assertTrue(repository.addManualMembership(collectionId, first))
+                assertTrue(repository.addManualMembership(collectionId, second))
+            }
+            composeRule.activityRule.scenario.recreate()
+            waitForText("EINK 顺序结构节点")
+            waitForRootCardOrder(collectionTag, firstTag, secondTag)
+
+            composeRule.onNodeWithTag("library-eink-move-down-${libraryCollectionRootId(collectionId)}")
+                .assertIsDisplayed()
+                .performClick()
+
+            waitForRootCardOrder(firstTag, collectionTag, secondTag)
+            composeRule.onNodeWithTag(collectionTag).assertIsDisplayed().performClick()
+            waitForText("EINK 节点顺序 A")
+            waitForRootCardOrder(firstTag, secondTag)
+
+            val moveFirstDown = "library-eink-move-down-book:${first.storageKey}"
+            composeRule.onNodeWithTag(moveFirstDown).assertIsDisplayed().performClick()
+            waitForRootCardOrder(secondTag, firstTag)
+            composeRule.onNodeWithTag(moveFirstDown).assertIsNotEnabled()
+        }
+    }
+
+    @Test
+    fun einkSelectedRootBooksMoveDownAsABatchAndLastRootNodeIsBounded() {
+        val application = composeRule.activity.application as TsuyomiApplication
+        val token = UUID.randomUUID().toString()
+        val first = BookIdentity.Remote("fixture.eink.reorder", "$token-first")
+        val second = BookIdentity.Remote("fixture.eink.reorder", "$token-second")
+        val third = BookIdentity.Remote("fixture.eink.reorder", "$token-third")
+        val collectionId = "eink-bound-$token"
+        val collection = LibraryCollection(
+            collectionId = collectionId,
+            kind = CollectionKind.MANUAL,
+            title = "EINK 边界结构节点",
+            parentCollectionId = null,
+            displayOrder = Long.MAX_VALUE,
+        )
+        val firstTag = "library-book-${first.storageKey}"
+        val secondTag = "library-book-${second.storageKey}"
+        val thirdTag = "library-book-${third.storageKey}"
+
+        withEinkManualOrderFixture(
+            application = application,
+            fixtureBooks = listOf(
+                first to "EINK 批量顺序 A",
+                second to "EINK 批量顺序 B",
+                third to "EINK 批量顺序 C",
+            ),
+            collection = collection,
+            collectionPlacement = FixtureRootNodePlacement.LAST,
+        ) {
+            composeRule.activityRule.scenario.recreate()
+            waitForText("EINK 批量顺序 A")
+            waitForRootCardOrder(firstTag, secondTag, thirdTag)
+
+            composeRule.onNodeWithTag(firstTag).performSemanticsAction(SemanticsActions.OnLongClick)
+            composeRule.onNodeWithTag(secondTag).performClick()
+            waitForText("已选 2 项")
+            composeRule.onNodeWithTag("library-eink-move-up-book:${second.storageKey}").assertIsNotEnabled()
+            composeRule.onNodeWithTag("library-eink-move-down-book:${first.storageKey}")
+                .assertIsDisplayed()
+                .performClick()
+
+            waitForRootCardOrder(thirdTag, firstTag, secondTag)
+            composeRule.onNodeWithTag(firstTag).performSemanticsAction(SemanticsActions.OnLongClick)
+            composeRule.onNodeWithTag(secondTag).performClick()
+            waitForText("已选 2 项")
+            composeRule.onNodeWithTag("library-eink-move-up-book:${second.storageKey}")
+                .assertIsDisplayed()
+                .performClick()
+            waitForRootCardOrder(firstTag, secondTag, thirdTag)
+            composeRule.onNodeWithTag(firstTag).performSemanticsAction(SemanticsActions.OnLongClick)
+            composeRule.onNodeWithTag(secondTag).performClick()
+            waitForText("已选 2 项")
+            composeRule.onNodeWithTag("library-eink-move-up-book:${first.storageKey}").assertIsNotEnabled()
+            composeRule.onNodeWithTag("library-eink-move-up-book:${second.storageKey}").assertIsNotEnabled()
+            moveToLastLibraryPage("library-root-node-${libraryCollectionRootId(collectionId)}")
+            composeRule.onNodeWithTag("library-root-node-${libraryCollectionRootId(collectionId)}")
+                .assertIsDisplayed()
+            composeRule.onNodeWithTag("library-eink-move-down-${libraryCollectionRootId(collectionId)}")
+                .assertIsNotEnabled()
+        }
+    }
+
+    @Test
     fun selected_folders_share_one_preview_cancel_and_atomic_subtree_confirmation() {
         val application = composeRule.activity.application as TsuyomiApplication
         val repository = application.libraryRepository
@@ -976,7 +1359,7 @@ class LibraryProductionJourneyInstrumentedTest {
         val parentB = "$prefix-b"
         val childA = "$prefix-a-child"
         val childB = "$prefix-b-child"
-        val identity = BookIdentity("fixture.collection", "$prefix-book")
+        val identity = BookIdentity.Remote("fixture.collection", "$prefix-book")
         try {
             runBlocking {
                 application.displayController.setDisplayPreference(DisplayPreference.STANDARD)
@@ -1066,9 +1449,9 @@ class LibraryProductionJourneyInstrumentedTest {
     fun library_controller_projects_actual_unpinned_reader_history_and_keeps_root_membership() = runBlocking {
         val repository = (composeRule.activity.application as TsuyomiApplication).libraryRepository
         val suffix = UUID.randomUUID().toString()
-        val reopened = BookIdentity("fixture.reader.history", "opened-$suffix")
-        val completed = BookIdentity("fixture.reader.history", "completed-$suffix")
-        val metadataOnly = BookIdentity("fixture.reader.history", "metadata-$suffix")
+        val reopened = BookIdentity.Remote("fixture.reader.history", "opened-$suffix")
+        val completed = BookIdentity.Remote("fixture.reader.history", "completed-$suffix")
+        val metadataOnly = BookIdentity.Remote("fixture.reader.history", "metadata-$suffix")
         val initialVisit = Instant.parse("2200-09-14T01:00:00Z")
         val completedVisit = initialVisit.plusSeconds(10)
         val returnVisit = initialVisit.plusSeconds(20)
@@ -1483,10 +1866,12 @@ class LibraryProductionJourneyInstrumentedTest {
                 packageRevision = "package-revision",
                 credentialRevision = "credential-revision",
                 scope = this,
+                localPublications = null,
+                publicationGeneration = 0L,
             )
             val entries = (0 until 33).map { index ->
                 LibraryEntry(
-                    book = book(BookIdentity("fixture.cover", "cover-$index"), "封面 $index").copy(
+                    book = book(BookIdentity.Remote("fixture.cover", "cover-$index"), "封面 $index").copy(
                         coverUrl = "https://example.com/cover-$index.png",
                         canonicalUrl = "https://example.com/book-$index",
                     ),
@@ -1531,7 +1916,7 @@ class LibraryProductionJourneyInstrumentedTest {
             }
         }
         val entry = LibraryEntry(
-            book = book(BookIdentity("fixture.cover", "foreground"), "前后台封面").copy(
+            book = book(BookIdentity.Remote("fixture.cover", "foreground"), "前后台封面").copy(
                 coverUrl = "https://example.com/foreground.png",
                 canonicalUrl = "https://example.com/book/foreground",
             ),
@@ -1548,6 +1933,8 @@ class LibraryProductionJourneyInstrumentedTest {
                 packageRevision = "package",
                 credentialRevision = "credential",
                 scope = this,
+                localPublications = null,
+                publicationGeneration = 0L,
             )
             controller.setCoverVisible(entry, true)
             withTimeout(5_000) {
@@ -1563,6 +1950,118 @@ class LibraryProductionJourneyInstrumentedTest {
         } finally {
             controller.setCoverVisible(entry, false)
             bitmap.recycle()
+        }
+    }
+
+    private enum class FixtureRootNodePlacement { FIRST, LAST, AFTER_FIXTURE_BOOKS }
+
+    private fun withEinkManualOrderFixture(
+        application: TsuyomiApplication,
+        fixtureBooks: List<Pair<BookIdentity, String>>,
+        collection: LibraryCollection? = null,
+        collectionPlacement: FixtureRootNodePlacement = FixtureRootNodePlacement.AFTER_FIXTURE_BOOKS,
+        test: () -> Unit,
+    ) {
+        val repository = application.libraryRepository
+        val preferences = application.libraryPreferencesRepository
+        val identities = fixtureBooks.map { it.first }
+        val identitySet = identities.toSet()
+        val previousDisplayPreference = runBlocking {
+            application.displayController.preferences.first().displayPreference
+        }
+        val previousLibraryPreferences = runBlocking { preferences.preferences.first() }
+        val previousEinkTab = previousLibraryPreferences.tabPresentations["EINK:ALL"]
+            ?: LibraryTabPresentationPreferences()
+        val previousBookOrder = runBlocking { repository.libraryEntries().map { it.book.identity } }
+
+        try {
+            runBlocking {
+                repository.removeFromLibrary(identitySet)
+                collection?.let { repository.deleteCollection(it.collectionId) }
+                fixtureBooks.forEach { (identity, title) -> repository.addToLibrary(book(identity, title)) }
+                val currentBookOrder = repository.libraryEntries().map { it.book.identity }
+                repository.reorderLibrary(identities + currentBookOrder.filterNot(identitySet::contains))
+                collection?.let { repository.createCollection(it) }
+                preferences.updateTabPresentation(
+                    "EINK:ALL",
+                    LibraryTabPresentationPreferences(layout = "GRID", sortMode = "CUSTOM"),
+                )
+                application.displayController.setDisplayPreference(DisplayPreference.EINK)
+
+                val owner = LibraryFlowController(repository, preferences, "EINK")
+                owner.reload("failed")
+                val collectionNodeId = collection?.let { libraryCollectionRootId(it.collectionId) }
+                val otherNodes = owner.state.rootNodePlacements.filterNot { it.id == collectionNodeId }
+                val bookCount = repository.libraryEntries().size
+                val rootNodes = when (collectionPlacement) {
+                    FixtureRootNodePlacement.FIRST -> buildList {
+                        add(LibraryRootNodePreference(requireNotNull(collectionNodeId), 0))
+                        otherNodes.forEach { add(LibraryRootNodePreference(it.id, identities.size)) }
+                    }
+                    FixtureRootNodePlacement.LAST -> buildList {
+                        otherNodes.forEach { add(LibraryRootNodePreference(it.id, bookCount)) }
+                        add(LibraryRootNodePreference(requireNotNull(collectionNodeId), bookCount))
+                    }
+                    FixtureRootNodePlacement.AFTER_FIXTURE_BOOKS -> owner.state.rootNodePlacements.map {
+                        LibraryRootNodePreference(it.id, identities.size)
+                    }
+                }
+                preferences.updateRootNodes(rootNodes)
+            }
+            test()
+        } finally {
+            runBlocking {
+                collection?.let { repository.deleteCollection(it.collectionId) }
+                repository.removeFromLibrary(identitySet)
+                val remainingBookOrder = repository.libraryEntries().map { it.book.identity }
+                val originalIdentities = previousBookOrder.toSet()
+                val restoredBookOrder = previousBookOrder.filter { it in remainingBookOrder } +
+                    remainingBookOrder.filterNot(originalIdentities::contains)
+                if (restoredBookOrder.isNotEmpty()) repository.reorderLibrary(restoredBookOrder)
+                preferences.updateRootNodes(previousLibraryPreferences.rootNodes)
+                preferences.updateTabPresentation("EINK:ALL", previousEinkTab)
+                application.displayController.setDisplayPreference(previousDisplayPreference)
+            }
+        }
+    }
+
+    private fun waitForRootCardOrder(vararg tags: String) {
+        fun matches(): Boolean {
+            var previous: Offset? = null
+            for (tag in tags) {
+                val bounds = composeRule.onAllNodesWithTag(tag)
+                    .fetchSemanticsNodes().singleOrNull()?.boundsInRoot ?: return false
+                val current = Offset(bounds.left, bounds.top)
+                previous?.let { before ->
+                    val follows = before.y < current.y - 1f ||
+                        (abs(before.y - current.y) <= 1f && before.x < current.x)
+                    if (!follows) return false
+                }
+                previous = current
+            }
+            return true
+        }
+
+        composeRule.waitUntil(timeoutMillis = 10_000) { matches() }
+        assertTrue("Root cards are not in expected screen order: ${tags.toList()}", matches())
+    }
+
+    private fun moveToLastLibraryPage(expectedLastRootNodeTag: String) {
+        val nextPages = composeRule.onAllNodes(
+            hasText("下一页") and hasAnyAncestor(hasTestTag("library-eink-pagination")),
+        )
+        var pageChanges = 0
+        while (true) {
+            val nextNodes = nextPages.fetchSemanticsNodes()
+            if (nextNodes.isEmpty()) {
+                // Fitting content has no page controls; its exact terminal root must already be visible.
+                composeRule.onNodeWithTag(expectedLastRootNodeTag).assertIsDisplayed()
+                return
+            }
+            assertEquals("Expected exactly one Library content Next control", 1, nextNodes.size)
+            if (nextNodes.single().config.contains(SemanticsProperties.Disabled)) return
+            assertTrue("Library page count exceeded the bounded fixture", pageChanges++ < 512)
+            nextPages[0].performClick()
         }
     }
 
@@ -1592,7 +2091,7 @@ class LibraryProductionJourneyInstrumentedTest {
     private fun progress(identity: BookIdentity, at: Instant, bookProgress: Double): ReadingProgress = ReadingProgress(
         identity = identity,
         locator = ReaderLocator(
-            document = DocumentIdentity(identity.sourceId, identity.remoteBookId, "chapter-1"),
+            document = DocumentIdentity(identity, "chapter-1"),
             blockId = "block-1",
             characterOffset = 10,
             bookProgress = bookProgress,

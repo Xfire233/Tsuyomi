@@ -24,7 +24,7 @@ class LibraryUpdateProjectionTest {
         val localUpdated = entry("local-updated")
         val localQuiet = entry("local-quiet")
         val mirrorUpdated = entry("mirror-updated", localMembership = false)
-        val updates = listOf(update(localUpdated, detectedAt = 30), update(mirrorUpdated, detectedAt = 20))
+        val updates: Map<BookIdentity, UnresolvedUpdate> = listOf(update(localUpdated, detectedAt = 30), update(mirrorUpdated, detectedAt = 20))
             .associateBy(UnresolvedUpdate::identity)
 
         val projected = LibraryUiState(
@@ -45,7 +45,7 @@ class LibraryUpdateProjectionTest {
         val neverReadNewest = entry("never-read-newest")
         val lastRead = entry("last-read", readAt = Instant.ofEpochSecond(90))
         val quietSecond = entry("quiet-second")
-        val updates = listOf(
+        val updates: Map<BookIdentity, UnresolvedUpdate> = listOf(
             update(datedOlder, detectedAt = 200, publicationDate = "2026-09-01"),
             update(neverReadNewest, detectedAt = 100, publicationDate = "2026-09-03"),
             update(lastRead, detectedAt = 50, publicationDate = "2026-08-01"),
@@ -60,7 +60,7 @@ class LibraryUpdateProjectionTest {
 
         assertEquals(
             listOf("last-read", "never-read-newest", "dated-older", "quiet-first", "quiet-second"),
-            projected.map { it.book.identity.remoteBookId },
+            projected.map { (it.book.identity as BookIdentity.Remote).remoteBookId },
         )
     }
 
@@ -76,7 +76,7 @@ class LibraryUpdateProjectionTest {
             sortMode = LibrarySortMode.TITLE,
         ).projectedEntries()
 
-        assertEquals(listOf("a-quiet", "z-updated"), projected.map { it.book.identity.remoteBookId })
+        assertEquals(listOf("a-quiet", "z-updated"), projected.map { (it.book.identity as BookIdentity.Remote).remoteBookId })
     }
 
     @Test
@@ -115,7 +115,7 @@ class LibraryUpdateProjectionTest {
         localMembership: Boolean = true,
         readAt: Instant? = null,
     ): LibraryEntry {
-        val identity = BookIdentity("fixture.source", id)
+        val identity = BookIdentity.Remote("fixture.source", id)
         return LibraryEntry(
             book = LibraryBook(identity, title, Instant.EPOCH, Instant.EPOCH),
             libraryAddedAt = Instant.EPOCH,
@@ -127,7 +127,7 @@ class LibraryUpdateProjectionTest {
                 ReadingProgress(
                     identity = identity,
                     locator = ReaderLocator(
-                        document = DocumentIdentity(identity.sourceId, identity.remoteBookId, "chapter-1"),
+                        document = DocumentIdentity(identity, "chapter-1", null),
                         blockId = "block-1",
                         characterOffset = 0,
                         chapterProgress = 0.25,
@@ -144,13 +144,16 @@ class LibraryUpdateProjectionTest {
         entry: LibraryEntry,
         detectedAt: Long,
         publicationDate: String? = null,
-    ) = UnresolvedUpdate(
-        identity = entry.book.identity,
-        title = entry.book.title,
-        anchor = "anchor-${entry.book.identity.remoteBookId}",
-        chapters = listOf(SourceUpdateChapter("chapter-2", "第二章")),
-        newChapterIds = listOf("chapter-2"),
-        lastUpdatedDate = publicationDate,
-        detectedAt = detectedAt,
-    )
+    ): UnresolvedUpdate {
+        val identity = entry.book.identity as BookIdentity.Remote
+        return UnresolvedUpdate(
+            identity = identity,
+            title = entry.book.title,
+            anchor = "anchor-${identity.remoteBookId}",
+            chapters = listOf(SourceUpdateChapter("chapter-2", "第二章")),
+            newChapterIds = listOf("chapter-2"),
+            lastUpdatedDate = publicationDate,
+            detectedAt = detectedAt,
+        )
+    }
 }

@@ -5,6 +5,7 @@
 package org.tsuyomi.reader.ui
 
 import androidx.activity.compose.BackHandler
+import org.tsuyomi.core.display.displayGrayscaleLayer
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
@@ -13,8 +14,23 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.safeDrawing
+import androidx.compose.foundation.layout.windowInsetsPadding
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
+import org.tsuyomi.core.display.DisplayProfile
+import org.tsuyomi.core.display.LocalDisplayEnvironment
+import org.tsuyomi.core.ui.components.TsuyomiTopBar
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.ui.unit.Dp
+import org.tsuyomi.core.ui.components.LocalTsuyomiPagerMaxContentHeight
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.selection.toggleable
@@ -26,6 +42,8 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.MutableState
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -34,12 +52,16 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.input.TextFieldValue
 import org.tsuyomi.core.ui.components.tsuyomiAnimateContentSize
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.stateDescription
+import androidx.compose.ui.semantics.role
+import androidx.compose.ui.semantics.toggleableState
+import androidx.compose.ui.state.ToggleableState
 import androidx.compose.ui.unit.dp
 import java.util.Locale
 import kotlinx.coroutines.launch
@@ -55,9 +77,88 @@ import org.tsuyomi.core.ui.components.TsuyomiVisibility
 import org.tsuyomi.core.ui.components.TsuyomiVisibilityEdge
 import org.tsuyomi.core.ui.components.rememberTsuyomiModalSheetController
 import org.tsuyomi.core.ui.components.TsuyomiToggleChip
+import org.tsuyomi.core.ui.components.TsuyomiMeasuredPager
+import org.tsuyomi.core.ui.components.TsuyomiMeasuredPagerState
+import org.tsuyomi.core.ui.components.rememberTsuyomiMeasuredPagerState
+import androidx.compose.runtime.key
+import androidx.compose.ui.semantics.selected
+
+private enum class ReaderSettingsProject(
+    val key: String,
+    val labelResource: Int,
+    val controlKeys: List<String>,
+) {
+    TYPOGRAPHY("project:typography", R.string.reader_typography_group, listOf(
+        "font-size", "line-spacing", "horizontal-margin", "paragraph-spacing",
+        "font-family", "font-weight", "letter-spacing", "first-line-indent", "vertical-margin",
+        "text-alignment",
+        "foreground-color", "background-color",
+    )),
+    PAGE("project:page", R.string.reader_page_group, listOf(
+        "flow", "theme",
+    )),
+    NAVIGATION("project:navigation", R.string.reader_navigation_group, listOf("progress", "volume", "immersive")),
+    DEVICE("project:device", R.string.reader_device_group, listOf("keep-awake", "lock-portrait")),
+}
+
+private class ReaderSettingsPagerStates(
+    val projects: TsuyomiMeasuredPagerState,
+    private val controls: Map<ReaderSettingsProject, TsuyomiMeasuredPagerState>,
+    val foregroundDraft: MutableState<TextFieldValue>,
+    val backgroundDraft: MutableState<TextFieldValue>,
+) {
+    fun controls(project: ReaderSettingsProject): TsuyomiMeasuredPagerState = controls.getValue(project)
+}
+
+@Composable
+private fun rememberReaderSettingsPagerStates(
+    foregroundColor: String?,
+    backgroundColor: String?,
+): ReaderSettingsPagerStates {
+    val projects = rememberTsuyomiMeasuredPagerState(ReaderSettingsProject.TYPOGRAPHY.key)
+    val typography = rememberTsuyomiMeasuredPagerState()
+    val page = rememberTsuyomiMeasuredPagerState()
+    val navigation = rememberTsuyomiMeasuredPagerState()
+    val device = rememberTsuyomiMeasuredPagerState()
+    val foregroundDraft = rememberSaveable(foregroundColor, stateSaver = TextFieldValue.Saver) {
+        mutableStateOf(TextFieldValue(foregroundColor.orEmpty()))
+    }
+    val backgroundDraft = rememberSaveable(backgroundColor, stateSaver = TextFieldValue.Saver) {
+        mutableStateOf(TextFieldValue(backgroundColor.orEmpty()))
+    }
+    return remember(projects, typography, page, navigation, device, foregroundDraft, backgroundDraft) {
+        ReaderSettingsPagerStates(
+            projects,
+            mapOf(
+                ReaderSettingsProject.TYPOGRAPHY to typography,
+                ReaderSettingsProject.PAGE to page,
+                ReaderSettingsProject.NAVIGATION to navigation,
+                ReaderSettingsProject.DEVICE to device,
+            ),
+            foregroundDraft,
+            backgroundDraft,
+        )
+    }
+}
+
+/** Both Reader sidebars use their rendered button typography, not the window's width fraction. */
+@Composable
+internal fun readerNavigationWidth(labels: List<String>): Dp {
+    val measurer = rememberTextMeasurer()
+    val density = LocalDensity.current
+    val style = MaterialTheme.typography.labelLarge
+    return remember(labels, style, density) {
+        val labelWidth = labels.maxOfOrNull { measurer.measure(it, style = style).size.width } ?: 0
+        with(density) {
+            (labelWidth + (TsuyomiSpacing.Sm * 2 + 4.dp).roundToPx())
+                .coerceAtLeast(48.dp.roundToPx()).toDp()
+        }
+    }
+}
 
 @Composable
 internal fun ReaderSettingsSheet(
+    settingsIdentity: String,
     state: ReaderSettingsUiState,
     effectiveFlow: ReaderFlow,
     dualPageEligible: Boolean,
@@ -66,6 +167,39 @@ internal fun ReaderSettingsSheet(
     onFollowGlobalFlow: () -> Unit,
     onDismiss: () -> Unit,
 ) {
+    val selectedProject = key(settingsIdentity) {
+        rememberSaveable { mutableStateOf(ReaderSettingsProject.TYPOGRAPHY) }
+    }
+    val pagerStates = key(settingsIdentity) {
+        rememberReaderSettingsPagerStates(state.foregroundColor, state.backgroundColor)
+    }
+    if (LocalDisplayEnvironment.current.effectiveProfile == DisplayProfile.EINK) {
+        Dialog(onDismissRequest = onDismiss, properties = DialogProperties(
+            usePlatformDefaultWidth = false,
+            decorFitsSystemWindows = false,
+        )) {
+            Surface(Modifier.fillMaxSize().testTag("reader-settings-page").displayGrayscaleLayer()) {
+                Column(Modifier.fillMaxSize().windowInsetsPadding(WindowInsets.safeDrawing)) {
+                    TsuyomiTopBar(title = stringResource(R.string.reader_all_settings), onNavigateUp = onDismiss)
+                    ReaderSettingsContent(
+                        state = state,
+                        effectiveFlow = effectiveFlow,
+                        dualPageEligible = dualPageEligible,
+                        hasFlowOverride = hasFlowOverride,
+                        onAction = onAction,
+                        onFollowGlobalFlow = onFollowGlobalFlow,
+                        expanded = true,
+                        onOpenExpanded = {},
+                        selectedProject = selectedProject.value,
+                        onSelectProject = { selectedProject.value = it },
+                        pagerStates = pagerStates,
+                        modifier = Modifier.fillMaxWidth().weight(1f),
+                    )
+                }
+            }
+        }
+        return
+    }
     val scope = rememberCoroutineScope()
     val controller = rememberTsuyomiModalSheetController(
         allowPartiallyExpanded = true,
@@ -102,6 +236,9 @@ internal fun ReaderSettingsSheet(
             onFollowGlobalFlow = onFollowGlobalFlow,
             expanded = controller.targetExpanded,
             onOpenExpanded = ::showExpandedSettings,
+            selectedProject = selectedProject.value,
+            onSelectProject = { selectedProject.value = it },
+            pagerStates = pagerStates,
             modifier = Modifier.fillMaxWidth().fillMaxHeight().testTag("reader-settings-content"),
         )
         BackHandler {
@@ -120,8 +257,77 @@ private fun ReaderSettingsContent(
     onFollowGlobalFlow: () -> Unit,
     expanded: Boolean,
     onOpenExpanded: () -> Unit,
+    selectedProject: ReaderSettingsProject,
+    onSelectProject: (ReaderSettingsProject) -> Unit,
+    pagerStates: ReaderSettingsPagerStates,
     modifier: Modifier,
 ) {
+    if (LocalDisplayEnvironment.current.effectiveProfile == DisplayProfile.EINK) {
+        val navigationWidth = readerNavigationWidth(ReaderSettingsProject.entries.map { stringResource(it.labelResource) })
+        val controlKeys = remember(selectedProject, hasFlowOverride) {
+            if (selectedProject == ReaderSettingsProject.PAGE && hasFlowOverride) {
+                selectedProject.controlKeys + "follow-global"
+            } else {
+                selectedProject.controlKeys
+            }
+        }
+        Row(
+            modifier.fillMaxSize().padding(horizontal = TsuyomiSpacing.Md, vertical = TsuyomiSpacing.Sm)
+                .testTag("reader-eink-settings-content"),
+            horizontalArrangement = Arrangement.spacedBy(TsuyomiSpacing.Md),
+        ) {
+            TsuyomiMeasuredPager(
+                itemCount = ReaderSettingsProject.entries.size,
+                itemKey = { ReaderSettingsProject.entries[it].key },
+                itemContent = { index ->
+                    val project = ReaderSettingsProject.entries[index]
+                    val selected = selectedProject == project
+                    TsuyomiButton(
+                        text = stringResource(project.labelResource),
+                        onClick = { onSelectProject(project) },
+                        modifier = Modifier.fillMaxWidth()
+                            .semantics {
+                                this.selected = selected
+                                stateDescription = if (selected) "当前设置项目" else "打开设置项目"
+                            }
+                            .testTag("reader-eink-project-${project.name.lowercase(Locale.ROOT)}"),
+                        style = if (selected) TsuyomiButtonStyle.PRIMARY else TsuyomiButtonStyle.SECONDARY,
+                        contentPadding = PaddingValues(horizontal = TsuyomiSpacing.Sm, vertical = TsuyomiSpacing.Sm),
+                    )
+                },
+                state = pagerStates.projects,
+                verticalSpacing = TsuyomiSpacing.Sm,
+                modifier = Modifier.width(navigationWidth).fillMaxHeight()
+                    .testTag("reader-eink-settings-navigation"),
+            )
+            Column(
+                Modifier.weight(1f).fillMaxHeight().testTag("reader-eink-project-content"),
+                verticalArrangement = Arrangement.spacedBy(TsuyomiSpacing.Xs),
+            ) {
+                Text(stringResource(selectedProject.labelResource), style = MaterialTheme.typography.titleMedium)
+                HorizontalDivider()
+                TsuyomiMeasuredPager(
+                    itemCount = controlKeys.size,
+                    itemKey = { controlKeys[it] },
+                    itemContent = { index ->
+                        ReaderEInkSettingsControl(
+                            key = controlKeys[index],
+                            state = state,
+                            effectiveFlow = effectiveFlow,
+                            onAction = onAction,
+                            onFollowGlobalFlow = onFollowGlobalFlow,
+                            foregroundDraft = pagerStates.foregroundDraft,
+                            backgroundDraft = pagerStates.backgroundDraft,
+                        )
+                    },
+                    modifier = Modifier.fillMaxWidth().weight(1f).testTag("reader-eink-setting-controls"),
+                    state = pagerStates.controls(selectedProject),
+                    verticalSpacing = TsuyomiSpacing.Md,
+                )
+            }
+        }
+        return
+    }
     BoxWithConstraints(modifier) {
         val quickScrollState = rememberScrollState()
         val fullScrollState = rememberScrollState()
@@ -158,7 +364,7 @@ private fun ReaderSettingsContent(
                             onAction = onAction,
                             modifier = Modifier.fillMaxWidth(),
                         )
-                        ReaderTypographyDetails(state, onAction)
+                        ReaderTypographyDetails(state, onAction, pagerStates.foregroundDraft, pagerStates.backgroundDraft)
                     }
                 }
                 TsuyomiVisibility(
@@ -204,6 +410,172 @@ private fun ReaderSettingsContent(
         }
     }
 }
+
+@Composable
+private fun ReaderEInkSettingsControl(
+    key: String,
+    state: ReaderSettingsUiState,
+    effectiveFlow: ReaderFlow,
+    onAction: (ReaderSettingsAction) -> Unit,
+    onFollowGlobalFlow: () -> Unit,
+    foregroundDraft: MutableState<TextFieldValue>,
+    backgroundDraft: MutableState<TextFieldValue>,
+) {
+    when (key) {
+        "font-size" -> ReaderSliderSetting(
+            label = stringResource(R.string.reader_font_size), valueLabel = "${state.fontSize.toInt()}sp",
+            value = state.fontSize, valueRange = 12f..32f, steps = 19, eInk = true,
+            eInkTag = "reader-eink-font-size",
+            onValueChange = { onAction(ReaderSettingsAction.FontSize(it)) },
+        )
+        "line-spacing" -> ReaderSliderSetting(
+            label = stringResource(R.string.reader_line_spacing), valueLabel = String.format(Locale.ROOT, "%.1f", state.lineHeight),
+            value = state.lineHeight, valueRange = 1.2f..2.2f, steps = 9, eInk = true,
+            eInkTag = "reader-eink-line-spacing",
+            onValueChange = { onAction(ReaderSettingsAction.LineHeight(it)) },
+        )
+        "horizontal-margin" -> ReaderSliderSetting(
+            label = stringResource(R.string.reader_margin), valueLabel = "${state.horizontalMargin.toInt()}dp",
+            value = state.horizontalMargin, valueRange = 12f..40f, steps = 6, eInk = true,
+            eInkTag = "reader-eink-horizontal-margin",
+            onValueChange = { onAction(ReaderSettingsAction.HorizontalMargin(it)) },
+        )
+        "paragraph-spacing" -> ReaderSliderSetting(
+            label = stringResource(R.string.reader_paragraph_spacing), valueLabel = "${state.paragraphSpacing.toInt()}dp",
+            value = state.paragraphSpacing, valueRange = 0f..32f, steps = 7, eInk = true,
+            eInkTag = "reader-eink-paragraph-spacing",
+            onValueChange = { onAction(ReaderSettingsAction.ParagraphSpacing(it)) },
+        )
+        "letter-spacing" -> ReaderSliderSetting(
+            label = stringResource(R.string.reader_letter_spacing), valueLabel = String.format(Locale.ROOT, "%.2fsp", state.letterSpacing),
+            value = state.letterSpacing, valueRange = -0.05f..0.20f, steps = 24, eInk = true,
+            eInkTag = "reader-eink-letter-spacing",
+            onValueChange = { onAction(ReaderSettingsAction.LetterSpacing(it)) },
+        )
+        "first-line-indent" -> ReaderSliderSetting(
+            label = stringResource(R.string.reader_first_line_indent), valueLabel = String.format(Locale.ROOT, "%.2fem", state.firstLineIndent),
+            value = state.firstLineIndent, valueRange = 0f..4f, steps = 15, eInk = true,
+            eInkTag = "reader-eink-first-line-indent",
+            onValueChange = { onAction(ReaderSettingsAction.FirstLineIndent(it)) },
+        )
+        "vertical-margin" -> ReaderSliderSetting(
+            label = stringResource(R.string.reader_vertical_margin), valueLabel = "${state.verticalMargin.toInt()}dp",
+            value = state.verticalMargin, valueRange = 0f..64f, steps = 15, eInk = true,
+            eInkTag = "reader-eink-vertical-margin",
+            onValueChange = { onAction(ReaderSettingsAction.VerticalMargin(it)) },
+        )
+        "foreground-color" -> ReaderColorOverrideSetting(
+            label = stringResource(R.string.reader_foreground_color),
+            tag = "reader-foreground-color", draftState = foregroundDraft,
+            onValueChanged = { onAction(ReaderSettingsAction.ForegroundColor(it)) },
+        )
+        "background-color" -> ReaderColorOverrideSetting(
+            label = stringResource(R.string.reader_background_color),
+            tag = "reader-background-color", draftState = backgroundDraft,
+            onValueChanged = { onAction(ReaderSettingsAction.BackgroundColor(it)) },
+        )
+        "follow-global" -> TsuyomiButton(
+            text = stringResource(R.string.reader_follow_global_default), onClick = onFollowGlobalFlow,
+            style = TsuyomiButtonStyle.SECONDARY, modifier = Modifier.testTag("reader-follow-global-flow"),
+        )
+        "progress" -> ReaderSwitchSetting(
+            title = stringResource(R.string.reader_progress_info), checked = state.progressVisible,
+            onCheckedChange = { onAction(ReaderSettingsAction.ProgressVisible(it)) },
+            eInk = true, eInkTag = "reader-eink-progress",
+        )
+        "volume" -> ReaderSwitchSetting(
+            title = stringResource(R.string.reader_volume_paging), checked = state.volumePaging,
+            onCheckedChange = { onAction(ReaderSettingsAction.VolumePaging(it)) },
+            eInk = true, eInkTag = "reader-eink-volume-paging",
+        )
+        "immersive" -> ReaderSwitchSetting(
+            title = stringResource(R.string.reader_immersive), checked = state.immersive,
+            onCheckedChange = { onAction(ReaderSettingsAction.Immersive(it)) },
+            eInk = true, eInkTag = "reader-eink-immersive",
+        )
+        "keep-awake" -> ReaderSwitchSetting(
+            title = stringResource(R.string.reader_keep_awake), checked = state.keepAwake,
+            onCheckedChange = { onAction(ReaderSettingsAction.KeepAwake(it)) },
+            eInk = true, eInkTag = "reader-eink-keep-awake",
+        )
+        "lock-portrait" -> ReaderSwitchSetting(
+            title = stringResource(R.string.reader_lock_portrait), checked = state.lockPortrait,
+            onCheckedChange = { onAction(ReaderSettingsAction.LockPortrait(it)) },
+            eInk = true, eInkTag = "reader-eink-lock-portrait",
+        )
+        "font-family" -> ReaderEInkChoiceGroup(
+            label = stringResource(R.string.reader_font_family), currentValue = state.fontFamily,
+            options = listOf("system" to stringResource(R.string.reader_font_family_system),
+                "sans" to stringResource(R.string.reader_font_family_sans),
+                "serif" to stringResource(R.string.reader_font_family_serif),
+                "monospace" to stringResource(R.string.reader_font_family_monospace)),
+            tag = key, onSelect = { onAction(ReaderSettingsAction.FontFamily(it)) },
+        )
+        "font-weight" -> ReaderEInkChoiceGroup(
+            label = stringResource(R.string.reader_font_weight), currentValue = state.fontWeight.toString(),
+            options = listOf("400" to stringResource(R.string.reader_font_weight_regular),
+                "500" to stringResource(R.string.reader_font_weight_medium)),
+            tag = key, onSelect = { onAction(ReaderSettingsAction.FontWeight(it.toInt())) },
+        )
+        "text-alignment" -> ReaderEInkChoiceGroup(
+            label = stringResource(R.string.reader_text_alignment), currentValue = state.textAlignment,
+            options = listOf("start" to stringResource(R.string.reader_text_alignment_start),
+                "justify" to stringResource(R.string.reader_text_alignment_justify),
+                "center" to stringResource(R.string.reader_text_alignment_center),
+                "end" to stringResource(R.string.reader_text_alignment_end)),
+            tag = key, onSelect = { onAction(ReaderSettingsAction.TextAlignment(it)) },
+        )
+        "flow" -> Column(Modifier.heightIn(max = LocalTsuyomiPagerMaxContentHeight.current ?: Dp.Infinity),
+            verticalArrangement = Arrangement.spacedBy(TsuyomiSpacing.Xs)) {
+            ReaderEInkChoiceGroup(
+                label = stringResource(R.string.reader_page_group), currentValue = effectiveFlow.name,
+                options = listOf(ReaderFlow.PAGED.name to ReaderFlow.PAGED.label, ReaderFlow.DUAL.name to ReaderFlow.DUAL.label),
+                tag = key, onSelect = { onAction(ReaderSettingsAction.Flow(ReaderFlow.valueOf(it))) },
+                modifier = Modifier.weight(1f, fill = false),
+            )
+            if (state.flow == ReaderFlow.DUAL && effectiveFlow == ReaderFlow.PAGED) {
+                Text(stringResource(R.string.reader_dual_effective_paged), style = MaterialTheme.typography.bodySmall)
+            }
+        }
+        "theme" -> ReaderEInkChoiceGroup(
+            label = stringResource(R.string.reader_theme_label), currentValue = state.theme.name,
+            options = ReaderTheme.entries.map { it.name to stringResource(it.labelResource()) },
+            tag = key, onSelect = { onAction(ReaderSettingsAction.Theme(ReaderTheme.valueOf(it))) },
+        )
+        else -> error("Unknown E-ink Reader setting: $key")
+    }
+}
+
+@Composable
+private fun ReaderEInkChoiceGroup(
+    label: String,
+    currentValue: String,
+    options: List<Pair<String, String>>,
+    tag: String,
+    onSelect: (String) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    Column(modifier.heightIn(max = LocalTsuyomiPagerMaxContentHeight.current ?: Dp.Infinity)
+        .testTag("reader-eink-setting-$tag"), verticalArrangement = Arrangement.spacedBy(TsuyomiSpacing.Sm)) {
+        Text(label, style = MaterialTheme.typography.labelLarge)
+        Text(stringResource(R.string.reader_setting_current_value, options.firstOrNull { it.first == currentValue }?.second ?: currentValue),
+            style = MaterialTheme.typography.bodySmall)
+        TsuyomiMeasuredPager(
+            itemCount = options.size, itemKey = { options[it].first }, wrapItems = true,
+            fillViewport = false, modifier = Modifier.fillMaxWidth().weight(1f, fill = false),
+            horizontalSpacing = TsuyomiSpacing.Sm, verticalSpacing = TsuyomiSpacing.Sm,
+            itemContent = { index ->
+                val (optionKey, optionLabel) = options[index]
+                TsuyomiToggleChip(
+                    text = optionLabel, selected = optionKey == currentValue,
+                    stateDescription = stringResource(if (optionKey == currentValue) R.string.reader_option_selected else R.string.reader_option_not_selected),
+                    onClick = { onSelect(optionKey) }, modifier = Modifier.testTag("reader-eink-option-${optionKey.lowercase(Locale.ROOT)}"),
+                )
+            },
+        )
+    }
+}
+
 
 
 @Composable
@@ -399,6 +771,8 @@ private fun ReaderFullSettings(
 private fun ReaderTypographyDetails(
     state: ReaderSettingsUiState,
     onAction: (ReaderSettingsAction) -> Unit,
+    foregroundDraft: MutableState<TextFieldValue>,
+    backgroundDraft: MutableState<TextFieldValue>,
 ) {
     Column(verticalArrangement = Arrangement.spacedBy(TsuyomiSpacing.Sm)) {
         Text(stringResource(R.string.reader_font_family), style = MaterialTheme.typography.labelLarge)
@@ -473,14 +847,14 @@ private fun ReaderTypographyDetails(
         }
         ReaderColorOverrideSetting(
             label = stringResource(R.string.reader_foreground_color),
-            value = state.foregroundColor,
             tag = "reader-foreground-color",
+            draftState = foregroundDraft,
             onValueChanged = { onAction(ReaderSettingsAction.ForegroundColor(it)) },
         )
         ReaderColorOverrideSetting(
             label = stringResource(R.string.reader_background_color),
-            value = state.backgroundColor,
             tag = "reader-background-color",
+            draftState = backgroundDraft,
             onValueChanged = { onAction(ReaderSettingsAction.BackgroundColor(it)) },
         )
     }
@@ -489,20 +863,19 @@ private fun ReaderTypographyDetails(
 @Composable
 private fun ReaderColorOverrideSetting(
     label: String,
-    value: String?,
     tag: String,
+    draftState: MutableState<TextFieldValue>,
     onValueChanged: (String?) -> Unit,
 ) {
-    var draft by rememberSaveable(value) { mutableStateOf(value.orEmpty()) }
     TsuyomiTextField(
-        value = draft,
+        value = draftState.value,
         onValueChange = { candidate ->
-            val normalized = candidate.uppercase(Locale.ROOT)
-            draft = normalized
-            if (normalized.isEmpty()) {
+            val normalized = candidate.copy(text = candidate.text.uppercase(Locale.ROOT))
+            draftState.value = normalized
+            if (normalized.text.isEmpty()) {
                 onValueChanged(null)
-            } else if (HEX_COLOR.matches(normalized)) {
-                onValueChanged(normalized)
+            } else if (HEX_COLOR.matches(normalized.text)) {
+                onValueChanged(normalized.text)
             }
         },
         label = label,
@@ -542,8 +915,11 @@ private fun ReaderSliderSetting(
     onValueChange: (Float) -> Unit,
     compact: Boolean = false,
     sliderTag: String? = null,
+    eInk: Boolean = false,
+    eInkTag: String? = null,
 ) {
-    val sliderModifier = if (sliderTag == null) Modifier else Modifier.testTag(sliderTag)
+    val tag = if (eInk) eInkTag?.let { "$it-slider" } else sliderTag
+    val sliderModifier = if (tag == null) Modifier else Modifier.testTag(tag)
     Column(Modifier.fillMaxWidth().tsuyomiAnimateContentSize()) {
         if (compact) {
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
@@ -584,12 +960,30 @@ private fun ReaderSliderSetting(
     }
 }
 
+
 @Composable
 private fun ReaderSwitchSetting(
     title: String,
     checked: Boolean,
     onCheckedChange: (Boolean) -> Unit,
+    eInk: Boolean = false,
+    eInkTag: String? = null,
 ) {
+    if (eInk) {
+        val stateLabel = stringResource(if (checked) R.string.reader_setting_enabled else R.string.reader_setting_disabled)
+        TsuyomiButton(
+            text = "$title · $stateLabel",
+            onClick = { onCheckedChange(!checked) },
+            modifier = Modifier.semantics {
+                selected = checked
+                role = Role.Switch
+                toggleableState = if (checked) ToggleableState.On else ToggleableState.Off
+                stateDescription = stateLabel
+            }.testTag(eInkTag ?: "reader-eink-setting-toggle"),
+            style = if (checked) TsuyomiButtonStyle.PRIMARY else TsuyomiButtonStyle.SECONDARY,
+        )
+        return
+    }
     Surface(
         modifier = Modifier
             .fillMaxWidth()

@@ -206,12 +206,12 @@ internal class CollectionRuleDraftOwner(
             put("advancedExpanded", value.advancedExpanded)
             put("selectedBooks", org.json.JSONArray().apply {
                 value.selectedBooks.sorted().forEach { identity ->
-                    put(JSONObject().put("sourceId", identity.sourceId).put("remoteBookId", identity.remoteBookId))
+                    put(encodeIdentity(identity))
                 }
             })
             put("booksBeforePick", org.json.JSONArray().apply {
                 value.booksBeforePick.sorted().forEach { identity ->
-                    put(JSONObject().put("sourceId", identity.sourceId).put("remoteBookId", identity.remoteBookId))
+                    put(encodeIdentity(identity))
                 }
             })
             put("attempted", value.attempted)
@@ -250,7 +250,7 @@ internal class CollectionRuleDraftOwner(
                 buildSet {
                     repeat(books.length()) { index ->
                         val book = books.getJSONObject(index)
-                        add(BookIdentity(book.getString("sourceId"), book.getString("remoteBookId")))
+                        add(decodeIdentity(book))
                     }
                     require(size == books.length())
                 }
@@ -259,13 +259,22 @@ internal class CollectionRuleDraftOwner(
                 buildSet {
                     repeat(books.length()) { index ->
                         val book = books.getJSONObject(index)
-                        add(BookIdentity(book.getString("sourceId"), book.getString("remoteBookId")))
+                        add(decodeIdentity(book))
                     }
                     require(size == books.length())
                 }
             } ?: emptySet(),
         )
     }
+
+    private fun encodeIdentity(identity: BookIdentity): JSONObject = when (identity) {
+        is BookIdentity.Remote -> JSONObject().put("sourceId", identity.sourceId).put("remoteBookId", identity.remoteBookId)
+        is BookIdentity.Local -> JSONObject().put("publicationId", identity.publicationId)
+    }
+
+    private fun decodeIdentity(value: JSONObject): BookIdentity = if (value.has("publicationId")) {
+        BookIdentity.Local(value.getString("publicationId"))
+    } else BookIdentity.Remote(value.getString("sourceId"), value.getString("remoteBookId"))
 }
 
 private class CollectionRuleDraftOwnerFactory(

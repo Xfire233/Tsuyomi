@@ -16,7 +16,7 @@ class LibraryDragCoordinatorTest {
     @Test
     fun remoteMirrorAcceptsExactlyOneBookFromTheSameSource() {
         val destination = destinationFor(
-            identities = setOf(BookIdentity("source-a", "book-1")),
+            identities = setOf(BookIdentity.Remote("source-a", "book-1")),
             kind = LibraryShortcutDropKind.REMOTE_FOLDER,
             mirror = LibraryMirrorShortcut("source-a", "folder-1", "收藏", 1, false),
         )
@@ -30,14 +30,14 @@ class LibraryDragCoordinatorTest {
 
         assertNull(
             destinationFor(
-                identities = setOf(BookIdentity("source-a", "book-1"), BookIdentity("source-a", "book-2")),
+                identities = setOf(BookIdentity.Remote("source-a", "book-1"), BookIdentity.Remote("source-a", "book-2")),
                 kind = LibraryShortcutDropKind.REMOTE_FOLDER,
                 mirror = mirror,
             ),
         )
         assertNull(
             destinationFor(
-                identities = setOf(BookIdentity("source-b", "book-1")),
+                identities = setOf(BookIdentity.Remote("source-b", "book-1")),
                 kind = LibraryShortcutDropKind.REMOTE_FOLDER,
                 mirror = mirror,
             ),
@@ -49,13 +49,13 @@ class LibraryDragCoordinatorTest {
         assertEquals(
             LibraryDropDestination.RemoteRemove,
             destinationFor(
-                identities = setOf(BookIdentity("source-a", "book-1")),
+                identities = setOf(BookIdentity.Remote("source-a", "book-1")),
                 kind = LibraryShortcutDropKind.REMOTE_REMOVE,
             ),
         )
         assertNull(
             destinationFor(
-                identities = setOf(BookIdentity("source-a", "book-1"), BookIdentity("source-a", "book-2")),
+                identities = setOf(BookIdentity.Remote("source-a", "book-1"), BookIdentity.Remote("source-a", "book-2")),
                 kind = LibraryShortcutDropKind.REMOTE_REMOVE,
             ),
         )
@@ -64,7 +64,7 @@ class LibraryDragCoordinatorTest {
     @Test
     fun remoteMirrorRootAcceptsOneSameSourceBook() {
         val destination = destinationFor(
-            identities = setOf(BookIdentity("source-a", "book-1")),
+            identities = setOf(BookIdentity.Remote("source-a", "book-1")),
             kind = LibraryShortcutDropKind.REMOTE_MIRROR,
             mirror = LibraryMirrorShortcut("source-a", null, "网站书架", 3, false),
         )
@@ -77,14 +77,14 @@ class LibraryDragCoordinatorTest {
         assertEquals(
             LibraryDropDestination.LocalCopy,
             destinationFor(
-                identities = setOf(BookIdentity("source-a", "book-1")),
+                identities = setOf(BookIdentity.Remote("source-a", "book-1")),
                 kind = LibraryShortcutDropKind.LOCAL_COPY,
             ),
         )
         assertEquals(
             LibraryDropDestination.LocalCopy,
             destinationFor(
-                identities = setOf(BookIdentity("source-a", "book-1"), BookIdentity("source-a", "book-2")),
+                identities = setOf(BookIdentity.Remote("source-a", "book-1"), BookIdentity.Remote("source-a", "book-2")),
                 kind = LibraryShortcutDropKind.LOCAL_COPY,
             ),
         )
@@ -93,7 +93,7 @@ class LibraryDragCoordinatorTest {
     @Test
     fun disposing_a_visible_target_removes_it_from_the_active_drag_snapshot() {
         val coordinator = LibraryDragCoordinator()
-        val source = BookIdentity("source-a", "book-1")
+        val source = BookIdentity.Remote("source-a", "book-1")
         val mirror = LibraryMirrorShortcut("source-a", "folder-1", "收藏", 1, false)
         coordinator.registerSource("subject", Rect(0f, 0f, 20f, 20f))
         coordinator.registerShelf(coordinator.allocateShelfTargetId(), Rect(0f, 0f, 120f, 100f), true, null)

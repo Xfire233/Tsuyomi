@@ -4,44 +4,25 @@
  */
 package org.tsuyomi.feature.browse
 
-import androidx.compose.foundation.clickable
-import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.FlowRow
-import androidx.compose.foundation.layout.PaddingValues
-import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.lazy.rememberLazyListState
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.DisposableEffect
-import androidx.compose.ui.Alignment
+import androidx.compose.runtime.saveable.rememberSaveableStateHolder
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
-import androidx.compose.ui.semantics.Role
-import androidx.compose.ui.semantics.heading
-import androidx.compose.ui.semantics.semantics
-import androidx.compose.ui.text.style.TextOverflow
-import androidx.compose.ui.unit.dp
+import androidx.compose.ui.platform.testTag
 import org.tsuyomi.core.display.DisplayProfile
 import org.tsuyomi.core.display.LocalDisplayEnvironment
 import org.tsuyomi.core.media.api.CoverUiState
-import org.tsuyomi.core.ui.components.CoverImage
 import org.tsuyomi.core.ui.components.StateView
-import org.tsuyomi.core.ui.components.TsuyomiAdaptiveListFab
-import org.tsuyomi.core.ui.components.TsuyomiButton
-import org.tsuyomi.core.ui.components.TsuyomiButtonStyle
-import org.tsuyomi.core.ui.components.TsuyomiTabRow
 import org.tsuyomi.core.ui.components.TsuyomiStateKind
 import org.tsuyomi.core.ui.components.TsuyomiTabOption
+import org.tsuyomi.core.ui.components.TsuyomiTextTabRow
+import org.tsuyomi.core.ui.theme.TsuyomiSpacing
 import org.tsuyomi.shared.sourcecontract.SourceBookSummary
 import org.tsuyomi.shared.sourcecontract.SourceErrorCode
 import org.tsuyomi.shared.sourcecontract.SourceHomeFilter
@@ -64,6 +45,10 @@ data class SourceHomePageViewState(
     val appendFailure: SourceHomeFailure? = null,
     val firstVisibleItemIndex: Int = 0,
     val firstVisibleItemScrollOffset: Int = 0,
+    val cursorPage: SourceHomePage? = null,
+    val cursorPageNumber: Int = 1,
+    val cursorPreviousAvailable: Boolean = false,
+    val cursorNextAvailable: Boolean = false,
 )
 
 sealed interface SourceHomeViewState {
@@ -85,21 +70,19 @@ sealed interface SourceHomeViewState {
     data class Failure(val code: SourceErrorCode?, val safeCode: String) : SourceHomeViewState
 }
 
-/** Standard host-owned source Home pager plus the frozen E-ink presentation. */
+/** Standard pager and explicit E-ink cursor-page presentation over the same source state. */
 @Composable
 fun SourceHomeScreen(
     sourceName: String,
     state: SourceHomeViewState,
-    remoteLibraryAvailable: Boolean,
-    verificationAvailable: Boolean,
+    filtersExpanded: Boolean,
+    onFiltersExpandedChange: (Boolean) -> Unit,
     onSelectPrimary: (String) -> Unit,
     onSelectFilters: (Map<String, String>) -> Unit,
     onRefresh: () -> Unit,
     onLoadMore: () -> Unit,
     onRetryReplacement: () -> Unit,
     onUseOfflineCache: () -> Unit,
-    onSearch: () -> Unit,
-    onOpenRemoteLibrary: () -> Unit,
     onOpenBook: (SourceBookSummary) -> Unit,
     onOpenFeature: (SourceHomeFeature) -> Unit,
     onOpenVerification: () -> Unit,
@@ -107,7 +90,10 @@ fun SourceHomeScreen(
     coverState: @Composable (SourceBookSummary) -> CoverUiState,
     modifier: Modifier = Modifier,
     onCoverVisibility: (SourceBookSummary, Boolean) -> Unit = { _, _ -> },
+    onPreviousPage: () -> Unit = {},
+    onNextPage: () -> Unit = onLoadMore,
 ) {
+    val einkPageStateHolder = rememberSaveableStateHolder()
     when (state) {
         SourceHomeViewState.Idle,
         SourceHomeViewState.Loading,
@@ -127,39 +113,67 @@ fun SourceHomeScreen(
         is SourceHomeViewState.Content -> if (
             LocalDisplayEnvironment.current.effectiveProfile == DisplayProfile.EINK
         ) {
-            val active = state.activePageState
-            if (active?.page == null) {
-                active?.replacementFailure?.let { failure ->
-                    SourceHomeFailureView(
-                        failure,
-                        onRetryReplacement,
-                        onUseOfflineCache,
-                        onOpenVerification,
-                        modifier,
-                    )
-                } ?: StateView(
-                    kind = TsuyomiStateKind.LOADING,
-                    title = stringResource(R.string.source_home_loading),
-                    message = stringResource(R.string.source_home_loading_message, sourceName),
-                    modifier = modifier.fillMaxSize(),
-                )
-            } else {
-                FrozenEInkSourceHomeContent(
-                    pageState = active,
-                    remoteLibraryAvailable = remoteLibraryAvailable,
-                    verificationAvailable = verificationAvailable,
-                    onSelectPrimary = onSelectPrimary,
-                    onSelectFilters = onSelectFilters,
-                    onRefresh = onRefresh,
-                    onLoadMore = onLoadMore,
-                    onSearch = onSearch,
-                    onOpenRemoteLibrary = onOpenRemoteLibrary,
-                    onOpenVerification = onOpenVerification,
-                    onOpenBook = onOpenBook,
-                    coverState = coverState,
-                    onCoverVisibility = onCoverVisibility,
-                    modifier = modifier,
-                )
+            BoxWithConstraints(modifier.fillMaxSize()) {
+                val primaryMaxHeight = maxHeight / 3
+                Column(Modifier.fillMaxSize()) {
+                    if (!state.featureOpen) {
+                        state.primaryFilter?.let { filter ->
+                            TsuyomiTextTabRow(
+                                options = filter.options.map { TsuyomiTabOption(it.value, it.label) },
+                                selectedKey = state.selectedPrimary,
+                                onSelect = { selected ->
+                                    if (selected != state.selectedPrimary) {
+                                        onFiltersExpandedChange(false)
+                                        onSelectPrimary(selected)
+                                    }
+                                },
+                                modifier = Modifier
+                                    .heightIn(max = primaryMaxHeight)
+                                    .padding(horizontal = TsuyomiSpacing.Md, vertical = TsuyomiSpacing.Xs)
+                                    .testTag("source-home-primary-tabs"),
+                            )
+                        }
+                    }
+                    Box(Modifier.weight(1f)) {
+                        val active = state.activePageState
+                        val cursorPage = active?.cursorPage
+                        if (active == null || cursorPage == null) {
+                            active?.replacementFailure?.let { failure ->
+                                SourceHomeFailureView(
+                                    failure,
+                                    onRetryReplacement,
+                                    onUseOfflineCache,
+                                    onOpenVerification,
+                                    Modifier,
+                                )
+                            } ?: StateView(
+                                kind = TsuyomiStateKind.LOADING,
+                                title = stringResource(R.string.source_home_loading),
+                                message = stringResource(R.string.source_home_loading_message, sourceName),
+                                modifier = Modifier.fillMaxSize(),
+                            )
+                        } else {
+                            SourceHomeEinkContent(
+                                primary = state.selectedPrimary,
+                                pageState = active,
+                                page = cursorPage,
+                                filtersExpanded = filtersExpanded,
+                                onFiltersExpandedChange = onFiltersExpandedChange,
+                                onSelectFilters = onSelectFilters,
+                                onPreviousPage = onPreviousPage,
+                                onNextPage = onNextPage,
+                                onRetryReplacement = onRetryReplacement,
+                                onOpenBook = onOpenBook,
+                                onOpenFeature = onOpenFeature,
+                                onOpenVerification = onOpenVerification,
+                                saveableStateHolder = einkPageStateHolder,
+                                coverState = coverState,
+                                onCoverVisibility = onCoverVisibility,
+                                modifier = Modifier,
+                            )
+                        }
+                    }
+                }
             }
         } else {
             SourceHomeStandardContent(
@@ -215,174 +229,3 @@ private fun SourceHomeFailureView(
     )
 }
 
-@Composable
-private fun FrozenEInkSourceHomeContent(
-    pageState: SourceHomePageViewState,
-    remoteLibraryAvailable: Boolean,
-    verificationAvailable: Boolean,
-    onSelectPrimary: (String) -> Unit,
-    onSelectFilters: (Map<String, String>) -> Unit,
-    onRefresh: () -> Unit,
-    onLoadMore: () -> Unit,
-    onSearch: () -> Unit,
-    onOpenRemoteLibrary: () -> Unit,
-    onOpenVerification: () -> Unit,
-    onOpenBook: (SourceBookSummary) -> Unit,
-    coverState: @Composable (SourceBookSummary) -> CoverUiState,
-    onCoverVisibility: (SourceBookSummary, Boolean) -> Unit,
-    modifier: Modifier,
-) {
-    val page = requireNotNull(pageState.page)
-    val listState = rememberLazyListState()
-    val primaryFilter = page.filters.firstOrNull()
-    Box(modifier.fillMaxSize()) {
-        LazyColumn(
-            state = listState,
-            modifier = Modifier.fillMaxSize(),
-            contentPadding = PaddingValues(bottom = 96.dp),
-        ) {
-            item(key = "quick-actions") {
-                FlowRow(
-                    modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    verticalArrangement = Arrangement.spacedBy(4.dp),
-                ) {
-                    TsuyomiButton(
-                        text = stringResource(R.string.browse_source_search_action),
-                        onClick = onSearch,
-                        style = TsuyomiButtonStyle.TEXT,
-                    )
-                    if (remoteLibraryAvailable) {
-                        TsuyomiButton(
-                            text = stringResource(R.string.browse_remote_library_action),
-                            onClick = onOpenRemoteLibrary,
-                            style = TsuyomiButtonStyle.TEXT,
-                        )
-                    }
-                    if (verificationAvailable) {
-                        TsuyomiButton(
-                            text = stringResource(R.string.browse_source_verification_action),
-                            onClick = onOpenVerification,
-                            style = TsuyomiButtonStyle.TEXT,
-                        )
-                    }
-                    TsuyomiButton(
-                        text = stringResource(R.string.source_home_refresh),
-                        onClick = onRefresh,
-                        style = TsuyomiButtonStyle.SECONDARY,
-                    )
-                }
-            }
-            primaryFilter?.let { filter ->
-                item(key = "primary-tabs:${filter.id}") {
-                    TsuyomiTabRow(
-                        options = filter.options.map { TsuyomiTabOption(it.value, it.label) },
-                        selectedKey = pageState.selectedFilters[filter.id],
-                        onSelect = onSelectPrimary,
-                        equalWidthWhenFits = false,
-                    )
-                }
-            }
-            page.filters.drop(1).forEach { filter ->
-                item(key = "filter:${filter.id}") {
-                    Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp)) {
-                        Text(
-                            text = filter.label,
-                            modifier = Modifier.semantics { heading() },
-                            style = MaterialTheme.typography.titleSmall,
-                        )
-                        FlowRow(
-                            modifier = Modifier.fillMaxWidth().padding(top = 4.dp),
-                            horizontalArrangement = Arrangement.spacedBy(8.dp),
-                            verticalArrangement = Arrangement.spacedBy(4.dp),
-                        ) {
-                            filter.options.forEach { option ->
-                                TsuyomiButton(
-                                    text = option.label,
-                                    onClick = {
-                                        onSelectFilters(pageState.selectedFilters + (filter.id to option.value))
-                                    },
-                                    style = if (pageState.selectedFilters[filter.id] == option.value) {
-                                        TsuyomiButtonStyle.SECONDARY
-                                    } else {
-                                        TsuyomiButtonStyle.TEXT
-                                    },
-                                )
-                            }
-                        }
-                    }
-                }
-            }
-            page.sections.forEach { section ->
-                item(key = "section:${section.id}") {
-                    Text(
-                        text = section.title,
-                        modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp).semantics { heading() },
-                        style = MaterialTheme.typography.titleMedium,
-                    )
-                }
-                items(section.items, key = { "${section.id}:${it.identity.sourceId}:${it.identity.remoteBookId}" }) { book ->
-                    SourceHomeBookRow(book, coverState(book), onOpenBook, onCoverVisibility)
-                }
-            }
-            if (!page.complete) {
-                item(key = "load-more") {
-                    TsuyomiButton(
-                        text = if (pageState.appending) {
-                            stringResource(R.string.source_home_loading_more)
-                        } else {
-                            stringResource(R.string.source_home_load_more)
-                        },
-                        onClick = onLoadMore,
-                        enabled = !pageState.appending,
-                        style = TsuyomiButtonStyle.SECONDARY,
-                        modifier = Modifier.fillMaxWidth().padding(16.dp),
-                    )
-                }
-            }
-        }
-        TsuyomiAdaptiveListFab(
-            state = listState,
-            topLabel = stringResource(R.string.source_home_top),
-            endLabel = stringResource(R.string.source_home_end),
-            modifier = Modifier.align(Alignment.BottomEnd).padding(16.dp),
-        )
-    }
-}
-
-@Composable
-private fun SourceHomeBookRow(
-    book: SourceBookSummary,
-    coverState: CoverUiState,
-    onOpenBook: (SourceBookSummary) -> Unit,
-    onCoverVisibility: (SourceBookSummary, Boolean) -> Unit,
-) {
-    DisposableEffect(book.identity, book.coverUrl, book.canonicalUrl) {
-        onCoverVisibility(book, true)
-        onDispose { onCoverVisibility(book, false) }
-    }
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .height(112.dp)
-            .clickable(role = Role.Button) { onOpenBook(book) }
-            .padding(horizontal = 16.dp, vertical = 8.dp),
-        horizontalArrangement = Arrangement.spacedBy(12.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        CoverImage(coverState, Modifier.size(width = 64.dp, height = 96.dp))
-        Column(Modifier.weight(1f)) {
-            Text(book.title, maxLines = 2, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.titleSmall)
-            book.author?.let { author ->
-                Text(
-                    author,
-                    modifier = Modifier.padding(top = 4.dp),
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            }
-        }
-    }
-}

@@ -22,6 +22,8 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import org.tsuyomi.core.ui.icons.TsuyomiIcons
 import org.tsuyomi.core.ui.theme.TsuyomiSpacing
+import org.tsuyomi.core.display.DisplayProfile
+import org.tsuyomi.core.display.LocalDisplayEnvironment
 
 /** Full-width host-owned Material navigation surface for a source-provided typed destination. */
 @Composable
@@ -31,6 +33,10 @@ fun TsuyomiNavigationCard(
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
+    if (LocalDisplayEnvironment.current.effectiveProfile == DisplayProfile.EINK) {
+        SettingsActionRow(title, onClick, modifier, summary = supportingText)
+        return
+    }
     Card(
         onClick = onClick,
         modifier = modifier.fillMaxWidth().heightIn(min = 72.dp),

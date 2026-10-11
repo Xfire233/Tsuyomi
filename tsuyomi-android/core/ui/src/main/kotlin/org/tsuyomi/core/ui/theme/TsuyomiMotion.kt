@@ -31,9 +31,12 @@ import androidx.compose.ui.node.DrawModifierNode
 import androidx.compose.ui.node.invalidateDraw
 import androidx.compose.material3.MotionScheme
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.graphics.drawscope.inset as insetDrawingArea
 import kotlinx.coroutines.launch
 import org.tsuyomi.core.display.DisplayEnvironment
 import org.tsuyomi.core.display.MotionPolicy
+import org.tsuyomi.core.display.DisplayProfile
 
 /** Shared motion constants. The standard profile never exceeds 250ms ease-out transitions. */
 object TsuyomiMotion {
@@ -77,7 +80,7 @@ internal object TsuyomiStandardMotionScheme : MotionScheme {
     override fun <T> slowEffectsSpec(): FiniteAnimationSpec<T> = slowEffectsSpec as FiniteAnimationSpec<T>
 }
 
-/** Immediate final-state motion for system reduced motion. */
+/** Immediate final-state motion for E-ink and system reduced-motion policies. */
 internal object TsuyomiInstantMotionScheme : MotionScheme {
     private val spec = snap<Any>()
 
@@ -102,7 +105,7 @@ internal object TsuyomiInstantMotionScheme : MotionScheme {
 
 /** True when the current environment replaces all state transitions with immediate commits. */
 val DisplayEnvironment.instantMotion: Boolean
-    get() = motionPolicy == MotionPolicy.INSTANT
+    get() = effectiveProfile == DisplayProfile.EINK || motionPolicy == MotionPolicy.INSTANT
 
 /**
  * Observes the platform reduced-motion signal exactly as the display contract defines it: the
@@ -197,13 +200,16 @@ private class InstantIndicationNode(
 /**
  * Draws a 2dp focus ring around the component while [focused] is true. The ring is a geometric
  * stroke, never a color-only state change. Callers obtain [focused] from the component
- * interaction source, and pass the active scheme's primary color as [color].
+ * interaction source. Inverted E-ink surfaces use a contrasting [color] and an [inset] so the
+ * focus ring remains visible without replacing their explicit outer boundary.
  */
-fun Modifier.tsuyomiFocusRing(shape: Shape, focused: Boolean, color: Color): Modifier =
+fun Modifier.tsuyomiFocusRing(shape: Shape, focused: Boolean, color: Color, inset: Dp = 0.dp): Modifier =
     drawWithContent {
         drawContent()
         if (focused) {
-            val outline = shape.createOutline(size, layoutDirection, this)
-            drawOutline(outline, color, style = Stroke(2.dp.toPx()))
+            insetDrawingArea(inset.toPx()) {
+                val outline = shape.createOutline(size, layoutDirection, this)
+                drawOutline(outline, color, style = Stroke(2.dp.toPx()))
+            }
         }
     }

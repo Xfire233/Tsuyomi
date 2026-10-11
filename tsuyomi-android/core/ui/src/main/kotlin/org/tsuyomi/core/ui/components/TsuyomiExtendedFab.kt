@@ -9,6 +9,10 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
+import org.tsuyomi.core.display.DisplayProfile
+import org.tsuyomi.core.display.LocalDisplayEnvironment
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 
 /** Core-owned extended floating action button for a persistent contextual action. */
 @Composable
@@ -19,6 +23,10 @@ fun TsuyomiExtendedFab(
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
+    if (LocalDisplayEnvironment.current.effectiveProfile == DisplayProfile.EINK) {
+        TsuyomiButton(text, onClick, modifier.semantics { this.contentDescription = contentDescription })
+        return
+    }
     ExtendedFloatingActionButton(
         text = { Text(text) },
         icon = { Icon(imageVector, contentDescription = contentDescription) },

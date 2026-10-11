@@ -97,6 +97,64 @@ fun <T> SegmentedSelector(
 ) {
     val environment = LocalDisplayEnvironment.current
     val eInk = environment.effectiveProfile == DisplayProfile.EINK
+    if (eInk) {
+        val labelCount = if (label == null) 0 else 1
+        val reasonCount = if (!enabled && disabledReason != null) 1 else 0
+        val errorCount = if (errorMessage == null) 0 else 1
+        val selectedDescription = stringResource(R.string.coreui_state_selected)
+        val unselectedDescription = stringResource(R.string.coreui_state_not_selected)
+        val disabledDescription = stringResource(R.string.coreui_state_disabled)
+        TsuyomiMeasuredPager(
+            itemCount = labelCount + options.size + reasonCount + errorCount,
+            itemKey = { index ->
+                when {
+                    index < labelCount -> "segment-label"
+                    index < labelCount + options.size -> "segment:${options[index - labelCount].value}"
+                    index < labelCount + options.size + reasonCount -> "segment-disabled-reason"
+                    else -> "segment-error"
+                }
+            },
+            itemContent = { index ->
+                if (index in labelCount until labelCount + options.size) {
+                    val option = options[index - labelCount]
+                    val optionEnabled = enabled && option.enabled
+                    TsuyomiToggleChip(
+                        text = option.label,
+                        selected = option.value == selected,
+                        stateDescription = when {
+                            !optionEnabled -> disabledDescription
+                            option.value == selected -> selectedDescription
+                            else -> unselectedDescription
+                        },
+                        onClick = { onSelect(option.value) },
+                        enabled = optionEnabled,
+                        role = Role.RadioButton,
+                    )
+                } else {
+                    val content = when {
+                        index < labelCount -> label.orEmpty()
+                        index < labelCount + options.size + reasonCount -> disabledReason.orEmpty()
+                        else -> errorMessage.orEmpty()
+                    }
+                    TsuyomiMeasuredTextPager(
+                        text = content,
+                        style = MaterialTheme.typography.bodyMedium,
+                        fillViewport = false,
+                        alwaysShowPageControls = false,
+                    )
+                }
+            },
+            modifier = modifier.fillMaxWidth().semantics {
+                collectionInfo = CollectionInfo(1, options.size)
+                errorMessage?.let { error(it) }
+            },
+            horizontalSpacing = TsuyomiSpacing.Sm,
+            verticalSpacing = TsuyomiSpacing.Sm,
+            fillViewport = false,
+            wrapItems = true,
+        )
+        return
+    }
     val shape: Shape = RoundedCornerShape(if (eInk) 4.dp else 12.dp)
     val borderColor = if (enabled) TsuyomiEInkPalette.Ink else TsuyomiEInkPalette.N50
     val selectedIndex = options.indexOfFirst { it.value == selected }

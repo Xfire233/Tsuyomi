@@ -423,7 +423,7 @@ internal fun LibraryFlowController.tagProjection(
     entries = fullLocalEntries().filter { entry ->
         when (ownership) {
             LibraryTagOwnership.LOCAL -> entry.localTags.any { normalizeLocalLibraryTagName(it) == normalizedTag }
-            LibraryTagOwnership.SOURCE -> entry.book.identity.sourceId == sourceId &&
+            LibraryTagOwnership.SOURCE -> (entry.book.identity as? org.tsuyomi.shared.model.BookIdentity.Remote)?.sourceId == sourceId &&
                 entry.book.remoteTags.any { normalizeSourceLibraryTagName(it) == normalizedTag }
         }
     },
@@ -702,7 +702,7 @@ private fun CollectionRuleRoute(
         title = draft.title,
         tree = tree,
         collections = controller.collections,
-        sourceIds = controller.searchableEntries.map { it.book.identity.sourceId }.distinct(),
+        sourceIds = controller.searchableEntries.mapNotNull { (it.book.identity as? org.tsuyomi.shared.model.BookIdentity.Remote)?.sourceId }.distinct(),
         sourceLabels = controller.tagSourceLabels(),
         tagChoices = buildSet {
             for (entry in controller.searchableEntries) {

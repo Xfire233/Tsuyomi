@@ -6,17 +6,22 @@
 package org.tsuyomi.core.ui.components
 
 import androidx.compose.foundation.BorderStroke
+import org.tsuyomi.core.display.displayGrayscaleLayer
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.safeDrawing
+import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -30,6 +35,11 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.runtime.saveable.rememberSaveableStateHolder
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
@@ -97,11 +107,12 @@ fun TsuyomiDialog(
         }
     }
 
-    val effectiveDismissLabel = dismissLabel ?: if (confirmLabel == null) {
+    val effectiveDismissLabel = dismissLabel ?: if (confirmLabel == null || destructive) {
         stringResource(R.string.coreui_close)
     } else {
         null
     }
+    val dialogStateHolder = rememberSaveableStateHolder()
 
     if (eInk) {
         Popup(
@@ -114,19 +125,21 @@ fun TsuyomiDialog(
             ),
             onDismissRequest = onDismissRequest,
         ) {
-            TsuyomiDialogPane(
-                title = title,
-                modifier = modifier,
-                text = text,
-                body = body,
-                confirmLabel = confirmLabel,
-                onConfirm = onConfirm,
-                confirmEnabled = confirmEnabled,
-                dismissLabel = effectiveDismissLabel,
-                onDismiss = onDismissRequest,
-                destructive = destructive,
-                fullWindow = true,
-            )
+            dialogStateHolder.SaveableStateProvider("dialog-pane:EINK") {
+                TsuyomiDialogPane(
+                    title = title,
+                    modifier = modifier.displayGrayscaleLayer(),
+                    text = text,
+                    body = body,
+                    confirmLabel = confirmLabel,
+                    onConfirm = onConfirm,
+                    confirmEnabled = confirmEnabled,
+                    dismissLabel = effectiveDismissLabel,
+                    onDismiss = onDismissRequest,
+                    destructive = destructive,
+                    fullWindow = true,
+                )
+            }
         }
     } else {
         BasicAlertDialog(
@@ -138,18 +151,20 @@ fun TsuyomiDialog(
                 usePlatformDefaultWidth = false,
             ),
         ) {
-            TsuyomiDialogPane(
-                title = title,
-                text = text,
-                body = body,
-                confirmLabel = confirmLabel,
-                onConfirm = onConfirm,
-                confirmEnabled = confirmEnabled,
-                dismissLabel = effectiveDismissLabel,
-                onDismiss = onDismissRequest,
-                destructive = destructive,
-                fullWindow = false,
-            )
+            dialogStateHolder.SaveableStateProvider("dialog-pane:STANDARD") {
+                TsuyomiDialogPane(
+                    title = title,
+                    text = text,
+                    body = body,
+                    confirmLabel = confirmLabel,
+                    onConfirm = onConfirm,
+                    confirmEnabled = confirmEnabled,
+                    dismissLabel = effectiveDismissLabel,
+                    onDismiss = onDismissRequest,
+                    destructive = destructive,
+                    fullWindow = false,
+                )
+            }
         }
     }
 }
@@ -180,6 +195,8 @@ fun TsuyomiDialogPane(
         modifier
             .fillMaxSize()
             .background(TsuyomiEInkPalette.Paper)
+            .windowInsetsPadding(WindowInsets.safeDrawing)
+            .imePadding()
     } else {
         modifier
             .fillMaxWidth()
@@ -190,6 +207,69 @@ fun TsuyomiDialogPane(
         TsuyomiEInkPalette.Paper
     } else {
         MaterialTheme.colorScheme.surface
+    }
+    if (fullWindow) {
+        var initialFocusRequested by remember { mutableStateOf(false) }
+        val textCount = if (text == null) 0 else 1
+        val dismissCount = if (dismissLabel != null && onDismiss != null) 1 else 0
+        val bodyCount = if (body == null) 0 else 1
+        val confirmCount = if (confirmLabel != null && onConfirm != null) 1 else 0
+        val textIndex = 1 + dismissCount
+        val bodyIndex = textIndex + textCount
+        val confirmIndex = bodyIndex + bodyCount
+        Surface(
+            modifier = containerModifier.semantics { paneTitle = title },
+            color = TsuyomiEInkPalette.Paper,
+            contentColor = TsuyomiEInkPalette.Ink,
+        ) {
+            Column(Modifier.fillMaxSize().padding(TsuyomiSpacing.Sm)) {
+                TsuyomiMeasuredPager(
+                    itemCount = 1 + dismissCount + textCount + bodyCount + confirmCount,
+                    itemKey = { index -> when {
+                        index == 0 -> "dialog-title:$title"
+                        dismissCount == 1 && index == 1 -> "dialog-dismiss:$dismissLabel"
+                        textCount == 1 && index == textIndex -> "dialog-text:$text"
+                        bodyCount == 1 && index == bodyIndex -> "dialog-body"
+                        else -> "dialog-confirm:$confirmLabel"
+                    } },
+                    itemContent = { index -> when {
+                        index == 0 -> TsuyomiMeasuredTextPager(title,
+                            style = MaterialTheme.typography.headlineMedium,
+                            fillViewport = false, alwaysShowPageControls = false)
+                        dismissCount == 1 && index == 1 -> TsuyomiButton(
+                            text = dismissLabel.orEmpty(),
+                            onClick = requireNotNull(onDismiss),
+                            style = TsuyomiButtonStyle.SECONDARY,
+                            modifier = Modifier.focusRequester(dismissActionFocus).onGloballyPositioned {
+                                if (!initialFocusRequested) {
+                                    dismissActionFocus.requestFocus()
+                                    initialFocusRequested = true
+                                }
+                            },
+                        )
+                        textCount == 1 && index == textIndex -> TsuyomiMeasuredTextPager(text.orEmpty(),
+                            fillViewport = false, alwaysShowPageControls = false)
+                        bodyCount == 1 && index == bodyIndex -> Column(
+                            Modifier.fillMaxWidth().heightIn(max = LocalTsuyomiPagerMaxContentHeight.current ?: androidx.compose.ui.unit.Dp.Unspecified),
+                        ) { body?.invoke(this) }
+                        confirmCount == 1 && index == confirmIndex -> TsuyomiButton(
+                            text = confirmLabel.orEmpty(),
+                            onClick = requireNotNull(onConfirm),
+                            enabled = confirmEnabled,
+                            modifier = Modifier.focusRequester(confirmActionFocus).onGloballyPositioned {
+                                if (dismissCount == 0 && !destructive && !initialFocusRequested) {
+                                    confirmActionFocus.requestFocus()
+                                    initialFocusRequested = true
+                                }
+                            },
+                        )
+                    } },
+                    modifier = Modifier.fillMaxWidth().weight(1f),
+                    verticalSpacing = TsuyomiSpacing.Sm,
+                )
+            }
+        }
+        return
     }
 
     Surface(
@@ -224,19 +304,27 @@ fun TsuyomiDialogPane(
                         .padding(top = TsuyomiSpacing.Md)
                         .then(
                             if (fullWindow) {
-                                Modifier.weight(1f, fill = false)
+                                Modifier.fillMaxWidth().weight(1f)
                             } else {
-                                Modifier.heightIn(max = 440.dp)
+                                Modifier.heightIn(max = 440.dp).verticalScroll(rememberScrollState())
                             },
-                        )
-                        .verticalScroll(rememberScrollState()),
+                        ),
                 ) {
                     if (text != null) {
-                        Text(
-                            text = text,
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
+                        if (fullWindow && body == null) {
+                            TsuyomiMeasuredTextPager(
+                                text = text,
+                                modifier = Modifier.fillMaxWidth().weight(1f),
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        } else {
+                            Text(
+                                text = text,
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
                     }
                     body?.invoke(this)
                 }
@@ -295,7 +383,7 @@ fun TsuyomiDialogPane(
 }
 
 /** Positions a popup at the window origin so its fill-size content covers the whole window. */
-private object FullWindowPopupPositionProvider : PopupPositionProvider {
+internal object FullWindowPopupPositionProvider : PopupPositionProvider {
     override fun calculatePosition(
         anchorBounds: IntRect,
         windowSize: IntSize,

@@ -29,9 +29,38 @@ data class DetailCollectionDestination(
     val selected: Boolean,
 )
 
+fun bookDestinationMenuItemCount(
+    collections: List<DetailCollectionDestination>,
+    remoteTargets: List<RemoteTarget>,
+    loadingRemoteTargets: Boolean,
+    websiteGroupingEnabled: Boolean,
+    websiteAvailable: Boolean,
+): Int = 2 + collections.size + if (websiteAvailable) {
+    1 + if (loadingRemoteTargets || remoteTargets.isEmpty() || !websiteGroupingEnabled) 1 else remoteTargets.size
+} else 0
+
+fun bookDestinationMenuItemKey(
+    index: Int,
+    collections: List<DetailCollectionDestination>,
+    remoteTargets: List<RemoteTarget>,
+    loadingRemoteTargets: Boolean,
+    websiteGroupingEnabled: Boolean,
+    websiteAvailable: Boolean,
+): String {
+    if (index == 0) return "read-later"
+    val websiteRows = if (!websiteAvailable) 0 else
+        1 + if (loadingRemoteTargets || remoteTargets.isEmpty() || !websiteGroupingEnabled) 1 else remoteTargets.size
+    if (websiteAvailable && index == 1) return "website-heading"
+    if (index in 2..websiteRows) return if (loadingRemoteTargets || remoteTargets.isEmpty()) "website-status"
+        else if (!websiteGroupingEnabled) "website-default" else "website:${remoteTargets[index - 2].targetId}"
+    if (index == 1 + websiteRows) return "local-heading"
+    return "collection:${collections[index - websiteRows - 2].id}"
+}
+
 /** Compact actions rendered inside the Detail split button's anchored Material dropdown menu. */
 @Composable
 fun BookDestinationMenu(
+    itemIndex: Int,
     readLater: Boolean,
     collections: List<DetailCollectionDestination>,
     remoteTargets: List<RemoteTarget>,
@@ -40,9 +69,12 @@ fun BookDestinationMenu(
     websiteGroupingEnabled: Boolean,
     onToggleReadLater: () -> Unit,
     onToggleCollection: (String) -> Unit,
-    onApplyWebsite: (String) -> Unit,
+    onApplyWebsite: ((String) -> Unit)?,
     onDismiss: () -> Unit,
 ) {
+    val websiteRows = if (onApplyWebsite == null) 0 else
+        1 + if (loadingRemoteTargets || remoteTargets.isEmpty() || !websiteGroupingEnabled) 1 else remoteTargets.size
+    if (itemIndex == 0) {
     DestinationMenuItem(
         label = stringResource(R.string.book_read_later),
         selectedStateDescription = stringResource(
@@ -56,9 +88,14 @@ fun BookDestinationMenu(
             onDismiss()
         },
     )
-    HorizontalDivider()
-    DestinationSectionLabel("网站收藏")
-    when {
+        return
+    }
+    if (onApplyWebsite != null && itemIndex <= websiteRows) {
+        if (itemIndex == 1) {
+            DestinationSectionLabel("网站收藏")
+            return
+        }
+        when {
         loadingRemoteTargets -> DestinationStatusRow(
             if (websiteGroupingEnabled) "正在读取网站目标…" else "正在读取网站书架…",
         )
@@ -79,7 +116,8 @@ fun BookDestinationMenu(
                 },
             )
         }
-        else -> remoteTargets.forEach { target ->
+        else -> {
+            val target = remoteTargets[itemIndex - 2]
             DestinationMenuItem(
                 label = target.displayName,
                 icon = TsuyomiIcons.Mirror,
@@ -96,19 +134,22 @@ fun BookDestinationMenu(
             )
         }
     }
-    HorizontalDivider()
-    DestinationSectionLabel("本地收藏夹")
-    collections.forEach { destination ->
-        DestinationMenuItem(
-            label = destination.label,
-            icon = TsuyomiIcons.Folder,
-            selected = destination.selected,
-            onClick = {
-                onToggleCollection(destination.id)
-                onDismiss()
-            },
-        )
     }
+    if (onApplyWebsite != null && itemIndex <= websiteRows) return
+    if (itemIndex == 1 + websiteRows) {
+        DestinationSectionLabel("本地收藏夹")
+        return
+    }
+    val destination = collections[itemIndex - websiteRows - 2]
+    DestinationMenuItem(
+        label = destination.label,
+        icon = TsuyomiIcons.Folder,
+        selected = destination.selected,
+        onClick = {
+            onToggleCollection(destination.id)
+            onDismiss()
+        },
+    )
 }
 
 @Composable
@@ -142,7 +183,9 @@ private fun DestinationMenuItem(
     TsuyomiMenuItem(
         label = label,
         onClick = onClick,
+        selected = selected,
         modifier = modifier.semantics {
+            this.selected = selected
             stateDescription = selectedStateDescription
         },
     )

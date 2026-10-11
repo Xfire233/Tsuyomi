@@ -24,6 +24,12 @@ Progress uses a stable chapter ID when available plus a semantic locator: text a
 
 When two valid progress records conflict, the record with the newer `updatedAt` wins. A numerically later position does not win merely because it is further through the book. Equal timestamps use a deterministic protocol-defined tie break; they are never merged by taking maximum progress.
 
+### 0.5.0 local-publication identity and duplicate intake — accepted 2026-10-06
+
+Remote identity remains unchanged. Local publications require a portable host-generated ID distinct from private Room row IDs, filenames, provider URIs and raw-byte fingerprints. Metadata edits, file renaming, cache rebuild and display-profile changes cannot change it. A fingerprint identifies original bytes, not a unique reading-state owner: independent copies may share identical bytes.
+
+The maintainer selected confirmation on duplicate import, superseding the plan's proposed automatic same-byte association. After verifying matching bytes, offer association with an existing publication or creation of an independent copy; association never resets progress/bookmarks. Multiple matches require an explicit target, not the first match. An independent copy has a new publication ID and independent state. Different bytes/editions/formats remain independent by default; never merge by title or silently replace an original. Missing-original reassociation requires a verified matching fingerprint.
+
 ## Rejected alternatives
 
 - Use local row IDs: rejected because they do not survive import or cross-host transfer.

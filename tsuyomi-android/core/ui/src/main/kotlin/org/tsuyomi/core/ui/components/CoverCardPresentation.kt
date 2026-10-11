@@ -39,15 +39,12 @@ data class CoverCardLayout(
     val usesWideTitleLane: Boolean,
 )
 
-/**
- * Resolves the selected Standard presentation, retaining the complete legacy E-ink geometry.
- * E-ink never adopts the user-selected Standard grid/card option.
- */
+/** Resolves fixed monochrome E-ink geometry or the selected Standard presentation. */
 @Composable
 fun currentCoverCardLayout(): CoverCardLayout = if (
     LocalDisplayEnvironment.current.effectiveProfile == DisplayProfile.EINK
 ) {
-    LegacyEInkCoverCardLayout
+    EInkCoverCardLayout
 } else {
     when (LocalCoverCardPresentation.current) {
         CoverCardPresentation.STANDARD -> StandardCoverCardLayout
@@ -71,10 +68,10 @@ private val WideCoverCardLayout = CoverCardLayout(
     usesWideTitleLane = true,
 )
 
-private val LegacyEInkCoverCardLayout = CoverCardLayout(
+private val EInkCoverCardLayout = CoverCardLayout(
     presentation = CoverCardPresentation.STANDARD,
-    gridAspectRatio = 3f / 4f,
-    artworkAspectRatio = 2f / 3f,
-    leadingArtworkAspectRatio = 3f / 4f,
+    gridAspectRatio = 5f / 7f,
+    artworkAspectRatio = 5f / 7f,
+    leadingArtworkAspectRatio = 5f / 7f,
     usesWideTitleLane = false,
 )

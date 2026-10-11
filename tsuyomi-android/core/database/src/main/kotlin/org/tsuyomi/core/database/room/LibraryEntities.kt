@@ -13,37 +13,33 @@ import org.tsuyomi.shared.librarydomain.CollectionKind
 
 @Entity(
     tableName = "books",
-    primaryKeys = ["source_id", "remote_book_id"],
+    indices = [Index(value = ["source_id", "remote_book_id"], unique = true)],
 )
 internal data class BookEntity(
-    @ColumnInfo(name = "source_id")
-    val sourceId: String,
-    @ColumnInfo(name = "remote_book_id")
-    val remoteBookId: String,
+    @PrimaryKey @ColumnInfo(name = "identity_key") val identityKey: String,
+    val origin: String,
+    @ColumnInfo(name = "source_id") val sourceId: String?,
+    @ColumnInfo(name = "remote_book_id") val remoteBookId: String?,
+    @ColumnInfo(name = "publication_id") val publicationId: String?,
     val title: String,
-    @ColumnInfo(name = "authors_json", defaultValue = "'[]'")
-    val authorsJson: String,
-    @ColumnInfo(name = "author_sort_key")
-    val authorSortKey: ByteArray?,
-    @ColumnInfo(name = "cover_url")
-    val coverUrl: String? = null,
-    @ColumnInfo(name = "canonical_url")
-    val canonicalUrl: String? = null,
+    @ColumnInfo(name = "authors_json", defaultValue = "'[]'") val authorsJson: String,
+    @ColumnInfo(name = "author_sort_key") val authorSortKey: ByteArray?,
+    @ColumnInfo(name = "cover_url") val coverUrl: String? = null,
+    @ColumnInfo(name = "canonical_url") val canonicalUrl: String? = null,
     val status: String? = null,
-    @ColumnInfo(name = "remote_tags_json", defaultValue = "'[]'")
-    val remoteTagsJson: String,
-    @ColumnInfo(name = "source_update_key")
-    val legacySourceUpdateKey: String? = null,
-    @ColumnInfo(name = "has_unread_update", defaultValue = "0")
-    val legacyHasUnreadUpdate: Boolean = false,
-    @ColumnInfo(name = "added_at_epoch_second")
-    val addedAtEpochSecond: Long,
-    @ColumnInfo(name = "added_at_nano")
-    val addedAtNano: Int,
-    @ColumnInfo(name = "metadata_updated_at_epoch_second")
-    val metadataUpdatedAtEpochSecond: Long,
-    @ColumnInfo(name = "metadata_updated_at_nano")
-    val metadataUpdatedAtNano: Int,
+    @ColumnInfo(name = "remote_tags_json", defaultValue = "'[]'") val remoteTagsJson: String,
+    @ColumnInfo(name = "source_update_key") val legacySourceUpdateKey: String? = null,
+    @ColumnInfo(name = "has_unread_update", defaultValue = "0") val legacyHasUnreadUpdate: Boolean = false,
+    @ColumnInfo(name = "added_at_epoch_second") val addedAtEpochSecond: Long,
+    @ColumnInfo(name = "added_at_nano") val addedAtNano: Int,
+    @ColumnInfo(name = "metadata_updated_at_epoch_second") val metadataUpdatedAtEpochSecond: Long,
+    @ColumnInfo(name = "metadata_updated_at_nano") val metadataUpdatedAtNano: Int,
+    @ColumnInfo(name = "local_format") val localFormat: String? = null,
+    @ColumnInfo(name = "local_original_sha256") val localOriginalSha256: String? = null,
+    @ColumnInfo(name = "local_original_size_bytes") val localOriginalSizeBytes: Long? = null,
+    @ColumnInfo(name = "local_original_available") val localOriginalAvailable: Boolean? = null,
+    @ColumnInfo(name = "local_txt_options_json") val localTxtOptionsJson: String? = null,
+    @ColumnInfo(name = "local_cover_resource_id") val localCoverResourceId: String? = null,
 )
 
 @Entity(
@@ -76,30 +72,18 @@ internal data class CollectionEntity(
 
 @Entity(
     tableName = "manual_collection_memberships",
-    primaryKeys = ["collection_id", "source_id", "remote_book_id"],
+    primaryKeys = ["collection_id", "identity_key"],
     foreignKeys = [
-        ForeignKey(
-            entity = CollectionEntity::class,
-            parentColumns = ["collection_id"],
-            childColumns = ["collection_id"],
-            onDelete = ForeignKey.CASCADE,
-        ),
-        ForeignKey(
-            entity = LibraryEntryEntity::class,
-            parentColumns = ["source_id", "remote_book_id"],
-            childColumns = ["source_id", "remote_book_id"],
-            onDelete = ForeignKey.CASCADE,
-        ),
+        ForeignKey(entity = CollectionEntity::class, parentColumns = ["collection_id"], childColumns = ["collection_id"], onDelete = ForeignKey.CASCADE),
+        ForeignKey(entity = LibraryEntryEntity::class, parentColumns = ["identity_key"], childColumns = ["identity_key"], onDelete = ForeignKey.CASCADE),
     ],
-    indices = [Index(value = ["source_id", "remote_book_id"])],
+    indices = [Index(value = ["identity_key"])],
 )
 internal data class ManualCollectionMembershipEntity(
-    @ColumnInfo(name = "collection_id")
-    val collectionId: String,
-    @ColumnInfo(name = "source_id")
-    val sourceId: String,
-    @ColumnInfo(name = "remote_book_id")
-    val remoteBookId: String,
+    @ColumnInfo(name = "collection_id") val collectionId: String,
+    @ColumnInfo(name = "identity_key") val identityKey: String,
+    @ColumnInfo(name = "source_id") val sourceId: String?,
+    @ColumnInfo(name = "remote_book_id") val remoteBookId: String?,
     @ColumnInfo(name = "added_at_epoch_second") val addedAtEpochSecond: Long,
     @ColumnInfo(name = "added_at_nano") val addedAtNano: Int,
     @ColumnInfo(name = "display_order") val displayOrder: Long,
@@ -111,38 +95,22 @@ internal data class ManualCollectionMembershipEntity(
  */
 @Entity(
     tableName = "reading_progress",
-    primaryKeys = ["source_id", "remote_book_id"],
-    foreignKeys = [
-        ForeignKey(
-            entity = BookEntity::class,
-            parentColumns = ["source_id", "remote_book_id"],
-            childColumns = ["source_id", "remote_book_id"],
-            onDelete = ForeignKey.CASCADE,
-        ),
-    ],
+    primaryKeys = ["identity_key"],
+    foreignKeys = [ForeignKey(entity = BookEntity::class, parentColumns = ["identity_key"], childColumns = ["identity_key"], onDelete = ForeignKey.CASCADE)],
 )
 internal data class ReadingProgressEntity(
-    @ColumnInfo(name = "source_id")
-    val sourceId: String,
-    @ColumnInfo(name = "remote_book_id")
-    val remoteBookId: String,
-    @ColumnInfo(name = "content_id")
-    val contentId: String,
+    @ColumnInfo(name = "identity_key") val identityKey: String,
+    @ColumnInfo(name = "source_id") val sourceId: String?,
+    @ColumnInfo(name = "remote_book_id") val remoteBookId: String?,
+    @ColumnInfo(name = "content_id") val contentId: String,
     val revision: String?,
-    @ColumnInfo(name = "block_id")
-    val blockId: String?,
-    @ColumnInfo(name = "text_anchor_digest")
-    val textAnchorDigest: String?,
-    @ColumnInfo(name = "character_offset")
-    val characterOffset: Int?,
-    @ColumnInfo(name = "chapter_progress")
-    val chapterProgress: Double?,
-    @ColumnInfo(name = "book_progress")
-    val bookProgress: Double?,
-    @ColumnInfo(name = "updated_at_epoch_second")
-    val updatedAtEpochSecond: Long,
-    @ColumnInfo(name = "updated_at_nano")
-    val updatedAtNano: Int,
+    @ColumnInfo(name = "block_id") val blockId: String?,
+    @ColumnInfo(name = "text_anchor_digest") val textAnchorDigest: String?,
+    @ColumnInfo(name = "character_offset") val characterOffset: Int?,
+    @ColumnInfo(name = "chapter_progress") val chapterProgress: Double?,
+    @ColumnInfo(name = "book_progress") val bookProgress: Double?,
+    @ColumnInfo(name = "updated_at_epoch_second") val updatedAtEpochSecond: Long,
+    @ColumnInfo(name = "updated_at_nano") val updatedAtNano: Int,
 )
 
 /**
@@ -151,37 +119,26 @@ internal data class ReadingProgressEntity(
  */
 @Entity(
     tableName = "reader_history",
-    primaryKeys = ["source_id", "remote_book_id"],
-    foreignKeys = [
-        ForeignKey(
-            entity = BookEntity::class,
-            parentColumns = ["source_id", "remote_book_id"],
-            childColumns = ["source_id", "remote_book_id"],
-            onDelete = ForeignKey.CASCADE,
-        ),
-    ],
+    primaryKeys = ["identity_key"],
+    foreignKeys = [ForeignKey(entity = BookEntity::class, parentColumns = ["identity_key"], childColumns = ["identity_key"], onDelete = ForeignKey.CASCADE)],
 )
 internal data class ReaderHistoryEntity(
-    @ColumnInfo(name = "source_id") val sourceId: String,
-    @ColumnInfo(name = "remote_book_id") val remoteBookId: String,
+    @ColumnInfo(name = "identity_key") val identityKey: String,
+    @ColumnInfo(name = "source_id") val sourceId: String?,
+    @ColumnInfo(name = "remote_book_id") val remoteBookId: String?,
     @ColumnInfo(name = "last_visited_at_epoch_second") val lastVisitedAtEpochSecond: Long,
     @ColumnInfo(name = "last_visited_at_nano") val lastVisitedAtNano: Int,
 )
+
 @Entity(
     tableName = "completed_chapters",
-    primaryKeys = ["source_id", "remote_book_id", "chapter_id"],
-    foreignKeys = [
-        ForeignKey(
-            entity = BookEntity::class,
-            parentColumns = ["source_id", "remote_book_id"],
-            childColumns = ["source_id", "remote_book_id"],
-            onDelete = ForeignKey.CASCADE,
-        ),
-    ],
+    primaryKeys = ["identity_key", "chapter_id"],
+    foreignKeys = [ForeignKey(entity = BookEntity::class, parentColumns = ["identity_key"], childColumns = ["identity_key"], onDelete = ForeignKey.CASCADE)],
 )
 internal data class CompletedChapterEntity(
-    @ColumnInfo(name = "source_id") val sourceId: String,
-    @ColumnInfo(name = "remote_book_id") val remoteBookId: String,
+    @ColumnInfo(name = "identity_key") val identityKey: String,
+    @ColumnInfo(name = "source_id") val sourceId: String?,
+    @ColumnInfo(name = "remote_book_id") val remoteBookId: String?,
     @ColumnInfo(name = "chapter_id") val chapterId: String,
     @ColumnInfo(name = "completed_at_epoch_second") val completedAtEpochSecond: Long,
     @ColumnInfo(name = "completed_at_nano") val completedAtNano: Int,
@@ -191,13 +148,11 @@ internal data class CompletedChapterEntity(
  * Semantic bookmarks intentionally do not reference [BookEntity]. They remain durable when a
  * local pin is removed or a source is unavailable, and they never own reading progress.
  */
-@Entity(
-    tableName = "reader_bookmarks",
-    primaryKeys = ["source_id", "remote_book_id", "bookmark_position_key"],
-)
+@Entity(tableName = "reader_bookmarks", primaryKeys = ["identity_key", "bookmark_position_key"])
 internal data class ReaderBookmarkEntity(
-    @ColumnInfo(name = "source_id") val sourceId: String,
-    @ColumnInfo(name = "remote_book_id") val remoteBookId: String,
+    @ColumnInfo(name = "identity_key") val identityKey: String,
+    @ColumnInfo(name = "source_id") val sourceId: String?,
+    @ColumnInfo(name = "remote_book_id") val remoteBookId: String?,
     @ColumnInfo(name = "bookmark_position_key") val bookmarkPositionKey: String,
     @ColumnInfo(name = "content_id") val contentId: String,
     val revision: String?,
@@ -213,19 +168,13 @@ internal data class ReaderBookmarkEntity(
 
 @Entity(
     tableName = "library_entries",
-    primaryKeys = ["source_id", "remote_book_id"],
-    foreignKeys = [
-        ForeignKey(
-            entity = BookEntity::class,
-            parentColumns = ["source_id", "remote_book_id"],
-            childColumns = ["source_id", "remote_book_id"],
-            onDelete = ForeignKey.CASCADE,
-        ),
-    ],
+    primaryKeys = ["identity_key"],
+    foreignKeys = [ForeignKey(entity = BookEntity::class, parentColumns = ["identity_key"], childColumns = ["identity_key"], onDelete = ForeignKey.CASCADE)],
 )
 internal data class LibraryEntryEntity(
-    @ColumnInfo(name = "source_id") val sourceId: String,
-    @ColumnInfo(name = "remote_book_id") val remoteBookId: String,
+    @ColumnInfo(name = "identity_key") val identityKey: String,
+    @ColumnInfo(name = "source_id") val sourceId: String?,
+    @ColumnInfo(name = "remote_book_id") val remoteBookId: String?,
     @ColumnInfo(name = "added_at_epoch_second") val addedAtEpochSecond: Long,
     @ColumnInfo(name = "added_at_nano") val addedAtNano: Int,
     val rating: Int?,
@@ -236,19 +185,14 @@ internal data class LibraryEntryEntity(
 
 @Entity(
     tableName = "local_book_tags",
-    primaryKeys = ["source_id", "remote_book_id", "normalized_tag"],
-    foreignKeys = [
-        ForeignKey(
-            entity = LibraryEntryEntity::class,
-            parentColumns = ["source_id", "remote_book_id"],
-            childColumns = ["source_id", "remote_book_id"],
-            onDelete = ForeignKey.CASCADE,
-        ),
-    ],
+    primaryKeys = ["identity_key", "normalized_tag"],
+    foreignKeys = [ForeignKey(entity = LibraryEntryEntity::class, parentColumns = ["identity_key"], childColumns = ["identity_key"], onDelete = ForeignKey.CASCADE)],
+    indices = [Index(value = ["identity_key"])],
 )
 internal data class LocalBookTagEntity(
-    @ColumnInfo(name = "source_id") val sourceId: String,
-    @ColumnInfo(name = "remote_book_id") val remoteBookId: String,
+    @ColumnInfo(name = "identity_key") val identityKey: String,
+    @ColumnInfo(name = "source_id") val sourceId: String?,
+    @ColumnInfo(name = "remote_book_id") val remoteBookId: String?,
     @ColumnInfo(name = "normalized_tag") val normalizedTag: String,
     @ColumnInfo(name = "display_tag") val displayTag: String,
 )

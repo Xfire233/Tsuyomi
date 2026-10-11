@@ -4,33 +4,56 @@
  */
 package org.tsuyomi.feature.book
 
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.ColumnScope
-import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
-import androidx.compose.material3.HorizontalDivider
-import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.Immutable
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.res.stringResource
-import androidx.compose.ui.unit.dp
 import org.tsuyomi.core.display.DisplayProfile
 import org.tsuyomi.core.display.LocalDisplayEnvironment
 import org.tsuyomi.core.media.api.CoverUiState
-import org.tsuyomi.core.ui.components.StateView
-import org.tsuyomi.core.ui.components.TsuyomiButton
-import org.tsuyomi.core.ui.components.TsuyomiButtonStyle
-import org.tsuyomi.core.ui.components.TsuyomiStateKind
+import org.tsuyomi.shared.model.BookIdentity
+import org.tsuyomi.shared.sourcecontract.ReaderNavigationTarget
 import org.tsuyomi.shared.sourcecontract.SourceBookDetail
-import org.tsuyomi.shared.sourcecontract.SourceChapter
 import org.tsuyomi.shared.sourcecontract.SourceDirectory
 import org.tsuyomi.shared.sourcecontract.SourceDiagnostic
 import org.tsuyomi.shared.sourcecontract.SourceErrorCode
+
+@Immutable
+data class BookDetailContent(
+    val identity: BookIdentity,
+    val title: String,
+    val author: String? = null,
+    val description: String? = null,
+    val tags: List<String> = emptyList(),
+    val status: String? = null,
+    val lastUpdatedDate: String? = null,
+)
+
+@Immutable
+data class BookDirectory(
+    val identity: BookIdentity,
+    val navigationTargets: List<ReaderNavigationTarget>,
+    val authoredNavigation: Boolean = false,
+) {
+    init {
+        require(navigationTargets.isNotEmpty()) { "Directory cannot be empty" }
+        require(!authoredNavigation || identity is BookIdentity.Local) { "Authored publication navigation requires a local book" }
+        require(authoredNavigation || navigationTargets.map { it.contentId }.distinct().size == navigationTargets.size) {
+            "Duplicate chapter identity"
+        }
+    }
+}
+
+sealed interface BookScreenState<out T> {
+    data object Loading : BookScreenState<Nothing>
+    data class Content<T>(val value: T) : BookScreenState<T>
+    data class Failure(
+        val message: String? = null,
+        val verificationRequired: Boolean = false,
+        val offlineCacheAvailable: Boolean = !verificationRequired,
+        val retryLabel: String? = null,
+    ) : BookScreenState<Nothing>
+}
 
 sealed interface SourceBookState<out T> {
     data object Loading : SourceBookState<Nothing>
@@ -40,8 +63,8 @@ sealed interface SourceBookState<out T> {
 
 @Composable
 fun BookDetailScreen(
-    state: SourceBookState<SourceBookDetail>,
-    directoryState: SourceBookState<SourceDirectory>,
+    state: BookScreenState<BookDetailContent>,
+    directoryState: BookScreenState<BookDirectory>,
     localState: DetailLocalState,
     mutation: DetailMutationStatus?,
     coverState: CoverUiState,
@@ -51,15 +74,13 @@ fun BookDetailScreen(
     cacheState: DetailCacheState,
     onCacheAction: (DetailCacheAction) -> Unit,
     onSetRating: (Int?) -> Unit,
-    onSearchAuthor: (String) -> Unit,
+    onSearchAuthor: ((String) -> Unit)?,
     onToggleUnreadOnly: () -> Unit,
     onToggleOrder: () -> Unit,
-    onSelectChapter: (SourceChapter) -> Unit,
-    onContinueReading: (SourceChapter) -> Unit,
+    onSelectChapter: (ReaderNavigationTarget) -> Unit,
+    onContinueReading: (ReaderNavigationTarget) -> Unit,
     onAddToLibrary: () -> Unit,
-    onRemoveFromLibrary: () -> Unit,
     onRequestRemoveFromLibrary: () -> Unit,
-    onOpenDirectory: () -> Unit,
     onRetry: () -> Unit,
     onUseOfflineCache: () -> Unit,
     onOpenVerification: () -> Unit,
@@ -73,7 +94,9 @@ fun BookDetailScreen(
     onOpenDestinations: () -> Unit = {},
     destinationMenuExpanded: Boolean = false,
     onDestinationMenuExpandedChange: (Boolean) -> Unit = {},
-    destinationMenuContent: @Composable ColumnScope.(dismissMenu: () -> Unit) -> Unit = { _ -> },
+    destinationMenuItemCount: Int = 0,
+    destinationMenuItemKey: (Int) -> String = { it.toString() },
+    destinationMenuItemContent: @Composable ColumnScope.(Int, dismissMenu: () -> Unit) -> Unit = { _, _ -> },
     destinationMessage: String? = null,
     partialMoveTargetName: String? = null,
     onRetryMoveOnly: () -> Unit = {},
@@ -84,20 +107,6 @@ fun BookDetailScreen(
     focusChapterId: String? = null,
     onFocusHandled: () -> Unit = {},
 ) {
-    if (LocalDisplayEnvironment.current.effectiveProfile == DisplayProfile.EINK) {
-        FrozenEInkBookDetailScreen(
-            state = state,
-            inLibrary = localState.inLibrary,
-            onAddToLibrary = onAddToLibrary,
-            onRemoveFromLibrary = onRemoveFromLibrary,
-            onOpenDirectory = onOpenDirectory,
-            onRetry = onRetry,
-            onUseOfflineCache = onUseOfflineCache,
-            onOpenVerification = onOpenVerification,
-            modifier = modifier,
-        )
-        return
-    }
     StandardBookDetailScreen(
         state = state,
         directoryState = directoryState,
@@ -126,7 +135,9 @@ fun BookDetailScreen(
         onOpenDestinations = onOpenDestinations,
         destinationMenuExpanded = destinationMenuExpanded,
         onDestinationMenuExpandedChange = onDestinationMenuExpandedChange,
-        destinationMenuContent = destinationMenuContent,
+        destinationMenuItemCount = destinationMenuItemCount,
+        destinationMenuItemKey = destinationMenuItemKey,
+        destinationMenuItemContent = destinationMenuItemContent,
         destinationMessage = destinationMessage,
         partialMoveTargetName = partialMoveTargetName,
         onRetryMoveOnly = onRetryMoveOnly,
@@ -139,104 +150,7 @@ fun BookDetailScreen(
         resyncMessage = resyncMessage,
         focusChapterId = focusChapterId,
         onFocusHandled = onFocusHandled,
+        einkPagination = LocalDisplayEnvironment.current.effectiveProfile == DisplayProfile.EINK,
         modifier = modifier,
     )
-}
-
-@Composable
-fun BookDirectoryScreen(
-    state: SourceBookState<SourceDirectory>,
-    onSelectChapter: (SourceChapter) -> Unit,
-    onRetry: () -> Unit,
-    onUseOfflineCache: () -> Unit,
-    onOpenVerification: () -> Unit,
-    modifier: Modifier = Modifier,
-) {
-    FrozenEInkBookDirectoryScreen(
-        state = state,
-        onSelectChapter = onSelectChapter,
-        onRetry = onRetry,
-        onUseOfflineCache = onUseOfflineCache,
-        onOpenVerification = onOpenVerification,
-        modifier = modifier,
-    )
-}
-
-@Composable
-private fun FrozenEInkBookDetailScreen(
-    state: SourceBookState<SourceBookDetail>,
-    inLibrary: Boolean,
-    onAddToLibrary: () -> Unit,
-    onRemoveFromLibrary: () -> Unit,
-    onOpenDirectory: () -> Unit,
-    onRetry: () -> Unit,
-    onUseOfflineCache: () -> Unit,
-    onOpenVerification: () -> Unit,
-    modifier: Modifier,
-) {
-    when (state) {
-        SourceBookState.Loading -> StateView(
-            kind = TsuyomiStateKind.LOADING,
-            title = stringResource(R.string.book_loading_detail),
-            modifier = modifier,
-        )
-        is SourceBookState.Failure -> DetailFailure(state, onRetry, onUseOfflineCache, onOpenVerification, modifier)
-        is SourceBookState.Content -> {
-            val detail = state.value
-            Column(
-                modifier = modifier.fillMaxSize().padding(24.dp),
-                verticalArrangement = Arrangement.spacedBy(12.dp),
-            ) {
-                Text(detail.summary.title)
-                detail.summary.author?.let { Text(stringResource(R.string.book_author, it)) }
-                detail.status?.let { Text(stringResource(R.string.book_status, it)) }
-                detail.description?.let { Text(it) }
-                if (detail.tags.isNotEmpty()) Text(detail.tags.joinToString(" · "))
-                TsuyomiButton(
-                    text = stringResource(
-                        if (inLibrary) R.string.book_remove_from_library else R.string.book_add_to_library,
-                    ),
-                    onClick = if (inLibrary) onRemoveFromLibrary else onAddToLibrary,
-                    modifier = Modifier.fillMaxWidth(),
-                    style = if (inLibrary) TsuyomiButtonStyle.SECONDARY else TsuyomiButtonStyle.PRIMARY,
-                )
-                TsuyomiButton(
-                    text = stringResource(R.string.book_open_directory),
-                    onClick = onOpenDirectory,
-                    modifier = Modifier.fillMaxWidth(),
-                )
-            }
-        }
-    }
-}
-
-@Composable
-private fun FrozenEInkBookDirectoryScreen(
-    state: SourceBookState<SourceDirectory>,
-    onSelectChapter: (SourceChapter) -> Unit,
-    onRetry: () -> Unit,
-    onUseOfflineCache: () -> Unit,
-    onOpenVerification: () -> Unit,
-    modifier: Modifier,
-) {
-    when (state) {
-        SourceBookState.Loading -> StateView(
-            kind = TsuyomiStateKind.LOADING,
-            title = stringResource(R.string.book_loading_directory),
-            modifier = modifier,
-        )
-        is SourceBookState.Failure -> DetailFailure(state, onRetry, onUseOfflineCache, onOpenVerification, modifier)
-        is SourceBookState.Content -> LazyColumn(modifier.fillMaxSize()) {
-            items(state.value.chapters, key = SourceChapter::chapterId) { chapter ->
-                Text(
-                    text = chapter.title,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clickable { onSelectChapter(chapter) }
-                        .padding(horizontal = 20.dp, vertical = 18.dp),
-                )
-                HorizontalDivider()
-            }
-        }
-    }
 }

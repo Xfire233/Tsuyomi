@@ -18,6 +18,7 @@ import kotlinx.coroutines.withContext
 import org.tsuyomi.shared.librarydomain.UpdateCandidate
 import org.tsuyomi.shared.librarydomain.UpdatePolicy
 import org.tsuyomi.shared.librarydomain.UpdateProbe
+import org.tsuyomi.shared.librarydomain.UpdateProbeResult
 import org.tsuyomi.shared.librarydomain.UpdateSnapshot
 import org.tsuyomi.shared.librarydomain.UpdateStore
 import org.tsuyomi.shared.librarydomain.UpdateUndo
@@ -90,7 +91,7 @@ class UpdateCoordinator(
                             continue
                         }
 
-                        val result = try {
+                        val probeResult = try {
                             probeWithLeaseHeartbeat(lease, candidate) ?: return UpdateRunOutcome.RELINQUISHED
                         } catch (cancelled: CancellationException) {
                             throw cancelled
@@ -101,13 +102,24 @@ class UpdateCoordinator(
                             continue
                         }
 
-                        if (!isStillValid(lease, candidate)) continue
-                        val beforeCommit = clock()
-                        if (!store.renewLease(lease, beforeCommit, beforeCommit + leaseDurationMillis)) {
-                            return UpdateRunOutcome.RELINQUISHED
+                        when (probeResult) {
+                            is UpdateProbeResult.Unavailable -> {
+                                val beforeCommit = clock()
+                                if (!store.renewLease(lease, beforeCommit, beforeCommit + leaseDurationMillis)) {
+                                    return UpdateRunOutcome.RELINQUISHED
+                                }
+                                store.recordUnavailable(lease, candidate, probeResult, beforeCommit)
+                            }
+                            is UpdateProbeResult.Checked -> {
+                                if (!isStillValid(lease, candidate)) continue
+                                val beforeCommit = clock()
+                                if (!store.renewLease(lease, beforeCommit, beforeCommit + leaseDurationMillis)) {
+                                    return UpdateRunOutcome.RELINQUISHED
+                                }
+                                if (!isStillValid(lease, candidate)) continue
+                                store.recordProbe(lease, candidate, probeResult.evidence, beforeCommit)
+                            }
                         }
-                        if (!isStillValid(lease, candidate)) continue
-                        store.recordProbe(lease, candidate, result, beforeCommit)
                     }
                 }
             } catch (cancelled: CancellationException) {
@@ -142,14 +154,14 @@ class UpdateCoordinator(
 
     suspend fun loadMoreSessionItems(): Boolean = store.loadMoreSessionItems()
 
-    suspend fun ignore(identity: BookIdentity, anchor: String): UpdateUndo? =
+    suspend fun ignore(identity: BookIdentity.Remote, anchor: String): UpdateUndo? =
         store.ignore(identity, anchor)
 
     suspend fun undo(token: UpdateUndo) {
         store.undo(token)
     }
 
-    suspend fun reconcileCompleted(identity: BookIdentity, chapterIds: Set<String>) {
+    suspend fun reconcileCompleted(identity: BookIdentity.Remote, chapterIds: Set<String>) {
         store.reconcileCompleted(identity, chapterIds)
     }
 
@@ -181,7 +193,7 @@ class UpdateCoordinator(
         null
     }
 
-    suspend fun excludeBook(identity: BookIdentity, excluded: Boolean) {
+    suspend fun excludeBook(identity: BookIdentity.Remote, excluded: Boolean) {
         store.excludeBook(identity, excluded)
     }
 

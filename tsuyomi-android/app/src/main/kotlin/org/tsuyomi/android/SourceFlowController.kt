@@ -58,11 +58,46 @@ internal class SourceFlowController(
         val credentialRevision: String,
         val packageInfo: VerifiedHxpPackage,
     )
+    private data class SourceSessionLease(
+        val active: ActiveSourceSession,
+        val client: SourceFlowSession,
+    )
+
 
     private val applicationContext = context.applicationContext
     private var homeCachePartition: HomeCachePartition? = null
     private val sessionOwner = SourceSessionOwner(directActionTokens, openSession, isPackageTrusted)
     private val coverPresenter = SourceCoverPresenter()
+    private fun captureSourceSessionLease(sourceId: String? = null): SourceSessionLease? {
+        val active = sessionOwner.active() ?: return null
+        if (sourceId != null && active.packageInfo.manifest.sourceId.value != sourceId) return null
+        val client = sessionOwner.clientFor(active) ?: return null
+        return SourceSessionLease(active, client)
+    }
+
+    private fun hasCurrentSourceSession(lease: SourceSessionLease): Boolean =
+        sessionOwner.clientFor(lease.active) === lease.client
+
+    private fun requireCurrentSourceSession(lease: SourceSessionLease) {
+        if (!hasCurrentSourceSession(lease)) throw sessionSupersededException()
+    }
+
+    private fun sessionSupersededException() = SourceException(
+        code = SourceErrorCode.EXTENSION_RUNTIME_FAILURE,
+        diagnostic = SourceDiagnostic(
+            correlationId = "source-session-superseded",
+            stage = "source-session",
+            safeCode = "source-session-superseded",
+        ),
+    )
+
+    private fun performWithCurrentSourceSession(lease: SourceSessionLease, action: () -> Unit): Boolean =
+        sessionOwner.performWithCurrentClient(lease.active, lease.client, action)
+
+    private fun sourceNotOpenException() = SourceException(
+        code = SourceErrorCode.EXTENSION_RUNTIME_FAILURE,
+        diagnostic = SourceDiagnostic("source-not-open", "source-session", "source-not-open"),
+    )
 
     val remoteLibrary = SourceRemoteLibraryCoordinator(context, library, sessionOwner)
     val home = SourceHomeController()
@@ -107,32 +142,55 @@ internal class SourceFlowController(
     private var preparedResumeLoad: SourceReaderLoad? = null
 
     private var selectionGeneration = 0L
+    private val sourceOpenRequestLock = Any()
+    private var sourceOpenRequestGeneration = 0L
+    private var sourceOpenRequestPackageSha256: String? = null
 
-    private var searchInvocation = 0L
-    suspend fun chapterVerifiedPageRequestUrl(): String? {
-        val source = sessionOwner.requireClientOrNull() ?: return null
-        val book = selectedBook ?: return null
-        val chapter = selectedChapter ?: return null
-        return sourceOrNull { source.chapterRequestUrl(chapter, book.identity.remoteBookId) }
+    private fun beginSourceOpenRequest(packageInfo: VerifiedHxpPackage): Long = synchronized(sourceOpenRequestLock) {
+        if (sourceOpenRequestPackageSha256 != packageInfo.packageSha256) {
+            sourceOpenRequestPackageSha256 = packageInfo.packageSha256
+            sourceOpenRequestGeneration++
+        }
+        sourceOpenRequestGeneration
     }
 
-    suspend fun chapterVerifiedPage(snapshot: CapturedVerifiedPage): Boolean {
-        val source = sessionOwner.requireClientOrNull() ?: return false
+    private fun isCurrentSourceOpenRequest(generation: Long): Boolean =
+        synchronized(sourceOpenRequestLock) { sourceOpenRequestGeneration == generation }
+
+    private var searchInvocation = 0L
+    suspend fun chapterVerifiedPageRequestUrl(targetChapter: SourceChapter? = selectedChapter): String? {
+        val book = selectedBook ?: return null
+        val chapter = targetChapter ?: return null
+        val generation = selectionGeneration
+        val lease = captureSourceSessionLease(book.identity.sourceId) ?: return null
+        return sourceOrNull { lease.client.chapterRequestUrl(chapter, book.identity.remoteBookId) }
+            ?.takeIf { matchesSelection(book, generation) && hasCurrentSourceSession(lease) }
+    }
+
+    suspend fun chapterVerifiedPage(snapshot: CapturedVerifiedPage, targetChapter: SourceChapter? = selectedChapter): Boolean {
         val book = selectedBook ?: return false
-        val chapter = selectedChapter ?: return false
+        val chapter = targetChapter ?: return false
+        val generation = selectionGeneration
+        val lease = captureSourceSessionLease(book.identity.sourceId) ?: return false
+        fun currentChapter() = matchesSelection(book, generation) && hasCurrentSourceSession(lease)
         val restored = library.progress(book.identity)?.locator
             ?.takeIf { it.document.contentId == chapter.chapterId }
-        verifiedChapterLoad = try {
-            SourceReaderLoad(
-                document = source.chapterVerifiedPage(chapter, book.identity.remoteBookId, snapshot).also { document ->
-                    writeNormalized { normalizedStore.writeDocument(book.identity, document) }
-                },
-                restoredLocator = restored,
-            )
+        if (!currentChapter()) return false
+        val result = try {
+            val document = lease.client.chapterVerifiedPage(chapter, book.identity.remoteBookId, snapshot)
+            if (!currentChapter()) return false
+            if (document.identity.book != book.identity || document.identity.contentId != chapter.chapterId) {
+                throw wrongChapterIdentity()
+            }
+            writeNormalized(lease) { normalizedStore.writeDocument(book.identity, document) }
+            if (!currentChapter()) return false
+            SourceReaderLoad(document = document, restoredLocator = restored)
         } catch (error: SourceException) {
+            if (!currentChapter()) return false
             SourceReaderLoad(failure = error, restoredLocator = restored)
         }
-        return verifiedChapterLoad?.document != null
+        if (!currentChapter() || !performWithCurrentSourceSession(lease) { verifiedChapterLoad = result }) return false
+        return result.document != null
     }
 
     fun chapterVerifiedPageDiagnostic(): SourceDiagnostic? = verifiedChapterLoad?.failure?.diagnostic
@@ -144,26 +202,41 @@ internal class SourceFlowController(
         preparedResumeLoad.also { preparedResumeLoad = null }
 
 
-    suspend fun open(packageInfo: VerifiedHxpPackage): SourceSessionOpenResult {
-        val result = sessionOwner.open(packageInfo) {
+    suspend fun open(packageInfo: VerifiedHxpPackage): SourceSessionOpenResult =
+        open(packageInfo, beginSourceOpenRequest(packageInfo))
+
+    private suspend fun open(
+        packageInfo: VerifiedHxpPackage,
+        requestGeneration: Long,
+    ): SourceSessionOpenResult {
+        val result = sessionOwner.open(packageInfo, onPackageChanged = {
             resetReadingState()
             remoteLibrary.reset()
-        }
+        })
+        if (!isCurrentSourceOpenRequest(requestGeneration)) return SourceSessionOpenResult.SUPERSEDED
         when (result) {
             SourceSessionOpenResult.ALREADY_OPEN -> {
-                commitHomeSource(packageInfo)
-                return result
+                if (!sessionOwner.performWhenReady(packageInfo) { commitHomeSource(packageInfo) }) {
+                    return SourceSessionOpenResult.SUPERSEDED
+                }
             }
-            SourceSessionOpenResult.UNAVAILABLE -> sourceBecameUnavailable()
             SourceSessionOpenResult.OPENED, SourceSessionOpenResult.PACKAGE_CHANGED -> {
-                commitHomeSource(packageInfo)
-                searchState = SearchResultState.Idle
+                if (!sessionOwner.performWhenReady(packageInfo) {
+                        commitHomeSource(packageInfo)
+                        searchState = SearchResultState.Idle
+                    }
+                ) return SourceSessionOpenResult.SUPERSEDED
             }
+            SourceSessionOpenResult.UNAVAILABLE -> {
+                sessionOwner.performForLatestRequest(packageInfo) { sourceBecameUnavailable() }
+            }
+            SourceSessionOpenResult.SUPERSEDED -> Unit
         }
         return result
     }
 
     suspend fun openHome(packageInfo: VerifiedHxpPackage): SourceSessionOpenResult {
+        val requestGeneration = beginSourceOpenRequest(packageInfo)
         val sourceId = packageInfo.manifest.sourceId.value
         val partition = HomeCachePartition(
             sourceId = sourceId,
@@ -173,13 +246,14 @@ internal class SourceFlowController(
             },
             packageInfo = packageInfo,
         )
+        if (!isCurrentSourceOpenRequest(requestGeneration)) return SourceSessionOpenResult.SUPERSEDED
         if (homeCachePartition != partition) {
             home.invalidateSession()
             homeCachePartition = partition
         }
         commitHomeSource(packageInfo)
         if (home.state is SourceHomeViewState.Idle) {
-            withContext(Dispatchers.IO) {
+            val cachedPage = withContext(Dispatchers.IO) {
                 normalizedStore.readHome(
                     sourceId = partition.sourceId,
                     packageRevision = partition.packageRevision,
@@ -187,16 +261,24 @@ internal class SourceFlowController(
                     selectedFilters = emptyMap(),
                     cursor = null,
                 )
-            }?.let(home::acceptVerifiedPage)
+            }
+            if (!isCurrentSourceOpenRequest(requestGeneration)) return SourceSessionOpenResult.SUPERSEDED
+            cachedPage?.let(home::acceptVerifiedPage)
         }
-        val result = open(packageInfo)
-        if (result != SourceSessionOpenResult.UNAVAILABLE) {
+        val result = open(packageInfo, requestGeneration)
+        if (result == SourceSessionOpenResult.ALREADY_OPEN ||
+            result == SourceSessionOpenResult.OPENED ||
+            result == SourceSessionOpenResult.PACKAGE_CHANGED
+        ) {
             val activeCredentialRevision = withContext(Dispatchers.IO) {
                 SourceGatewayFactory.mediaCredentialRevision(applicationContext, packageInfo)
             }
-            if (activeCredentialRevision != partition.credentialRevision) {
-                home.invalidateSession()
-                homeCachePartition = partition.copy(credentialRevision = activeCredentialRevision)
+            if (!isCurrentSourceOpenRequest(requestGeneration)) return SourceSessionOpenResult.SUPERSEDED
+            sessionOwner.performWhenReady(packageInfo) {
+                if (activeCredentialRevision != partition.credentialRevision) {
+                    home.invalidateSession()
+                    homeCachePartition = partition.copy(credentialRevision = activeCredentialRevision)
+                }
             }
         }
         return result
@@ -228,17 +310,20 @@ internal class SourceFlowController(
     fun discardPreparedSourceSession(prepared: PreparedSourceSession) {
         sessionOwner.discardPrepared(prepared)
     }
-    suspend fun pullRemoteLibrary(packageInfo: VerifiedHxpPackage): RemoteLibraryPullResult {
-        open(packageInfo)
-        return remoteLibrary.pull(packageInfo)
-    }
+    suspend fun pullRemoteLibrary(packageInfo: VerifiedHxpPackage): RemoteLibraryPullResult =
+        when (open(packageInfo)) {
+            SourceSessionOpenResult.UNAVAILABLE -> RemoteLibraryPullResult.Failure("source-unavailable")
+            SourceSessionOpenResult.SUPERSEDED -> RemoteLibraryPullResult.Failure("source-changed")
+            else -> remoteLibrary.pull(packageInfo)
+        }
 
     internal suspend fun pullRemoteLibrary(
         packageInfo: VerifiedHxpPackage,
         aggregateLimitBytes: Long,
-    ): RemoteLibraryPullResult {
-        open(packageInfo)
-        return remoteLibrary.pull(packageInfo, aggregateLimitBytes)
+    ): RemoteLibraryPullResult = when (open(packageInfo)) {
+        SourceSessionOpenResult.UNAVAILABLE -> RemoteLibraryPullResult.Failure("source-unavailable")
+        SourceSessionOpenResult.SUPERSEDED -> RemoteLibraryPullResult.Failure("source-changed")
+        else -> remoteLibrary.pull(packageInfo, aggregateLimitBytes)
     }
 
     suspend fun copyRemoteLibraryToLocal(books: Collection<SourceBookSummary>): RemoteLibraryCopyResult =
@@ -292,16 +377,14 @@ internal class SourceFlowController(
     suspend fun moveBookOnWebsite(book: SourceBookSummary, targetId: String, targetName: String, importedAt: Instant = Instant.now()): RemoteMutationUiResult =
         remoteLibrary.moveBookOnWebsite(book, targetId, targetName, importedAt)
 
-    suspend fun listRemoteTargets(): List<RemoteTarget> = remoteLibrary.listRemoteTargets()
+    suspend fun listRemoteTargets(): RemoteTargetReadResult = remoteLibrary.listRemoteTargets()
+
+    suspend fun refreshRemoteLibrarySnapshot(
+        packageInfo: VerifiedHxpPackage,
+    ): RemoteLibrarySnapshotRefreshResult = remoteLibrary.refreshRemoteLibrarySnapshot(packageInfo)
 
     suspend fun writebackAuthorized(sourceId: String, operation: String): Boolean =
         remoteLibrary.writebackAuthorized(sourceId, operation)
-
-    suspend fun saveRemoteMirrorSnapshot(
-        sourceName: String,
-        books: List<SourceBookSummary>,
-        targets: List<RemoteTarget>,
-    ): List<SourceBookSummary> = remoteLibrary.saveRemoteMirrorSnapshot(sourceName, books, targets)
 
     suspend fun remoteMirrorSnapshot(sourceId: String) = remoteLibrary.remoteMirrorSnapshot(sourceId)
 
@@ -319,10 +402,10 @@ internal class SourceFlowController(
     ): RemoteMutationUiResult =
         remoteLibrary.retryRemoteMutation(book ?: selectedBook, importedAt, expectedOperation)
 
-    suspend fun acknowledgeUnresolved(identity: BookIdentity): Boolean =
+    suspend fun acknowledgeUnresolved(identity: BookIdentity.Remote): Boolean =
         remoteLibrary.acknowledgeUnresolved(identity)
 
-    suspend fun remoteReconciliation(identity: BookIdentity) =
+    suspend fun remoteReconciliation(identity: BookIdentity.Remote) =
         library.bookReconciliation(identity.sourceId, identity.remoteBookId)
 
     suspend fun authorizeWriteback(sourceId: String, operation: String, enabled: Boolean): Boolean =
@@ -331,48 +414,72 @@ internal class SourceFlowController(
 
     suspend fun unresolvedReconciliations() = library.unresolvedReconciliations()
 
-    suspend fun reopenWithStoredCredentials() {
-        when (sessionOwner.reopen()) {
-            SourceSessionOpenResult.OPENED -> {
+    suspend fun reopenWithStoredCredentials(): Boolean {
+        val expectedPackage = sessionOwner.active()?.packageInfo ?: return false
+        return when (sessionOwner.reopen()) {
+            SourceSessionOpenResult.OPENED,
+            SourceSessionOpenResult.ALREADY_OPEN -> {
+                if (!sessionOwner.performWhenReady(expectedPackage) {}) return false
                 refreshHomeCredentialPartition(persistCurrentPage = false)
-                home.invalidateSession()
-                searchState = SearchResultState.Idle
+                sessionOwner.performWhenReady(expectedPackage) {
+                    home.invalidateSession()
+                    searchState = SearchResultState.Idle
+                }
             }
-            SourceSessionOpenResult.PACKAGE_CHANGED -> {
+            SourceSessionOpenResult.PACKAGE_CHANGED -> sessionOwner.performWhenReady(expectedPackage) {
                 homeCachePartition = null
                 home.invalidateSession()
                 resetReadingState()
                 remoteLibrary.reset()
                 searchState = SearchResultState.Idle
             }
-            SourceSessionOpenResult.ALREADY_OPEN, null -> Unit
-            SourceSessionOpenResult.UNAVAILABLE -> sourceBecameUnavailable()
+            SourceSessionOpenResult.UNAVAILABLE -> {
+                sessionOwner.performForLatestRequest(expectedPackage) { sourceBecameUnavailable() }
+                false
+            }
+            SourceSessionOpenResult.SUPERSEDED, null -> false
         }
     }
 
-    suspend fun reopenAfterVerifiedPage(retainVerifiedHome: Boolean) {
+    suspend fun reopenAfterVerifiedPage(retainVerifiedHome: Boolean): Boolean {
+        val expectedPackage = sessionOwner.active()?.packageInfo ?: return false
         val parsedSearchState = searchState
-        when (sessionOwner.reopen()) {
-            SourceSessionOpenResult.OPENED -> {
+        return when (sessionOwner.reopen()) {
+            SourceSessionOpenResult.OPENED,
+            SourceSessionOpenResult.ALREADY_OPEN -> {
+                if (!sessionOwner.performWhenReady(expectedPackage) {}) return false
                 refreshHomeCredentialPartition(persistCurrentPage = retainVerifiedHome)
-                if (retainVerifiedHome) home.retainVerifiedPageAfterSessionRenewal() else home.invalidateSession()
-                searchState = parsedSearchState
+                sessionOwner.performWhenReady(expectedPackage) {
+                    if (retainVerifiedHome) home.retainVerifiedPageAfterSessionRenewal()
+                    else home.invalidateSession()
+                    searchState = parsedSearchState
+                }
             }
-            SourceSessionOpenResult.PACKAGE_CHANGED -> {
+            SourceSessionOpenResult.PACKAGE_CHANGED -> sessionOwner.performWhenReady(expectedPackage) {
                 homeCachePartition = null
                 home.invalidateSession()
                 resetReadingState()
                 remoteLibrary.reset()
             }
-            SourceSessionOpenResult.ALREADY_OPEN, null -> Unit
-            SourceSessionOpenResult.UNAVAILABLE -> sourceBecameUnavailable()
+            SourceSessionOpenResult.UNAVAILABLE -> {
+                sessionOwner.performForLatestRequest(expectedPackage) { sourceBecameUnavailable() }
+                false
+            }
+            SourceSessionOpenResult.SUPERSEDED, null -> false
         }
     }
 
     suspend fun restoreFor(target: SourceRestorationTarget, packageInfo: VerifiedHxpPackage) {
-        open(packageInfo)
+        when (open(packageInfo)) {
+            SourceSessionOpenResult.UNAVAILABLE, SourceSessionOpenResult.SUPERSEDED -> return
+            else -> Unit
+        }
         if (target == SourceRestorationTarget.SEARCH) return
+        val generation = selectionGeneration
+        val lease = captureSourceSessionLease(packageInfo.manifest.sourceId.value) ?: return
+        if (lease.active.packageInfo.packageSha256 != packageInfo.packageSha256) return
         val snapshot = snapshotStore.read(packageInfo.manifest.sourceId.value) ?: return
+        if (selectionGeneration != generation || !hasCurrentSourceSession(lease)) return
         when (target) {
             SourceRestorationTarget.SEARCH -> Unit
             SourceRestorationTarget.DETAIL -> if (selectedBook == null) prepareBook(snapshot.book)
@@ -380,8 +487,10 @@ internal class SourceFlowController(
             SourceRestorationTarget.READER -> if (selectedBook == null || selectedChapter == null) {
                 if (selectedBook?.identity != snapshot.book.identity) selectionGeneration += 1
                 selectedBook = snapshot.book
+                val restoredGeneration = selectionGeneration
                 remoteLibrary.beginSelection(snapshot.book.identity)
                 remoteLibrary.refreshSelection(snapshot.book)
+                if (selectionGeneration != restoredGeneration || !hasCurrentSourceSession(lease)) return
                 snapshot.chapter?.let { prepareChapter(it) }
             }
         }
@@ -419,14 +528,21 @@ internal class SourceFlowController(
                     cursor = cursor,
                 )
             }
-            if (cached != null) return Result.success(cached)
+            if (cached != null) {
+                return if (homeCachePartition == partition) Result.success(cached)
+                else Result.failure(sessionSupersededException())
+            }
         }
-        val source = sessionOwner.requireClientOrNull()
-            ?: return Result.failure(IllegalStateException("source-not-open"))
+        val lease = captureSourceSessionLease(partition?.sourceId) ?: return Result.failure(sourceNotOpenException())
+        if (partition != null && lease.active.packageInfo.packageSha256 != partition.packageRevision) {
+            return Result.failure(sessionSupersededException())
+        }
         return try {
-            val page = source.home(selectedFilters, cursor, offlineOnly)
+            val page = lease.client.home(selectedFilters, cursor, offlineOnly)
+            requireCurrentSourceSession(lease)
             partition?.let { expected -> refreshHomeCredentialPartition(expected) }?.let { activePartition ->
-                writeNormalized {
+                requireCurrentSourceSession(lease)
+                writeNormalized(lease) {
                     normalizedStore.writeHome(
                         sourceId = activePartition.sourceId,
                         packageRevision = activePartition.packageRevision,
@@ -436,6 +552,7 @@ internal class SourceFlowController(
                         page = page,
                     )
                 }
+                requireCurrentSourceSession(lease)
             }
             Result.success(page)
         } catch (error: SourceException) {
@@ -444,19 +561,23 @@ internal class SourceFlowController(
     }
 
     suspend fun homeVerifiedPageRequestUrl(): String? {
-        val source = sessionOwner.requireClientOrNull() ?: return null
-        return sourceOrNull { source.homeRequestUrl(home.selectedFilters, cursor = null) }
+        val lease = captureSourceSessionLease() ?: return null
+        val filters = home.selectedFilters
+        return sourceOrNull { lease.client.homeRequestUrl(filters, cursor = null) }
+            ?.takeIf { hasCurrentSourceSession(lease) }
     }
 
     suspend fun homeVerifiedPage(snapshot: CapturedVerifiedPage): Boolean {
-        val source = sessionOwner.requireClientOrNull() ?: return false
+        val lease = captureSourceSessionLease() ?: return false
+        val filters = home.selectedFilters
         return try {
-            home.acceptVerifiedPage(
-                source.homeVerifiedPage(home.selectedFilters, cursor = null, snapshot = snapshot),
-            )
-            true
+            val page = lease.client.homeVerifiedPage(filters, cursor = null, snapshot = snapshot)
+            requireCurrentSourceSession(lease)
+            performWithCurrentSourceSession(lease) { home.acceptVerifiedPage(page) }
         } catch (error: SourceException) {
-            home.rejectVerifiedPage(SourceHomeFailure(error.code, error.diagnostic.safeCode))
+            performWithCurrentSourceSession(lease) {
+                home.rejectVerifiedPage(SourceHomeFailure(error.code, error.diagnostic.safeCode))
+            }
             false
         }
     }
@@ -465,16 +586,19 @@ internal class SourceFlowController(
         val title = query
         if (title.isBlank()) return
         val invocation = beginSearch(title, authorSearch = false)
-        val source = sessionOwner.requireClientOrNull() ?: run {
+        val lease = captureSourceSessionLease() ?: run {
             completeSearch(invocation, searchFailure(SourceErrorCode.EXTENSION_RUNTIME_FAILURE, "source-open", "source-not-open"))
             return
         }
         val result = try {
-            SearchResultState.Results(source.search(title, offlineOnly = offlineOnly))
+            val items = lease.client.search(title, offlineOnly = offlineOnly)
+            requireCurrentSourceSession(lease)
+            SearchResultState.Results(items)
         } catch (error: SourceException) {
+            if (!hasCurrentSourceSession(lease)) return
             SearchResultState.Failure(error.code, error.diagnostic)
         }
-        completeSearch(invocation, result)
+        performWithCurrentSourceSession(lease) { completeSearch(invocation, result) }
     }
 
     suspend fun authorSearch(author: String, offlineOnly: Boolean = false) {
@@ -489,16 +613,19 @@ internal class SourceFlowController(
             )
             return
         }
-        val source = sessionOwner.requireClientOrNull() ?: run {
+        val lease = captureSourceSessionLease() ?: run {
             completeSearch(invocation, searchFailure(SourceErrorCode.EXTENSION_RUNTIME_FAILURE, "source-open", "source-not-open"))
             return
         }
         val result = try {
-            SearchResultState.Results(source.authorSearch(author, offlineOnly = offlineOnly))
+            val items = lease.client.authorSearch(author, offlineOnly = offlineOnly)
+            requireCurrentSourceSession(lease)
+            SearchResultState.Results(items)
         } catch (error: SourceException) {
+            if (!hasCurrentSourceSession(lease)) return
             SearchResultState.Failure(error.code, error.diagnostic)
         }
-        completeSearch(invocation, result)
+        performWithCurrentSourceSession(lease) { completeSearch(invocation, result) }
     }
 
     suspend fun searchVerifiedPageRequestUrl(): String? {
@@ -509,19 +636,22 @@ internal class SourceFlowController(
             searchState = searchFailure(SourceErrorCode.MALFORMED_SOURCE_RESPONSE, "author-search", "author-query-too-long")
             return null
         }
-        val source = sessionOwner.requireClientOrNull() ?: return null
+        val invocation = searchInvocation
+        val lease = captureSourceSessionLease() ?: return null
         return try {
-            if (requestedAuthorSearch) {
-                source.authorSearchRequestUrl(requestedQuery)
+            val requestUrl = if (requestedAuthorSearch) {
+                lease.client.authorSearchRequestUrl(requestedQuery)
             } else {
-                source.searchRequestUrl(requestedQuery)
+                lease.client.searchRequestUrl(requestedQuery)
             }
+            requestUrl.takeIf { searchInvocation == invocation && hasCurrentSourceSession(lease) }
         } catch (error: SourceException) {
-            if (requestedAuthorSearch) searchState = SearchResultState.Failure(error.code, error.diagnostic)
+            if (requestedAuthorSearch && searchInvocation == invocation) {
+                performWithCurrentSourceSession(lease) { searchState = SearchResultState.Failure(error.code, error.diagnostic) }
+            }
             null
         }
     }
-
     suspend fun searchVerifiedPage(snapshot: CapturedVerifiedPage): Boolean {
         val requestedQuery = query
         if (requestedQuery.isBlank()) return false
@@ -531,64 +661,84 @@ internal class SourceFlowController(
             return false
         }
         val invocation = beginSearch(requestedQuery, requestedAuthorSearch)
-        val source = sessionOwner.requireClientOrNull() ?: run {
+        val lease = captureSourceSessionLease() ?: run {
             completeSearch(invocation, searchFailure(SourceErrorCode.EXTENSION_RUNTIME_FAILURE, "source-open", "source-not-open"))
             return false
         }
         val result = try {
-            if (requestedAuthorSearch) {
-                SearchResultState.Results(source.authorSearchVerifiedPage(requestedQuery, snapshot))
+            val items = if (requestedAuthorSearch) {
+                lease.client.authorSearchVerifiedPage(requestedQuery, snapshot)
             } else {
-                SearchResultState.Results(source.searchVerifiedPage(requestedQuery, snapshot))
+                lease.client.searchVerifiedPage(requestedQuery, snapshot)
             }
+            requireCurrentSourceSession(lease)
+            SearchResultState.Results(items)
         } catch (error: SourceException) {
+            if (!hasCurrentSourceSession(lease)) return false
             SearchResultState.Failure(error.code, error.diagnostic)
         }
-        completeSearch(invocation, result)
+        if (!performWithCurrentSourceSession(lease) { completeSearch(invocation, result) }) return false
         return searchInvocation == invocation && searchState is SearchResultState.Results
     }
+
     suspend fun detailVerifiedPageRequestUrl(): String? {
-        val source = sessionOwner.requireClientOrNull() ?: return null
         val book = selectedBook ?: return null
-        return sourceOrNull { source.detailRequestUrl(book.identity.remoteBookId) }
+        val generation = selectionGeneration
+        val lease = captureSourceSessionLease(book.identity.sourceId) ?: return null
+        return sourceOrNull { lease.client.detailRequestUrl(book.identity.remoteBookId) }
+            ?.takeIf { matchesSelection(book, generation) && hasCurrentSourceSession(lease) }
     }
 
     suspend fun detailVerifiedPage(snapshot: CapturedVerifiedPage): Boolean {
-        val source = sessionOwner.requireClientOrNull() ?: return false
         val book = selectedBook ?: return false
-        detailState = SourceBookState.Loading
-        detailState = try {
-            val detail = source.detailVerifiedPage(book.identity.remoteBookId, snapshot).also { value ->
-                writeNormalized { normalizedStore.writeDetail(value) }
-            }
-            adoptDetail(detail)
+        val generation = selectionGeneration
+        val lease = captureSourceSessionLease(book.identity.sourceId) ?: return false
+        if (!performWithCurrentSourceSession(lease) { detailState = SourceBookState.Loading }) return false
+        val result = try {
+            val detail = lease.client.detailVerifiedPage(book.identity.remoteBookId, snapshot)
+            if (detail.summary.identity != book.identity) throw wrongDetailIdentity()
+            requireCurrentSourceSession(lease)
+            if (!matchesSelection(book, generation)) return false
+            writeNormalized(lease) { normalizedStore.writeDetail(detail) }
+            requireCurrentSourceSession(lease)
+            if (!matchesSelection(book, generation)) return false
+            adoptDetail(detail, lease)
             SourceBookState.Content(detail)
         } catch (error: SourceException) {
+            if (!matchesSelection(book, generation) || !hasCurrentSourceSession(lease)) return false
             SourceBookState.Failure(error.code, error.diagnostic)
         }
-        return detailState is SourceBookState.Content
+        return matchesSelection(book, generation) &&
+            performWithCurrentSourceSession(lease) { detailState = result } && result is SourceBookState.Content
     }
 
     suspend fun directoryVerifiedPageRequestUrl(): String? {
-        val source = sessionOwner.requireClientOrNull() ?: return null
         val book = selectedBook ?: return null
-        return sourceOrNull { source.directoryRequestUrl(book.identity.remoteBookId) }
+        val generation = selectionGeneration
+        val lease = captureSourceSessionLease(book.identity.sourceId) ?: return null
+        return sourceOrNull { lease.client.directoryRequestUrl(book.identity.remoteBookId) }
+            ?.takeIf { matchesSelection(book, generation) && hasCurrentSourceSession(lease) }
     }
 
     suspend fun directoryVerifiedPage(snapshot: CapturedVerifiedPage): Boolean {
-        val source = sessionOwner.requireClientOrNull() ?: return false
         val book = selectedBook ?: return false
-        directoryState = SourceBookState.Loading
-        directoryState = try {
-            SourceBookState.Content(
-                source.directoryVerifiedPage(book.identity.remoteBookId, snapshot).also { directory ->
-                    writeNormalized { normalizedStore.writeDirectory(directory) }
-                },
-            )
+        val generation = selectionGeneration
+        val lease = captureSourceSessionLease(book.identity.sourceId) ?: return false
+        if (!performWithCurrentSourceSession(lease) { directoryState = SourceBookState.Loading }) return false
+        val result = try {
+            val directory = lease.client.directoryVerifiedPage(book.identity.remoteBookId, snapshot)
+            requireDirectoryIdentity(book, directory)
+            requireCurrentSourceSession(lease)
+            if (!matchesSelection(book, generation)) return false
+            writeNormalized(lease) { normalizedStore.writeDirectory(directory) }
+            requireCurrentSourceSession(lease)
+            SourceBookState.Content(directory)
         } catch (error: SourceException) {
+            if (!matchesSelection(book, generation) || !hasCurrentSourceSession(lease)) return false
             SourceBookState.Failure(error.code, error.diagnostic)
         }
-        return directoryState is SourceBookState.Content
+        return matchesSelection(book, generation) &&
+            performWithCurrentSourceSession(lease) { directoryState = result } && result is SourceBookState.Content
     }
 
 
@@ -627,40 +777,68 @@ internal class SourceFlowController(
 
     suspend fun selectBook(book: SourceBookSummary, offlineOnly: Boolean = false) {
         prepareBook(book)
-        detailState = requestDetail(book, offlineOnly)
+        val generation = selectionGeneration
+        if (!matchesSelection(book, generation)) return
+        val result = requestDetail(book, offlineOnly)
+        if (matchesSelection(book, generation)) detailState = result
     }
 
     suspend fun requestDetail(
         book: SourceBookSummary = requireNotNull(selectedBook) { "Book is not selected" },
         offlineOnly: Boolean = false,
-    ): SourceBookState<SourceBookDetail> = try {
-        val detail = loadDetail(book, offlineOnly)
-        adoptDetail(detail)
-        SourceBookState.Content(detail)
-    } catch (error: SourceException) {
-        SourceBookState.Failure(error.code, error.diagnostic)
+    ): SourceBookState<SourceBookDetail> {
+        val lease = if (offlineOnly) null else {
+            captureSourceSessionLease(book.identity.sourceId) ?: run {
+                val error = sourceNotOpenException()
+                return SourceBookState.Failure(error.code, error.diagnostic)
+            }
+        }
+        return try {
+            val detail = loadDetail(book, offlineOnly, lease)
+            if (detail.summary.identity != book.identity) throw wrongDetailIdentity()
+            lease?.let(::requireCurrentSourceSession)
+            adoptDetail(detail, lease)
+            lease?.let(::requireCurrentSourceSession)
+            SourceBookState.Content(detail)
+        } catch (error: SourceException) {
+            SourceBookState.Failure(error.code, error.diagnostic)
+        }
     }
 
     suspend fun requestDirectory(
         book: SourceBookSummary = requireNotNull(selectedBook) { "Book is not selected" },
         offlineOnly: Boolean = false,
     ): SourceBookState<SourceDirectory> {
+        val lease = if (offlineOnly) null else {
+            captureSourceSessionLease(book.identity.sourceId) ?: run {
+                val error = sourceNotOpenException()
+                return SourceBookState.Failure(error.code, error.diagnostic)
+            }
+        }
         val result = try {
-            SourceBookState.Content(loadDirectory(book, offlineOnly))
+            SourceBookState.Content(loadDirectory(book, offlineOnly, lease))
         } catch (error: SourceException) {
             SourceBookState.Failure(error.code, error.diagnostic)
         }
-        if (selectedBook?.identity == book.identity) directoryState = result
+        if (selectedBook?.identity == book.identity) {
+            if (lease == null) directoryState = result
+            else if (!performWithCurrentSourceSession(lease) { directoryState = result }) {
+                val error = sessionSupersededException()
+                return SourceBookState.Failure(error.code, error.diagnostic)
+            }
+        }
         return result
     }
 
     suspend fun loadDirectory(offlineOnly: Boolean = false) {
         val book = selectedBook ?: return
+        val generation = selectionGeneration
         directoryState = SourceBookState.Loading
-        directoryState = requestDirectory(book, offlineOnly)
+        val result = requestDirectory(book, offlineOnly)
+        if (matchesSelection(book, generation)) directoryState = result
     }
 
-    suspend fun prepareDetail(identity: BookIdentity): Boolean {
+    suspend fun prepareDetail(identity: BookIdentity.Remote): Boolean {
         val detail = normalizedStore.readDetail(identity) ?: return false
         val directory = normalizedStore.readDirectory(identity) ?: return false
         if (detail.summary.identity != identity || directory.bookIdentity != identity) return false
@@ -674,13 +852,13 @@ internal class SourceFlowController(
         return true
     }
 
-    suspend fun prepareResume(identity: BookIdentity): Boolean {
+    suspend fun prepareResume(identity: BookIdentity.Remote): Boolean {
         val entry = library.readerHistoryEntry(identity) ?: return false
         return prepareResume(entry)
     }
 
     suspend fun prepareResume(entry: LibraryEntry): Boolean {
-        val identity = entry.book.identity
+        val identity = entry.book.identity as? BookIdentity.Remote ?: return false
         val detail = normalizedStore.readDetail(identity) ?: return false
         val directory = normalizedStore.readDirectory(identity) ?: return false
         val restoredLocator = entry.progress?.locator
@@ -691,8 +869,7 @@ internal class SourceFlowController(
             ?: return false
         val document = normalizedStore.readDocument(identity, chapter.chapterId) ?: return false
         if (detail.summary.identity != identity || directory.bookIdentity != identity) return false
-        if (document.sourceId != identity.sourceId || document.remoteBookId != identity.remoteBookId ||
-            document.contentId != chapter.chapterId
+        if (document.identity.book != identity || document.identity.contentId != chapter.chapterId
         ) return false
 
         if (selectedBook?.identity != identity) selectionGeneration += 1
@@ -708,6 +885,11 @@ internal class SourceFlowController(
     }
 
     suspend fun prepareChapter(chapter: SourceChapter) {
+        if (selectedChapter != chapter) {
+            selectionGeneration += 1
+            verifiedChapterLoad = null
+            preparedResumeLoad = null
+        }
         selectedChapter = chapter
         snapshotStore.saveChapter(chapter)
     }
@@ -715,7 +897,7 @@ internal class SourceFlowController(
     /**
      * Finds exact durable document snapshots without bringing their bodies onto the UI thread.
      */
-    internal suspend fun cachedChapterIds(identity: BookIdentity, chapterIds: Collection<String>): Set<String> =
+    internal suspend fun cachedChapterIds(identity: BookIdentity.Remote, chapterIds: Collection<String>): Set<String> =
         withContext(Dispatchers.IO) {
             normalizedStore.cachedDocumentIds(identity, chapterIds)
         }
@@ -730,23 +912,23 @@ internal class SourceFlowController(
     ): ChapterCacheResult {
         val requestGeneration = selectionGeneration
         if (!matchesSelection(book, requestGeneration)) return ChapterCacheResult.CANCELLED
+        val lease = captureSourceSessionLease(book.identity.sourceId) ?: return ChapterCacheResult.FAILED
         val document = try {
-            sessionOwner.requireClient().chapter(chapter, book.identity.remoteBookId, offlineOnly = false)
+            lease.client.chapter(chapter, book.identity.remoteBookId, offlineOnly = false)
         } catch (cancelled: CancellationException) {
             throw cancelled
         } catch (_: SourceException) {
             return ChapterCacheResult.FAILED
         }
-        if (!matchesSelection(book, requestGeneration)) return ChapterCacheResult.CANCELLED
-        if (
-            document.sourceId != book.identity.sourceId ||
-                document.remoteBookId != book.identity.remoteBookId ||
-                document.contentId != chapter.chapterId
-        ) {
+        if (!matchesSelection(book, requestGeneration) || !hasCurrentSourceSession(lease)) {
+            return ChapterCacheResult.CANCELLED
+        }
+        if (document.identity.book != book.identity || document.identity.contentId != chapter.chapterId) {
             return ChapterCacheResult.FAILED
         }
         val persisted = try {
             withContext(Dispatchers.IO) {
+                if (!matchesSelection(book, requestGeneration) || !hasCurrentSourceSession(lease)) return@withContext false
                 normalizedStore.writeAndVerifyDocument(book.identity, chapter.chapterId, document)
             }
         } catch (cancelled: CancellationException) {
@@ -755,7 +937,7 @@ internal class SourceFlowController(
             false
         }
         return when {
-            !matchesSelection(book, requestGeneration) -> ChapterCacheResult.CANCELLED
+            !matchesSelection(book, requestGeneration) || !hasCurrentSourceSession(lease) -> ChapterCacheResult.CANCELLED
             persisted -> ChapterCacheResult.CACHED
             else -> ChapterCacheResult.FAILED
         }
@@ -767,18 +949,24 @@ internal class SourceFlowController(
         offlineOnly: Boolean = false,
         prefetchedDocument: ReaderDocument? = null,
     ): SourceReaderLoad {
+        val generation = selectionGeneration
+        val lease = if (offlineOnly) null else {
+            captureSourceSessionLease(book.identity.sourceId) ?: return SourceReaderLoad(failure = sourceNotOpenException())
+        }
         val restored = library.progress(book.identity)?.locator
             ?.takeIf { it.document.contentId == chapter.chapterId }
+        if (!matchesSelection(book, generation) || (lease != null && !hasCurrentSourceSession(lease))) {
+            return SourceReaderLoad(failure = sessionSupersededException(), restoredLocator = restored)
+        }
         val exactPrefetch = prefetchedDocument?.takeIf { document ->
-            document.sourceId == book.identity.sourceId &&
-                document.remoteBookId == book.identity.remoteBookId &&
-                document.contentId == chapter.chapterId
+            document.identity.book == book.identity && document.identity.contentId == chapter.chapterId
         }
         return try {
-            SourceReaderLoad(
-                document = exactPrefetch ?: loadDocument(book, chapter, offlineOnly),
-                restoredLocator = restored,
-            )
+            val document = exactPrefetch ?: loadDocument(book, chapter, offlineOnly, lease)
+            if (!matchesSelection(book, generation) || (lease != null && !hasCurrentSourceSession(lease))) {
+                throw sessionSupersededException()
+            }
+            SourceReaderLoad(document = document, restoredLocator = restored)
         } catch (error: SourceException) {
             SourceReaderLoad(failure = error, restoredLocator = restored)
         }
@@ -795,8 +983,9 @@ internal class SourceFlowController(
     ): ReaderDocument? {
         val generation = selectionGeneration
         if (!matchesSelection(book, generation)) return null
+        val lease = captureSourceSessionLease(book.identity.sourceId) ?: return null
         val document = try {
-            sessionOwner.requireClient().chapter(chapter, book.identity.remoteBookId, offlineOnly = false)
+            lease.client.chapter(chapter, book.identity.remoteBookId, offlineOnly = false)
         } catch (cancelled: CancellationException) {
             throw cancelled
         } catch (_: SourceException) {
@@ -804,11 +993,9 @@ internal class SourceFlowController(
         } catch (_: Exception) {
             return null
         }
-        if (!matchesSelection(book, generation)) return null
+        if (!matchesSelection(book, generation) || !hasCurrentSourceSession(lease)) return null
         return document.takeIf {
-            it.sourceId == book.identity.sourceId &&
-                it.remoteBookId == book.identity.remoteBookId &&
-                it.contentId == chapter.chapterId
+            it.identity.book == book.identity && it.identity.contentId == chapter.chapterId
         }
     }
 
@@ -919,11 +1106,13 @@ internal class SourceFlowController(
         }
     }
 
-    private suspend fun adoptDetail(detail: SourceBookDetail) {
+    private suspend fun adoptDetail(detail: SourceBookDetail, lease: SourceSessionLease? = null) {
         val summary = detail.summary
         if (selectedBook?.identity != summary.identity) return
+        lease?.let(::requireCurrentSourceSession)
         selectedBook = summary
         snapshotStore.saveBook(summary)
+        lease?.let(::requireCurrentSourceSession)
         val existing = library.book(summary.identity)
         if (existing != null) {
             val merged = mergeLibraryBook(
@@ -935,7 +1124,8 @@ internal class SourceFlowController(
             )
             if (merged != existing) library.saveBook(merged)
         }
-        remoteLibrary.refreshSelection(summary)
+        lease?.let(::requireCurrentSourceSession)
+        if (selectedBook?.identity == summary.identity) remoteLibrary.refreshSelection(summary)
     }
 
     private fun mergeLibraryBook(
@@ -977,45 +1167,120 @@ internal class SourceFlowController(
         return if (merged == base) base else merged.copy(metadataUpdatedAt = updatedAt)
     }
 
-    private suspend fun loadDetail(book: SourceBookSummary, offlineOnly: Boolean): SourceBookDetail {
-        if (offlineOnly) return normalizedStore.readDetail(book.identity) ?: throw normalizedCacheMiss("detail")
+    private suspend fun loadDetail(
+        book: SourceBookSummary,
+        offlineOnly: Boolean,
+        lease: SourceSessionLease?,
+    ): SourceBookDetail {
+        if (offlineOnly) {
+            return normalizedStore.readDetail(book.identity)?.also {
+                if (it.summary.identity != book.identity) throw wrongDetailIdentity()
+            } ?: throw normalizedCacheMiss("detail")
+        }
+        val active = lease ?: throw sourceNotOpenException()
         return try {
-            sessionOwner.requireClient().detail(book.identity.remoteBookId, offlineOnly = false).also { detail ->
-                writeNormalized { normalizedStore.writeDetail(detail) }
-            }
+            val detail = active.client.detail(book.identity.remoteBookId, offlineOnly = false)
+            if (detail.summary.identity != book.identity) throw wrongDetailIdentity()
+            requireCurrentSourceSession(active)
+            writeNormalized(active) { normalizedStore.writeDetail(detail) }
+            requireCurrentSourceSession(active)
+            detail
         } catch (error: SourceException) {
             if (error.code != SourceErrorCode.NETWORK_OFFLINE) throw error
-            normalizedStore.readDetail(book.identity) ?: throw error
+            requireCurrentSourceSession(active)
+            normalizedStore.readDetail(book.identity)?.also {
+                if (it.summary.identity != book.identity) throw wrongDetailIdentity()
+            } ?: throw error
         }
     }
 
-    private suspend fun loadDirectory(book: SourceBookSummary, offlineOnly: Boolean): SourceDirectory {
-        if (offlineOnly) return normalizedStore.readDirectory(book.identity) ?: throw normalizedCacheMiss("directory")
+    private suspend fun loadDirectory(
+        book: SourceBookSummary,
+        offlineOnly: Boolean,
+        lease: SourceSessionLease?,
+    ): SourceDirectory {
+        if (offlineOnly) {
+            val cached = normalizedStore.readDirectory(book.identity) ?: throw normalizedCacheMiss("directory")
+            requireDirectoryIdentity(book, cached)
+            return cached
+        }
+        val active = lease ?: throw sourceNotOpenException()
         return try {
-            sessionOwner.requireClient().directory(book.identity.remoteBookId, offlineOnly = false).also { directory ->
-                writeNormalized { normalizedStore.writeDirectory(directory) }
-            }
+            val directory = active.client.directory(book.identity.remoteBookId, offlineOnly = false)
+            requireDirectoryIdentity(book, directory)
+            requireCurrentSourceSession(active)
+            writeNormalized(active) { normalizedStore.writeDirectory(directory) }
+            requireCurrentSourceSession(active)
+            directory
         } catch (error: SourceException) {
             if (error.code != SourceErrorCode.NETWORK_OFFLINE) throw error
-            normalizedStore.readDirectory(book.identity) ?: throw error
+            requireCurrentSourceSession(active)
+            normalizedStore.readDirectory(book.identity)?.also { requireDirectoryIdentity(book, it) } ?: throw error
         }
     }
+
+    private fun requireDirectoryIdentity(book: SourceBookSummary, directory: SourceDirectory) {
+        if (directory.bookIdentity != book.identity) {
+            throw SourceException(
+                SourceErrorCode.MALFORMED_SOURCE_RESPONSE,
+                SourceDiagnostic(
+                    correlationId = "directory-identity-mismatch",
+                    stage = "directory-admission",
+                    safeCode = "wrong-book-identity",
+                ),
+            )
+        }
+    }
+
+    private fun wrongDetailIdentity() = SourceException(
+        SourceErrorCode.MALFORMED_SOURCE_RESPONSE,
+        SourceDiagnostic(
+            correlationId = "detail-identity-mismatch",
+            stage = "detail-admission",
+            safeCode = "wrong-book-identity",
+        ),
+    )
+
+    private fun wrongChapterIdentity() = SourceException(
+        SourceErrorCode.MALFORMED_SOURCE_RESPONSE,
+        SourceDiagnostic(
+            correlationId = "chapter-identity-mismatch",
+            stage = "chapter-admission",
+            safeCode = "wrong-chapter-identity",
+        ),
+    )
 
     private suspend fun loadDocument(
         book: SourceBookSummary,
         chapter: SourceChapter,
         offlineOnly: Boolean,
+        lease: SourceSessionLease?,
     ): ReaderDocument {
         if (offlineOnly) {
-            return normalizedStore.readDocument(book.identity, chapter.chapterId) ?: throw normalizedCacheMiss("chapter")
+            return normalizedStore.readDocument(book.identity, chapter.chapterId)?.also {
+                if (it.identity.book != book.identity || it.identity.contentId != chapter.chapterId) {
+                    throw wrongChapterIdentity()
+                }
+            } ?: throw normalizedCacheMiss("chapter")
         }
+        val active = lease ?: throw sourceNotOpenException()
         return try {
-            sessionOwner.requireClient().chapter(chapter, book.identity.remoteBookId, offlineOnly = false).also { document ->
-                writeNormalized { normalizedStore.writeDocument(book.identity, document) }
+            val document = active.client.chapter(chapter, book.identity.remoteBookId, offlineOnly = false)
+            if (document.identity.book != book.identity || document.identity.contentId != chapter.chapterId) {
+                throw wrongChapterIdentity()
             }
+            requireCurrentSourceSession(active)
+            writeNormalized(active) { normalizedStore.writeDocument(book.identity, document) }
+            requireCurrentSourceSession(active)
+            document
         } catch (error: SourceException) {
             if (error.code != SourceErrorCode.NETWORK_OFFLINE) throw error
-            normalizedStore.readDocument(book.identity, chapter.chapterId) ?: throw error
+            requireCurrentSourceSession(active)
+            normalizedStore.readDocument(book.identity, chapter.chapterId)?.also {
+                if (it.identity.book != book.identity || it.identity.contentId != chapter.chapterId) {
+                    throw wrongChapterIdentity()
+                }
+            } ?: throw error
         }
     }
 
@@ -1066,11 +1331,13 @@ internal class SourceFlowController(
 
     private suspend fun refreshHomeCredentialPartition(persistCurrentPage: Boolean) {
         val current = homeCachePartition ?: return
+        val lease = captureSourceSessionLease(current.sourceId) ?: return
+        if (lease.active.packageInfo.packageSha256 != current.packageRevision) return
         val updated = refreshHomeCredentialPartition(current) ?: return
         if (!persistCurrentPage) return
         val pageState = (home.state as? SourceHomeViewState.Content)?.activePageState ?: return
         val page = pageState.page ?: return
-        writeNormalized {
+        writeNormalized(lease) {
             normalizedStore.writeHome(
                 sourceId = updated.sourceId,
                 packageRevision = updated.packageRevision,
@@ -1087,9 +1354,11 @@ internal class SourceFlowController(
      * (temp file, fsync, rename) must never run on the UI thread: callers reach this from a
      * LaunchedEffect, so the write would otherwise stall the frame between parse and render.
      */
-    private suspend fun writeNormalized(block: () -> Unit) {
+    private suspend fun writeNormalized(lease: SourceSessionLease, block: () -> Unit) {
         try {
-            withContext(Dispatchers.IO) { block() }
+            withContext(Dispatchers.IO) {
+                if (hasCurrentSourceSession(lease)) block()
+            }
         } catch (_: StorageException) {
             // Normalized replay is optional; source results remain valid without a local snapshot.
         }

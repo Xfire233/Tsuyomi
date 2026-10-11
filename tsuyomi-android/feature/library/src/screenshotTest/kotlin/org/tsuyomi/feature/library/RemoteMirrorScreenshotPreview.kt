@@ -40,9 +40,9 @@ fun RemoteMirrorStandardScreenshot() {
         redrawEpoch = 0,
     )
     val books = listOf(
-        SourceBookSummary(BookIdentity(SourceId, "1"), "文学少女", "野村美月", null, "https://example.com/1"),
-        SourceBookSummary(BookIdentity(SourceId, "2"), "狼与香辛料", "支仓冻砂", null, "https://example.com/2"),
-        SourceBookSummary(BookIdentity(SourceId, "3"), "奇诺之旅", "时雨泽惠一", null, "https://example.com/3"),
+        SourceBookSummary(BookIdentity.Remote(SourceId, "1"), "文学少女", "野村美月", null, "https://example.com/1"),
+        SourceBookSummary(BookIdentity.Remote(SourceId, "2"), "狼与香辛料", "支仓冻砂", null, "https://example.com/2"),
+        SourceBookSummary(BookIdentity.Remote(SourceId, "3"), "奇诺之旅", "时雨泽惠一", null, "https://example.com/3"),
     )
     DisplayEnvironmentProvider(environment) {
         TsuyomiTheme(environment) {

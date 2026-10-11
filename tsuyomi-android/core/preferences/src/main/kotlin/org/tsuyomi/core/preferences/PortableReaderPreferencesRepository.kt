@@ -175,9 +175,14 @@ class PortableReaderPreferencesRepository(private val dataStore: DataStore<Prefe
 
         fun isRequestedFlow(value: String): Boolean = value in REQUESTED_FLOWS
 
-        fun encodeFlowOverride(identity: BookIdentity, flow: String): String =
-            Base64.getUrlEncoder().withoutPadding()
-                .encodeToString("${identity.sourceId}\u0000${identity.remoteBookId}".toByteArray(StandardCharsets.UTF_8)) + "|$flow"
+        fun encodeFlowOverride(identity: BookIdentity, flow: String): String {
+            val tuple = when (identity) {
+                is BookIdentity.Remote -> "${identity.sourceId}\u0000${identity.remoteBookId}"
+                is BookIdentity.Local -> "\u0000${identity.publicationId}"
+            }
+            return Base64.getUrlEncoder().withoutPadding()
+                .encodeToString(tuple.toByteArray(StandardCharsets.UTF_8)) + "|$flow"
+        }
 
         fun decodeFlowOverride(value: String): Pair<BookIdentity, String>? = runCatching {
             val separator = value.lastIndexOf('|')
@@ -186,7 +191,9 @@ class PortableReaderPreferencesRepository(private val dataStore: DataStore<Prefe
                 .toString(StandardCharsets.UTF_8)
                 .split('\u0000', limit = 2)
             require(identity.size == 2 && isRequestedFlow(value.substring(separator + 1)))
-            BookIdentity(identity[0], identity[1]) to value.substring(separator + 1)
+            val book = if (identity[0].isEmpty()) BookIdentity.Local(identity[1])
+                else BookIdentity.Remote(identity[0], identity[1])
+            book to value.substring(separator + 1)
         }.getOrNull()
     }
 }

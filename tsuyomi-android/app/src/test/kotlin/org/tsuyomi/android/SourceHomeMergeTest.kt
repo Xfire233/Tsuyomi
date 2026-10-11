@@ -77,7 +77,7 @@ class SourceHomeMergeTest {
     private fun items(size: Int, skip: Int): List<SourceBookSummary> = (1..size).map { offset -> summary(skip + offset) }
 
     private fun summary(remoteBookId: Int) = SourceBookSummary(
-        identity = BookIdentity("org.tsuyomi.wenku8", remoteBookId.toString()),
+        identity = BookIdentity.Remote("org.tsuyomi.wenku8", remoteBookId.toString()),
         title = "书目 $remoteBookId",
         author = "作者",
         coverUrl = null,

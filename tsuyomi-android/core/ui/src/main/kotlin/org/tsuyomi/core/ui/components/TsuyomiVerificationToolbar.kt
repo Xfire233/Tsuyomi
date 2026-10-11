@@ -10,6 +10,8 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.FlowRow
+import org.tsuyomi.core.display.DisplayProfile
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.FilledTonalButton
@@ -23,6 +25,7 @@ import androidx.compose.ui.unit.dp
 import org.tsuyomi.core.display.LocalDisplayEnvironment
 import org.tsuyomi.core.ui.theme.instantMotion
 import org.tsuyomi.core.ui.theme.rememberSystemReducedMotion
+import org.tsuyomi.core.ui.theme.TsuyomiSpacing
 
 /** Full-screen verification route's compact unbacked horizontal action row. */
 @Composable
@@ -30,6 +33,13 @@ fun TsuyomiVerificationToolbar(
     modifier: Modifier = Modifier,
     content: @Composable RowScope.() -> Unit,
 ) {
+    if (LocalDisplayEnvironment.current.effectiveProfile == DisplayProfile.EINK) {
+        FlowRow(modifier, horizontalArrangement = Arrangement.spacedBy(TsuyomiSpacing.Sm, Alignment.CenterHorizontally),
+            verticalArrangement = Arrangement.spacedBy(TsuyomiSpacing.Sm)) {
+            content()
+        }
+        return
+    }
     Row(
         modifier = modifier,
         horizontalArrangement = Arrangement.spacedBy(4.dp),
@@ -57,6 +67,16 @@ fun TsuyomiVerificationAction(
     val actionModifier = modifier
         .heightIn(min = 48.dp)
         .semantics { contentDescription = text }
+    if (LocalDisplayEnvironment.current.effectiveProfile == DisplayProfile.EINK) {
+        TsuyomiButton(
+            text = if (working) workingText else text,
+            onClick = onClick,
+            modifier = actionModifier,
+            enabled = enabled && !working,
+            style = if (tonal) TsuyomiButtonStyle.SECONDARY else TsuyomiButtonStyle.PRIMARY,
+        )
+        return
+    }
     val content: @Composable RowScope.() -> Unit = {
         if (working && !staticMotion) {
             CircularProgressIndicator(modifier = Modifier.size(18.dp), strokeWidth = 2.dp)

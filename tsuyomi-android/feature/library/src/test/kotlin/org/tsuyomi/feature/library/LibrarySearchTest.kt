@@ -8,6 +8,8 @@ import java.time.Instant
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import org.tsuyomi.shared.librarydomain.LocalPublicationFormat
+import org.tsuyomi.shared.librarydomain.LocalPublicationMetadata
 import org.tsuyomi.shared.librarydomain.CollectionKind
 import org.tsuyomi.shared.librarydomain.LibraryBook
 import org.tsuyomi.shared.librarydomain.LibraryCollection
@@ -63,6 +65,17 @@ class LibrarySearchTest {
     }
 
     @Test
+    fun localPublicationRemainsSearchableAndEligibleForRecommendations() {
+        val local = localEntry("00000000-0000-4000-8000-000000000004", "离线小说")
+
+        val result = searchLocalLibrary("离线", listOf(local), emptyList())
+        val recommendations = recommendLocalLibrary(listOf(local), emptyList(), preferredCollectionId = null)
+
+        assertEquals(listOf(local.book.identity), result.books.map { it.book.identity })
+        assertEquals(listOf(local.book.identity), recommendations.books.map { it.book.identity })
+    }
+
+    @Test
     fun recommendationsPrioritizeReadingThenRecentAdditionAndCallerCollection() {
         val readBook = entry(
             id = "read",
@@ -85,9 +98,29 @@ class LibrarySearchTest {
             preferredCollectionId = "caller",
         )
 
-        assertEquals(listOf("read", "recent"), result.books.map { it.book.identity.remoteBookId })
+        assertEquals(listOf("read", "recent"), result.books.map { (it.book.identity as BookIdentity.Remote).remoteBookId })
         assertEquals(listOf("caller", "first"), result.collections.map { it.collectionId })
     }
+
+    private fun localEntry(id: String, title: String): LibraryEntry = LibraryEntry(
+        book = LibraryBook(
+            identity = BookIdentity.Local(id),
+            title = title,
+            addedAt = Instant.EPOCH,
+            metadataUpdatedAt = Instant.EPOCH,
+            localPublication = LocalPublicationMetadata(
+                format = LocalPublicationFormat.EPUB,
+                originalSha256 = "c".repeat(64),
+                originalSizeBytes = 3,
+                originalAvailable = true,
+            ),
+        ),
+        libraryAddedAt = Instant.EPOCH,
+        rating = null,
+        localTags = emptySet(),
+        sourceAvailable = false,
+        reconciliation = null,
+    )
 
     private fun entry(
         id: String,
@@ -99,7 +132,7 @@ class LibrarySearchTest {
         progressAt: Instant? = null,
     ): LibraryEntry = LibraryEntry(
         book = LibraryBook(
-            identity = BookIdentity("fixture.local", id),
+            identity = BookIdentity.Remote("fixture.local", id),
             title = title,
             addedAt = Instant.EPOCH,
             metadataUpdatedAt = Instant.EPOCH,
@@ -114,9 +147,9 @@ class LibrarySearchTest {
         reconciliation = null,
         progress = progressAt?.let { capturedAt ->
             ReadingProgress(
-                identity = BookIdentity("fixture.local", id),
+                identity = BookIdentity.Remote("fixture.local", id),
                 locator = ReaderLocator(
-                    document = DocumentIdentity("fixture.local", id, "chapter"),
+                    document = DocumentIdentity(BookIdentity.Remote("fixture.local", id), "chapter", null),
                     bookProgress = 0.5,
                     capturedAt = capturedAt,
                 ),

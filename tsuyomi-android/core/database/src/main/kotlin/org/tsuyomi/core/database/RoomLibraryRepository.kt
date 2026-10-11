@@ -5,8 +5,10 @@
 
 package org.tsuyomi.core.database
 
+import androidx.room.withTransaction
 import java.time.Instant
 import kotlinx.coroutines.flow.Flow
+import org.tsuyomi.shared.librarydomain.LocalPublicationFormat
 import org.tsuyomi.shared.librarydomain.LibraryBook
 import org.tsuyomi.shared.librarydomain.LibraryCollection
 import org.tsuyomi.shared.librarydomain.LibraryEntry
@@ -26,7 +28,7 @@ import org.tsuyomi.shared.smartshelf.SmartRule
  * The only public persistence boundary for the initial library schema. It exposes stable identities
  * and semantic locators, never Room entities or storage row identifiers.
  */
-class RoomLibraryRepository(database: TsuyomiDatabase) {
+class RoomLibraryRepository(private val database: TsuyomiDatabase) {
     private val dao = database.libraryDao()
     private val catalog = RoomLibraryCatalogStore(database, dao)
     private val remote = RoomRemoteLibraryStore(database, dao, catalog)
@@ -38,6 +40,20 @@ class RoomLibraryRepository(database: TsuyomiDatabase) {
     suspend fun saveBook(book: LibraryBook) = catalog.saveBook(book)
     suspend fun ensureRetainedLibraryEntry(book: LibraryBook): Boolean = catalog.ensureRetainedLibraryEntry(book)
     suspend fun book(identity: BookIdentity): LibraryBook? = catalog.book(identity)
+    /** All local publication metadata records, including unpinned and original-missing books. */
+    suspend fun localPublications(): List<LibraryBook> = catalog.localPublications()
+    suspend fun setLocalOriginalAvailable(identity: BookIdentity.Local, available: Boolean): Boolean =
+        catalog.setLocalOriginalAvailable(identity, available)
+    suspend fun compareAndSetLocalCoverResourceId(
+        identity: BookIdentity.Local,
+        format: LocalPublicationFormat,
+        originalSha256: String,
+        originalSizeBytes: Long,
+        expectedResourceId: String?,
+        resourceId: String,
+    ): Boolean = catalog.compareAndSetLocalCoverResourceId(identity, format, originalSha256, originalSizeBytes, expectedResourceId, resourceId)
+    suspend fun deleteLocalPublication(identity: BookIdentity.Local): Boolean =
+        catalog.deleteLocalPublication(identity)
     suspend fun libraryEntries(): List<LibraryEntry> = catalog.libraryEntries()
     suspend fun readLaterEntries(): List<LibraryEntry> = catalog.readLaterEntries()
     suspend fun readerHistoryEntries(): List<LibraryEntry> = catalog.readerHistoryEntries()
@@ -81,22 +97,20 @@ class RoomLibraryRepository(database: TsuyomiDatabase) {
     ): Boolean = remote.transitionRemoteAdd(id, expected, next, now, diagnosticId)
     suspend fun confirmRemoteAdd(
         id: String,
-        identity: BookIdentity,
+        identity: BookIdentity.Remote,
         resolvesPriorUnresolved: Boolean,
         now: Instant,
     ): Boolean = remote.confirmRemoteAdd(id, identity, resolvesPriorUnresolved, now)
     suspend fun confirmRemoteMutation(
         id: String,
-        identity: BookIdentity,
+        identity: BookIdentity.Remote,
         operation: String,
         resolvesPriorUnresolved: Boolean,
         now: Instant,
     ): Boolean = remote.confirmRemoteMutation(id, identity, operation, resolvesPriorUnresolved, now)
-    suspend fun cancelUnresolvedMutations(
-        identity: BookIdentity,
-        operation: String,
-        now: Instant,
-    ): Boolean = remote.cancelUnresolvedMutations(identity, operation, now)
+
+    suspend fun cancelUnresolvedMutations(identity: BookIdentity.Remote, operation: String, now: Instant): Boolean =
+        remote.cancelUnresolvedMutations(identity, operation, now)
     suspend fun transitionRemoteMutation(
         id: String,
         expected: RemoteReconciliationState,
@@ -110,11 +124,22 @@ class RoomLibraryRepository(database: TsuyomiDatabase) {
     suspend fun ensureRemoteMirrorBinding(sourceId: String, sourceName: String, now: Instant = Instant.now()) =
         remote.ensureRemoteMirrorBinding(sourceId, sourceName, now)
     suspend fun saveRemoteMirrorSnapshot(request: RemoteMirrorReplaceRequest) = remote.saveRemoteMirrorSnapshot(request)
+    suspend fun saveRemoteMirrorSnapshotIfSourceCurrent(
+        request: RemoteMirrorReplaceRequest,
+        expectedVersion: String,
+        expectedGeneration: Long,
+        expectedCapabilityFingerprint: String,
+    ): Boolean = remote.saveRemoteMirrorSnapshotIfSourceCurrent(
+        request,
+        expectedVersion,
+        expectedGeneration,
+        expectedCapabilityFingerprint,
+    )
     suspend fun remoteMirrorBindings(): List<RemoteMirrorBinding> = remote.remoteMirrorBindings()
     suspend fun remoteMirrorSnapshot(sourceId: String): RemoteMirrorSnapshot? = remote.remoteMirrorSnapshot(sourceId)
-    suspend fun updateRemoteMirrorBookTarget(identity: BookIdentity, targetId: String?, now: Instant = Instant.now()): Boolean =
+    suspend fun updateRemoteMirrorBookTarget(identity: BookIdentity.Remote, targetId: String?, now: Instant = Instant.now()): Boolean =
         remote.updateRemoteMirrorBookTarget(identity, targetId, now)
-    suspend fun removeRemoteMirrorBook(identity: BookIdentity): Boolean = remote.removeRemoteMirrorBook(identity)
+    suspend fun removeRemoteMirrorBook(identity: BookIdentity.Remote): Boolean = remote.removeRemoteMirrorBook(identity)
     suspend fun upsertRemoteMirrorBook(book: LibraryBook, targetId: String?, now: Instant = Instant.now()) =
         remote.upsertRemoteMirrorBook(book, targetId, now)
     suspend fun remoteMirrorTargetCount(sourceId: String, targetId: String): Int = remote.remoteMirrorTargetCount(sourceId, targetId)
@@ -168,12 +193,12 @@ class RoomLibraryRepository(database: TsuyomiDatabase) {
     suspend fun completedChapterIds(identity: BookIdentity): Set<String> = progress.completedChapterIds(identity)
     fun observeBookmarks(identity: BookIdentity): Flow<List<ReaderLocator>> = bookmarks.observeBookmarks(identity)
     suspend fun bookmarks(identity: BookIdentity): List<ReaderLocator> = bookmarks.bookmarks(identity)
-    suspend fun toggleBookmark(locator: ReaderLocator): Boolean {
+    suspend fun toggleBookmark(locator: ReaderLocator): Boolean = database.withTransaction {
         check(book(locator.document.book) != null) { "Bookmark requires retained book metadata" }
-        return bookmarks.toggleBookmark(locator)
+        bookmarks.toggleBookmark(locator)
     }
     suspend fun removeBookmark(locator: ReaderLocator): Boolean = bookmarks.removeBookmark(locator)
-    suspend fun addBookmarks(identity: BookIdentity, locators: List<ReaderLocator>) {
+    suspend fun addBookmarks(identity: BookIdentity, locators: List<ReaderLocator>) = database.withTransaction {
         check(book(identity) != null) { "Bookmark requires retained book metadata" }
         bookmarks.addBookmarks(identity, locators)
     }

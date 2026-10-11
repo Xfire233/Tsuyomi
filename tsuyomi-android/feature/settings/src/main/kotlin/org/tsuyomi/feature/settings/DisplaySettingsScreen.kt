@@ -6,18 +6,12 @@
 package org.tsuyomi.feature.settings
 
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.widthIn
-import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.runtime.Composable
-import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
-import androidx.compose.ui.unit.dp
 import org.tsuyomi.core.display.DisplayDecisionReason
 import org.tsuyomi.core.display.DisplayEnvironment
 import org.tsuyomi.core.display.DisplayProfile
@@ -54,6 +48,10 @@ class DisplaySettingsActions(
     val onAcknowledgeWriteFailure: () -> Unit,
 )
 
+private data class DisplaySettingsItem(
+    val key: String,
+    val content: @Composable () -> Unit,
+)
 /**
  * Display settings. Persisted values drive every control's state; effective values are only ever
  * shown as explanatory status text. Content is capped at 560dp and centered on wide windows.
@@ -67,30 +65,23 @@ fun DisplaySettingsScreen(
     val environment = state.environment
     val preferences = environment.preferences
     val eInk = environment.effectiveProfile == DisplayProfile.EINK
+    val items = mutableListOf<DisplaySettingsItem>()
 
-    Box(modifier = modifier.fillMaxSize()) {
-        Column(
-            modifier = Modifier
-                .align(Alignment.TopCenter)
-                .fillMaxWidth()
-                .widthIn(max = 560.dp)
-                .verticalScroll(rememberScrollState())
-                .padding(horizontal = TsuyomiSpacing.Md)
-                .padding(bottom = TsuyomiSpacing.Lg),
-        ) {
-            val writeFailure = state.writeFailure
-            if (writeFailure != null) {
-                InfoBanner(
-                    title = stringResource(R.string.settings_write_failure_title),
-                    message = stringResource(R.string.settings_write_failure_message),
-                    primaryActionLabel = stringResource(org.tsuyomi.core.ui.R.string.coreui_retry),
-                    onPrimaryAction = actions.onRetryWrite,
-                    dismissLabel = stringResource(R.string.settings_write_failure_acknowledge),
-                    onDismiss = actions.onAcknowledgeWriteFailure,
-                    modifier = Modifier.padding(top = TsuyomiSpacing.Md),
-                )
-            }
+    state.writeFailure?.let { failure ->
+        items += DisplaySettingsItem("write-failure-${failure.id}") {
+            InfoBanner(
+                title = stringResource(R.string.settings_write_failure_title),
+                message = stringResource(R.string.settings_write_failure_message),
+                primaryActionLabel = stringResource(org.tsuyomi.core.ui.R.string.coreui_retry),
+                onPrimaryAction = actions.onRetryWrite,
+                dismissLabel = stringResource(R.string.settings_write_failure_acknowledge),
+                onDismiss = actions.onAcknowledgeWriteFailure,
+                modifier = Modifier.padding(top = TsuyomiSpacing.Md),
+            )
+        }
+    }
 
+        items += DisplaySettingsItem("profile") {
             SettingsSectionHeader(title = stringResource(R.string.settings_display_section_profile))
             SettingsGroup {
                 SegmentedSelector(
@@ -108,7 +99,8 @@ fun DisplaySettingsScreen(
                     modifier = Modifier.padding(horizontal = TsuyomiSpacing.Md, vertical = TsuyomiSpacing.Sm),
                 )
             }
-
+        }
+        items += DisplaySettingsItem("appearance") {
             SettingsSectionHeader(title = stringResource(R.string.settings_display_section_appearance))
             SettingsGroup {
                 SegmentedSelector(
@@ -118,9 +110,9 @@ fun DisplaySettingsScreen(
                         TsuyomiSegment(ColorSchemePreference.DARK, stringResource(R.string.settings_display_theme_dark)),
                     ),
                     selected = preferences.colorSchemePreference,
-                    onSelect = actions.onColorSchemePreferenceChange,
                     enabled = !eInk,
                     disabledReason = if (eInk) stringResource(R.string.settings_display_theme_disabled_eink) else null,
+                    onSelect = actions.onColorSchemePreferenceChange,
                     modifier = Modifier.padding(TsuyomiSpacing.Md),
                 )
                 SettingsSwitchRow(
@@ -136,35 +128,9 @@ fun DisplaySettingsScreen(
                     },
                 )
             }
-
-            if (!eInk) {
-                SettingsSectionHeader(title = stringResource(R.string.settings_display_section_cover_cards))
-                SettingsGroup {
-                    SegmentedSelector(
-                        options = listOf(
-                            TsuyomiSegment(
-                                CoverCardPresentation.STANDARD,
-                                stringResource(R.string.settings_display_cover_standard),
-                            ),
-                            TsuyomiSegment(
-                                CoverCardPresentation.WIDE,
-                                stringResource(R.string.settings_display_cover_wide),
-                            ),
-                        ),
-                        selected = preferences.coverCardPresentation,
-                        onSelect = actions.onCoverCardPresentationChange,
-                        enabled = !preferences.coverCardPresentationReadOnly,
-                        disabledReason = if (preferences.coverCardPresentationReadOnly) {
-                            stringResource(R.string.settings_display_cover_unsupported)
-                        } else {
-                            null
-                        },
-                        modifier = Modifier.padding(TsuyomiSpacing.Md),
-                    )
-                }
-            }
-
-            if (eInk) {
+        }
+        if (eInk) {
+            items += DisplaySettingsItem("refresh") {
                 SettingsSectionHeader(title = stringResource(R.string.settings_display_section_refresh))
                 SettingsGroup {
                     InlineStatus(
@@ -178,10 +144,51 @@ fun DisplaySettingsScreen(
                     )
                 }
             }
-
+        } else {
+        items += DisplaySettingsItem("cover-cards") {
+            SettingsSectionHeader(title = stringResource(R.string.settings_display_section_cover_cards))
+            SettingsGroup {
+                SegmentedSelector(
+                    options = listOf(
+                        TsuyomiSegment(
+                            CoverCardPresentation.STANDARD,
+                            stringResource(R.string.settings_display_cover_standard),
+                        ),
+                        TsuyomiSegment(
+                            CoverCardPresentation.WIDE,
+                            stringResource(R.string.settings_display_cover_wide),
+                        ),
+                    ),
+                    selected = preferences.coverCardPresentation,
+                    onSelect = actions.onCoverCardPresentationChange,
+                    enabled = !preferences.coverCardPresentationReadOnly,
+                    disabledReason = if (preferences.coverCardPresentationReadOnly) {
+                        stringResource(R.string.settings_display_cover_unsupported)
+                    } else {
+                        null
+                    },
+                    modifier = Modifier.padding(TsuyomiSpacing.Md),
+                )
+            }
         }
     }
 
+    CenteredSettingsItems(
+        modifier = modifier,
+        itemCount = items.size,
+        itemKey = { index -> items[index].key },
+        itemContent = { index ->
+            if (eInk) {
+                Box(Modifier.fillMaxWidth().testTag("settings-display-item")) {
+                    Box(Modifier.fillMaxWidth().testTag("settings-display-item-${items[index].key}")) {
+                        items[index].content()
+                    }
+                }
+            } else {
+                items[index].content()
+            }
+        },
+    )
 }
 
 @Composable

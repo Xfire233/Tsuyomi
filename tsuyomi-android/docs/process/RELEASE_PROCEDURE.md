@@ -48,11 +48,11 @@ Set-Location tsuyomi-android
 
 下列签名命令仅适用于 Windows PowerShell；脚本依赖 Windows Android SDK build-tools 安装位置、Java 17（默认 `C:\Program Files\Java\jdk-17`）以及获准发布维护者在工作树外托管的签名材料。该私钥/证书与个人机器状态不是普通贡献或构建的前置条件；无权访问签名材料者不得尝试签名或替代密钥。
 
-在 `tsuyomi-android` 目录核对本次已合并源码的版本后设置参数。以下为 beta.5 / versionCode7；后续发布需使用对应源码的实际值，脚本会拒绝 APK 身份不匹配：
+在 `tsuyomi-android` 目录核对本次已合并源码的版本后设置参数。以下为待发布的 `0.5.0-beta.1` / versionCode `8`；执行前仍须核对合并源码的实际值，脚本会拒绝 APK 身份不匹配：
 
 ```powershell
-$VersionName = '0.3.0-beta.5'
-$VersionCode = 7
+$VersionName = '0.5.0-beta.1'
+$VersionCode = 8
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File tools/Publish-AndroidRelease.ps1 `
   -VersionName $VersionName -VersionCode $VersionCode -SourceRevision (git rev-parse HEAD)
 ```
@@ -114,3 +114,4 @@ source-revision: <40 hex>
 ## 9. 回退
 
 不移动已发布 tag、不替换已发布资产。回退按 [`REPOSITORY_GOVERNANCE.md`](REPOSITORY_GOVERNANCE.md) 执行：revert 引入问题的提交，保留数据，重跑受影响检查，再发布新的 patch 版本。
+

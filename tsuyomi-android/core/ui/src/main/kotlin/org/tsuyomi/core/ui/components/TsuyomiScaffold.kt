@@ -97,21 +97,23 @@ fun AppScaffold(
     ) {
         Layout(
             modifier = modifier.tsuyomiModalBackground()
-                .windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Horizontal)),
+                .windowInsetsPadding(
+                    if (layout == TsuyomiNavigationLayout.RAIL) WindowInsets.safeDrawing
+                    else WindowInsets.safeDrawing.only(WindowInsetsSides.Horizontal),
+                ),
             content = {
                 Box { topBar() }
                 Box { navigation(layout) }
                 Box { content() }
             },
         ) { measurables, constraints ->
-            val topBarPlaceable = measurables[0].measure(constraints.copy(minWidth = 0, minHeight = 0))
-            val contentTop = topBarPlaceable.height
-            val remainingHeight = (constraints.maxHeight - contentTop).coerceAtLeast(0)
-
             when (layout) {
                 TsuyomiNavigationLayout.BOTTOM_BAR,
                 TsuyomiNavigationLayout.COMPACT_BOTTOM_BAR,
                 -> {
+                    val topBarPlaceable = measurables[0].measure(constraints.copy(minWidth = 0, minHeight = 0))
+                    val contentTop = topBarPlaceable.height
+                    val remainingHeight = (constraints.maxHeight - contentTop).coerceAtLeast(0)
                     val navPlaceable = measurables[1].measure(
                         constraints.copy(minWidth = 0, minHeight = 0, maxHeight = remainingHeight),
                     )
@@ -130,18 +132,23 @@ fun AppScaffold(
 
                 TsuyomiNavigationLayout.RAIL -> {
                     val navPlaceable = measurables[1].measure(
-                        constraints.copy(minWidth = 0, minHeight = 0, maxHeight = remainingHeight),
+                        constraints.copy(minWidth = 0, minHeight = 0),
                     )
+                    val contentWidth = (constraints.maxWidth - navPlaceable.width).coerceAtLeast(0)
+                    val topBarPlaceable = measurables[0].measure(
+                        Constraints(maxWidth = contentWidth, maxHeight = constraints.maxHeight),
+                    )
+                    val contentTop = topBarPlaceable.height
                     val contentPlaceable = measurables[2].measure(
                         Constraints.fixed(
-                            width = (constraints.maxWidth - navPlaceable.width).coerceAtLeast(0),
-                            height = remainingHeight,
+                            width = contentWidth,
+                            height = (constraints.maxHeight - contentTop).coerceAtLeast(0),
                         ),
                     )
                     layout(constraints.maxWidth, constraints.maxHeight) {
-                        topBarPlaceable.place(0, 0)
-                        navPlaceable.place(0, contentTop)
-                        contentPlaceable.place(navPlaceable.width, contentTop)
+                        navPlaceable.placeRelative(0, 0)
+                        topBarPlaceable.placeRelative(navPlaceable.width, 0)
+                        contentPlaceable.placeRelative(navPlaceable.width, contentTop)
                     }
                 }
             }

@@ -4,15 +4,24 @@
  */
 package org.tsuyomi.core.ui.components
 
+import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.DropdownMenu
+import org.tsuyomi.core.display.DisplayProfile
+import org.tsuyomi.core.display.LocalDisplayEnvironment
+import org.tsuyomi.core.display.displayGrayscaleLayer
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.shape.CornerSize
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.runtime.key
+import org.tsuyomi.core.ui.theme.TsuyomiSpacing
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
-import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.SplitButtonDefaults
@@ -45,8 +54,12 @@ fun TsuyomiSplitButton(
     onMenuExpandedChange: (Boolean) -> Unit,
     leadingEnabled: Boolean,
     modifier: Modifier = Modifier,
-    menuContent: @Composable ColumnScope.(dismissMenu: () -> Unit) -> Unit,
+    menuItemCount: Int,
+    menuItemKey: (index: Int) -> String,
+    menuItemContent: @Composable ColumnScope.(index: Int, dismissMenu: () -> Unit) -> Unit,
 ) {
+    val eInk = LocalDisplayEnvironment.current.effectiveProfile == DisplayProfile.EINK
+    require(menuItemCount >= 0) { "menuItemCount must not be negative" }
     // The extended FAB also resolves CornerLarge from MaterialTheme.shapes.large.
     val outerShape = MaterialTheme.shapes.large
     val leadingShapes = remember(outerShape) {
@@ -58,6 +71,32 @@ fun TsuyomiSplitButton(
         SplitButtonShapes(shape = shape, pressedShape = shape, checkedShape = shape)
     }
     Box(modifier) {
+        if (eInk) {
+            Row(horizontalArrangement = Arrangement.spacedBy(TsuyomiSpacing.Xs)) {
+                TsuyomiButton(
+                    text = text,
+                    onClick = onLeadingClick,
+                    enabled = leadingEnabled,
+                    modifier = Modifier.weight(1f, fill = false).testTag("tsuyomi-split-leading"),
+                )
+                TsuyomiIconButton(
+                    imageVector = trailingIcon,
+                    contentDescription = trailingDescription,
+                    onClick = { onMenuOpen(); onMenuExpandedChange(true) },
+                    modifier = Modifier.testTag("tsuyomi-split-trailing"),
+                )
+            }
+            TsuyomiDropdownMenu(
+                expanded = menuExpanded,
+                onDismissRequest = { onMenuExpandedChange(false) },
+                itemCount = menuItemCount,
+                itemKey = menuItemKey,
+                itemContent = { index -> menuItemContent(index) { onMenuExpandedChange(false) } },
+                modifier = Modifier.widthIn(min = 220.dp, max = 320.dp).testTag("detail-destination-menu"),
+                offset = DpOffset(x = 0.dp, y = 4.dp),
+            )
+            return@Box
+        }
         SplitButtonLayout(
             leadingButton = {
                 SplitButtonDefaults.LeadingButton(
@@ -95,14 +134,17 @@ fun TsuyomiSplitButton(
         DropdownMenu(
             expanded = menuExpanded,
             onDismissRequest = { onMenuExpandedChange(false) },
-            modifier = Modifier.widthIn(min = 220.dp, max = 320.dp).testTag("detail-destination-menu"),
+            modifier = Modifier.widthIn(min = 220.dp, max = 320.dp).testTag("detail-destination-menu").displayGrayscaleLayer(),
             offset = DpOffset(x = 0.dp, y = 4.dp),
-            shape = MaterialTheme.shapes.medium,
-            containerColor = MaterialTheme.colorScheme.surfaceContainer,
-            tonalElevation = 3.dp,
-            shadowElevation = 6.dp,
+            shape = if (eInk) RoundedCornerShape(4.dp) else MaterialTheme.shapes.medium,
+            containerColor = if (eInk) MaterialTheme.colorScheme.surface else MaterialTheme.colorScheme.surfaceContainer,
+            tonalElevation = if (eInk) 0.dp else 3.dp,
+            shadowElevation = if (eInk) 0.dp else 6.dp,
+            border = if (eInk) BorderStroke(1.dp, MaterialTheme.colorScheme.outline) else null,
         ) {
-            menuContent { onMenuExpandedChange(false) }
+            for (index in 0 until menuItemCount) {
+                key(menuItemKey(index)) { menuItemContent(index) { onMenuExpandedChange(false) } }
+            }
         }
     }
 }

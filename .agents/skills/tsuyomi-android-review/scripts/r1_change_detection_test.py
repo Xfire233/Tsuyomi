@@ -170,6 +170,7 @@ class GitBaselineTest(unittest.TestCase):
 
             self.assertIsNotNone(baseline)
             assert baseline is not None
+            assert baseline.label is not None
             self.assertTrue(baseline.label.startswith("git:"))
             analysis = r1.detect_changes(baseline.files, current, NODE_IDS)
             self.assertEqual(
@@ -226,6 +227,9 @@ class PolicyCatalogConsistencyTest(unittest.TestCase):
         sharing = json.loads(json.dumps(valid))
         sharing["routineReview"]["shareOnlineCandidateWithHuman"] = False
         invalid_policies.append(sharing)
+        blanket_eink = json.loads(json.dumps(valid))
+        blanket_eink["einkVerification"]["selection"] = "every-active-profile"
+        invalid_policies.append(blanket_eink)
 
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

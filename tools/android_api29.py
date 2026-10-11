@@ -296,7 +296,7 @@ def capture_command(
     log: Path,
     cwd: Path | None,
     env: dict[str, str] | None,
-    timeout: int,
+    timeout: float,
     input_text: str | None = None,
 ) -> CommandResult:
     append_log(log, f"$ {display_command(command)}")
@@ -534,7 +534,7 @@ def adb(
     *,
     env: dict[str, str],
     log: Path,
-    timeout: int = 10,
+    timeout: float = 10,
 ) -> CommandResult:
     return capture_command(
         [str(tools.adb), "-s", serial, *arguments],
@@ -545,8 +545,10 @@ def adb(
     )
 
 
-def owned_avd_name(tools: SdkTools, serial: str, env: dict[str, str], log: Path) -> str | None:
-    result = adb(tools, serial, ("emu", "avd", "name"), env=env, log=log)
+def owned_avd_name(
+    tools: SdkTools, serial: str, env: dict[str, str], log: Path, *, timeout: float = 10,
+) -> str | None:
+    result = adb(tools, serial, ("emu", "avd", "name"), env=env, log=log, timeout=timeout)
     if result.returncode != 0:
         return None
     lines = [line.strip() for line in result.output.splitlines() if line.strip()]
@@ -555,8 +557,11 @@ def owned_avd_name(tools: SdkTools, serial: str, env: dict[str, str], log: Path)
     return lines[0] if len(lines) == 1 else None
 
 
-def require_owned_avd(tools: SdkTools, serial: str, expected_name: str, env: dict[str, str], log: Path) -> None:
-    actual_name = owned_avd_name(tools, serial, env, log)
+def require_owned_avd(
+    tools: SdkTools, serial: str, expected_name: str, env: dict[str, str], log: Path,
+    *, timeout: float = 10,
+) -> None:
+    actual_name = owned_avd_name(tools, serial, env, log, timeout=timeout)
     if actual_name != expected_name:
         raise RunnerError(
             f"Refusing device operation: serial {serial} reported AVD {actual_name!r}, expected owned AVD {expected_name!r}."
@@ -571,23 +576,286 @@ def wait_for_boot(
     profile: Profile,
     env: dict[str, str],
     log: Path,
+    *,
+    deadline: float | None = None,
 ) -> None:
-    deadline = time.monotonic() + profile.boot_timeout_seconds
+    """Wait without mutating the device; boot_completed alone is not user readiness."""
+    deadline = deadline if deadline is not None else time.monotonic() + profile.boot_timeout_seconds
+    transport_errors = {
+        f"{prefix} {message}"
+        for prefix in ("error:", "adb:", f"{tools.adb.name}:")
+        for message in ("closed", "device offline", f"device '{serial}' not found")
+    }
+
+    def query(arguments: Sequence[str]) -> str | None:
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            raise RunnerError(f"Owned emulator boot deadline expired; see {log}")
+        result = adb(tools, serial, arguments, env=env, log=log, timeout=min(5, remaining))
+        output = result.output.strip()
+        if result.returncode != 0:
+            if output in transport_errors:
+                return None
+            raise RunnerError(f"Unexpected boot query failure: {output!r}; see {log}")
+        return output
+
     while time.monotonic() < deadline:
         exited = process.poll()
         if exited is not None:
             raise RunnerError(f"Owned emulator process exited before boot with status {exited}; see {log}")
-        try:
-            state = adb(tools, serial, ("get-state",), env=env, log=log, timeout=5)
-            if state.returncode == 0 and state.output.strip() == "device":
-                boot = adb(tools, serial, ("shell", "getprop", "sys.boot_completed"), env=env, log=log, timeout=5)
-                if boot.returncode == 0 and boot.output.strip() == "1":
-                    require_owned_avd(tools, serial, expected_name, env, log)
+        state = query(("get-state",))
+        if state == "device":
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise RunnerError(f"Owned emulator boot identity deadline expired; see {log}")
+            require_owned_avd(tools, serial, expected_name, env, log, timeout=min(5, remaining))
+            boot = query(("shell", "getprop", "sys.boot_completed"))
+            if boot == "1":
+                user_state = query(("shell", "am", "get-started-user-state", "0"))
+                if user_state == "RUNNING_UNLOCKED":
                     return
-        except RunnerError as error:
-            append_log(log, f"Waiting for owned emulator boot: {error}")
-        time.sleep(2)
-    raise RunnerError(f"Owned emulator did not boot within {profile.boot_timeout_seconds}s; see {log}")
+                if user_state not in (None, "BOOTING", "RUNNING_LOCKED", "RUNNING_UNLOCKING"):
+                    raise RunnerError(f"Unexpected user 0 boot state: {user_state!r}; see {log}")
+            elif boot not in (None, "", "0"):
+                raise RunnerError(f"Unexpected sys.boot_completed: {boot!r}; see {log}")
+        elif state not in (None, "offline"):
+            raise RunnerError(f"Unexpected adb boot state: {state!r}; see {log}")
+        time.sleep(min(2, max(0, deadline - time.monotonic())))
+    raise RunnerError(f"Owned emulator did not boot with user 0 unlocked within {profile.boot_timeout_seconds}s; see {log}")
+
+
+def prepare_runtime(
+    tools: SdkTools,
+    process: subprocess.Popen[str],
+    serial: str,
+    expected_name: str,
+    profile: Profile,
+    env: dict[str, str],
+    log: Path,
+    *,
+    deadline: float | None = None,
+    receipt: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Initialize the pinned userdebug runtime once, before app/test dispatch."""
+    started = time.monotonic()
+    boot_deadline = deadline if deadline is not None else started + profile.boot_timeout_seconds
+    phase_deadline = boot_deadline
+    receipt = receipt if receipt is not None else {}
+    receipt.update({"phase": "prerequisites", "root_requests": 0, "stop_requests": [], "start_requests": []})
+
+    def command(arguments: Sequence[str]) -> CommandResult:
+        if process.poll() is not None:
+            raise RunnerError(f"Owned emulator exited during runtime preparation; see {log}")
+        remaining = phase_deadline - time.monotonic()
+        if remaining <= 0:
+            raise RunnerError(f"Runtime preparation deadline expired in {receipt['phase']}; see {log}")
+        return adb(tools, serial, arguments, env=env, log=log, timeout=min(10, remaining))
+
+    def query(arguments: Sequence[str]) -> str:
+        result = command(arguments)
+        if result.returncode != 0:
+            raise RunnerError(f"Runtime preparation command failed: {result.output.strip()!r}; see {log}")
+        return result.output.strip()
+
+    def bind_identity() -> None:
+        remaining = phase_deadline - time.monotonic()
+        if remaining <= 0:
+            raise RunnerError(f"Runtime preparation identity deadline expired; see {log}")
+        require_owned_avd(tools, serial, expected_name, env, log, timeout=min(10, remaining))
+
+    def heap_properties() -> dict[str, str]:
+        return {
+            name: query(("shell", "getprop", name))
+            for name in ("dalvik.vm.heapsize", "dalvik.vm.heapgrowthlimit", "dalvik.vm.heapstartsize", "dalvik.vm.extra-opts")
+        }
+
+    def runtime_processes() -> tuple[dict[str, dict[str, int]], set[int]]:
+        output = query(("shell", "ps", "-A", "-o", "PID,PPID,NAME"))
+        lines = output.splitlines()
+        if not lines or lines[0].split() != ["PID", "PPID", "NAME"]:
+            raise RunnerError(f"Unexpected runtime process table: {output!r}; see {log}")
+        runtime: dict[str, dict[str, int]] = {}
+        pids: set[int] = set()
+        for line in lines[1:]:
+            fields = line.split(maxsplit=2)
+            if len(fields) != 3 or not fields[0].isdigit() or not fields[1].isdigit():
+                raise RunnerError(f"Unexpected runtime process row: {line!r}; see {log}")
+            pid, parent = int(fields[0]), int(fields[1])
+            pids.add(pid)
+            name = fields[2]
+            if (name in ("zygote64", "zygote") and parent == 1) or name == "system_server":
+                role = {"zygote64": "zygote", "zygote": "zygote_secondary", "system_server": "system_server"}[name]
+                if role in runtime:
+                    raise RunnerError(f"Multiple runtime processes for {role}; see {log}")
+                runtime[role] = {"pid": pid, "ppid": parent}
+        return runtime, pids
+
+    bind_identity()
+    capability = {name: query(("shell", "getprop", name)) for name in ("ro.build.type", "ro.debuggable", "ro.zygote")}
+    receipt["capability"] = capability
+    if capability != {"ro.build.type": "userdebug", "ro.debuggable": "1", "ro.zygote": "zygote64_32"}:
+        raise RunnerError(f"Runtime preparation requires the pinned debuggable userdebug zygote64_32 image: {capability!r}")
+    if query(("shell", "getprop", "sys.boot_completed")) != "1" or query(("shell", "am", "get-started-user-state", "0")) != "RUNNING_UNLOCKED":
+        raise RunnerError("Runtime preparation requires completed boot and user 0 RUNNING_UNLOCKED")
+    before = heap_properties()
+    receipt["properties_before"] = before
+    if not before["dalvik.vm.heapsize"]:
+        raise RunnerError("Pinned image has not published dalvik.vm.heapsize; refusing runtime initialization")
+
+    receipt["phase"] = "root"
+    root_started = time.monotonic()
+    phase_deadline = min(boot_deadline, root_started + 20)
+    receipt["root_requests"] = 1
+    root = command(("root",))
+    receipt["root_output"] = root.output
+    receipt["root_returncode"] = root.returncode
+    root_transport_closed = root.returncode == 1 and root.output == "adb: unable to connect for root: closed\n"
+    receipt["root_transport_closed"] = root_transport_closed
+    # This exact closure leaves acknowledgement unknown; only the UID probe proves root.
+    # Normal and empty exit-0 replies use the same bounded probe, never another request.
+    if not root_transport_closed and (
+        root.returncode != 0 or root.output.strip() not in ("", "restarting adbd as root", "adbd is already running as root")
+    ):
+        raise RunnerError(f"Pinned image adb root denied or unexpected: {root.output.strip()!r}; see {log}")
+    transport_errors = {
+        f"{prefix} {message}"
+        for prefix in ("error:", "adb:", f"{tools.adb.name}:")
+        for message in ("closed", "device offline", f"device '{serial}' not found")
+    }
+    while True:
+        uid = command(("shell", "id", "-u"))
+        output = uid.output.strip()
+        if uid.returncode == 0 and output == "0":
+            break
+        if not ((uid.returncode == 0 and output == "2000") or (uid.returncode != 0 and output in transport_errors)):
+            raise RunnerError(f"Unexpected root transition result: {output!r}; see {log}")
+        time.sleep(min(0.25, max(0, phase_deadline - time.monotonic())))
+    receipt["shell_uid"] = 0
+    receipt["root_seconds"] = round(time.monotonic() - root_started, 3)
+    phase_deadline = boot_deadline
+    bind_identity()
+    receipt["properties_after_root"] = heap_properties()
+    if receipt["properties_after_root"] != before:
+        raise RunnerError("Image heap properties changed during root transition; refusing runtime initialization")
+
+    old, _ = runtime_processes()
+    services = ("zygote", "zygote_secondary")
+    if set(old) != {*services, "system_server"} or old["system_server"]["ppid"] != old["zygote"]["pid"]:
+        raise RunnerError(f"Expected init-owned primary/secondary and primary-owned system_server: {old!r}")
+    receipt["runtime_before"] = old
+    for service in services:
+        if query(("shell", "getprop", f"init.svc.{service}")) != "running":
+            raise RunnerError(f"Expected running pinned init service {service}; see {log}")
+
+    runtime_started = time.monotonic()
+    phase_deadline = min(boot_deadline, runtime_started + 60)
+    receipt["phase"] = "stopping_runtime"
+    # Installed /init.zygote64_32.rc: primary onrestart does not cycle secondary;
+    # secondary onrestart restarts primary. Use stop/start, not restart hooks, and
+    # stop secondary before primary; neither may start until BOTH are fully gone.
+    for service in reversed(services):
+        receipt["stop_requests"].append(service)
+        if query(("shell", "stop", service)):
+            raise RunnerError(f"Unexpected stop acknowledgement for {service}; see {log}")
+    old_pids = {entry["pid"] for entry in old.values()}
+    while True:
+        states = {service: query(("shell", "getprop", f"init.svc.{service}")) for service in services}
+        runtime, pids = runtime_processes()
+        receipt["stopped_service_states"] = states
+        if all(state == "stopped" for state in states.values()) and not old_pids.intersection(pids) and not runtime:
+            break
+        if any(state not in ("running", "stopping", "stopped") for state in states.values()):
+            raise RunnerError(f"Unexpected init stop states: {states!r}; see {log}")
+        time.sleep(min(0.25, max(0, phase_deadline - time.monotonic())))
+    receipt["old_runtime_stopped"] = True
+    receipt["stop_seconds"] = round(time.monotonic() - runtime_started, 3)
+    receipt["phase"] = "retiring_framework_publications"
+    retirement_started = time.monotonic()
+    retirement: dict[str, Any] = {}
+    receipt["publication_retirement"] = retirement
+    # Early system-context creation accepts no display service, but a dead old
+    # display Binder throws before new services start. PID exit alone is not
+    # servicemanager publication retirement; activity must retire as well.
+    while True:
+        publications = {name: query(("shell", "service", "check", name)) for name in ("display", "activity")}
+        observation = {
+            "states": publications,
+            "elapsed_seconds": round(time.monotonic() - retirement_started, 3),
+        }
+        retirement.setdefault("first", observation)
+        retirement["last"] = observation
+        for name, output in publications.items():
+            if output not in (f"Service {name}: found", f"Service {name}: not found"):
+                raise RunnerError(f"Unexpected stopped framework publication {name}: {output!r}; see {log}")
+        if all(output == f"Service {name}: not found" for name, output in publications.items()):
+            break
+        retirement["last_found"] = observation
+        time.sleep(min(0.25, max(0, phase_deadline - time.monotonic())))
+    receipt["publication_retirement_seconds"] = round(time.monotonic() - retirement_started, 3)
+    bind_identity()
+    receipt["phase"] = "starting_runtime"
+    for service in services:
+        receipt["start_requests"].append(service)
+        if query(("shell", "start", service)):
+            raise RunnerError(f"Unexpected start acknowledgement for {service}; see {log}")
+
+    observed: dict[str, dict[str, int]] = {}
+    receipt["runtime_after"] = observed
+    while True:
+        runtime, pids = runtime_processes()
+        if old_pids.intersection(pids):
+            raise RunnerError("Old runtime PID reappeared after orderly stop; refusing readiness")
+        for role, entry in observed.items():
+            if runtime.get(role) != entry:
+                raise RunnerError(f"New runtime {role} exited or was replaced during readiness; see {log}")
+        observed.update(runtime)
+        states = {service: query(("shell", "getprop", f"init.svc.{service}")) for service in services}
+        if any(state not in ("running", "stopped") for state in states.values()):
+            raise RunnerError(f"Unexpected init start states: {states!r}; see {log}")
+        if set(runtime) == {*services, "system_server"} and all(state == "running" for state in states.values()):
+            if runtime["system_server"]["ppid"] != runtime["zygote"]["pid"]:
+                raise RunnerError(f"New system_server is not a child of the new primary: {runtime!r}")
+            activity = query(("shell", "service", "check", "activity"))
+            if activity == "Service activity: found":
+                user_query = command(("shell", "am", "get-started-user-state", "0"))
+                user_state = user_query.output.strip()
+                receipt["activity_query"] = {"returncode": user_query.returncode, "output": user_query.output}
+                if user_query.returncode == 224 and user_state == "cmd: Failure calling service activity: Broken pipe (32)":
+                    # Android 10 cmd returns Binder DEAD_OBJECT (-EPIPE -> exit 224).
+                    # Publication can expose an unavailable Binder, not a callable service.
+                    # Keep this query pending ONLY while the new runtime remains identical.
+                    current_runtime, _ = runtime_processes()
+                    receipt["activity_dead_object"] = {
+                        **receipt["activity_query"], "runtime_after_query": current_runtime,
+                    }
+                    if current_runtime != observed:
+                        raise RunnerError(f"New runtime exited or changed after activity DEAD_OBJECT: {current_runtime!r}; see {log}")
+                    user_state = None
+                elif user_query.returncode != 0:
+                    raise RunnerError(f"Runtime activity readiness command failed: {user_state!r}; see {log}")
+                receipt["user_state"] = user_state
+                if user_state == "RUNNING_UNLOCKED":
+                    package = query(("shell", "cmd", "package", "path", "--user", "0", "android"))
+                    receipt["package_query"] = package
+                    if not package.startswith("package:/") or not package.endswith("/framework-res.apk") or "\n" in package:
+                        raise RunnerError(f"Unexpected user 0 framework package query: {package!r}; see {log}")
+                    break
+                if user_state not in (None, "BOOTING", "RUNNING_LOCKED", "RUNNING_UNLOCKING"):
+                    raise RunnerError(f"Unexpected restarted user 0 state: {user_state!r}; see {log}")
+            elif activity != "Service activity: not found":
+                raise RunnerError(f"Unexpected activity service query: {activity!r}; see {log}")
+        time.sleep(min(0.25, max(0, phase_deadline - time.monotonic())))
+    receipt["properties_after"] = heap_properties()
+    if receipt["properties_after"] != before:
+        raise RunnerError("Image heap properties changed during runtime initialization")
+    bind_identity()
+    final_runtime, _ = runtime_processes()
+    if final_runtime != observed:
+        raise RunnerError(f"Prepared runtime changed before handoff: {final_runtime!r}; see {log}")
+    receipt["runtime_seconds"] = round(time.monotonic() - runtime_started, 3)
+    receipt["total_seconds"] = round(time.monotonic() - started, 3)
+    receipt["phase"] = "ready"
+    return receipt
 
 
 def configure_emulator(
@@ -978,7 +1246,14 @@ def main(argv: Sequence[str] | None = None) -> int:
         require_renderer(tools, profile, emulator_env, emulator_log)
         create_avd(tools, profile, avd_name, emulator_env, emulator_log)
         emulator_process = start_emulator(tools, profile, avd_name, port, emulator_env, emulator_log)
-        wait_for_boot(tools, emulator_process, serial, avd_name, profile, emulator_env, adb_log)
+        boot_deadline = time.monotonic() + profile.boot_timeout_seconds
+        wait_for_boot(tools, emulator_process, serial, avd_name, profile, emulator_env, adb_log, deadline=boot_deadline)
+        evidence["runtime_preparation"] = {}
+        evidence["runtime_preparation"] = prepare_runtime(
+            tools, emulator_process, serial, avd_name, profile, emulator_env, adb_log,
+            deadline=boot_deadline, receipt=evidence["runtime_preparation"],
+        )
+        write_evidence(evidence_path, evidence)
         configure_emulator(tools, serial, avd_name, profile, emulator_env, adb_log)
         device = device_evidence(
             tools,

@@ -6,6 +6,9 @@ package org.tsuyomi.feature.library
 
 import androidx.compose.foundation.Indication
 import androidx.compose.foundation.LocalIndication
+import androidx.compose.foundation.combinedClickable
+import org.tsuyomi.core.display.DisplayProfile
+import org.tsuyomi.core.display.LocalDisplayEnvironment
 import androidx.compose.foundation.indication
 import androidx.compose.foundation.gestures.Orientation
 import androidx.compose.foundation.gestures.awaitEachGesture
@@ -389,7 +392,8 @@ internal class LibraryDragCoordinator {
             val mirror = hit?.value?.mirror
             if (mirror != null) {
                 externalDestination = if (
-                    activeBookIds.size == 1 && activeBookIds.single().sourceId == mirror.sourceId
+                    activeBookIds.size == 1 &&
+                        (activeBookIds.singleOrNull() as? BookIdentity.Remote)?.sourceId == mirror.sourceId
                 ) {
                     LibraryDropDestination.RemoteMirror(mirror.sourceId, mirror.targetId, mirror.label)
                 } else {
@@ -440,7 +444,9 @@ internal class LibraryDragCoordinator {
             val targets = if (dragShortcutBounds.isNotEmpty()) dragShortcutBounds else shortcutBounds
             targets.values.firstOrNull { it.mirror != null && it.bounds.contains(point) }?.mirror
         }
-        if (visibleMirror != null && activeBookIds.size == 1 && activeBookIds.single().sourceId == visibleMirror.sourceId) {
+        if (visibleMirror != null && activeBookIds.size == 1 &&
+            (activeBookIds.singleOrNull() as? BookIdentity.Remote)?.sourceId == visibleMirror.sourceId
+        ) {
             externalDestination = LibraryDropDestination.RemoteMirror(
                 visibleMirror.sourceId,
                 visibleMirror.targetId,
@@ -541,6 +547,14 @@ internal fun Modifier.libraryBookGestures(
     onTap: () -> Unit,
     onLongPress: () -> Unit,
 ): Modifier {
+    if (LocalDisplayEnvironment.current.effectiveProfile == DisplayProfile.EINK) {
+        return semantics { this.selected = selected }
+            .combinedClickable(
+                onClick = onTap,
+                onLongClickLabel = if (longPressEnabled) "选择此书" else null,
+                onLongClick = if (longPressEnabled) onLongPress else null,
+            )
+    }
     val subjectKey = identity.stableKey()
     val currentSelectionActive by rememberUpdatedState(selectionActive)
     val currentSelected by rememberUpdatedState(selected)
@@ -817,7 +831,7 @@ internal fun Modifier.libraryDeleteDropTarget(coordinator: LibraryDragCoordinato
     onGloballyPositioned { coordinator.registerDeleteTarget(it.boundsInWindow()) }
 }
 
-private fun BookIdentity.stableKey(): String = "$sourceId\u0000$remoteBookId"
+private fun BookIdentity.stableKey(): String = storageKey
 
 private fun Rect.collectionDropBounds(): Rect {
     val horizontalInset = if (width > height * 1.5f) 0.20f else 0.28f

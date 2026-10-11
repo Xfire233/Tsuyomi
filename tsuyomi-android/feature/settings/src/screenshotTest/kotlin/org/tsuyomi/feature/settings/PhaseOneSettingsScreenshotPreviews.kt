@@ -44,7 +44,7 @@ fun StandardDisplaySettingsScreenshots() {
     SettingsPreview(environment = standardEnvironment())
 }
 
-// Retained for IDE review; screenshot evidence resumes only when the EINK profile is unfrozen.
+@PreviewTest
 @Preview(name = "eink-portrait", device = EInkPortrait, locale = "zh-rCN")
 @Preview(name = "eink-landscape", device = EInkLandscape, locale = "zh-rCN")
 @Preview(
@@ -70,7 +70,7 @@ fun AutoUnknownDisplaySettingsScreenshot() {
     )
 }
 
-// Retained for IDE review; screenshot evidence resumes only when the EINK profile is unfrozen.
+@PreviewTest
 @Preview(name = "auto-recognized-eink", device = EInkPortrait, locale = "zh-rCN")
 @Composable
 fun AutoRecognizedEInkSettingsScreenshot() {

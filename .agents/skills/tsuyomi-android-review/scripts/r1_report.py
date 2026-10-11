@@ -4,6 +4,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Collection
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any
@@ -19,7 +20,7 @@ class ReportBuildContext:
     force_full_review: bool
     changes: list[dict[str, Any]]
     affected_reasons: dict[str, list[str]]
-    changed_kotlin_files: set[str]
+    changed_kotlin_files: Collection[str]
     node_ids: list[str]
     catalog_version: int
     current_files: dict[str, str]
@@ -58,6 +59,8 @@ class ChangeSummary:
     device_required: bool
     product_runtime_changed: bool
     evidence_plan: dict[str, Any]
+    device_profiles: list[str]
+    conditional_device_profiles: list[str]
 
 
 def _summarize_changes(context: ReportBuildContext) -> ChangeSummary:
@@ -108,6 +111,19 @@ def _summarize_changes(context: ReportBuildContext) -> ChangeSummary:
     build_required = context.force_full_review or bool(runtime_nodes) or "build" in classes
     device_required = context.force_full_review or bool(runtime_nodes)
     product_runtime_changed = context.force_full_review or bool(runtime_nodes)
+    active_profiles = context.review_policy["activeProfiles"] if device_required else []
+    full_eink_restoration = (
+        context.review_policy["mode"]
+        == context.review_policy["einkVerification"]["fullRestorationMode"]
+    )
+    device_profiles = [
+        profile for profile in active_profiles
+        if profile != "EINK" or full_eink_restoration
+    ]
+    conditional_device_profiles = [
+        profile for profile in active_profiles
+        if profile == "EINK" and not full_eink_restoration
+    ]
     if not context.changes:
         scope = "none"
     elif classes <= {"workflow", "other"}:
@@ -125,6 +141,8 @@ def _summarize_changes(context: ReportBuildContext) -> ChangeSummary:
         device_required,
         product_runtime_changed,
         evidence_plan,
+        device_profiles,
+        conditional_device_profiles,
     )
 
 
@@ -167,6 +185,7 @@ def _review_policy_section(
         "deferredProfiles": deferred_profiles,
         "resume": context.review_policy["resume"],
         "nodeExecution": context.review_policy["nodeExecution"],
+        "einkVerification": context.review_policy["einkVerification"],
     }
 
 
@@ -187,7 +206,8 @@ def _summary_section(
         "deferredNodes": summary.deferred_nodes,
         "requiresGradleBuild": summary.build_required,
         "requiresDevicePass": summary.device_required,
-        "requiresDeviceProfiles": context.review_policy["activeProfiles"] if summary.device_required else [],
+        "requiresDeviceProfiles": summary.device_profiles,
+        "conditionalDeviceProfiles": summary.conditional_device_profiles,
         "deferredProfilesAffected": deferred_profiles if summary.device_required else [],
         "requiresJourneySelection": (
             summary.product_runtime_changed and "B03" in runtime_nodes
@@ -209,7 +229,9 @@ def _next_section(
     summary: ChangeSummary,
 ) -> dict[str, Any]:
     if summary.device_required:
-        stage = "UI-R2 current-stage review on " + ", ".join(context.review_policy["activeProfiles"])
+        stage = "UI-R2 current-stage review on " + ", ".join(summary.device_profiles)
+        if summary.conditional_device_profiles:
+            stage += "; EINK only if impact assessment selects necessary affected evidence"
     elif summary.build_required:
         stage = "build verification"
     elif summary.deferred_nodes:

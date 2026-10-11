@@ -8,6 +8,58 @@ import java.time.Instant
 import org.tsuyomi.shared.locator.ReaderLocator
 import org.tsuyomi.shared.model.BookIdentity
 
+
+enum class LocalPublicationFormat { EPUB, TXT, MOBI, AZW3 }
+data class LocalTextHeading(
+    val paragraphOrdinal: Int,
+    val title: String,
+) {
+    init {
+        require(paragraphOrdinal in 0..20_000) { "TXT heading paragraph ordinal is out of bounds" }
+        require(title.isNotBlank()) { "TXT heading title must not be blank" }
+        require(title.codePointCount(0, title.length) in 1..512) { "TXT heading title must contain 1..512 code points" }
+    }
+}
+
+data class LocalTextParseOptions(
+    val charsetName: String? = null,
+    val headingSelections: List<LocalTextHeading> = emptyList(),
+    val paragraphsPerSection: Int = DEFAULT_PARAGRAPHS_PER_SECTION,
+) {
+    init {
+        require(charsetName == null || charsetName in CHARSET_NAMES) { "Unsupported canonical TXT charset" }
+        require(headingSelections.size <= MAX_HEADING_SELECTIONS) { "Too many TXT heading selections" }
+        require(headingSelections.zipWithNext().all { (left, right) -> left.paragraphOrdinal < right.paragraphOrdinal }) {
+            "TXT heading selections must be strictly ordered and unique"
+        }
+        require(paragraphsPerSection in 1..4096) { "TXT paragraphs per section is out of bounds" }
+    }
+
+    companion object {
+        const val DEFAULT_PARAGRAPHS_PER_SECTION = 128
+        const val MAX_HEADING_SELECTIONS = 20_000
+        private val CHARSET_NAMES = setOf("UTF-8", "UTF-16LE", "UTF-16BE", "UTF-32LE", "UTF-32BE", "GB18030", "Big5")
+    }
+}
+
+/** Verified metadata for host-owned original bytes; availability is local, non-portable state. */
+data class LocalPublicationMetadata(
+    val format: LocalPublicationFormat,
+    val originalSha256: String,
+    val originalSizeBytes: Long,
+    val originalAvailable: Boolean,
+    val txtOptions: LocalTextParseOptions? = null,
+    val coverResourceId: String? = null,
+) {
+    init {
+        require(originalSha256.matches(Regex("^[0-9a-f]{64}$"))) { "Invalid original SHA-256" }
+        require(originalSizeBytes > 0) { "Original size must be positive" }
+        coverResourceId?.let { BookIdentity.requireCanonicalUuid(it, "coverResourceId") }
+        require((format == LocalPublicationFormat.TXT) == (txtOptions != null)) {
+            "TXT parse options must be present only for TXT publications"
+        }
+    }
+}
 data class LibraryBook(
     val identity: BookIdentity,
     val title: String,
@@ -19,7 +71,17 @@ data class LibraryBook(
     val canonicalUrl: String? = null,
     val status: String? = null,
     val remoteTags: Set<String> = emptySet(),
-)
+    val localPublication: LocalPublicationMetadata? = null,
+) {
+    init {
+        require((identity is BookIdentity.Local) == (localPublication != null)) {
+            "Local identity and local-publication metadata must be present together"
+        }
+        require(identity !is BookIdentity.Local || (coverUrl == null && canonicalUrl == null)) {
+            "Local publications cannot carry remote cover or canonical URLs"
+        }
+    }
+}
 
 enum class CollectionKind {
     MANUAL,
@@ -111,7 +173,11 @@ data class RemoteMirrorTargetSnapshot(
 data class RemoteMirrorBookSnapshot(
     val book: LibraryBook,
     val targetId: String?,
-)
+) {
+    init {
+        require(book.identity is BookIdentity.Remote) { "Remote mirrors cannot contain local publications" }
+    }
+}
 
 data class RemoteMirrorSnapshot(
     val binding: RemoteMirrorBinding,
@@ -135,8 +201,7 @@ data class ReadingProgress(
     val updatedAt: Instant = locator.capturedAt,
 ) {
     init {
-        require(locator.document.sourceId == identity.sourceId) { "Locator source does not match book" }
-        require(locator.document.remoteBookId == identity.remoteBookId) { "Locator book does not match book" }
+        require(locator.document.book == identity) { "Locator book does not match book" }
         require(updatedAt == locator.capturedAt) { "Progress timestamp must equal locator capture time" }
     }
 }

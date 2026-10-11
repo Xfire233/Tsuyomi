@@ -10,7 +10,7 @@ import org.tsuyomi.shared.sourcecontract.SourceUpdateChapter
 import org.tsuyomi.shared.sourcecontract.SourceUpdateOutcome
 
 internal data class ParsedSourceUpdateCheck(
-    val identity: BookIdentity,
+    val identity: BookIdentity.Remote,
     val chapters: List<SourceUpdateChapter>,
     val lastUpdatedDate: String?,
 )
@@ -32,7 +32,7 @@ internal data class AdmittedSourceUpdateCheck(
  * metadata, so a title correction cannot manufacture an order change or block a later append.
  */
 internal fun admitSourceUpdateCheck(
-    expectedIdentity: BookIdentity,
+    expectedIdentity: BookIdentity.Remote,
     previousAnchor: String?,
     parsed: ParsedSourceUpdateCheck,
 ): AdmittedSourceUpdateCheck {
@@ -83,7 +83,7 @@ private fun parseAnchor(anchor: String): PriorAnchor? {
     return PriorAnchor(count).takeIf { it.chapterCount in 1..MAX_UPDATE_CHAPTERS }
 }
 
-private fun updateAnchor(identity: BookIdentity, chapters: List<SourceUpdateChapter>): String {
+private fun updateAnchor(identity: BookIdentity.Remote, chapters: List<SourceUpdateChapter>): String {
     val evidence = buildString {
         appendField("version", "update-check-v2")
         appendField("source", identity.sourceId)

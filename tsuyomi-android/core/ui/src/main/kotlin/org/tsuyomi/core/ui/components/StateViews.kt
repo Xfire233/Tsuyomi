@@ -15,6 +15,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -27,6 +28,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -71,6 +73,79 @@ fun StateView(
     onSecondaryAction: (() -> Unit)? = null,
 ) {
     val eInk = LocalDisplayEnvironment.current.effectiveProfile == DisplayProfile.EINK
+    if (eInk) {
+        val pagerState = rememberSaveable(kind, saver = TsuyomiMeasuredPagerState.Saver) { TsuyomiMeasuredPagerState(null) }
+        val messageCount = if (message == null) 0 else 1
+        val hasActions = (actionLabel != null && onAction != null) || (secondaryActionLabel != null && onSecondaryAction != null)
+        val paging = pagerState.canGoPrevious || pagerState.canGoNext
+        TsuyomiMeasuredPager(
+            itemCount = 1 + messageCount + if (hasActions) 1 else 0,
+            itemKey = { index ->
+                when {
+                    index == 0 -> "state-title:$kind:$title"
+                    messageCount == 1 && index == 1 -> "state-message:$kind:$message"
+                    else -> "state-actions:$kind:$actionLabel:$secondaryActionLabel"
+                }
+            },
+            itemContent = { index ->
+                Box(Modifier.padding(horizontal = TsuyomiSpacing.Xl)) {
+                when {
+                    index == 0 -> TsuyomiMeasuredTextPager(
+                        text = title,
+                        style = MaterialTheme.typography.titleLarge,
+                        textAlign = TextAlign.Center,
+                        fillViewport = false,
+                        alwaysShowPageControls = false,
+                        fillWidth = false,
+                    )
+                    messageCount == 1 && index == 1 -> TsuyomiMeasuredTextPager(
+                        text = message.orEmpty(),
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        textAlign = TextAlign.Center,
+                        fillViewport = false,
+                        alwaysShowPageControls = false,
+                        fillWidth = false,
+                    )
+                    else -> TsuyomiMeasuredPager(
+                        itemCount = (if (actionLabel != null && onAction != null) 1 else 0) +
+                            (if (secondaryActionLabel != null && onSecondaryAction != null) 1 else 0),
+                        itemKey = { actionIndex -> if (actionIndex == 0 && actionLabel != null && onAction != null) "primary" else "secondary" },
+                        itemContent = { actionIndex ->
+                            if (actionIndex == 0 && actionLabel != null && onAction != null) TsuyomiButton(
+                                text = actionLabel,
+                                onClick = onAction,
+                                style = if (kind == TsuyomiStateKind.ERROR) TsuyomiButtonStyle.PRIMARY else TsuyomiButtonStyle.SECONDARY,
+                            ) else TsuyomiButton(
+                                text = requireNotNull(secondaryActionLabel),
+                                onClick = requireNotNull(onSecondaryAction),
+                                style = TsuyomiButtonStyle.SECONDARY,
+                            )
+                        },
+                        modifier = Modifier.heightIn(max = requireNotNull(LocalTsuyomiPagerMaxContentHeight.current))
+                            .padding(top = if (paging) 0.dp else TsuyomiSpacing.Lg - TsuyomiSpacing.Sm),
+                        fillViewport = false,
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalSpacing = TsuyomiSpacing.Sm,
+                    )
+                }
+                }
+            },
+            state = pagerState,
+            // Keep the original centred group when it fits. Once paging is required, spend the
+            // vertical decorative inset on complete text/actions, not on an empty margin.
+            modifier = modifier.fillMaxSize().padding(
+                vertical = if (paging) TsuyomiSpacing.Sm else TsuyomiSpacing.Xl,
+            ).semantics {
+                if (kind == TsuyomiStateKind.LOADING) liveRegion = LiveRegionMode.Polite
+            },
+            verticalSpacing = TsuyomiSpacing.Sm,
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalAlignment = Alignment.CenterVertically,
+            pageDecoration = { Box(Modifier.padding(start = TsuyomiSpacing.Xl, end = TsuyomiSpacing.Xl, bottom = TsuyomiSpacing.Lg)) { StateKaomoji(kind, title, message) } },
+        )
+        return
+    }
     Column(
         modifier = modifier
             .fillMaxSize()
@@ -174,7 +249,7 @@ private fun StateKaomoji(kind: TsuyomiStateKind, title: String, message: String?
     Box(
         modifier = Modifier
             .fillMaxWidth()
-            .height(72.dp)
+            .then(if (LocalDisplayEnvironment.current.effectiveProfile == DisplayProfile.EINK) Modifier.heightIn(min = 72.dp) else Modifier.height(72.dp))
             .testTag(StateKaomojiTestTag)
             .semantics { hideFromAccessibility() },
         contentAlignment = Alignment.Center,

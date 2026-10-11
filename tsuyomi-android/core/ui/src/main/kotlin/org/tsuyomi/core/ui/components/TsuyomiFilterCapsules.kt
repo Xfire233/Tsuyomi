@@ -13,7 +13,6 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
@@ -66,6 +65,7 @@ import org.tsuyomi.core.ui.theme.TsuyomiMotion
 import org.tsuyomi.core.ui.theme.TsuyomiSpacing
 import org.tsuyomi.core.ui.theme.activeAccent
 import org.tsuyomi.core.ui.theme.instantMotion
+import org.tsuyomi.core.ui.theme.tsuyomiAnimateFloatAsState
 import kotlin.math.roundToInt
 import kotlinx.coroutines.flow.filterNotNull
 import kotlinx.coroutines.flow.first
@@ -89,9 +89,29 @@ fun TsuyomiFilterCapsuleOptionRow(
     modifier: Modifier = Modifier,
     revealSelectionKey: Boolean = true,
 ) {
-    val isEInk = LocalDisplayEnvironment.current.effectiveProfile == DisplayProfile.EINK
-    val ordered = remember(options, selectedKey, isEInk) {
-        if (isEInk) eInkSelectedFirst(options, selectedKey) else options
+    if (LocalDisplayEnvironment.current.effectiveProfile == DisplayProfile.EINK) {
+        Row(modifier = modifier, verticalAlignment = Alignment.CenterVertically) {
+            TsuyomiMeasuredPager(
+                itemCount = options.size,
+                itemKey = { options[it].key },
+                itemContent = { index ->
+                    val option = options[index]
+                    TsuyomiToggleChip(
+                        text = option.label,
+                        selected = option.key == selectedKey,
+                        stateDescription = option.label,
+                        onClick = { onSelect(option.key) },
+                    )
+                },
+                modifier = Modifier.weight(1f),
+                horizontalSpacing = TsuyomiSpacing.Sm,
+                verticalSpacing = TsuyomiSpacing.Sm,
+                fillViewport = false,
+                wrapItems = true,
+            )
+            CapsuleArrow(expanded, if (expanded) expandedStateDescription else collapsedStateDescription, onToggleExpanded)
+        }
+        return
     }
     val scrollState = rememberScrollState()
     var viewportCoordinates by remember { mutableStateOf<LayoutCoordinates?>(null) }
@@ -99,8 +119,8 @@ fun TsuyomiFilterCapsuleOptionRow(
     val chipCoordinates = remember(options) { mutableStateMapOf<String, LayoutCoordinates>() }
     val layoutDirection = LocalLayoutDirection.current
     val fontScale = LocalDensity.current.fontScale
-    LaunchedEffect(selectedKey, expanded, viewportWidth, options, isEInk, layoutDirection, fontScale, revealSelectionKey) {
-        if (!isEInk && !expanded && selectedKey != null) {
+    LaunchedEffect(selectedKey, expanded, viewportWidth, options, layoutDirection, fontScale, revealSelectionKey) {
+        if (!expanded && selectedKey != null) {
             val viewport = viewportCoordinates ?: return@LaunchedEffect
             val chip = snapshotFlow { chipCoordinates[selectedKey] }.filterNotNull().first()
             if (!viewport.isAttached || !chip.isAttached) return@LaunchedEffect
@@ -129,7 +149,7 @@ fun TsuyomiFilterCapsuleOptionRow(
                 horizontalArrangement = Arrangement.spacedBy(TsuyomiSpacing.Sm),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                ordered.forEach { option ->
+                options.forEach { option ->
                     TsuyomiFilterCapsuleChip(
                         option = option,
                         selected = option.key == selectedKey,
@@ -160,6 +180,17 @@ fun TsuyomiFilterCapsuleButton(
     emphasized: Boolean = false,
 ) {
     val state = if (expanded) expandedStateDescription else collapsedStateDescription
+    if (LocalDisplayEnvironment.current.effectiveProfile == DisplayProfile.EINK) {
+        TsuyomiToggleChip(
+            text = label,
+            selected = expanded,
+            stateDescription = state,
+            onClick = onClick,
+            modifier = modifier,
+            leadingIcon = TsuyomiIcons.Disclosure,
+        )
+        return
+    }
     FilledTonalButton(
         onClick = onClick,
         modifier = modifier
@@ -189,6 +220,29 @@ fun TsuyomiFilterCapsulePanel(
     modifier: Modifier = Modifier,
 ) {
     val isEInk = LocalDisplayEnvironment.current.effectiveProfile == DisplayProfile.EINK
+    if (isEInk) {
+        Surface(
+            modifier = modifier.fillMaxWidth().testTag("filter-capsule-panel"),
+            shape = RoundedCornerShape(4.dp),
+            color = MaterialTheme.colorScheme.surface,
+            border = BorderStroke(1.5.dp, MaterialTheme.colorScheme.outline),
+        ) {
+            TsuyomiMeasuredPager(
+                itemCount = options.size,
+                itemKey = { options[it].key },
+                itemContent = { index ->
+                    val option = options[index]
+                    TsuyomiToggleChip(option.label, option.key == selectedKey, option.label, { onSelect(option.key) })
+                },
+                modifier = Modifier.padding(TsuyomiSpacing.Sm),
+                horizontalSpacing = TsuyomiSpacing.Sm,
+                verticalSpacing = TsuyomiSpacing.Sm,
+                fillViewport = false,
+                wrapItems = true,
+            )
+        }
+        return
+    }
     val scrollState = rememberScrollState()
     val containPanelScroll = remember {
         object : NestedScrollConnection {
@@ -309,12 +363,21 @@ private fun CapsuleArrow(
     stateDescription: String,
     onClick: () -> Unit,
 ) {
-    val isEInk = LocalDisplayEnvironment.current.effectiveProfile == DisplayProfile.EINK
+    if (LocalDisplayEnvironment.current.effectiveProfile == DisplayProfile.EINK) {
+        TsuyomiIconButton(
+            imageVector = TsuyomiIcons.Disclosure,
+            contentDescription = stateDescription,
+            onClick = onClick,
+            modifier = Modifier.semantics { this.stateDescription = stateDescription },
+            iconModifier = Modifier.rotate(if (expanded) 180f else 0f),
+        )
+        return
+    }
     IconButton(
         onClick = onClick,
         modifier = Modifier
             .width(48.dp)
-            .then(if (isEInk) Modifier.fillMaxHeight() else Modifier.heightIn(min = 48.dp))
+            .heightIn(min = 48.dp)
             .semantics { this.stateDescription = stateDescription },
     ) {
         CapsuleDisclosureIcon(
@@ -330,13 +393,9 @@ private fun CapsuleDisclosureIcon(
     contentDescription: String? = null,
 ) {
     val instant = LocalDisplayEnvironment.current.instantMotion
-    val rotation by animateFloatAsState(
-        targetValue = if (expanded) 180f else 0f,
-        animationSpec = if (instant) {
-            snap()
-        } else {
-            tween(TsuyomiMotion.SELECTION_DURATION_MS, easing = TsuyomiMotion.Easing)
-        },
+    val rotation = tsuyomiAnimateFloatAsState(
+        target = if (expanded) 180f else 0f,
+        instant = instant,
         label = "filterCapsuleDisclosureRotation",
     )
     Icon(
@@ -346,14 +405,3 @@ private fun CapsuleDisclosureIcon(
         modifier = Modifier.rotate(rotation),
     )
 }
-private fun eInkSelectedFirst(
-    options: List<TsuyomiFilterCapsuleOption>,
-    selectedKey: String?,
-): List<TsuyomiFilterCapsuleOption> {
-    val selected = options.firstOrNull { it.key == selectedKey } ?: return options
-    return buildList(options.size) {
-        add(selected)
-        options.forEach { if (it.key != selectedKey) add(it) }
-    }
-}
-

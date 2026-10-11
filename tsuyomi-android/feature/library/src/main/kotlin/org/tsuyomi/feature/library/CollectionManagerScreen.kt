@@ -45,6 +45,10 @@ import org.tsuyomi.core.ui.components.TsuyomiSlider
 import org.tsuyomi.core.ui.components.TsuyomiSwitchVisual
 import org.tsuyomi.core.ui.components.TsuyomiTextField
 import org.tsuyomi.core.ui.theme.TsuyomiSpacing
+import org.tsuyomi.core.display.DisplayProfile
+import org.tsuyomi.core.display.LocalDisplayEnvironment
+import org.tsuyomi.core.ui.components.TsuyomiMeasuredPager
+import org.tsuyomi.core.ui.components.TsuyomiMeasuredTextPager
 import org.tsuyomi.shared.librarydomain.CollectionKind
 import org.tsuyomi.shared.librarydomain.LibraryCollection
 
@@ -220,6 +224,23 @@ fun CollectionRuleScreen(
     val errorText = stringResource(R.string.collection_rule_invalid_condition)
     val expandedDescription = stringResource(R.string.collection_rule_group_expanded)
     val collapsedDescription = stringResource(R.string.collection_rule_group_collapsed)
+    if (LocalDisplayEnvironment.current.effectiveProfile == DisplayProfile.EINK) {
+        TsuyomiMeasuredPager(itemCount = 7, itemKey = { "collection-form:$it" }, modifier = modifier.fillMaxSize(), itemContent = { index -> when (index) {
+            0 -> TsuyomiTextField(title, onTitleChange, label = stringResource(R.string.collection_name_label), singleLine = true, isError = nameError,
+                supportingText = stringResource(if (creation && !advancedExpanded) R.string.collection_create_invalid_name else R.string.collection_rule_invalid_name).takeIf { nameError })
+            1 -> if (creation) TsuyomiButton(stringResource(R.string.collection_advanced_options), { onAdvancedExpandedChange(!advancedExpanded) },
+                style = if (advancedExpanded) TsuyomiButtonStyle.PRIMARY else TsuyomiButtonStyle.SECONDARY)
+            2 -> if (creation && !advancedExpanded) TsuyomiButton(stringResource(R.string.collection_choose_books, selectedBookCount), onChooseBooks)
+            3 -> if (focusedPath.isNotEmpty()) TsuyomiButton(stringResource(R.string.collection_rule_parent_group), { onFocusChange(focusedPath.dropLast(1)) })
+            4 -> if (!creation || advancedExpanded) {
+                val active = focusedPath.fold(tree as SmartDraftNode) { current, child -> (current as SmartDraftNode.Group).children[child] } as SmartDraftNode.Group
+                RuleGroupEditor(active, focusedPath, tree, collections, sourceIds, sourceLabels, tagChoices, invalidConditions, errorText, onTreeChange, onFocusChange, 0, focusedPath.isEmpty())
+            }
+            5 -> saveFailure?.let { TsuyomiMeasuredTextPager(it, fillViewport = false, alwaysShowPageControls = false) }
+            else -> TsuyomiButton(stringResource(when { !creation -> R.string.collection_rule_save_action; advancedExpanded -> R.string.collection_create_smart_action; else -> R.string.collection_create_action }), onSave, enabled = !saving)
+        } })
+        return
+    }
     Column(
         modifier = modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(TsuyomiSpacing.Md),
         verticalArrangement = Arrangement.spacedBy(TsuyomiSpacing.Md),
@@ -305,6 +326,34 @@ private fun RuleGroupEditor(
         onChange(if (path.isEmpty()) updated else root.updateAt(path) { updated })
     }
     var expanded by rememberSaveable(path) { mutableStateOf(!showHeader || path.isEmpty()) }
+    if (LocalDisplayEnvironment.current.effectiveProfile == DisplayProfile.EINK) {
+        val visibleChildren = if (expanded) group.children.size else 0
+        TsuyomiMeasuredPager(itemCount = 7 + visibleChildren, itemKey = { "group:${path.joinToString(".")}:$it" }, fillViewport = false,
+            itemContent = { index -> when {
+                index == 0 -> if (showHeader && path.isNotEmpty()) TsuyomiButton(stringResource(R.string.collection_rule_group_toggle, stringResource(if (group.matchAll) R.string.collection_match_all else R.string.collection_match_any)), { expanded = !expanded },
+                    style = if (expanded) TsuyomiButtonStyle.PRIMARY else TsuyomiButtonStyle.SECONDARY)
+                index == 1 -> if (expanded) TsuyomiCheckboxRow(label = stringResource(if (group.matchAll) R.string.collection_match_all else R.string.collection_match_any), checked = group.matchAll, onCheckedChange = { change(group.copy(matchAll = it, syntheticRoot = false)) })
+                index == 2 -> if (expanded) TsuyomiCheckboxRow(label = stringResource(R.string.collection_rule_group_negate), checked = group.negations % 2 != 0, onCheckedChange = { change(group.copy(negations = if (it) 1 else 0)) })
+                index in 3 until 3 + visibleChildren -> {
+                    val childIndex = index - 3
+                    val child = group.children[childIndex]
+                    val childPath = path + childIndex
+                    when (child) {
+                        is SmartDraftNode.Group -> TsuyomiButton(stringResource(R.string.collection_rule_open_group), { onFocusChange(childPath) })
+                        is SmartDraftNode.Condition -> RuleConditionEditor(child, childPath, root, collections, sourceIds, sourceLabels, tagChoices, childPath in invalid, errorText, onChange)
+                    }
+                }
+                else -> when (index - visibleChildren) {
+                    3 -> if (expanded) RuleAddButton(false, root.nodeCount() < 128 && path.size + group.negations < 6,
+                        { change(group.copy(children = group.children + SmartDraftNode.Condition(SmartConditionDraft()))) }, Modifier.fillMaxWidth())
+                    4 -> if (expanded) RuleAddButton(true, root.nodeCount() < 127 && path.size + group.negations < 5,
+                        { change(group.copy(children = group.children + SmartDraftNode.Group(true, listOf(SmartDraftNode.Condition(SmartConditionDraft()))))) }, Modifier.fillMaxWidth())
+                    5 -> if (path.isNotEmpty()) TsuyomiButton(stringResource(R.string.collection_rule_remove_group), { onChange(root.updateAt(path) { null }); onFocusChange(path.dropLast(1)) })
+                    else -> if (group.children.isEmpty()) TsuyomiMeasuredTextPager(errorText, fillViewport = false, alwaysShowPageControls = false)
+                }
+            } })
+        return
+    }
     SettingsGroup(Modifier.fillMaxWidth().padding(horizontal = if (path.isEmpty()) 0.dp else TsuyomiSpacing.Md)) {
         Column(Modifier.fillMaxWidth().padding(TsuyomiSpacing.Md),
             verticalArrangement = Arrangement.spacedBy(TsuyomiSpacing.Sm)) {
@@ -416,41 +465,6 @@ private fun RuleConditionEditor(
     fun change(draft: SmartConditionDraft = condition, negations: Int = node.negations) {
         onChange(root.updateAt(path) { node.copy(draft = draft.copy(excluded = false), negations = negations) })
     }
-    Column(Modifier.fillMaxWidth().padding(horizontal = TsuyomiSpacing.Md)
-        .then(if (invalid) Modifier.semantics { error(errorText) } else Modifier),
-        verticalArrangement = Arrangement.spacedBy(TsuyomiSpacing.Sm)) {
-        var fieldExpanded by remember(path) { mutableStateOf(false) }
-        TsuyomiButton(
-            text = stringResource(R.string.collection_condition_type, condition.field.localizedName()),
-            onClick = { fieldExpanded = true },
-            modifier = Modifier.fillMaxWidth(),
-            style = TsuyomiButtonStyle.SECONDARY,
-        )
-        TsuyomiDropdownMenu(expanded = fieldExpanded, onDismissRequest = { fieldExpanded = false }) {
-            SmartField.entries.forEach { field ->
-                TsuyomiMenuItem(label = field.localizedName(), onClick = {
-                    fieldExpanded = false
-                    if (field != condition.field) change(condition.copy(field = field,
-                        value = if (field == SmartField.RATING) "0,5" else "",
-                        matchAllTags = false, facetSourceId = ""))
-                })
-            }
-        }
-        val sourceLength = condition.facetSourceId.codePointCount(0, condition.facetSourceId.length)
-        val sourceInvalid = invalid && sourceLength !in 1..256
-        val valueInvalid = invalid && (condition.field != SmartField.FACET ||
-            invalidSmartConditions(listOf(condition.copy(facetSourceId = "source"))).isNotEmpty())
-        if (condition.field == SmartField.FACET) {
-            TsuyomiTextField(
-                value = condition.facetSourceId,
-                onValueChange = { change(condition.copy(facetSourceId = it)) },
-                label = stringResource(R.string.collection_rule_facet_source),
-                modifier = Modifier.fillMaxWidth().then(if (sourceInvalid) Modifier.semantics { error(errorText) } else Modifier),
-                isError = sourceInvalid,
-                supportingText = errorText.takeIf { sourceInvalid },
-            )
-        }
-        if (condition.field.requiresValue()) {
             val namedValues = when (condition.field) {
                 SmartField.STATUS -> mapOf(
                     "ongoing" to stringResource(R.string.smart_status_ongoing),
@@ -466,12 +480,6 @@ private fun RuleConditionEditor(
                 )
                 else -> emptyMap()
             }
-            val choices = when (condition.field) {
-                SmartField.SOURCE -> sourceIds
-                SmartField.MANUAL_COLLECTION -> collections.filter { it.kind == CollectionKind.MANUAL }.map { it.collectionId }
-                SmartField.STATUS, SmartField.PROGRESS -> namedValues.keys.toList()
-                else -> emptyList()
-            }
             fun labelFor(choice: String): String = when (condition.field) {
                 SmartField.SOURCE -> sourceLabels[choice]?.takeIf(String::isNotBlank)?.let { name ->
                     if (sourceLabels.any { (id, label) -> id != choice && label == name }) "$name（$choice）" else name
@@ -480,6 +488,97 @@ private fun RuleConditionEditor(
                 SmartField.STATUS, SmartField.PROGRESS -> namedValues[choice.lowercase()] ?: choice
                 else -> choice
             }
+    if (LocalDisplayEnvironment.current.effectiveProfile == DisplayProfile.EINK) {
+        var fieldExpanded by rememberSaveable(path) { mutableStateOf(false) }
+        var valueExpanded by rememberSaveable(path, condition.field) { mutableStateOf(false) }
+        val namedChoices = when (condition.field) {
+            SmartField.STATUS, SmartField.PROGRESS -> namedValues.keys.toList()
+            SmartField.SOURCE -> sourceIds
+            SmartField.MANUAL_COLLECTION -> collections.filter { it.kind == CollectionKind.MANUAL }.map { it.collectionId }
+            SmartField.TAG -> (tagChoices + parseSmartTerms(condition.value).orEmpty()).filter(String::isNotBlank).distinct()
+            else -> emptyList()
+        }
+        TsuyomiMeasuredPager(itemCount = 8, itemKey = { "condition:${path.joinToString(".")}:$it" }, fillViewport = false,
+            itemContent = { index -> when (index) {
+                0 -> {
+                    TsuyomiButton(stringResource(R.string.collection_condition_type, condition.field.localizedName()), { fieldExpanded = true })
+                    TsuyomiDropdownMenu(fieldExpanded, { fieldExpanded = false }, SmartField.entries.size, { SmartField.entries[it].name }, { selectedIndex ->
+                        val field = SmartField.entries[selectedIndex]
+                        TsuyomiMenuItem(field.localizedName(), { fieldExpanded = false; if (field != condition.field) change(condition.copy(field = field,
+                            value = if (field == SmartField.RATING) "0,5" else "", matchAllTags = false, facetSourceId = "")) }, selected = field == condition.field)
+                    })
+                }
+                1 -> if (condition.field == SmartField.FACET) TsuyomiTextField(condition.facetSourceId, { change(condition.copy(facetSourceId = it)) }, label = stringResource(R.string.collection_rule_facet_source), isError = invalid, singleLine = true)
+                2 -> if (namedChoices.isNotEmpty()) {
+                    TsuyomiMenuItem(parseSmartTerms(condition.value)?.joinToString("、", transform = ::labelFor)?.takeIf(String::isNotBlank)
+                        ?: stringResource(R.string.collection_rule_select_value), { valueExpanded = true })
+                    TsuyomiDropdownMenu(valueExpanded, { valueExpanded = false }, namedChoices.size, { namedChoices[it] }, { selectedIndex ->
+                        val choice = namedChoices[selectedIndex]
+                        if (condition.field == SmartField.TAG) TsuyomiCheckboxRow(label = choice, checked = choice in parseSmartTerms(condition.value).orEmpty(), onCheckedChange = { checked ->
+                            val values = parseSmartTerms(condition.value).orEmpty().toMutableSet()
+                            if (checked) values.add(choice) else values.remove(choice)
+                            change(condition.copy(value = formatSmartTerms(values)))
+                        }) else TsuyomiMenuItem(labelFor(choice), { valueExpanded = false; change(condition.copy(value = choice)) }, selected = choice in parseSmartTerms(condition.value).orEmpty())
+                    })
+                }
+                3 -> if (condition.field.requiresValue() && condition.field != SmartField.RATING) TsuyomiTextField(condition.value, { change(condition.copy(value = it)) },
+                    label = stringResource(if (condition.field == SmartField.FACET) R.string.collection_rule_facet_ids else condition.field.hintResource()), singleLine = true, isError = invalid, supportingText = errorText.takeIf { invalid })
+                4 -> if (condition.field == SmartField.RATING) {
+                    val bounds = condition.value.split(',', '，')
+                    val lower = bounds.getOrNull(0)?.toFloatOrNull()?.coerceIn(0f, 5f) ?: 0f
+                    val upper = bounds.getOrNull(1)?.toFloatOrNull()?.coerceIn(lower, 5f) ?: 5f
+                    TsuyomiMeasuredPager(itemCount = 2, itemKey = { "rating:$it" }, fillViewport = false, itemContent = { bound ->
+                        TsuyomiSlider(value = if (bound == 0) lower else upper, valueRange = 0f..5f, steps = 9,
+                            label = stringResource(if (bound == 0) R.string.smart_rating_min else R.string.smart_rating_max, (if (bound == 0) lower else upper).toString()),
+                            onValueChange = { if (bound == 0) change(condition.copy(value = "${it.coerceAtMost(upper)},$upper")) else change(condition.copy(value = "$lower,${it.coerceAtLeast(lower)}")) })
+                    })
+                }
+                5 -> TsuyomiCheckboxRow(label = stringResource(R.string.collection_exclude_condition), checked = node.negations % 2 != 0, onCheckedChange = { change(negations = if (it) 1 else 0) })
+                6 -> if (condition.field == SmartField.TAG) TsuyomiCheckboxRow(label = stringResource(if (condition.matchAllTags) R.string.collection_tag_match_all else R.string.collection_tag_match_any), checked = condition.matchAllTags, onCheckedChange = { change(condition.copy(matchAllTags = it)) })
+                else -> if (root.nodeCount() > 1) TsuyomiButton(stringResource(R.string.collection_remove_condition), { onChange(root.updateAt(path) { null }) })
+            } })
+        return
+    }
+    Column(Modifier.fillMaxWidth().padding(horizontal = TsuyomiSpacing.Md)
+        .then(if (invalid) Modifier.semantics { error(errorText) } else Modifier),
+        verticalArrangement = Arrangement.spacedBy(TsuyomiSpacing.Sm)) {
+        var fieldExpanded by remember(path) { mutableStateOf(false) }
+        TsuyomiButton(
+            text = stringResource(R.string.collection_condition_type, condition.field.localizedName()),
+            onClick = { fieldExpanded = true },
+            modifier = Modifier.fillMaxWidth(),
+            style = TsuyomiButtonStyle.SECONDARY,
+        )
+        TsuyomiDropdownMenu(expanded = fieldExpanded, onDismissRequest = { fieldExpanded = false },
+            itemCount = SmartField.entries.size, itemKey = { SmartField.entries[it].name }, itemContent = { index ->
+                val field = SmartField.entries[index]
+                TsuyomiMenuItem(label = field.localizedName(), selected = field == condition.field, onClick = {
+                    fieldExpanded = false
+                    if (field != condition.field) change(condition.copy(field = field,
+                        value = if (field == SmartField.RATING) "0,5" else "", matchAllTags = false, facetSourceId = ""))
+                })
+            })
+        val sourceLength = condition.facetSourceId.codePointCount(0, condition.facetSourceId.length)
+        val sourceInvalid = invalid && sourceLength !in 1..256
+        val valueInvalid = invalid && (condition.field != SmartField.FACET ||
+            invalidSmartConditions(listOf(condition.copy(facetSourceId = "source"))).isNotEmpty())
+        if (condition.field == SmartField.FACET) {
+            TsuyomiTextField(
+                value = condition.facetSourceId,
+                onValueChange = { change(condition.copy(facetSourceId = it)) },
+                label = stringResource(R.string.collection_rule_facet_source),
+                modifier = Modifier.fillMaxWidth().then(if (sourceInvalid) Modifier.semantics { error(errorText) } else Modifier),
+                isError = sourceInvalid,
+                supportingText = errorText.takeIf { sourceInvalid },
+            )
+        }
+        if (condition.field.requiresValue()) {
+            val choices = when (condition.field) {
+                SmartField.SOURCE -> sourceIds
+                SmartField.MANUAL_COLLECTION -> collections.filter { it.kind == CollectionKind.MANUAL }.map { it.collectionId }
+                SmartField.STATUS, SmartField.PROGRESS -> namedValues.keys.toList()
+                else -> emptyList()
+            }
             if (condition.field == SmartField.TAG) {
                 val selectedTags = parseSmartTerms(condition.value)
                 val availableTags = remember(tagChoices, condition.value) {
@@ -487,7 +586,6 @@ private fun RuleConditionEditor(
                 }
                 var expanded by remember(path) { mutableStateOf(false) }
                 var tagFilter by rememberSaveable(path) { mutableStateOf("") }
-                var visibleCount by rememberSaveable(path) { mutableIntStateOf(40) }
                 var customInput by rememberSaveable(path) {
                     mutableStateOf(selectedTags == null || selectedTags.any { it !in tagChoices })
                 }
@@ -498,38 +596,26 @@ private fun RuleConditionEditor(
                 if (availableTags.isNotEmpty()) {
                     TsuyomiButton(
                         text = tagSummary,
-                        onClick = { tagFilter = ""; visibleCount = 40; expanded = true },
+                        onClick = { tagFilter = ""; expanded = true },
                         modifier = Modifier.fillMaxWidth().then(if (valueInvalid) Modifier.semantics { error(errorText) } else Modifier),
                         enabled = selectedTags != null,
                         style = TsuyomiButtonStyle.SECONDARY,
                     )
-                    TsuyomiDropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
-                        if (!selectedTags.isNullOrEmpty()) Text(tagSummary, Modifier.padding(TsuyomiSpacing.Sm))
-                        TsuyomiMenuItem(label = stringResource(R.string.collection_rule_tags_done), onClick = { expanded = false })
-                        if (availableTags.size > 12) TsuyomiTextField(
-                            value = tagFilter,
-                            onValueChange = { tagFilter = it; visibleCount = 40 },
-                            label = stringResource(R.string.collection_rule_find_tag),
-                        )
-                        val matching = availableTags.filter { it.contains(tagFilter, ignoreCase = true) }
-                        if (matching.isEmpty()) Text(stringResource(R.string.collection_rule_no_matching_tags),
-                            Modifier.padding(TsuyomiSpacing.Sm))
-                        matching.take(visibleCount).forEach { tag ->
-                            TsuyomiCheckboxRow(
-                                label = tag,
-                                checked = tag in selectedTags.orEmpty(),
-                                onCheckedChange = { checked ->
+                    val matching = availableTags.filter { it.contains(tagFilter, ignoreCase = true) }
+                    TsuyomiDropdownMenu(expanded = expanded, onDismissRequest = { expanded = false },
+                        itemCount = matching.size + 2, itemKey = { if (it == 0) "done" else if (it == 1) "filter" else "tag:${matching[it - 2]}" },
+                        itemContent = { index -> when (index) {
+                            0 -> TsuyomiMenuItem(label = stringResource(R.string.collection_rule_tags_done), onClick = { expanded = false })
+                            1 -> TsuyomiTextField(value = tagFilter, onValueChange = { tagFilter = it }, label = stringResource(R.string.collection_rule_find_tag), singleLine = true)
+                            else -> {
+                                val tag = matching[index - 2]
+                                TsuyomiCheckboxRow(label = tag, checked = tag in selectedTags.orEmpty(), onCheckedChange = { checked ->
                                     val values = selectedTags.orEmpty().toMutableSet()
                                     if (checked) values.add(tag) else values.remove(tag)
                                     change(condition.copy(value = formatSmartTerms(values)))
-                                },
-                            )
-                        }
-                        if (matching.size > visibleCount) TsuyomiMenuItem(
-                            label = stringResource(R.string.collection_rule_more_tags, minOf(40, matching.size - visibleCount)),
-                            onClick = { visibleCount = minOf(visibleCount + 40, matching.size) },
-                        )
-                    }
+                                })
+                            }
+                        } })
                 }
                 if (availableTags.isNotEmpty()) TsuyomiButton(
                     text = stringResource(if (customInput) R.string.collection_rule_hide_other_tags else R.string.collection_rule_other_tags),
@@ -557,14 +643,14 @@ private fun RuleConditionEditor(
                     modifier = Modifier.fillMaxWidth().then(if (invalid) Modifier.semantics { error(errorText) } else Modifier),
                     style = TsuyomiButtonStyle.SECONDARY,
                 )
-                TsuyomiDropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
-                    choices.forEach { choice ->
-                        TsuyomiMenuItem(label = labelFor(choice), onClick = {
+                TsuyomiDropdownMenu(expanded = expanded, onDismissRequest = { expanded = false },
+                    itemCount = choices.size, itemKey = { choices[it] }, itemContent = { index ->
+                        val choice = choices[index]
+                        TsuyomiMenuItem(label = labelFor(choice), selected = choice in parseSmartTerms(condition.value).orEmpty(), onClick = {
                             expanded = false
                             change(condition.copy(value = choice))
                         })
-                    }
-                }
+                    })
             } else if (condition.field == SmartField.RATING) {
                 val bounds = condition.value.split(',', '，')
                 val lowerRaw = bounds.getOrNull(0)?.trim().orEmpty()

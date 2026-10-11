@@ -19,6 +19,9 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.saveable.rememberSaveableStateHolder
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
@@ -70,6 +73,7 @@ fun RemoteMirrorBookSurface(
     onCoverVisibility: (SourceBookSummary, Boolean) -> Unit,
     modifier: Modifier = Modifier,
 ) {
+    val eink = LocalDisplayEnvironment.current.effectiveProfile == org.tsuyomi.core.display.DisplayProfile.EINK
     val summariesByIdentity = remember(books) { books.associateBy { it.identity } }
     val entries = remember(books, unresolvedBookOperations) {
         books.map { summary ->
@@ -121,6 +125,12 @@ fun RemoteMirrorBookSurface(
             }
         }
     }
+    val pageTargets = remember(targets, groupingEnabled, selectedTargetId) {
+        if (!groupingEnabled) emptyList()
+        else if (selectedTargetId == null) targets
+        else targets.filterNot { it.targetId == selectedTargetId }
+    }
+    val viewportScopeKey = "remote:$sourceId:${selectedTargetId ?: "root"}"
     val state = LibraryUiState(
         entries = entries,
         loading = false,
@@ -128,54 +138,113 @@ fun RemoteMirrorBookSurface(
         selectionKind = LibrarySelectionKind.BOOK.takeIf { selectedBookIds.isNotEmpty() },
         selectedBookIds = selectedBookIds,
     )
+    val stateHolder = rememberSaveableStateHolder()
+    val standardFirstVisibleIndex = rememberSaveable(viewportScopeKey, layout) { androidx.compose.runtime.mutableIntStateOf(0) }
+    val standardFirstVisibleOffset = rememberSaveable(viewportScopeKey, layout) { androidx.compose.runtime.mutableIntStateOf(0) }
+    val standardState = state.copy(
+        firstVisibleIndex = standardFirstVisibleIndex.intValue,
+        firstVisibleOffset = standardFirstVisibleOffset.intValue,
+    )
+    val surfaceState = if (eink) {
+        standardState.copy(firstVisibleIndex = (standardFirstVisibleIndex.intValue - 1).coerceAtLeast(0))
+    } else {
+        standardState
+    }
     Box(modifier.fillMaxSize().libraryDragOverlayHost(coordinator)) {
-        LibraryBookSurface(
-            entries = entries,
-            state = state,
-            onOpenBook = { entry -> summariesByIdentity[entry.book.identity]?.let(onOpenBook) },
-            onLongPressBook = { identity -> summariesByIdentity[identity]?.let(onLongPressBook) },
-            onToggleBookSelection = { identity -> summariesByIdentity[identity]?.let(onToggleBookSelection) },
-            dragCoordinator = coordinator,
-            dragEnabled = true,
-            canRemove = false,
-            reorderEnabled = false,
-            coverState = { entry ->
-                val summary = summariesByIdentity[entry.book.identity]
-                if (summary != null) coverState(summary)
-                else CoverUiState.Fallback(FallbackSpec(entry.book.title, entry.book.identity.sourceId))
-            },
-            onCoverVisibility = { entry, visible ->
-                summariesByIdentity[entry.book.identity]?.let { onCoverVisibility(it, visible) }
-            },
-            header = {
-                RemoteMirrorDestinationHeader(
-                    sourceId = sourceId,
-                    sourceName = sourceName,
-                    targets = targets,
-                    selectedTargetId = selectedTargetId,
-                    groupingEnabled = groupingEnabled,
-                    coordinator = coordinator,
-                    onOpenTarget = onOpenTarget,
-                )
-            },
-            empty = { Text("网站书架暂无书籍", color = MaterialTheme.colorScheme.onSurfaceVariant) },
-            modifier = Modifier.fillMaxSize(),
-        )
-        LibraryDragVisualOverlay(
-            coordinator = coordinator,
-            entries = entries,
-            layout = layout,
-            showRemoveTarget = false,
-            coverState = { entry ->
-                val summary = summariesByIdentity[entry.book.identity]
-                if (summary != null) coverState(summary)
-                else CoverUiState.Fallback(FallbackSpec(entry.book.title, entry.book.identity.sourceId))
-            },
-            modifier = Modifier.fillMaxSize(),
-        )
+        stateHolder.SaveableStateProvider("$viewportScopeKey:$layout:${if (eink) "EINK" else "STANDARD"}") {
+            LibraryBookSurface(
+                entries = entries,
+                state = surfaceState,
+                onOpenBook = { entry -> summariesByIdentity[entry.book.identity]?.let(onOpenBook) },
+                onLongPressBook = { identity -> summariesByIdentity[identity]?.let(onLongPressBook) },
+                onToggleBookSelection = { identity -> summariesByIdentity[identity]?.let(onToggleBookSelection) },
+                dragCoordinator = coordinator,
+                dragEnabled = !eink,
+                canRemove = false,
+                reorderEnabled = false,
+                coverState = { entry ->
+                    val summary = summariesByIdentity[entry.book.identity]
+                    if (summary != null) coverState(summary)
+                    else CoverUiState.Fallback(FallbackSpec(entry.book.title, (entry.book.identity as? BookIdentity.Remote)?.sourceId))
+                },
+                leadingItemCount = if (eink) pageTargets.size else 0,
+                leadingItemKey = { index ->
+                    val target = pageTargets[index]
+                    "remote-target:${sourceId.length}:$sourceId:${target.targetId}"
+                },
+                leadingItemContent = { index ->
+                    RemoteMirrorTargetPageItem(pageTargets[index], onOpenTarget)
+                },
+                onCoverVisibility = { entry, visible ->
+                    summariesByIdentity[entry.book.identity]?.let { onCoverVisibility(it, visible) }
+                },
+                header = {
+                    RemoteMirrorDestinationHeader(
+                        sourceId = sourceId,
+                        sourceName = sourceName,
+                        targets = targets,
+                        selectedTargetId = selectedTargetId,
+                        groupingEnabled = groupingEnabled,
+                        coordinator = coordinator,
+                        onOpenTarget = onOpenTarget,
+                    )
+                },
+                viewportScopeKey = viewportScopeKey,
+                onViewportChanged = { viewport ->
+                    if (!eink) {
+                        standardFirstVisibleIndex.intValue = viewport.firstVisibleIndex
+                        standardFirstVisibleOffset.intValue = viewport.firstVisibleOffset
+                    }
+                },
+                onViewportSettled = { index, offset ->
+                    if (!eink) {
+                        standardFirstVisibleIndex.intValue = index
+                        standardFirstVisibleOffset.intValue = offset
+                    }
+                },
+                empty = { Text("网站书架暂无书籍", color = MaterialTheme.colorScheme.onSurfaceVariant) },
+                modifier = Modifier.fillMaxSize(),
+            )
+        }
+        if (!eink) {
+            LibraryDragVisualOverlay(
+                coordinator = coordinator,
+                entries = entries,
+                layout = layout,
+                showRemoveTarget = false,
+                coverState = { entry ->
+                    val summary = summariesByIdentity[entry.book.identity]
+                    if (summary != null) coverState(summary)
+                    else CoverUiState.Fallback(FallbackSpec(entry.book.title, (entry.book.identity as? BookIdentity.Remote)?.sourceId))
+                },
+                modifier = Modifier.fillMaxSize(),
+            )
+        }
     }
 }
 
+@Composable
+private fun RemoteMirrorTargetPageItem(
+    target: RemoteTarget,
+    onOpenTarget: (RemoteTarget) -> Unit,
+) {
+    Surface(
+        modifier = Modifier.fillMaxWidth().testTag("remote-library-folder-${target.targetId}"),
+        onClick = { onOpenTarget(target) },
+        shape = MaterialTheme.shapes.small,
+        color = MaterialTheme.colorScheme.surfaceContainerLow,
+    ) {
+        Row(
+            Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 14.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            Icon(TsuyomiIcons.Folder, contentDescription = null)
+            Text(target.displayName, modifier = Modifier.weight(1f), style = MaterialTheme.typography.titleMedium)
+            Icon(TsuyomiIcons.Next, contentDescription = "打开${target.displayName}")
+        }
+    }
+}
 @Composable
 private fun RemoteMirrorDestinationHeader(
     sourceName: String,

@@ -29,7 +29,7 @@ internal class SourceRemoteLibraryPullInstrumentedTest : SourceFlowInstrumentedT
             assertEquals(setOf("1234", "5678"), pull.books.map { it.identity.remoteBookId }.toSet())
             assertTrue(library.libraryEntries().isEmpty())
             assertEquals(RemoteLibraryCopyResult(total = 2, added = 2), controller.copyRemoteLibraryToLocal(pull.books))
-            assertEquals(setOf("1234", "5678"), library.libraryEntries().map { it.book.identity.remoteBookId }.toSet())
+            assertEquals(setOf("1234", "5678"), library.libraryEntries().map { (it.book.identity as org.tsuyomi.shared.model.BookIdentity.Remote).remoteBookId }.toSet())
 
             val policy = requireNotNull(library.sourceRemotePolicy(sourceId))
             assertTrue(library.setAddWritebackEnabled(sourceId, policy.capabilitySetFingerprint, true))
@@ -74,6 +74,92 @@ internal class SourceRemoteLibraryPullInstrumentedTest : SourceFlowInstrumentedT
             assertTrue(library.libraryEntries().isEmpty())
         } finally {
             releaseSecondPage.complete(Unit)
+            controller.close()
+        }
+    }
+
+    @Test
+    fun paginationNeverContinuesOnReplacementPackageClient() = runBlocking {
+        val packageInfo = installFixture()
+        val sourceId = packageInfo.manifest.sourceId.value
+        val firstPageStarted = CompletableDeferred<Unit>()
+        val releaseFirstPage = CompletableDeferred<Unit>()
+        var replacementReads = 0
+        val firstSession = FakeSession(
+            listRemote = { cursor ->
+                if (cursor == null) {
+                    firstPageStarted.complete(Unit)
+                    releaseFirstPage.await()
+                    RemoteLibraryPage(listOf(summary(sourceId, "1003", "旧来源第一页")), "next", false)
+                } else {
+                    error("Captured source should be fenced before requesting another page")
+                }
+            },
+        )
+        val replacementSession = FakeSession(
+            listRemote = {
+                replacementReads++
+                RemoteLibraryPage(listOf(summary(sourceId, "1004", "替换来源")), null, true)
+            },
+        )
+        val controller = controller { candidate ->
+            if (candidate.packageSha256 == packageInfo.packageSha256) firstSession else replacementSession
+        }
+        try {
+            val pull = async { controller.pullRemoteLibrary(packageInfo) }
+            withTimeout(5_000) { firstPageStarted.await() }
+            controller.open(packageInfo.withPackageSha256(alternateSha(packageInfo.packageSha256)))
+            releaseFirstPage.complete(Unit)
+
+            assertEquals(RemoteLibraryPullResult.Failure("source-changed"), pull.await())
+            assertEquals(0, replacementReads)
+            assertTrue(library.libraryEntries().isEmpty())
+        } finally {
+            releaseFirstPage.complete(Unit)
+            controller.close()
+        }
+    }
+
+    @Test
+    fun paginationNeverSwitchesToReopenedLoginClient() = runBlocking {
+        val packageInfo = installFixture()
+        val sourceId = packageInfo.manifest.sourceId.value
+        val firstPageStarted = CompletableDeferred<Unit>()
+        val releaseFirstPage = CompletableDeferred<Unit>()
+        var opens = 0
+        var reopenedReads = 0
+        val firstSession = FakeSession(
+            listRemote = { cursor ->
+                if (cursor == null) {
+                    firstPageStarted.complete(Unit)
+                    releaseFirstPage.await()
+                    RemoteLibraryPage(listOf(summary(sourceId, "1005", "登录前第一页")), "next", false)
+                } else {
+                    error("Captured session should be fenced before requesting another page")
+                }
+            },
+        )
+        val reopenedSession = FakeSession(
+            listRemote = {
+                reopenedReads++
+                RemoteLibraryPage(listOf(summary(sourceId, "1006", "登录后替换会话")), null, true)
+            },
+        )
+        val controller = controller {
+            if (opens++ == 0) firstSession else reopenedSession
+        }
+        try {
+            val pull = async { controller.pullRemoteLibrary(packageInfo) }
+            withTimeout(5_000) { firstPageStarted.await() }
+            controller.sourceBecameUnavailable()
+            controller.open(packageInfo)
+            releaseFirstPage.complete(Unit)
+
+            assertEquals(RemoteLibraryPullResult.Failure("source-changed"), pull.await())
+            assertEquals(0, reopenedReads)
+            assertTrue(library.libraryEntries().isEmpty())
+        } finally {
+            releaseFirstPage.complete(Unit)
             controller.close()
         }
     }

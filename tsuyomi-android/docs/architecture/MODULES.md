@@ -21,8 +21,8 @@ No feature depends on another feature. `shared/*` has no Android UI, Room, WebVi
 |---|---|---|
 | App | `app` | Navigation, dependency composition, Android manifest. |
 | Shared | `model`, `locator`, `backup`, `smart-shelf`, `source-contract`, `library-domain` | Pure models and deterministic rules; `library-domain` owns update state and persistence/probe ports without Android dependencies. |
-| Core | `ui`, `display`, `database`, `library`, `preferences`, `network`, `files`, `security`, `webview` | Android infrastructure, global display/E-ink policy and design primitives; `library` owns update coordination through narrow ports, while `database` implements durable storage. |
-| Source | `quickjs-runtime`, `extension-manager`, `extension-testkit` | `.hxp` verification, installation, persistent repository subscriptions, exact-package execution trust, safe uninstall/reinstall, constrained runtime, and deterministic host replay. |
+| Core | `ui`, `display`, `database`, `library`, `preferences`, `network`, `files`, `security`, `webview`, `publication` | Android infrastructure, global display/E-ink policy and design primitives; `library` owns update coordination through narrow ports, `database` implements durable storage, and `publication` owns private originals, bounded format parsing, resource grants and portable original archives. |
+| Source | `quickjs-runtime`, `extension-manager`, `extension-testkit` | `.hxp` verification, installation, persistent repository subscriptions, exact-package execution trust, safe uninstall/reinstall, constrained runtime, and deterministic host replay. The runtime also hosts the separately isolated, networkless publication parser; it does not execute book scripts or treat local books as extensions. |
 | Reader | `engine`, `ui`, `tts` | Structured document sessions, semantic locators, incremental layout, reader surfaces, and text-to-speech. |
 | Features | `library`, `browse`, `search`, `book`, `reader`, `settings`, `backup`, `extensions` | User-facing screens and use-case coordination. |
 

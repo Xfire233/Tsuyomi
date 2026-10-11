@@ -28,6 +28,7 @@ import org.tsuyomi.core.database.RoomLibraryRepository
 import org.tsuyomi.core.library.UpdateCoordinator
 import org.tsuyomi.shared.librarydomain.UpdateCandidate
 import org.tsuyomi.shared.librarydomain.UpdateProbe
+import org.tsuyomi.shared.librarydomain.UpdateProbeResult
 import org.tsuyomi.shared.librarydomain.UpdateRunOutcome
 import org.tsuyomi.shared.librarydomain.UpdateSessionStates
 import org.tsuyomi.shared.model.BookIdentity
@@ -47,7 +48,7 @@ class UpdateCoordinatorInstrumentedTest {
             addLibraryBooks(database, candidate)
             var checks = 0
             val coordinator = UpdateCoordinator(store, object : UpdateProbe {
-                override suspend fun check(candidate: UpdateCandidate, previousAnchor: String?): SourceUpdateProbeResult {
+                override suspend fun check(candidate: UpdateCandidate, previousAnchor: String?): UpdateProbeResult {
                     checks++
                     return baseline(candidate.identity, previousAnchor)
                 }
@@ -81,7 +82,7 @@ class UpdateCoordinatorInstrumentedTest {
             var interruptSecond = true
             var captures = 0
             val coordinator = UpdateCoordinator(store, object : UpdateProbe {
-                override suspend fun check(candidate: UpdateCandidate, previousAnchor: String?): SourceUpdateProbeResult {
+                override suspend fun check(candidate: UpdateCandidate, previousAnchor: String?): UpdateProbeResult {
                     calls += candidate.identity.remoteBookId
                     if (candidate.identity == second.identity && interruptSecond) {
                         enteredSecond.complete(Unit)
@@ -126,7 +127,7 @@ class UpdateCoordinatorInstrumentedTest {
             addLibraryBooks(database, candidate)
             var checks = 0
             val probe = object : UpdateProbe {
-                override suspend fun check(candidate: UpdateCandidate, previousAnchor: String?): SourceUpdateProbeResult {
+                override suspend fun check(candidate: UpdateCandidate, previousAnchor: String?): UpdateProbeResult {
                     checks++
                     entered.complete(Unit)
                     release.await()
@@ -162,7 +163,7 @@ class UpdateCoordinatorInstrumentedTest {
             addLibraryBooks(database, candidate)
             var checks = 0
             val probe = object : UpdateProbe {
-                override suspend fun check(candidate: UpdateCandidate, previousAnchor: String?): SourceUpdateProbeResult {
+                override suspend fun check(candidate: UpdateCandidate, previousAnchor: String?): UpdateProbeResult {
                     checks++
                     if (checks == 1) {
                         entered.complete(Unit)
@@ -204,7 +205,7 @@ class UpdateCoordinatorInstrumentedTest {
             addLibraryBooks(database, candidate)
             var checks = 0
             val coordinator = UpdateCoordinator(store, object : UpdateProbe {
-                override suspend fun check(candidate: UpdateCandidate, previousAnchor: String?): SourceUpdateProbeResult {
+                override suspend fun check(candidate: UpdateCandidate, previousAnchor: String?): UpdateProbeResult {
                     checks++
                     return baseline(candidate.identity, previousAnchor)
                 }
@@ -248,19 +249,22 @@ class UpdateCoordinatorInstrumentedTest {
         TsuyomiDatabase::class.java,
     ).build()
 
-    private fun candidate(id: String) = UpdateCandidate(BookIdentity("fixture.update.coordinator", id), id)
+    private fun candidate(id: String) = UpdateCandidate(BookIdentity.Remote("fixture.update.coordinator", id), id)
 
-    private fun baseline(identity: BookIdentity, previousAnchor: String?) = SourceUpdateProbeResult(
-        identity = identity,
-        sourceVersion = "1.0.0",
-        packageSha256 = "a".repeat(64),
-        checkedAt = System.currentTimeMillis(),
-        outcome = SourceUpdateOutcome.UNCHANGED,
-        previousAnchor = previousAnchor,
-        anchor = "update-check-v2.1." + "b".repeat(64),
-        chapters = listOf(SourceUpdateChapter("chapter-1", "第一章")),
-        newChapterIds = emptyList(),
-        lastUpdatedDate = null,
-        reason = null,
-    )
+    private fun baseline(identity: BookIdentity.Remote, previousAnchor: String?): UpdateProbeResult =
+        UpdateProbeResult.Checked(
+            SourceUpdateProbeResult(
+                identity = identity,
+                sourceVersion = "1.0.0",
+                packageSha256 = "a".repeat(64),
+                checkedAt = System.currentTimeMillis(),
+                outcome = SourceUpdateOutcome.UNCHANGED,
+                previousAnchor = previousAnchor,
+                anchor = "update-check-v2.1." + "b".repeat(64),
+                chapters = listOf(SourceUpdateChapter("chapter-1", "第一章")),
+                newChapterIds = emptyList(),
+                lastUpdatedDate = null,
+                reason = null,
+            ),
+        )
 }

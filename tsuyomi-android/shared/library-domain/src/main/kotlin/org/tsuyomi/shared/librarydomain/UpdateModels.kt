@@ -9,9 +9,9 @@ import org.tsuyomi.shared.model.BookIdentity
 import org.tsuyomi.shared.sourcecontract.SourceUpdateChapter
 import org.tsuyomi.shared.sourcecontract.SourceUpdateProbeResult
 
-/** A local or enabled-mirror book captured at the beginning of an update session. */
+/** A remote book captured at the beginning of an update session. */
 data class UpdateCandidate(
-    val identity: BookIdentity,
+    val identity: BookIdentity.Remote,
     val title: String,
     val eligible: Boolean = true,
     val reason: String? = null,
@@ -34,7 +34,7 @@ data class UpdatePolicy(
 
 /** Exact unresolved chapter delta for one current trusted source anchor. */
 data class UnresolvedUpdate(
-    val identity: BookIdentity,
+    val identity: BookIdentity.Remote,
     val title: String,
     val anchor: String,
     val chapters: List<SourceUpdateChapter>,
@@ -54,7 +54,7 @@ data class UpdateSessionSummary(
     val reason: String? = null,
 )
 data class UpdateSessionItemSummary(
-    val identity: BookIdentity,
+    val identity: BookIdentity.Remote,
     val title: String,
     val state: String,
     val reason: String?,
@@ -84,19 +84,32 @@ data class UpdateSnapshot(
     val updates: List<UnresolvedUpdate>,
     val session: UpdateSessionSummary?,
     val policy: UpdatePolicy,
-    val excludedBooks: Set<BookIdentity>,
+    val excludedBooks: Set<BookIdentity.Remote>,
     val excludedSources: Set<String>,
     val sessionItems: List<UpdateSessionItemSummary> = emptyList(),
     val totalSessionItems: Int = sessionItems.size,
     val hasMoreSessionItems: Boolean = false,
 )
+private val SAFE_UPDATE_REASON = Regex("^[a-z][a-z0-9._-]{0,127}$")
+
+/** A source check either has signed-source evidence or a safe terminal source-unavailable reason. */
+sealed interface UpdateProbeResult {
+    data class Checked(val evidence: SourceUpdateProbeResult) : UpdateProbeResult
+
+    data class Unavailable(val identity: BookIdentity.Remote, val reason: String) : UpdateProbeResult {
+        init {
+            require(SAFE_UPDATE_REASON.matches(reason)) { "Invalid unavailable source reason" }
+        }
+    }
+}
+
 
 /**
- * The source boundary for update checks. Runtime owns source/package/credential lease validation.
- * Returning false from [isStillValid] prevents a checked result from being committed.
+ * The source boundary for update checks. Checked evidence is revalidated before commit; an
+ * unavailable result carries only a safe reason and cannot update a baseline.
  */
 interface UpdateProbe {
-    suspend fun check(candidate: UpdateCandidate, previousAnchor: String?): SourceUpdateProbeResult
+    suspend fun check(candidate: UpdateCandidate, previousAnchor: String?): UpdateProbeResult
 
     suspend fun isStillValid(candidate: UpdateCandidate): Boolean = true
 }
@@ -136,7 +149,7 @@ interface UpdateStore {
     suspend fun claimQueuedSession(now: Long, leaseExpiresAt: Long): UpdateSessionLease?
 
 
-    suspend fun previousAnchor(identity: BookIdentity): String?
+    suspend fun previousAnchor(identity: BookIdentity.Remote): String?
     suspend fun renewLease(lease: UpdateSessionLease, now: Long, leaseExpiresAt: Long): Boolean
     suspend fun canProbe(lease: UpdateSessionLease, candidate: UpdateCandidate, now: Long): Boolean
     suspend fun pendingCandidates(lease: UpdateSessionLease, limit: Int): List<UpdateCandidate>
@@ -156,6 +169,14 @@ interface UpdateStore {
         now: Long,
     ): Boolean
 
+    /** Records source unavailability without requiring package/version evidence that no longer exists. */
+    suspend fun recordUnavailable(
+        lease: UpdateSessionLease,
+        candidate: UpdateCandidate,
+        result: UpdateProbeResult.Unavailable,
+        now: Long,
+    ): Boolean
+
     suspend fun recordFailure(lease: UpdateSessionLease, candidate: UpdateCandidate, reason: String?, now: Long): Boolean
     /** Cancels the current running or queued session as an explicit user action. */
     suspend fun cancelActiveSession(now: Long): Boolean
@@ -165,11 +186,11 @@ interface UpdateStore {
     suspend fun relinquishLease(lease: UpdateSessionLease, now: Long): Boolean
     /** Atomically cancels only the running or queued session with the advertised identifier. */
     suspend fun cancelSession(expectedSessionId: String, now: Long): Boolean
-    suspend fun ignore(identity: BookIdentity, anchor: String): UpdateUndo?
+    suspend fun ignore(identity: BookIdentity.Remote, anchor: String): UpdateUndo?
     suspend fun undo(token: UpdateUndo): Boolean
-    suspend fun reconcileCompleted(identity: BookIdentity, chapterIds: Set<String>)
+    suspend fun reconcileCompleted(identity: BookIdentity.Remote, chapterIds: Set<String>)
 
     suspend fun setPolicy(policy: UpdatePolicy)
-    suspend fun excludeBook(identity: BookIdentity, excluded: Boolean)
+    suspend fun excludeBook(identity: BookIdentity.Remote, excluded: Boolean)
     suspend fun excludeSource(sourceId: String, excluded: Boolean)
 }

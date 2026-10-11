@@ -74,7 +74,7 @@ import org.tsuyomi.core.database.room.UpdateUndoEntity
         UpdateSourceExclusionEntity::class,
         UpdateUndoEntity::class,
     ],
-    version = 13,
+    version = 14,
     exportSchema = true,
 )
 @TypeConverters(RoomConverters::class)
@@ -217,5 +217,69 @@ val MIGRATION_12_13 = object : Migration(12, 13) {
         db.execSQL(
             "CREATE TABLE IF NOT EXISTS reader_history (source_id TEXT NOT NULL, remote_book_id TEXT NOT NULL, last_visited_at_epoch_second INTEGER NOT NULL, last_visited_at_nano INTEGER NOT NULL, PRIMARY KEY(source_id, remote_book_id), FOREIGN KEY(source_id, remote_book_id) REFERENCES books(source_id, remote_book_id) ON UPDATE NO ACTION ON DELETE CASCADE)",
         )
+    }
+}
+
+/** Adds origin-qualified identities and local original metadata without discarding Room13 state. */
+val MIGRATION_13_14 = object : Migration(13, 14) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        val stagedSchemas = linkedMapOf<String, String>()
+        fun stage(table: String, schema: String) {
+            stagedSchemas[table] = schema
+            db.execSQL(schema)
+        }
+        stage("books", """CREATE TABLE books_new (identity_key TEXT NOT NULL, origin TEXT NOT NULL, source_id TEXT, remote_book_id TEXT, publication_id TEXT, title TEXT NOT NULL, authors_json TEXT NOT NULL DEFAULT '[]', author_sort_key BLOB, cover_url TEXT, canonical_url TEXT, status TEXT, remote_tags_json TEXT NOT NULL DEFAULT '[]', source_update_key TEXT, has_unread_update INTEGER NOT NULL DEFAULT 0, added_at_epoch_second INTEGER NOT NULL, added_at_nano INTEGER NOT NULL, metadata_updated_at_epoch_second INTEGER NOT NULL, metadata_updated_at_nano INTEGER NOT NULL, local_format TEXT, local_original_sha256 TEXT, local_original_size_bytes INTEGER, local_original_available INTEGER, local_txt_options_json TEXT, local_cover_resource_id TEXT, PRIMARY KEY(identity_key))""")
+        db.execSQL("CREATE UNIQUE INDEX index_books_new_source_id_remote_book_id ON books_new(source_id, remote_book_id)")
+        db.execSQL("INSERT INTO books_new(identity_key,origin,source_id,remote_book_id,title,authors_json,author_sort_key,cover_url,canonical_url,status,remote_tags_json,source_update_key,has_unread_update,added_at_epoch_second,added_at_nano,metadata_updated_at_epoch_second,metadata_updated_at_nano) SELECT 'r'||length(CAST(source_id AS BLOB))||':'||source_id||length(CAST(remote_book_id AS BLOB))||':'||remote_book_id,'remote',source_id,remote_book_id,title,authors_json,author_sort_key,cover_url,canonical_url,status,remote_tags_json,source_update_key,has_unread_update,added_at_epoch_second,added_at_nano,metadata_updated_at_epoch_second,metadata_updated_at_nano FROM books")
+
+        stage("library_entries", """CREATE TABLE library_entries_new (identity_key TEXT NOT NULL, source_id TEXT, remote_book_id TEXT, added_at_epoch_second INTEGER NOT NULL, added_at_nano INTEGER NOT NULL, rating INTEGER, read_later INTEGER NOT NULL DEFAULT 0, display_order INTEGER NOT NULL DEFAULT 2147483647, local_pin INTEGER NOT NULL DEFAULT 1, PRIMARY KEY(identity_key), FOREIGN KEY(identity_key) REFERENCES books_new(identity_key) ON UPDATE NO ACTION ON DELETE CASCADE)""")
+        db.execSQL("INSERT INTO library_entries_new(identity_key,source_id,remote_book_id,added_at_epoch_second,added_at_nano,rating,read_later,display_order,local_pin) SELECT 'r'||length(CAST(source_id AS BLOB))||':'||source_id||length(CAST(remote_book_id AS BLOB))||':'||remote_book_id,source_id,remote_book_id,added_at_epoch_second,added_at_nano,rating,read_later,display_order,local_pin FROM library_entries")
+
+        stage("manual_collection_memberships", """CREATE TABLE manual_collection_memberships_new (collection_id TEXT NOT NULL, identity_key TEXT NOT NULL, source_id TEXT, remote_book_id TEXT, added_at_epoch_second INTEGER NOT NULL, added_at_nano INTEGER NOT NULL, display_order INTEGER NOT NULL, PRIMARY KEY(collection_id,identity_key), FOREIGN KEY(collection_id) REFERENCES collections(collection_id) ON UPDATE NO ACTION ON DELETE CASCADE, FOREIGN KEY(identity_key) REFERENCES library_entries_new(identity_key) ON UPDATE NO ACTION ON DELETE CASCADE)""")
+        db.execSQL("INSERT INTO manual_collection_memberships_new(collection_id,identity_key,source_id,remote_book_id,added_at_epoch_second,added_at_nano,display_order) SELECT collection_id,'r'||length(CAST(source_id AS BLOB))||':'||source_id||length(CAST(remote_book_id AS BLOB))||':'||remote_book_id,source_id,remote_book_id,added_at_epoch_second,added_at_nano,display_order FROM manual_collection_memberships")
+
+        stage("local_book_tags", """CREATE TABLE local_book_tags_new (identity_key TEXT NOT NULL, source_id TEXT, remote_book_id TEXT, normalized_tag TEXT NOT NULL, display_tag TEXT NOT NULL, PRIMARY KEY(identity_key,normalized_tag), FOREIGN KEY(identity_key) REFERENCES library_entries_new(identity_key) ON UPDATE NO ACTION ON DELETE CASCADE)""")
+        db.execSQL("INSERT INTO local_book_tags_new(identity_key,source_id,remote_book_id,normalized_tag,display_tag) SELECT 'r'||length(CAST(source_id AS BLOB))||':'||source_id||length(CAST(remote_book_id AS BLOB))||':'||remote_book_id,source_id,remote_book_id,normalized_tag,display_tag FROM local_book_tags")
+
+        stage("reading_progress", """CREATE TABLE reading_progress_new (identity_key TEXT NOT NULL, source_id TEXT, remote_book_id TEXT, content_id TEXT NOT NULL, revision TEXT, block_id TEXT, text_anchor_digest TEXT, character_offset INTEGER, chapter_progress REAL, book_progress REAL, updated_at_epoch_second INTEGER NOT NULL, updated_at_nano INTEGER NOT NULL, PRIMARY KEY(identity_key), FOREIGN KEY(identity_key) REFERENCES books_new(identity_key) ON UPDATE NO ACTION ON DELETE CASCADE)""")
+        db.execSQL("INSERT INTO reading_progress_new(identity_key,source_id,remote_book_id,content_id,revision,block_id,text_anchor_digest,character_offset,chapter_progress,book_progress,updated_at_epoch_second,updated_at_nano) SELECT 'r'||length(CAST(source_id AS BLOB))||':'||source_id||length(CAST(remote_book_id AS BLOB))||':'||remote_book_id,source_id,remote_book_id,content_id,revision,block_id,text_anchor_digest,character_offset,chapter_progress,book_progress,updated_at_epoch_second,updated_at_nano FROM reading_progress")
+
+        stage("reader_history", """CREATE TABLE reader_history_new (identity_key TEXT NOT NULL, source_id TEXT, remote_book_id TEXT, last_visited_at_epoch_second INTEGER NOT NULL, last_visited_at_nano INTEGER NOT NULL, PRIMARY KEY(identity_key), FOREIGN KEY(identity_key) REFERENCES books_new(identity_key) ON UPDATE NO ACTION ON DELETE CASCADE)""")
+        db.execSQL("INSERT INTO reader_history_new(identity_key,source_id,remote_book_id,last_visited_at_epoch_second,last_visited_at_nano) SELECT 'r'||length(CAST(source_id AS BLOB))||':'||source_id||length(CAST(remote_book_id AS BLOB))||':'||remote_book_id,source_id,remote_book_id,last_visited_at_epoch_second,last_visited_at_nano FROM reader_history")
+
+        stage("completed_chapters", """CREATE TABLE completed_chapters_new (identity_key TEXT NOT NULL, source_id TEXT, remote_book_id TEXT, chapter_id TEXT NOT NULL, completed_at_epoch_second INTEGER NOT NULL, completed_at_nano INTEGER NOT NULL, PRIMARY KEY(identity_key,chapter_id), FOREIGN KEY(identity_key) REFERENCES books_new(identity_key) ON UPDATE NO ACTION ON DELETE CASCADE)""")
+        db.execSQL("INSERT INTO completed_chapters_new(identity_key,source_id,remote_book_id,chapter_id,completed_at_epoch_second,completed_at_nano) SELECT 'r'||length(CAST(source_id AS BLOB))||':'||source_id||length(CAST(remote_book_id AS BLOB))||':'||remote_book_id,source_id,remote_book_id,chapter_id,completed_at_epoch_second,completed_at_nano FROM completed_chapters")
+
+        stage("reader_bookmarks", """CREATE TABLE reader_bookmarks_new (identity_key TEXT NOT NULL, source_id TEXT, remote_book_id TEXT, bookmark_position_key TEXT NOT NULL, content_id TEXT NOT NULL, revision TEXT, block_id TEXT, text_anchor_digest TEXT, character_offset INTEGER, chapter_progress REAL, book_progress REAL, captured_at_epoch_second INTEGER NOT NULL, captured_at_nano INTEGER NOT NULL, PRIMARY KEY(identity_key,bookmark_position_key))""")
+        db.execSQL("INSERT INTO reader_bookmarks_new(identity_key,source_id,remote_book_id,bookmark_position_key,content_id,revision,block_id,text_anchor_digest,character_offset,chapter_progress,book_progress,captured_at_epoch_second,captured_at_nano) SELECT 'r'||length(CAST(source_id AS BLOB))||':'||source_id||length(CAST(remote_book_id AS BLOB))||':'||remote_book_id,source_id,remote_book_id,bookmark_position_key,content_id,revision,block_id,text_anchor_digest,character_offset,chapter_progress,book_progress,captured_at_epoch_second,captured_at_nano FROM reader_bookmarks")
+
+        stage("remote_mirror_items", "CREATE TABLE remote_mirror_items_new (source_id TEXT NOT NULL, remote_book_id TEXT NOT NULL, target_id TEXT, updated_at_epoch_second INTEGER NOT NULL, PRIMARY KEY(source_id,remote_book_id), FOREIGN KEY(source_id,remote_book_id) REFERENCES books_new(source_id,remote_book_id) ON UPDATE NO ACTION ON DELETE CASCADE)")
+        db.execSQL("INSERT INTO remote_mirror_items_new SELECT * FROM remote_mirror_items")
+        stage("browsing_history", "CREATE TABLE browsing_history_new (source_id TEXT NOT NULL, remote_book_id TEXT NOT NULL, last_viewed_at_epoch_second INTEGER NOT NULL, last_viewed_at_nano INTEGER NOT NULL, PRIMARY KEY(source_id,remote_book_id), FOREIGN KEY(source_id,remote_book_id) REFERENCES books_new(source_id,remote_book_id) ON UPDATE NO ACTION ON DELETE CASCADE)")
+        db.execSQL("INSERT INTO browsing_history_new SELECT * FROM browsing_history")
+
+        db.execSQL("DROP TABLE local_book_tags")
+        db.execSQL("DROP TABLE manual_collection_memberships")
+        db.execSQL("DROP TABLE reader_bookmarks")
+        db.execSQL("DROP TABLE reading_progress")
+        db.execSQL("DROP TABLE reader_history")
+        db.execSQL("DROP TABLE completed_chapters")
+        db.execSQL("DROP TABLE remote_mirror_items")
+        db.execSQL("DROP TABLE browsing_history")
+        db.execSQL("DROP TABLE library_entries")
+        db.execSQL("DROP TABLE books")
+
+        // Final names are explicit; older Android SQLite may not rewrite foreign-key targets on rename.
+        stagedSchemas.forEach { (table, schema) ->
+            db.execSQL(schema.replace("_new", ""))
+            db.execSQL("INSERT INTO $table SELECT * FROM ${table}_new")
+            if (table == "books") {
+                db.execSQL("CREATE UNIQUE INDEX index_books_source_id_remote_book_id ON books(source_id,remote_book_id)")
+            }
+        }
+        stagedSchemas.keys.toList().asReversed().forEach { table -> db.execSQL("DROP TABLE ${table}_new") }
+        db.execSQL("CREATE INDEX index_manual_collection_memberships_identity_key ON manual_collection_memberships(identity_key)")
+        db.execSQL("CREATE INDEX index_local_book_tags_identity_key ON local_book_tags(identity_key)")
+        db.execSQL("CREATE INDEX index_remote_mirror_items_source_id_remote_book_id ON remote_mirror_items(source_id,remote_book_id)")
     }
 }

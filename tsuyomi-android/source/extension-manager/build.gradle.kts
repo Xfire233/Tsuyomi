@@ -16,6 +16,7 @@ dependencies {
     implementation(project(":core:security"))
     api(project(":shared:source-contract"))
     implementation(project(":shared:model"))
+    implementation(project(":shared:locator"))
     implementation(project(":source:quickjs-runtime"))
     implementation(libs.kotlinx.serialization.json)
     implementation(libs.bouncycastle.provider)

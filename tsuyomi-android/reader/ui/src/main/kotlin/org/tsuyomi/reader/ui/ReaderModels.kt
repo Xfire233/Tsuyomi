@@ -34,7 +34,8 @@ data class ReaderPosition(
 
     fun adjacentPage(direction: Int): ReaderPosition? {
         if (direction == 0 || pageCount <= 1) return null
-        val nextIndex = (page - 1) + if (direction < 0) -pageStep else pageStep
+        val rawIndex = (page - 1) + if (direction < 0) -pageStep else pageStep
+        val nextIndex = if (direction < 0 && page > 1) rawIndex.coerceAtLeast(0) else rawIndex
         if (nextIndex !in 0 until pageCount) return null
         return fromPageIndex(nextIndex, pageCount, pageStep)
     }

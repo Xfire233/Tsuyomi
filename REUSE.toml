@@ -9,12 +9,17 @@ path = [
   "README.md",
   "tsuyomi-android/README.md",
   "tsuyomi-android/app/src/main/res/values/strings.xml",
+  "tsuyomi-android/app/src/main/res/values/publications.xml",
   "tsuyomi-android/feature/browse/src/main/res/values/strings.xml",
   "tsuyomi-android/app/src/main/res/drawable-nodpi/tsuyomi_launcher_artwork.png",
   "tsuyomi-android/feature/settings/src/main/res/raw/apache_license_2_0.txt",
   "tsuyomi-android/reader/ui/src/main/res/values/strings.xml",
   "tsuyomi-protocol/package.json",
   "tsuyomi-protocol/package-lock.json",
+  "tsuyomi-android/core/publication/parser-js/package.json",
+  "tsuyomi-android/core/publication/parser-js/package-lock.json",
+  "tsuyomi-android/core/publication/parser-js/source-pins.json",
+  "tsuyomi-android/core/publication/parser-js/THIRD_PARTY_NOTICES.txt",
   "tsuyomi-protocol/schemas/*.json",
   "tsuyomi-protocol/fixtures/**/*.json",
   "tsuyomi-android/**/*gradle.lockfile",
@@ -35,6 +40,7 @@ path = [
   "tsuyomi-android/docs/process/REPOSITORY_GOVERNANCE.md",
   "tsuyomi-android/docs/process/RELEASE_PROCEDURE.md",
   "tsuyomi-android/docs/process/PHASE_2_RETROSPECTIVE.md",
+  "tsuyomi-android/docs/phases/VERSION_0_5_0_PLAN.md",
   "tsuyomi-android/source/extension-testkit/fixtures/**",
   "tsuyomi-android/app/src/androidTest/assets/repository/*.json",
 ]
@@ -54,3 +60,27 @@ path = ["tsuyomi-android/gradle/wrapper/gradle-wrapper.jar"]
 precedence = "aggregate"
 SPDX-FileCopyrightText = "2007-2025 Gradle, Inc."
 SPDX-License-Identifier = "Apache-2.0"
+
+[[annotations]]
+path = ["tsuyomi-android/core/publication/parser-js/vendor/upstream/**"]
+precedence = "aggregate"
+SPDX-FileCopyrightText = "2024 hhk-png"
+SPDX-License-Identifier = "MIT"
+
+[[annotations]]
+path = ["tsuyomi-android/core/publication/parser-js/vendor/dependencies/events@3.3.0/**"]
+precedence = "aggregate"
+SPDX-FileCopyrightText = "Joyent, Inc. and other Node contributors"
+SPDX-License-Identifier = "MIT"
+
+[[annotations]]
+path = ["tsuyomi-android/core/publication/parser-js/vendor/dependencies/fflate@0.8.2/**"]
+precedence = "aggregate"
+SPDX-FileCopyrightText = "2023 Arjun Barrett"
+SPDX-License-Identifier = "MIT"
+
+[[annotations]]
+path = ["tsuyomi-android/core/publication/parser-js/vendor/dependencies/sax@1.4.1/**"]
+precedence = "aggregate"
+SPDX-FileCopyrightText = ["2010-2024 Isaac Z. Schlueter and Contributors", "2010-2024 Mathias Bynens"]
+SPDX-License-Identifier = "ISC AND MIT"

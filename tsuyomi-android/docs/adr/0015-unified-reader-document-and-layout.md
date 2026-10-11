@@ -42,6 +42,30 @@ WYSIWYG scrubbing is a transient `PreviewSession`, never progress persistence. I
 
 Scroll, paged, and dual-page surfaces consume the same document and locator contract. E-ink is the global display profile: it selects immediate page replacement, constrained prelayout, no paper curl/transition, and a stable visual commit, but it does not create an independent reader data model. A display-profile or typography change reflows from the semantic locator.
 
+### 0.5.0 local-publication selection inputs — accepted 2026-10-06
+
+The maintainer selected comparative P0 feasibility/fidelity before parser integration, within ADR0001's permissive-first/compliant-LGPL policy. The 2026-10-07 comparison below selects the implementation route under the explicit 0.5.0 authorization in PHASE_4. Selection does not relax the single document/locator/Reader invariants or constitute production acceptance.
+
+The selected EPUB profile includes reflowable publication with Chinese mixed text/images, emphasis, ruby, real TOC/internal links, footnotes/endnotes, lists and basic tables. The maintainer's 2026-10-09 real-publication repair authorization extends it to image-based fixed-layout comics, their declared reading progression, bounded large collections and inert SVG image wrappers; it supersedes treating those supplied publications as out of scope. This is not plain-text extraction or a promise of complete arbitrary SVG, complex-vertical or EPUB3 interactivity support. Unsupported features still require truthful compatibility outcomes, but cannot excuse omitted content in the authorized corpus. MOBI/AZW3 delivery remains required, with format-specific protection checks rather than treating identifiers as encryption. All formats use the same native document/locator/Reader; production Library import/open/restore and mounted Reader pagination/locator behavior are the observable seams. The earlier P0 comparison is selection evidence, not acceptance of this expanded profile.
+
+The selected protected-content policy is non-DRM local input only for 0.5.0: identify and explicitly reject protected publications, not misclassify them as corrupt data or wait indefinitely. No LCP/DRM subsystem, key collection or external protected-reader path was selected. This does not conflate ordinary resource encoding/font obfuscation with publication DRM without format-specific inspection.
+
+### 0.5.0 parser route — selected after P0 evidence, 2026-10-07
+
+Use Android's bounded ZIP/XML primitives and strict charset decoding for EPUB/TXT, a scoped MIT `@lingo-reader/mobi-parser` 0.4.6 derivative at `bc912542d9c09f144257205943c6bd3e421d8743` for MOBI7/KF8/hybrid, and the existing source-neutral Compose measurement/rendering route. The app composes the QuickJS implementation inside a non-exported, network-less isolated parser service; `core/publication` consumes narrow content ports and never depends on `source/*`. No HTML WebView, external reader, GPL engine or second layout engine is adopted.
+
+On the owned API29/x86_64 proof device, the MIT route passed exact content/TOC/link/resource oracles for six uncompressed/PalmDOC cases, protected/replica/malformed rejection, a 930,084-byte Chinese body with 10,000 paragraphs and its final anchor, and active-native cancellation followed by a fresh independent book. The large proof used the unchanged 64 MiB QuickJS heap and took 4,509 ms including binding, parse and pipe output. Fix the derivative's quoted-guide lookup and full-input per-byte string/iterator allocations; do not repin the oracle or raise the proof limit to hide the failure.
+
+The libmobi 0.12 comparison reconstructed raw content and resources rapidly (35 ms for its large JNI/pipe primitive), but that raw interface is not the same normalized TOC/link/Reader work. Keep it as comparison evidence, not a second shipped parser or an automatic fallback. The permissive route meets the observed fidelity seam; its license obligations and inherited notices must accompany the exact shipped source and bundle.
+
+P0 measurements are single synthetic-device observations, not P95, complete EPUB conformance, physical E-ink performance or a production capability claim. Production must retain original/expanded/section/resource quotas, bounded on-demand section and binary-resource output, actual process cancellation, trust-boundary validation and typed over-budget outcomes. The old extension runtime's memory/request limits must not be widened for book parsing. Host-owned originals are never transported as giant Binder values or exposed to scripts through filesystem/network APIs.
+
+The production publication runtime retains the proven 64 MiB QuickJS heap. Serialized requests may enter JNI on different worker threads; each operation refreshes QuickJS's stack top before evaluation so the previous thread's stack boundary cannot reject a valid section or binary-resource request. Cancellation still terminates the isolated process; the extension runtime's quotas remain unchanged.
+
+### Future switchable forum presentation — accepted 2026-10-07
+
+The maintainer requires an explicitly enableable/disableable Yamibo reply-stream presentation when that source is implemented, using Hikari Flutter Plus as a visual/interaction reference. Reserve typed post/reply content and source-declared presentation capability in the shared Reader architecture now so other plugins can use it without another renderer, bookmark store or progress model. UI Constitution §14 owns the visible behavior; Reader architecture owns the data/capability boundary. Reuse the existing source-content transform and exact/degraded/unavailable restoration contract rather than Hikari's percentage-based mode conversion. This does not select optional owner-header/owner-catalogue features or authorize Yamibo implementation or validation within 0.5.0.
+
 ## Rejected alternatives
 
 - Persist page number or scroll percentage: rejected because layout and content changes invalidate them.

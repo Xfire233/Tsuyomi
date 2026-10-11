@@ -120,7 +120,7 @@ internal object HikariBackupCodec {
                 progress = progress[identity],
             )
         }
-        return books.values.sortedWith(compareBy({ it.identity.sourceId }, { it.identity.remoteBookId }))
+        return books.values.sortedBy { it.identity }
     }
 
     private fun parseShelves(
@@ -347,7 +347,7 @@ internal object HikariBackupCodec {
         visit(payload, "payload")
     }
 
-    private fun legacyIdentity(aid: String): BookIdentity? {
+    private fun legacyIdentity(aid: String): BookIdentity.Remote? {
         val value = aid.trim().takeIf { it.isNotEmpty() } ?: return null
         val (sourceId, remoteBookId) = when {
             value.startsWith("esj:") && value.length > 4 -> "org.tsuyomi.esjzone" to value.removePrefix("esj:")
@@ -356,7 +356,7 @@ internal object HikariBackupCodec {
             else -> return null
         }
         if (remoteBookId.codePointCount(0, remoteBookId.length) !in 1..1024) return null
-        return BookIdentity(sourceId, remoteBookId)
+        return BookIdentity.Remote(sourceId, remoteBookId)
     }
 
     private fun legacySourceId(value: String): String? = when (value.trim().lowercase()) {
@@ -373,7 +373,10 @@ internal object HikariBackupCodec {
 
     private fun canonicalPlanDigestInput(plan: ImportPlan): ByteArray = buildString {
         append(plan.kind.name).append('\n').append(plan.sourceCreatedAt).append('\n')
-        plan.books.forEach { append(it.identity.sourceId).append('\u0000').append(it.identity.remoteBookId).append('\u0000').append(it.updatedAt).append('\n') }
+        plan.books.forEach {
+            val identity = it.identity as? BookIdentity.Remote ?: error("Legacy backup identity must be remote")
+            append(identity.sourceId).append('\u0000').append(identity.remoteBookId).append('\u0000').append(it.updatedAt).append('\n')
+        }
         plan.shelves.sortedBy { it.id }.forEach { append(it.id).append('\u0000').append(it.parentId.orEmpty()).append('\n') }
         plan.warnings.forEach { append(it.safeCode).append('\u0000').append(it.safeRecordRef.orEmpty()).append('\u0000').append(it.fieldName.orEmpty()).append('\n') }
     }.toByteArray(Charsets.UTF_8)
@@ -477,5 +480,5 @@ private fun JsonElement.isNonEmpty(): Boolean = when (this) {
     is JsonPrimitive -> contentOrNull?.isNotBlank() == true
     else -> false
 }
-private fun BookIdentity.safeRef(): String = "$sourceId:$remoteBookId"
+private fun BookIdentity.Remote.safeRef(): String = "$sourceId:$remoteBookId"
 private fun JsonArray?.orEmpty(): JsonArray = this ?: JsonArray(emptyList())

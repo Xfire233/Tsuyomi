@@ -6,6 +6,7 @@ package org.tsuyomi.feature.browse
 
 import android.graphics.Bitmap
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -19,16 +20,23 @@ import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.asAndroidBitmap
 import androidx.compose.ui.semantics.SemanticsActions
+import androidx.compose.ui.semantics.getOrNull
 import androidx.compose.ui.test.assertIsEnabled
+import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.captureToImage
 import androidx.compose.ui.test.getUnclippedBoundsInRoot
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.isDisplayed
 import androidx.compose.ui.test.assertIsSelected
 import androidx.compose.ui.test.hasClickAction
 import androidx.compose.ui.test.hasStateDescription
 import androidx.compose.ui.test.junit4.createComposeRule
+import androidx.compose.ui.test.hasAnyAncestor
+import androidx.compose.ui.test.hasTestTag
+import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.junit4.StateRestorationTester
 import androidx.compose.ui.test.onAllNodesWithTag
+import androidx.compose.ui.test.SemanticsMatcher
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithTag
@@ -70,6 +78,7 @@ import org.tsuyomi.core.media.api.FallbackSpec
 import org.tsuyomi.core.ui.theme.TsuyomiTheme
 import org.tsuyomi.core.ui.components.CoverCardPresentationProvider
 import org.tsuyomi.core.ui.components.TsuyomiFilterCapsuleOption
+import org.tsuyomi.core.ui.components.TsuyomiTopBar
 import org.tsuyomi.core.ui.components.TsuyomiFilterCapsulePanel
 import org.tsuyomi.core.ui.components.TsuyomiFilterCapsuleOptionRow
 import org.tsuyomi.shared.model.CoverCardPresentation
@@ -94,20 +103,18 @@ class SourceHomeScreenInstrumentedTest {
                 TsuyomiTheme(environment = standardEnvironment) {
                     SourceHomeScreen(
                         sourceName = "测试来源",
+                        filtersExpanded = true,
+                        onFiltersExpandedChange = {},
                         state = SourceHomeViewState.Failure(
                             SourceErrorCode.VERIFICATION_REQUIRED,
                             "verification-required",
                         ),
-                        remoteLibraryAvailable = true,
-                        verificationAvailable = true,
                         onSelectPrimary = {},
                         onSelectFilters = {},
                         onRefresh = {},
                         onLoadMore = {},
                         onRetryReplacement = {},
                         onUseOfflineCache = { cacheRequested = true },
-                        onSearch = {},
-                        onOpenRemoteLibrary = {},
                         onOpenBook = {},
                         onOpenFeature = {},
                         onOpenVerification = { verificationRequested = true },
@@ -137,6 +144,8 @@ class SourceHomeScreenInstrumentedTest {
                 TsuyomiTheme(environment = standardEnvironment) {
                     SourceHomeScreen(
                         sourceName = "Wenku8",
+                        filtersExpanded = true,
+                        onFiltersExpandedChange = {},
                         state = SourceHomeViewState.Content(
                             title = "Wenku8 书库",
                             primaryFilter = primary,
@@ -158,16 +167,12 @@ class SourceHomeScreenInstrumentedTest {
                                 ),
                             ),
                         ),
-                        remoteLibraryAvailable = true,
-                        verificationAvailable = true,
                         onSelectPrimary = {},
                         onSelectFilters = {},
                         onRefresh = {},
                         onLoadMore = {},
                         onRetryReplacement = { retryRequested = true },
                         onUseOfflineCache = {},
-                        onSearch = {},
-                        onOpenRemoteLibrary = {},
                         onOpenBook = {},
                         onOpenFeature = {},
                         onOpenVerification = { verificationRequested = true },
@@ -439,6 +444,8 @@ class SourceHomeScreenInstrumentedTest {
                 TsuyomiTheme(environment = standardEnvironment) {
                     SourceHomeScreen(
                         sourceName = "Wenku8",
+                        filtersExpanded = true,
+                        onFiltersExpandedChange = {},
                         state = SourceHomeViewState.Content(
                             title = "Wenku8 书库",
                             primaryFilter = primary,
@@ -452,8 +459,6 @@ class SourceHomeScreenInstrumentedTest {
                                 ),
                             ),
                         ),
-                        remoteLibraryAvailable = true,
-                        verificationAvailable = true,
                         onSelectPrimary = {},
                         onSelectFilters = {
                             submitted.value = it
@@ -466,8 +471,6 @@ class SourceHomeScreenInstrumentedTest {
                         },
                         onRetryReplacement = {},
                         onUseOfflineCache = {},
-                        onSearch = {},
-                        onOpenRemoteLibrary = {},
                         onOpenBook = { openedBook = it },
                         onOpenFeature = {},
                         onOpenVerification = {},
@@ -647,6 +650,8 @@ class SourceHomeScreenInstrumentedTest {
                 TsuyomiTheme(environment = standardEnvironment) {
                     SourceHomeScreen(
                         sourceName = "Wenku8",
+                        filtersExpanded = true,
+                        onFiltersExpandedChange = {},
                         state = SourceHomeViewState.Content(
                             title = "Wenku8 书库",
                             primaryFilter = primary,
@@ -659,16 +664,12 @@ class SourceHomeScreenInstrumentedTest {
                                 ),
                             ),
                         ),
-                        remoteLibraryAvailable = true,
-                        verificationAvailable = true,
                         onSelectPrimary = {},
                         onSelectFilters = { replacementRequests.incrementAndGet() },
                         onRefresh = { refreshRequests.incrementAndGet() },
                         onLoadMore = { appendRequests.incrementAndGet() },
                         onRetryReplacement = {},
                         onUseOfflineCache = {},
-                        onSearch = {},
-                        onOpenRemoteLibrary = {},
                         onOpenBook = {},
                         onOpenFeature = {},
                         onOpenVerification = {},
@@ -742,6 +743,8 @@ class SourceHomeScreenInstrumentedTest {
                     TsuyomiTheme(environment = standardEnvironment) {
                         SourceHomeScreen(
                             sourceName = "Wenku8",
+                            filtersExpanded = true,
+                            onFiltersExpandedChange = {},
                             state = SourceHomeViewState.Content(
                                 title = "Wenku8 书库",
                                 primaryFilter = null,
@@ -759,16 +762,12 @@ class SourceHomeScreenInstrumentedTest {
                                     ),
                                 ),
                             ),
-                            remoteLibraryAvailable = false,
-                            verificationAvailable = false,
                             onSelectPrimary = {},
                             onSelectFilters = {},
                             onRefresh = {},
                             onLoadMore = {},
                             onRetryReplacement = {},
                             onUseOfflineCache = {},
-                            onSearch = {},
-                            onOpenRemoteLibrary = {},
                             onOpenBook = {},
                             onOpenFeature = {},
                             onOpenVerification = {},
@@ -861,22 +860,20 @@ class SourceHomeScreenInstrumentedTest {
                     TsuyomiTheme(environment = standardEnvironment) {
                         SourceHomeScreen(
                             sourceName = "Wenku8",
+                            filtersExpanded = true,
+                            onFiltersExpandedChange = {},
                             state = SourceHomeViewState.Content(
                                 title = "Wenku8 书库",
                                 primaryFilter = primary,
                                 selectedPrimary = selectedPrimary,
                                 pages = pageStates,
                             ),
-                            remoteLibraryAvailable = true,
-                            verificationAvailable = true,
                             onSelectPrimary = { selectedPrimary = it; activePrimary.set(it) },
                             onSelectFilters = { replacementRequests.incrementAndGet() },
                             onRefresh = { refreshRequests.incrementAndGet() },
                             onLoadMore = { appendRequests.incrementAndGet() },
                             onRetryReplacement = {},
                             onUseOfflineCache = {},
-                            onSearch = {},
-                            onOpenRemoteLibrary = {},
                             onOpenFeature = {},
                             onOpenBook = {},
                             onOpenVerification = {},
@@ -1026,22 +1023,20 @@ class SourceHomeScreenInstrumentedTest {
                 TsuyomiTheme(environment = standardEnvironment) {
                     SourceHomeScreen(
                         sourceName = "Wenku8",
+                        filtersExpanded = true,
+                        onFiltersExpandedChange = {},
                         state = SourceHomeViewState.Content(
                             title = "Wenku8 书库",
                             primaryFilter = primary,
                             selectedPrimary = selectedPrimary,
                             pages = pages,
                         ),
-                        remoteLibraryAvailable = true,
-                        verificationAvailable = true,
                         onSelectPrimary = { selectedPrimary = it },
                         onSelectFilters = {},
                         onRefresh = {},
                         onLoadMore = {},
                         onRetryReplacement = {},
                         onUseOfflineCache = {},
-                        onSearch = {},
-                        onOpenRemoteLibrary = {},
                         onOpenBook = {},
                         onOpenFeature = {},
                         onOpenVerification = {},
@@ -1186,6 +1181,8 @@ class SourceHomeScreenInstrumentedTest {
                 TsuyomiTheme(environment = standardEnvironment) {
                     SourceHomeScreen(
                         sourceName = "Wenku8",
+                        filtersExpanded = true,
+                        onFiltersExpandedChange = {},
                         state = SourceHomeViewState.Content(
                             title = activePage.title,
                             primaryFilter = primary,
@@ -1199,16 +1196,12 @@ class SourceHomeScreenInstrumentedTest {
                             ),
                             featureOpen = featureOpen,
                         ),
-                        remoteLibraryAvailable = true,
-                        verificationAvailable = true,
                         onSelectPrimary = {},
                         onSelectFilters = {},
                         onRefresh = {},
                         onLoadMore = {},
                         onRetryReplacement = {},
                         onUseOfflineCache = {},
-                        onSearch = {},
-                        onOpenRemoteLibrary = {},
                         onOpenBook = {},
                         onOpenFeature = {
                             openedSelection = it.selectedFilters
@@ -1230,6 +1223,270 @@ class SourceHomeScreenInstrumentedTest {
         assertTrue(composeRule.onAllNodesWithTag("source-home-pager").fetchSemanticsNodes().isEmpty())
         composeRule.onNodeWithText("文库部门 TOP10").assertIsDisplayed()
         composeRule.onNodeWithText("单行本部门 TOP10").assertIsDisplayed()
+    }
+
+    @Test
+    fun einkFiltersCollapseForLocalCursorAndEndpointTurnsAndReopenWithoutFetching() {
+        val primary = primaryFilter()
+        val tag = SourceHomeFilter(
+            "tag", "题材", listOf(SourceHomeFilterOption("school", "校园"), SourceHomeFilterOption("love", "恋爱")),
+        )
+        var activePrimary by mutableStateOf("category")
+        var cursorNumber by mutableStateOf(1)
+        val requests = AtomicInteger()
+        val previousRequests = AtomicInteger()
+        val activeCovers = mutableSetOf<String>()
+        val coverAcquisitions = AtomicInteger()
+        val restoration = StateRestorationTester(composeRule)
+        restoration.setContent {
+            val selected = mapOf("view" to activePrimary, "tag" to "school")
+            val cursorPage = page(
+                filters = listOf(primary, tag), selectedFilters = selected,
+                books = (1..90).map { book(it + (cursorNumber - 1) * 100, "游标作品") },
+                nextCursor = "cursor-${cursorNumber + 1}", complete = false, sectionTitle = "目录内容",
+            )
+            EinkHomeWithFilterChrome(
+                state = SourceHomeViewState.Content(
+                    title = "测试书库", primaryFilter = primary, selectedPrimary = activePrimary,
+                    pages = mapOf(activePrimary to SourceHomePageViewState(
+                        queryKey = "$activePrimary|tag=school", selectedFilters = selected,
+                        page = cursorPage, cursorPage = cursorPage, cursorPageNumber = cursorNumber,
+                        cursorPreviousAvailable = cursorNumber > 1, cursorNextAvailable = true,
+                    )),
+                ),
+                onSelectPrimary = { activePrimary = it; cursorNumber = 1; requests.incrementAndGet() },
+                onSelectFilters = { requests.incrementAndGet() },
+                onPreviousPage = { cursorNumber--; previousRequests.incrementAndGet() },
+                onNextPage = { cursorNumber++; requests.incrementAndGet() },
+                onUnexpectedRequest = { requests.incrementAndGet() },
+                onCoverVisibility = { book, visible ->
+                    if (visible) {
+                        activeCovers.add(book.identity.remoteBookId)
+                        coverAcquisitions.incrementAndGet()
+                    } else activeCovers.remove(book.identity.remoteBookId)
+                },
+            )
+        }
+        fun contentAction(text: String) = composeRule.onNode(
+            hasText(text) and hasAnyAncestor(hasTestTag("source-home-content-page-controls")),
+        )
+        fun contentStatus(): List<String> = composeRule.onAllNodes(
+            SemanticsMatcher.keyIsDefined(androidx.compose.ui.semantics.SemanticsProperties.Text) and
+                hasAnyAncestor(hasTestTag("source-home-content-page-controls")),
+        ).fetchSemanticsNodes().flatMap { node ->
+            node.config[androidx.compose.ui.semantics.SemanticsProperties.Text].map { it.text }
+        }
+        fun visibleBooks(): List<String> = composeRule.onAllNodes(
+            SemanticsMatcher("Visible source book identities") { node ->
+                node.config.getOrNull(androidx.compose.ui.semantics.SemanticsProperties.TestTag)
+                    ?.startsWith("source-home-book-") == true &&
+                    !node.config[androidx.compose.ui.semantics.SemanticsProperties.TestTag].startsWith("source-home-book-grid-")
+            },
+        ).fetchSemanticsNodes().filter { node ->
+            // Measured probes retain semantics and stale bounds; display checks placement and viewport clipping.
+            composeRule.onNodeWithTag(node.config[androidx.compose.ui.semantics.SemanticsProperties.TestTag]).isDisplayed()
+        }.map { it.config[androidx.compose.ui.semantics.SemanticsProperties.TestTag] }
+        fun assertCollapsed() {
+            composeRule.onNodeWithTag("source-home-eink-filter-panel").assertDoesNotExist()
+            composeRule.onNodeWithTag("source-home-filter-choice-tag-school").assertDoesNotExist()
+            composeRule.onNodeWithTag("source-home-toggle-filters").assertIsDisplayed()
+            composeRule.onNode(hasStateDescription("筛选已收起")).assertIsDisplayed()
+        }
+        fun reopenWithoutMoving() {
+            val beforeStatus = contentStatus()
+            val beforeBooks = visibleBooks()
+            val beforeRequests = requests.get()
+            val beforeCoverAcquisitions = coverAcquisitions.get()
+            composeRule.runOnIdle {
+                assertEquals(
+                    "Offscreen measured-plan probes cannot acquire source covers",
+                    beforeBooks.map { it.removePrefix("source-home-book-") }.toSet(), activeCovers,
+                )
+            }
+            composeRule.onNodeWithTag("source-home-toggle-filters").performClick()
+            composeRule.onNodeWithTag("source-home-eink-filter-panel").assertIsDisplayed()
+            composeRule.onNodeWithTag("source-home-filter-choice-tag-school").assertIsSelected()
+            composeRule.onNode(hasStateDescription("筛选已展开")).assertIsDisplayed()
+            assertEquals(beforeStatus, contentStatus())
+            composeRule.onNodeWithTag("source-home-toggle-filters").performClick()
+            assertCollapsed()
+            assertEquals("Expansion preserves exact book identities", beforeBooks, visibleBooks())
+            assertEquals("Expansion preserves the measured local page", beforeStatus, contentStatus())
+            assertEquals("Expansion must not request source data", beforeRequests, requests.get())
+            assertEquals("Filter toggles cannot reacquire source covers", beforeCoverAcquisitions, coverAcquisitions.get())
+        }
+
+        // The same root mechanism owns both classification and ranking, not a source-specific patch.
+        listOf("category", "ranking").forEach { primaryValue ->
+            composeRule.runOnIdle { activePrimary = primaryValue; cursorNumber = 1 }
+            if (composeRule.onAllNodesWithTag("source-home-eink-filter-panel").fetchSemanticsNodes().isEmpty()) {
+                composeRule.onNodeWithTag("source-home-toggle-filters").performClick()
+            }
+            val initialRequests = requests.get()
+            contentAction("下一页").assertIsEnabled().performClick()
+            assertCollapsed()
+            repeat(2) { contentAction("下一页").performClick() }
+            assertEquals(initialRequests, requests.get())
+            reopenWithoutMoving()
+
+            val restoredStatus = contentStatus()
+            val restoredBooks = visibleBooks()
+            composeRule.onNodeWithTag("source-home-toggle-filters").performClick()
+            restoration.emulateSavedInstanceStateRestore()
+            composeRule.onNode(hasStateDescription("筛选已展开")).assertIsDisplayed()
+            composeRule.onNodeWithTag("source-home-toggle-filters").performClick()
+            assertEquals(restoredStatus, contentStatus())
+            assertEquals(restoredBooks, visibleBooks())
+            assertEquals(initialRequests, requests.get())
+
+            composeRule.onNodeWithTag("source-home-toggle-filters").performClick()
+            contentAction("末页").assertIsEnabled().performClick()
+            assertCollapsed()
+            contentAction("末页").assertIsNotEnabled()
+            composeRule.onNodeWithText("目录数据页 1").assertIsDisplayed()
+            assertEquals("Local last page never chases unknown remote cursors", initialRequests, requests.get())
+            reopenWithoutMoving()
+            composeRule.onNodeWithTag("source-home-toggle-filters").performClick()
+            contentAction("下一页").performClick()
+            assertCollapsed()
+            composeRule.onNodeWithText("目录数据页 2").assertIsDisplayed()
+            assertEquals(initialRequests + 1, requests.get())
+            reopenWithoutMoving()
+
+            composeRule.onNodeWithTag("source-home-toggle-filters").performClick()
+            contentAction("下一页").performClick()
+            assertCollapsed()
+            assertEquals(initialRequests + 1, requests.get())
+            composeRule.onNodeWithTag("source-home-toggle-filters").performClick()
+            contentAction("首页").performClick()
+            assertCollapsed()
+            contentAction("首页").assertIsNotEnabled()
+            composeRule.onNodeWithText("目录数据页 2").assertIsDisplayed()
+            val beforePrevious = previousRequests.get()
+            composeRule.onNodeWithTag("source-home-toggle-filters").performClick()
+            contentAction("上一页").performClick()
+            assertCollapsed()
+            composeRule.onNodeWithText("目录数据页 1").assertIsDisplayed()
+            assertEquals(beforePrevious + 1, previousRequests.get())
+            assertEquals("Returning to a cached cursor does not fetch", initialRequests + 1, requests.get())
+            reopenWithoutMoving()
+        }
+    }
+
+    @Test
+    fun einkHomeKeepsCursorPagesAndFilterReplacementDiscrete() {
+        val primary = primaryFilter()
+        val tag = SourceHomeFilter(
+            "tag", "题材", listOf(SourceHomeFilterOption("school", "校园"), SourceHomeFilterOption("love", "恋爱")) +
+                (1..30).map { SourceHomeFilterOption("tag$it", "题材 $it") },
+        )
+        val sort = SourceHomeFilter(
+            "sort", "排序", listOf(SourceHomeFilterOption("0", "按更新"), SourceHomeFilterOption("1", "按热门")),
+        )
+        val selected = mapOf("view" to "category", "tag" to "school", "sort" to "0")
+        var activeFilters by mutableStateOf(selected)
+        val filterRequests = AtomicInteger()
+        val otherRequests = AtomicInteger()
+        var openedFeature: SourceHomeFeature? = null
+        val feature = SourceHomeFeature("annual", "年度专题", "按源顺序查看专题", selected)
+        composeRule.setContent {
+            val cursorPage = page(
+                listOf(primary, tag, sort), activeFilters, listOf(book(99, "游标作品")), sectionTitle = "当前游标",
+            ).copy(features = listOf(feature))
+            val mergedPage = cursorPage.copy(
+                sections = listOf(SourceHomeSection("catalog", "已加载目录", (1..30).map(::book) + book(99, "游标作品"))),
+                nextCursor = "page-3", complete = false,
+            )
+            EinkHomeWithFilterChrome(
+                state = SourceHomeViewState.Content(
+                    "测试书库", primary, "category", mapOf("category" to SourceHomePageViewState(
+                        queryKey = activeFilters.toSortedMap().entries.joinToString("&") { "${it.key}=${it.value}" },
+                        selectedFilters = activeFilters, page = mergedPage, cursorPage = cursorPage,
+                        cursorPageNumber = 2, cursorPreviousAvailable = true,
+                    )),
+                ),
+                onSelectPrimary = {},
+                onSelectFilters = { activeFilters = it; filterRequests.incrementAndGet() },
+                onPreviousPage = { otherRequests.incrementAndGet() },
+                onNextPage = { otherRequests.incrementAndGet() },
+                onUnexpectedRequest = { otherRequests.incrementAndGet() },
+                onOpenFeature = { openedFeature = it },
+            )
+        }
+        fun showFilter(tagName: String) {
+            if (composeRule.onAllNodesWithTag("source-home-eink-filter-panel").fetchSemanticsNodes().isEmpty()) {
+                composeRule.onNodeWithTag("source-home-toggle-filters").performClick()
+            }
+            repeat(100) {
+                if (composeRule.onNodeWithTag(tagName).isDisplayed()) return
+                composeRule.onNode(hasText("下一页") and hasAnyAncestor(hasTestTag("source-home-eink-filter-panel")))
+                    .assertIsEnabled().performClick()
+            }
+            error("Source filter was unreachable")
+        }
+        showFilter("source-home-filter-choice-tag-school")
+        composeRule.onNodeWithTag("source-home-filter-choice-tag-school").performClick()
+        composeRule.onNodeWithTag("source-home-eink-filter-panel").assertIsDisplayed()
+        assertEquals("Selecting the current filter is inert", 0, filterRequests.get())
+        showFilter("source-home-filter-choice-tag-love")
+        composeRule.onNodeWithTag("source-home-filter-choice-tag-love").performClick()
+        composeRule.onNodeWithTag("source-home-eink-filter-panel").assertDoesNotExist()
+        assertEquals(1, filterRequests.get())
+        assertEquals(selected + ("tag" to "love"), activeFilters)
+        composeRule.onNodeWithText("游标作品 99").assertIsDisplayed()
+        composeRule.onNodeWithText("轻小说 1").assertDoesNotExist()
+        composeRule.onNodeWithTag("source-home-pager").assertDoesNotExist()
+        showFilter("source-home-filter-choice-sort-1")
+        composeRule.onNodeWithTag("source-home-filter-choice-sort-1").performClick()
+        composeRule.onNodeWithTag("source-home-eink-filter-panel").assertDoesNotExist()
+        assertEquals(2, filterRequests.get())
+        assertEquals(selected + mapOf("tag" to "love", "sort" to "1"), activeFilters)
+        composeRule.onNodeWithTag("source-home-feature-annual").performClick()
+        composeRule.runOnIdle {
+            assertEquals(feature, openedFeature)
+            assertEquals(0, otherRequests.get())
+        }
+    }
+
+    @androidx.compose.runtime.Composable
+    private fun EinkHomeWithFilterChrome(
+        state: SourceHomeViewState.Content,
+        onSelectPrimary: (String) -> Unit,
+        onSelectFilters: (Map<String, String>) -> Unit,
+        onPreviousPage: () -> Unit,
+        onNextPage: () -> Unit,
+        onUnexpectedRequest: () -> Unit,
+        onOpenFeature: (SourceHomeFeature) -> Unit = {},
+        onCoverVisibility: (SourceBookSummary, Boolean) -> Unit = { _, _ -> },
+    ) {
+        var expanded by rememberSaveable { mutableStateOf(true) }
+        val environment = standardEnvironment.copy(
+            preferences = standardEnvironment.preferences.copy(displayPreference = DisplayPreference.EINK),
+            effectiveProfile = DisplayProfile.EINK, decisionReason = DisplayDecisionReason.MANUAL_EINK,
+            motionPolicy = MotionPolicy.INSTANT,
+        )
+        DisplayEnvironmentProvider(environment) {
+            TsuyomiTheme(environment = environment) {
+                Column(Modifier.fillMaxSize()) {
+                    TsuyomiTopBar(
+                        title = state.title,
+                    )
+                    SourceHomeScreen(
+                        sourceName = "测试来源", state = state,
+                        filtersExpanded = expanded, onFiltersExpandedChange = { expanded = it },
+                        onSelectPrimary = onSelectPrimary, onSelectFilters = onSelectFilters,
+                        onRefresh = onUnexpectedRequest, onLoadMore = onUnexpectedRequest,
+                        onRetryReplacement = onUnexpectedRequest, onUseOfflineCache = onUnexpectedRequest,
+                        onOpenBook = {}, onOpenFeature = onOpenFeature, onOpenVerification = {},
+                        onScrollPositionChanged = { _, _, _, _ -> },
+                        coverState = { CoverUiState.Fallback(FallbackSpec(it.title, "测试来源")) },
+                        onCoverVisibility = onCoverVisibility,
+                        onPreviousPage = onPreviousPage, onNextPage = onNextPage,
+                        modifier = Modifier.weight(1f),
+                    )
+                }
+            }
+        }
     }
 
     private fun primaryFilter() = SourceHomeFilter(
@@ -1257,7 +1514,7 @@ class SourceHomeScreenInstrumentedTest {
     )
 
     private fun book(index: Int, prefix: String = "轻小说") = SourceBookSummary(
-        identity = BookIdentity("org.tsuyomi.wenku8", index.toString()),
+        identity = BookIdentity.Remote("org.tsuyomi.wenku8", index.toString()),
         title = "$prefix $index",
         author = "作者 $index",
         coverUrl = null,

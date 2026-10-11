@@ -7,6 +7,8 @@ package org.tsuyomi.core.ui.components
 
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.LocalIndication
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsFocusedAsState
@@ -29,13 +31,18 @@ import androidx.compose.material3.FilterChip
 import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.FilledTonalIconButton
 import androidx.compose.material3.Icon
+import androidx.compose.foundation.selection.toggleable
 import androidx.compose.material3.IconButtonDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.ui.draw.clip
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.material3.LocalContentColor
+import androidx.compose.material3.ProvideTextStyle
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
@@ -57,6 +64,7 @@ import org.tsuyomi.core.ui.theme.rememberSystemReducedMotion
 import org.tsuyomi.core.ui.theme.tsuyomiFocusRing
 
 import org.tsuyomi.core.ui.theme.activeAccent
+import androidx.compose.ui.semantics.selected
 /** Visual weight of a [TsuyomiButton]. Only one primary action should be visible per surface. */
 enum class TsuyomiButtonStyle {
     PRIMARY,
@@ -75,9 +83,10 @@ fun TsuyomiButton(
     modifier: Modifier = Modifier,
     style: TsuyomiButtonStyle = TsuyomiButtonStyle.PRIMARY,
     enabled: Boolean = true,
+    contentPadding: PaddingValues = TsuyomiButtonContentPadding,
 ) {
     if (LocalDisplayEnvironment.current.effectiveProfile == DisplayProfile.EINK) {
-        EInkTsuyomiButton(text, onClick, modifier, style, enabled)
+        EInkTsuyomiButton(text, onClick, modifier, style, enabled, contentPadding)
         return
     }
 
@@ -134,7 +143,7 @@ fun TsuyomiButton(
             },
             elevation = if (style == TsuyomiButtonStyle.PRIMARY) ButtonDefaults.buttonElevation() else null,
             border = border,
-            contentPadding = TsuyomiButtonContentPadding,
+            contentPadding = contentPadding,
             interactionSource = interactionSource,
         ) {
             TsuyomiButtonLabel(text)
@@ -150,7 +159,7 @@ fun TsuyomiButton(
             enabled = enabled,
             shapes = shapes,
             colors = colors,
-            contentPadding = TsuyomiButtonContentPadding,
+            contentPadding = contentPadding,
             interactionSource = interactionSource,
         ) {
             TsuyomiButtonLabel(text)
@@ -162,7 +171,7 @@ fun TsuyomiButton(
             shapes = shapes,
             colors = colors,
             border = border,
-            contentPadding = TsuyomiButtonContentPadding,
+            contentPadding = contentPadding,
             interactionSource = interactionSource,
         ) {
             TsuyomiButtonLabel(text)
@@ -173,7 +182,7 @@ fun TsuyomiButton(
             enabled = enabled,
             shapes = shapes,
             colors = colors,
-            contentPadding = TsuyomiButtonContentPadding,
+            contentPadding = contentPadding,
             interactionSource = interactionSource,
         ) {
             TsuyomiButtonLabel(text)
@@ -202,6 +211,7 @@ private fun EInkTsuyomiButton(
     modifier: Modifier,
     style: TsuyomiButtonStyle,
     enabled: Boolean,
+    contentPadding: PaddingValues,
 ) {
     val interactionSource = remember { MutableInteractionSource() }
     val focused by interactionSource.collectIsFocusedAsState()
@@ -213,7 +223,7 @@ private fun EInkTsuyomiButton(
         !enabled -> {
             containerColor = TsuyomiEInkPalette.Paper
             contentColor = TsuyomiEInkPalette.N50
-            border = BorderStroke(1.5.dp, TsuyomiEInkPalette.N50)
+            border = BorderStroke(if (style == TsuyomiButtonStyle.TEXT) 1.dp else 1.5.dp, TsuyomiEInkPalette.N50)
         }
         else -> when (style) {
             TsuyomiButtonStyle.PRIMARY -> {
@@ -229,14 +239,49 @@ private fun EInkTsuyomiButton(
             TsuyomiButtonStyle.TEXT -> {
                 containerColor = TsuyomiEInkPalette.Paper
                 contentColor = TsuyomiEInkPalette.Ink
-                border = null
+                border = BorderStroke(1.dp, TsuyomiEInkPalette.N50)
             }
         }
     }
 
+    if (style == TsuyomiButtonStyle.TEXT) {
+        Box(
+            modifier = modifier
+                .heightIn(min = 48.dp)
+                .widthIn(min = 48.dp)
+                .tsuyomiFocusRing(shape, focused, TsuyomiEInkPalette.Ink)
+                .clickable(
+                    interactionSource = interactionSource,
+                    indication = LocalIndication.current,
+                    enabled = enabled,
+                    role = Role.Button,
+                    onClick = onClick,
+                ),
+            contentAlignment = Alignment.Center,
+        ) {
+            Surface(shape = shape, color = containerColor, contentColor = contentColor, border = border) {
+                Text(
+                    text = text,
+                    modifier = Modifier.padding(horizontal = TsuyomiSpacing.Sm, vertical = TsuyomiSpacing.Xs),
+                    style = MaterialTheme.typography.labelLarge,
+                    textAlign = TextAlign.Center,
+                )
+            }
+        }
+        return
+    }
+
     Surface(
         modifier = modifier
-            .tsuyomiFocusRing(shape, focused, MaterialTheme.colorScheme.primary),
+            .tsuyomiFocusRing(shape, focused, if (enabled && style == TsuyomiButtonStyle.PRIMARY) TsuyomiEInkPalette.Paper else TsuyomiEInkPalette.Ink,
+                inset = if (enabled && style == TsuyomiButtonStyle.PRIMARY) 3.dp else 0.dp)
+            .clickable(
+                interactionSource = interactionSource,
+                indication = LocalIndication.current,
+                enabled = enabled,
+                role = Role.Button,
+                onClick = onClick,
+            ),
         shape = shape,
         color = containerColor,
         contentColor = contentColor,
@@ -244,24 +289,13 @@ private fun EInkTsuyomiButton(
     ) {
         Row(
             modifier = Modifier
-                .clickable(
-                    interactionSource = interactionSource,
-                    indication = LocalIndication.current,
-                    enabled = enabled,
-                    role = Role.Button,
-                    onClick = onClick,
-                )
                 .heightIn(min = 48.dp)
                 .widthIn(min = 64.dp)
-                .padding(horizontal = TsuyomiSpacing.Lg, vertical = TsuyomiSpacing.Sm),
+                .padding(contentPadding),
             horizontalArrangement = Arrangement.Center,
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            Text(
-                text = text,
-                style = MaterialTheme.typography.labelLarge,
-                textAlign = TextAlign.Center,
-            )
+            Text(text = text, style = MaterialTheme.typography.labelLarge, textAlign = TextAlign.Center)
         }
     }
 }
@@ -376,8 +410,24 @@ fun TsuyomiToggleChip(
     enabled: Boolean = true,
     compact: Boolean = false,
     leadingIcon: ImageVector? = null,
+    labelContent: (@Composable () -> Unit)? = null,
+    role: Role = Role.Checkbox,
 ) {
     val isEInk = LocalDisplayEnvironment.current.effectiveProfile == DisplayProfile.EINK
+    if (isEInk) {
+        EInkSelectionChip(
+            text = text,
+            selected = selected,
+            stateDescription = stateDescription,
+            onClick = onClick,
+            modifier = modifier,
+            enabled = enabled,
+            leadingIcon = leadingIcon,
+            labelContent = labelContent,
+            role = role,
+        )
+        return
+    }
     val useCompact = compact && !isEInk
     val scheme = MaterialTheme.colorScheme
     val chipModifier = modifier
@@ -395,17 +445,16 @@ fun TsuyomiToggleChip(
                 selectedLabelColor = scheme.activeAccent,
             ),
             label = {
-                Text(
-                    text = text,
-                    modifier = if (useCompact) Modifier else Modifier.fillMaxWidth(),
-                    textAlign = TextAlign.Center,
-                    maxLines = 1,
-                    color = if (isEInk) {
-                        if (selected) scheme.activeAccent else scheme.onSurfaceVariant
-                    } else {
-                        Color.Unspecified
-                    },
-                )
+                if (labelContent != null) {
+                    labelContent()
+                } else {
+                    Text(
+                        text = text,
+                        modifier = if (useCompact) Modifier else Modifier.fillMaxWidth(),
+                        textAlign = TextAlign.Center,
+                        maxLines = 1,
+                    )
+                }
             },
             leadingIcon = leadingIcon?.let { icon ->
                 {
@@ -430,6 +479,97 @@ fun TsuyomiToggleChip(
     }
 }
 
+@Composable
+private fun EInkSelectionChip(
+    text: String,
+    selected: Boolean?,
+    stateDescription: String,
+    onClick: () -> Unit,
+    modifier: Modifier,
+    enabled: Boolean,
+    leadingIcon: ImageVector? = null,
+    labelContent: (@Composable () -> Unit)? = null,
+    role: Role = Role.Checkbox,
+) {
+    val interactionSource = remember { MutableInteractionSource() }
+    val focused by interactionSource.collectIsFocusedAsState()
+    val shape = RoundedCornerShape(4.dp)
+    val contentMaxHeight = LocalTsuyomiPagerMaxContentHeight.current
+    val container = if (selected == true) TsuyomiEInkPalette.Ink else TsuyomiEInkPalette.Paper
+    val content = when {
+        selected == true -> TsuyomiEInkPalette.Paper
+        !enabled -> TsuyomiEInkPalette.N50
+        else -> TsuyomiEInkPalette.Ink
+    }
+    val interaction = if (selected == null) {
+        Modifier.clickable(
+            interactionSource = interactionSource,
+            indication = LocalIndication.current,
+            enabled = enabled,
+            role = Role.Button,
+            onClick = onClick,
+        )
+    } else {
+        Modifier.toggleable(
+            value = selected,
+            interactionSource = interactionSource,
+            indication = LocalIndication.current,
+            enabled = enabled,
+            role = role,
+            onValueChange = { onClick() },
+        )
+    }
+    Row(
+        modifier = modifier
+            .heightIn(min = 48.dp)
+            .then(if (contentMaxHeight == null) Modifier else Modifier.heightIn(max = contentMaxHeight))
+            .widthIn(min = 48.dp)
+            .clip(shape)
+            .background(container, shape)
+            .border(BorderStroke(1.5.dp, if (enabled) TsuyomiEInkPalette.Ink else TsuyomiEInkPalette.N50), shape)
+            .tsuyomiFocusRing(shape, focused, if (selected == true) TsuyomiEInkPalette.Paper else TsuyomiEInkPalette.Ink,
+                inset = if (selected == true) 3.dp else 0.dp)
+            .semantics(mergeDescendants = true) {
+                this.stateDescription = stateDescription
+                selected?.let { this.selected = it }
+            }
+            .then(interaction)
+            .padding(horizontal = TsuyomiSpacing.Md, vertical = TsuyomiSpacing.Sm),
+        horizontalArrangement = Arrangement.Center,
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        if (leadingIcon != null) {
+            Icon(
+                imageVector = leadingIcon,
+                contentDescription = null,
+                modifier = Modifier.size(20.dp),
+                tint = content,
+            )
+        }
+        CompositionLocalProvider(LocalContentColor provides content) {
+            ProvideTextStyle(MaterialTheme.typography.labelLarge.copy(color = content)) {
+                if (labelContent == null) {
+                    if (contentMaxHeight == null) {
+                        Text(text = text, color = content, textAlign = TextAlign.Center)
+                    } else {
+                        TsuyomiMeasuredTextPager(
+                            text = text,
+                            style = MaterialTheme.typography.labelLarge,
+                            color = content,
+                            textAlign = TextAlign.Center,
+                            fillViewport = false,
+                            alwaysShowPageControls = false,
+                            fillWidth = false,
+                        )
+                    }
+                } else {
+                    labelContent()
+                }
+            }
+        }
+    }
+}
+
 /** Standard Material action chip for a bounded compact action that is not a selection state. */
 @Composable
 fun TsuyomiActionChip(
@@ -439,6 +579,17 @@ fun TsuyomiActionChip(
     modifier: Modifier = Modifier,
     enabled: Boolean = true,
 ) {
+    if (LocalDisplayEnvironment.current.effectiveProfile == DisplayProfile.EINK) {
+        EInkSelectionChip(
+            text = text,
+            selected = null,
+            stateDescription = stateDescription,
+            onClick = onClick,
+            modifier = modifier,
+            enabled = enabled,
+        )
+        return
+    }
     AssistChip(
         onClick = onClick,
         enabled = enabled,

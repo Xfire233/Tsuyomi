@@ -5,6 +5,8 @@
 package org.tsuyomi.android
 
 import java.io.Closeable
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CompletableDeferred
 import org.tsuyomi.core.network.DirectActionTokenRegistry
 import org.tsuyomi.core.webview.CapturedVerifiedPage
 import org.tsuyomi.shared.sourcecontract.ReaderDocument
@@ -163,7 +165,31 @@ internal enum class SourceSessionOpenResult {
     ALREADY_OPEN,
     OPENED,
     PACKAGE_CHANGED,
+    SUPERSEDED,
     UNAVAILABLE,
+}
+
+private enum class PendingOpenOutcome { READY, CANCELLED, SUPERSEDED, UNAVAILABLE }
+
+private data class PendingSourceOpen(
+    val packageInfo: VerifiedHxpPackage,
+    val generation: Long,
+    val completion: CompletableDeferred<PendingOpenOutcome> = CompletableDeferred(),
+)
+
+private sealed interface SourceOpenRequest {
+    data class Start(
+        val pending: PendingSourceOpen,
+        val previousClient: SourceFlowSession?,
+        val superseded: PendingSourceOpen?,
+        val packageChanged: Boolean,
+    ) : SourceOpenRequest
+
+    data class Wait(val pending: PendingSourceOpen) : SourceOpenRequest
+    data class Unavailable(
+        val previousClient: SourceFlowSession?,
+        val invalidated: PendingSourceOpen?,
+    ) : SourceOpenRequest
 }
 
 internal class PreparedSourceSession internal constructor(
@@ -188,49 +214,183 @@ internal class SourceSessionOwner(
     private var openGeneration = 0L
     private var statePackageSha256: String? = null
     private var closed = false
+    private var opening: PendingSourceOpen? = null
+    private var requestedPackageSha256: String? = null
 
     suspend fun open(
         packageInfo: VerifiedHxpPackage,
         onPackageChanged: () -> Unit = {},
+        forceReopen: Boolean = false,
+        expectedGeneration: Long? = null,
     ): SourceSessionOpenResult {
-        if (!isPackageTrusted(packageInfo)) {
-            closeActiveClient()
-            return SourceSessionOpenResult.UNAVAILABLE
-        }
-        val (previousClient, operationGeneration, packageChanged) = synchronized(lock) {
-            checkOpen()
-            if (activePackage?.packageSha256 == packageInfo.packageSha256 && client != null) {
-                return SourceSessionOpenResult.ALREADY_OPEN
+        while (true) {
+            val request = synchronized(lock) {
+                checkOpen()
+                if (expectedGeneration != null && openGeneration != expectedGeneration) {
+                    return SourceSessionOpenResult.SUPERSEDED
+                }
+                if (forceReopen && activePackage?.packageSha256 != packageInfo.packageSha256) {
+                    return SourceSessionOpenResult.SUPERSEDED
+                }
+                requestedPackageSha256 = packageInfo.packageSha256
+                if (!isPackageTrusted(packageInfo)) {
+                    openGeneration += 1
+                    val invalidated = opening
+                    opening = null
+                    val previous = client
+                    client = null
+                    activePackage = null
+                    SourceOpenRequest.Unavailable(previous, invalidated)
+                } else if (!forceReopen && readyClientLocked(packageInfo) != null) {
+                    return SourceSessionOpenResult.ALREADY_OPEN
+                } else {
+                    val currentOpening = opening
+                    if (currentOpening?.packageInfo?.packageSha256 == packageInfo.packageSha256) {
+                        SourceOpenRequest.Wait(currentOpening)
+                    } else {
+                        openGeneration += 1
+                        val pending = PendingSourceOpen(packageInfo, openGeneration)
+                        val previous = client
+                        val superseded = opening
+                        client = null
+                        activePackage = null
+                        opening = pending
+                        SourceOpenRequest.Start(
+                            pending = pending,
+                            previousClient = previous,
+                            superseded = superseded,
+                            packageChanged = statePackageSha256 != packageInfo.packageSha256,
+                        )
+                    }
+                }
             }
-            openGeneration += 1
-            val previous = client
-            client = null
-            activePackage = null
-            val changed = statePackageSha256 != packageInfo.packageSha256
-            statePackageSha256 = packageInfo.packageSha256
-            Triple(previous, openGeneration, changed)
-        }
-        previousClient?.close()
-        if (packageChanged) onPackageChanged()
 
-        val openedClient = openSession(packageInfo)
-        val retained = synchronized(lock) {
-            if (closed || openGeneration != operationGeneration || !isPackageTrusted(packageInfo)) {
-                false
-            } else {
-                client = openedClient
-                activePackage = packageInfo
-                true
+            when (request) {
+                is SourceOpenRequest.Unavailable -> {
+                    request.invalidated?.completion?.complete(PendingOpenOutcome.UNAVAILABLE)
+                    request.previousClient?.close()
+                    return SourceSessionOpenResult.UNAVAILABLE
+                }
+                is SourceOpenRequest.Wait -> {
+                    val result = awaitOpen(packageInfo, request.pending)
+                    if (result != null) return result
+                }
+                is SourceOpenRequest.Start -> {
+                    request.superseded?.completion?.complete(PendingOpenOutcome.SUPERSEDED)
+                    request.previousClient?.close()
+                    if (request.packageChanged) {
+                        try {
+                            if (!performWhenOpening(request.pending) { onPackageChanged() }) {
+                                request.pending.completion.complete(PendingOpenOutcome.SUPERSEDED)
+                                return SourceSessionOpenResult.SUPERSEDED
+                            }
+                        } catch (error: Throwable) {
+                            if (failPendingOpen(request.pending, error, cancelled = false)) throw error
+                            return SourceSessionOpenResult.SUPERSEDED
+                        }
+                    }
+                    val openedClient = try {
+                        openSession(packageInfo)
+                    } catch (cancelled: CancellationException) {
+                        failPendingOpen(request.pending, cancelled, cancelled = true)
+                        throw cancelled
+                    } catch (error: Throwable) {
+                        if (failPendingOpen(request.pending, error, cancelled = false)) throw error
+                        return SourceSessionOpenResult.SUPERSEDED
+                    }
+
+                    val outcome = try {
+                        synchronized(lock) {
+                            when {
+                                closed -> PendingOpenOutcome.UNAVAILABLE
+                                openGeneration != request.pending.generation || opening !== request.pending ->
+                                    PendingOpenOutcome.SUPERSEDED
+                                !isPackageTrusted(packageInfo) -> {
+                                    opening = null
+                                    PendingOpenOutcome.UNAVAILABLE
+                                }
+                                else -> {
+                                    client = openedClient
+                                    activePackage = packageInfo
+                                    statePackageSha256 = packageInfo.packageSha256
+                                    opening = null
+                                    request.pending.completion.complete(PendingOpenOutcome.READY)
+                                    PendingOpenOutcome.READY
+                                }
+                            }
+                        }
+                    } catch (error: Throwable) {
+                        openedClient.close()
+                        if (failPendingOpen(request.pending, error, cancelled = false)) throw error
+                        return SourceSessionOpenResult.SUPERSEDED
+                    }
+
+                    if (outcome != PendingOpenOutcome.READY) {
+                        openedClient.close()
+                        request.pending.completion.complete(outcome)
+                        val result = awaitOpen(packageInfo, request.pending)
+                        if (result != null) return result
+                    }
+
+                    return synchronized(lock) {
+                        when {
+                            readyClientLocked(packageInfo) == null && closed -> SourceSessionOpenResult.UNAVAILABLE
+                            readyClientLocked(packageInfo) == null -> SourceSessionOpenResult.SUPERSEDED
+                            request.packageChanged -> SourceSessionOpenResult.PACKAGE_CHANGED
+                            else -> SourceSessionOpenResult.OPENED
+                        }
+                    }
+                }
             }
         }
-        if (!retained) {
-            openedClient.close()
-            synchronized(lock) { checkOpen() }
-            if (!isPackageTrusted(packageInfo)) return SourceSessionOpenResult.UNAVAILABLE
-            return SourceSessionOpenResult.ALREADY_OPEN
-        }
-        return if (packageChanged) SourceSessionOpenResult.PACKAGE_CHANGED else SourceSessionOpenResult.OPENED
     }
+
+    private suspend fun awaitOpen(
+        packageInfo: VerifiedHxpPackage,
+        pending: PendingSourceOpen,
+    ): SourceSessionOpenResult? {
+        val outcome = pending.completion.await()
+        return synchronized(lock) {
+            if (readyClientLocked(packageInfo) != null) {
+                SourceSessionOpenResult.ALREADY_OPEN
+            } else when {
+                closed || outcome == PendingOpenOutcome.UNAVAILABLE || !isPackageTrusted(packageInfo) ->
+                    SourceSessionOpenResult.UNAVAILABLE
+                outcome == PendingOpenOutcome.CANCELLED &&
+                    (openGeneration == pending.generation || opening?.packageInfo?.packageSha256 == packageInfo.packageSha256) -> null
+                outcome == PendingOpenOutcome.SUPERSEDED || openGeneration != pending.generation ->
+                    SourceSessionOpenResult.SUPERSEDED
+                else -> SourceSessionOpenResult.UNAVAILABLE
+            }
+        }
+    }
+
+    private fun failPendingOpen(
+        pending: PendingSourceOpen,
+        failure: Throwable,
+        cancelled: Boolean,
+    ): Boolean {
+        val current = synchronized(lock) {
+            if (opening === pending) {
+                opening = null
+                true
+            } else false
+        }
+        if (current) {
+            if (cancelled) pending.completion.complete(PendingOpenOutcome.CANCELLED)
+            else pending.completion.completeExceptionally(failure)
+        } else {
+            pending.completion.complete(PendingOpenOutcome.SUPERSEDED)
+        }
+        return current
+    }
+
+    private fun performWhenOpening(pending: PendingSourceOpen, action: () -> Unit): Boolean =
+        synchronized(lock) {
+            if (closed || openGeneration != pending.generation || opening !== pending) return@synchronized false
+            action()
+            true
+        }
 
     suspend fun prepare(packageInfo: VerifiedHxpPackage): PreparedSourceSession? {
         if (!isPackageTrusted(packageInfo)) return null
@@ -255,7 +415,7 @@ internal class SourceSessionOwner(
     }
 
     fun commitPrepared(prepared: PreparedSourceSession): Boolean {
-        val committed: Pair<SourceFlowSession?, Boolean>? = synchronized(lock) {
+        val committed: Pair<SourceFlowSession?, PendingSourceOpen?>? = synchronized(lock) {
             check(prepared.owner === this) { "Prepared session belongs to another owner" }
             checkOpen()
             if (
@@ -269,14 +429,17 @@ internal class SourceSessionOwner(
                 prepared.consumed = true
                 openGeneration += 1
                 val previous = client
+                val invalidated = opening
+                opening = null
+                requestedPackageSha256 = prepared.packageInfo.packageSha256
                 client = prepared.client
                 activePackage = prepared.packageInfo
-                val changed = statePackageSha256 != prepared.packageInfo.packageSha256
                 statePackageSha256 = prepared.packageInfo.packageSha256
-                previous to changed
+                previous to invalidated
             }
         }
-        val (previousClient, _) = committed ?: return false
+        val (previousClient, invalidated) = committed ?: return false
+        invalidated?.completion?.complete(PendingOpenOutcome.SUPERSEDED)
         previousClient?.close()
         return true
     }
@@ -294,9 +457,60 @@ internal class SourceSessionOwner(
 
     fun active(): ActiveSourceSession? = synchronized(lock) {
         checkOpen()
-        activePackage?.takeIf(isPackageTrusted)?.let { ActiveSourceSession(it, openGeneration) }
+        val installed = activePackage ?: return@synchronized null
+        if (client == null || !isPackageTrusted(installed)) return@synchronized null
+        ActiveSourceSession(installed, openGeneration)
     }
 
+    fun clientFor(active: ActiveSourceSession): SourceFlowSession? = synchronized(lock) {
+        clientForLocked(active)
+    }
+
+    fun performWithCurrentClient(
+        active: ActiveSourceSession,
+        expectedClient: SourceFlowSession,
+        action: () -> Unit,
+    ): Boolean = synchronized(lock) {
+        if (clientForLocked(active) !== expectedClient) return@synchronized false
+        action()
+        true
+    }
+
+    private fun clientForLocked(active: ActiveSourceSession): SourceFlowSession? {
+        if (closed || active.ownerGeneration != openGeneration) return null
+        val installed = activePackage ?: return null
+        if (
+            installed.packageSha256 != active.packageInfo.packageSha256 ||
+            installed.manifest.sourceId.value != active.packageInfo.manifest.sourceId.value ||
+            !isPackageTrusted(installed)
+        ) return null
+        return client
+    }
+
+    fun performWhenReady(packageInfo: VerifiedHxpPackage, action: () -> Unit): Boolean =
+        synchronized(lock) {
+            if (readyClientLocked(packageInfo) == null) return@synchronized false
+            action()
+            true
+        }
+
+    fun performForLatestRequest(packageInfo: VerifiedHxpPackage, action: () -> Unit): Boolean =
+        synchronized(lock) {
+            if (closed || requestedPackageSha256 != packageInfo.packageSha256) return@synchronized false
+            action()
+            true
+        }
+
+    private fun readyClientLocked(packageInfo: VerifiedHxpPackage): SourceFlowSession? {
+        if (closed) return null
+        val installed = activePackage ?: return null
+        if (
+            installed.packageSha256 != packageInfo.packageSha256 ||
+            installed.manifest.sourceId.value != packageInfo.manifest.sourceId.value ||
+            !isPackageTrusted(installed)
+        ) return null
+        return client
+    }
 
     fun requireClient(): SourceFlowSession = requireClientOrNull() ?: throw SourceException(
         code = SourceErrorCode.EXTENSION_RUNTIME_FAILURE,
@@ -305,7 +519,8 @@ internal class SourceSessionOwner(
 
     fun requireClientOrNull(): SourceFlowSession? = synchronized(lock) {
         checkOpen()
-        client.takeIf { activePackage?.let(isPackageTrusted) == true }
+        val installed = activePackage ?: return@synchronized null
+        client?.takeIf { isPackageTrusted(installed) }
     }
 
     fun hasUntrustedActivePackage(): Boolean = synchronized(lock) {
@@ -314,52 +529,71 @@ internal class SourceSessionOwner(
     }
 
     suspend fun reopen(): SourceSessionOpenResult? {
-        val packageInfo = synchronized(lock) {
+        val (packageInfo, generation) = synchronized(lock) {
             checkOpen()
-            activePackage
-        } ?: return null
-        closeActiveClient()
-        return open(packageInfo)
+            val installed = activePackage?.takeIf { client != null } ?: return null
+            installed to openGeneration
+        }
+        return open(packageInfo, forceReopen = true, expectedGeneration = generation)
     }
 
     /** Invalidates pending preparations without permanently closing the reusable session owner. */
     fun removeSource(sourceId: String): Boolean {
-        val removed = synchronized(lock) {
+        val removed: Pair<SourceFlowSession?, PendingSourceOpen?>? = synchronized(lock) {
             checkOpen()
+            val active = activePackage
+            val activeMatches = active?.manifest?.sourceId?.value == sourceId
+            val pending = opening?.takeIf { it.packageInfo.manifest.sourceId.value == sourceId }
+            if (!activeMatches && pending == null) return false
             openGeneration += 1
-            if (activePackage?.manifest?.sourceId?.value != sourceId) return false
-            val previous = client
-            client = null
-            activePackage = null
+            val previous = if (activeMatches) client else null
+            if (activeMatches) {
+                client = null
+                activePackage = null
+            }
+            if (pending != null) opening = null
             statePackageSha256 = null
-            previous
+            if (requestedPackageSha256 == active?.packageSha256 || pending != null) {
+                requestedPackageSha256 = null
+            }
+            previous to pending
         }
-        removed?.close()
+        val (previousClient, invalidated) = removed ?: return false
+        invalidated?.completion?.complete(PendingOpenOutcome.UNAVAILABLE)
+        previousClient?.close()
         return true
     }
 
     fun closeActiveClient() {
-        val activeClient = synchronized(lock) {
+        val (activeClient, invalidated) = synchronized(lock) {
             checkOpen()
             openGeneration += 1
             val previous = client
             client = null
             activePackage = null
-            previous
+            val pending = opening
+            opening = null
+            requestedPackageSha256 = null
+            previous to pending
         }
+        invalidated?.completion?.complete(PendingOpenOutcome.UNAVAILABLE)
         activeClient?.close()
     }
 
     override fun close() {
-        val activeClient = synchronized(lock) {
+        val (activeClient, invalidated) = synchronized(lock) {
             if (closed) return
             closed = true
             openGeneration += 1
             val previous = client
             client = null
             activePackage = null
-            previous
+            val pending = opening
+            opening = null
+            requestedPackageSha256 = null
+            previous to pending
         }
+        invalidated?.completion?.complete(PendingOpenOutcome.UNAVAILABLE)
         activeClient?.close()
     }
 

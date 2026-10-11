@@ -34,7 +34,7 @@ class RoomUpdateStoreInstrumentedTest {
         ).allowMainThreadQueries().build()
         try {
             val store = RoomUpdateStore(database) { now }
-            val candidate = UpdateCandidate(BookIdentity("fixture.source", "book-42"), "测试书")
+            val candidate = UpdateCandidate(BookIdentity.Remote("fixture.source", "book-42"), "测试书")
             addLibraryBook(database, candidate)
 
             val initial = requireNotNull(store.startSession("s1", "manual", listOf(candidate), now, now + 1_000L))
@@ -117,7 +117,7 @@ class RoomUpdateStoreInstrumentedTest {
         ).allowMainThreadQueries().build()
         try {
             val store = RoomUpdateStore(database) { now }
-            val candidate = UpdateCandidate(BookIdentity("fixture.source", "book-merge"), "合并测试")
+            val candidate = UpdateCandidate(BookIdentity.Remote("fixture.source", "book-merge"), "合并测试")
             addLibraryBook(database, candidate)
 
             suspend fun record(sessionId: String, previous: String?, anchor: String, newIds: List<String>) {
@@ -171,8 +171,8 @@ class RoomUpdateStoreInstrumentedTest {
         ).allowMainThreadQueries().build()
         try {
             val store = RoomUpdateStore(database) { now }
-            val first = UpdateCandidate(BookIdentity("fixture.source", "book-1"), "第一本")
-            val second = UpdateCandidate(BookIdentity("fixture.source", "book-2"), "第二本")
+            val first = UpdateCandidate(BookIdentity.Remote("fixture.source", "book-1"), "第一本")
+            val second = UpdateCandidate(BookIdentity.Remote("fixture.source", "book-2"), "第二本")
             addLibraryBook(database, first)
             addLibraryBook(database, second)
             val firstLease = requireNotNull(store.startSession("recover", "manual", listOf(first, second), now, now + 10L))
@@ -215,13 +215,13 @@ class RoomUpdateStoreInstrumentedTest {
             )
             assertEquals(UpdateSessionStates.COMPLETED, requireNotNull(store.snapshots.first().session).state)
 
-            val failed = UpdateCandidate(BookIdentity("fixture.source", "book-3"), "失败书")
+            val failed = UpdateCandidate(BookIdentity.Remote("fixture.source", "book-3"), "失败书")
             val failedLease = requireNotNull(store.startSession("failed", "manual", listOf(failed), now, now + 1_000L))
             assertTrue(store.recordFailure(failedLease, failed, "probe-failed", now))
             assertEquals(UpdateSessionStates.FAILED, requireNotNull(store.snapshots.first().session).state)
 
-            val cancelA = UpdateCandidate(BookIdentity("fixture.source", "book-4"), "取消一")
-            val cancelB = UpdateCandidate(BookIdentity("fixture.source", "book-5"), "取消二")
+            val cancelA = UpdateCandidate(BookIdentity.Remote("fixture.source", "book-4"), "取消一")
+            val cancelB = UpdateCandidate(BookIdentity.Remote("fixture.source", "book-5"), "取消二")
             val relinquished = requireNotNull(store.startSession("cancel", "manual", listOf(cancelA, cancelB), now, now + 1_000L))
             assertTrue(store.relinquishLease(relinquished, now))
             val queued = store.snapshots.first()
@@ -248,7 +248,7 @@ class RoomUpdateStoreInstrumentedTest {
         ).build()
         try {
             val store = RoomUpdateStore(database) { now }
-            val candidate = UpdateCandidate(BookIdentity("fixture.source", "queued"), "等待检查")
+            val candidate = UpdateCandidate(BookIdentity.Remote("fixture.source", "queued"), "等待检查")
             val lease = requireNotNull(store.startSession("queued-cancel", "manual", listOf(candidate), now, now + 1_000))
             assertTrue(store.relinquishLease(lease, now))
             assertFalse(store.cancelLease(lease, now))
@@ -274,7 +274,7 @@ class RoomUpdateStoreInstrumentedTest {
             TsuyomiDatabase::class.java,
         ).build()
         try {
-            val candidate = UpdateCandidate(BookIdentity("fixture.source", "removed"), "已移出的书")
+            val candidate = UpdateCandidate(BookIdentity.Remote("fixture.source", "removed"), "已移出的书")
             addLibraryBook(database, candidate)
             val store = RoomUpdateStore(database) { now }
             val lease = requireNotNull(store.startSession("removed", "manual", listOf(candidate), now, now + 1_000))
@@ -313,7 +313,7 @@ class RoomUpdateStoreInstrumentedTest {
         try {
             val store = RoomUpdateStore(database) { now }
             val candidates = (1..150).map { index ->
-                UpdateCandidate(BookIdentity("fixture.source", "book-$index"), "书籍 $index")
+                UpdateCandidate(BookIdentity.Remote("fixture.source", "book-$index"), "书籍 $index")
             }
             val firstLease = requireNotNull(
                 store.startSession("first-page", "manual", candidates, now, now + 1_000L),
@@ -343,13 +343,13 @@ class RoomUpdateStoreInstrumentedTest {
     }
     private fun addCompletedChapter(
         database: TsuyomiDatabase,
-        identity: BookIdentity,
+        identity: BookIdentity.Remote,
         chapterId: String,
         completedAt: Long,
     ) {
         database.openHelper.writableDatabase.execSQL(
-            "INSERT INTO completed_chapters(source_id, remote_book_id, chapter_id, completed_at_epoch_second, completed_at_nano) VALUES (?, ?, ?, ?, 0)",
-            arrayOf<Any>(identity.sourceId, identity.remoteBookId, chapterId, completedAt),
+            "INSERT INTO completed_chapters(identity_key, source_id, remote_book_id, chapter_id, completed_at_epoch_second, completed_at_nano) VALUES (?, ?, ?, ?, ?, 0)",
+            arrayOf<Any>(identity.storageKey, identity.sourceId, identity.remoteBookId, chapterId, completedAt),
         )
     }
 
@@ -361,7 +361,7 @@ class RoomUpdateStoreInstrumentedTest {
     }
 
     private fun result(
-        identity: BookIdentity = BookIdentity("fixture.source", "book-42"),
+        identity: BookIdentity.Remote = BookIdentity.Remote("fixture.source", "book-42"),
         outcome: SourceUpdateOutcome,
         previousAnchor: String?,
         anchor: String?,

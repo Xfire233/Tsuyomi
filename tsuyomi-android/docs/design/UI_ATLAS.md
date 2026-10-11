@@ -68,6 +68,13 @@ Each selected Review Graph node declares its required states. Evidence covers on
 
 A screenshot never proves reachability or state transition. A test that only forwards fields, checks source text or asserts implementation plumbing is not evidence.
 
+Reader preview evidence follows UI_CONSTITUTION A.1/§14 and the current version-plan checkpoints. EINK removes its special preview path and shares Standard's existing mounted body; no separate overlay/canvas/render/window is allowed. Normal reading and ordinary Standard page-turn animations retain their existing behavior. During PAGED/DUAL seeking, the same ReaderPageSpread draws directly without retaining outgoing AnimatedContent composition. Existing mounted Reader/rich-content and engine seams retain visible target/release consistency, zero hold writes, cancel/Back origin and epoch fencing; assertions tied to removed special surfaces do not define the current contract. Immediate-replacement evidence observes the first frame and continuously retargeted held input, cancellation and release; settled static equality or a delayed assertion cannot prove absence of transient overlap. An instrumentation APK that only compiled is not an executed-test result. Chapter-only seek, read-only single-page position and deliberate Standard edge gestures remain. Rejected special-preview observations stay historical; corrected-path receipts and remaining CI, human-quality and physical-panel limits stay scoped at the owning checkpoint. This evidence procedure grants no execution or restoration permission.
+
+Boundary evidence preserves declared protocol chapter/threadPage kind; declared threadPage always wins. A fresh legacy shape may carry explicit CHAPTER provenance only after classified chapter operation, parseChapter and exact identity/content admission; raw/default legacy decoding remains UNKNOWN. Local sections explicitly admit CHAPTER. Old normalized UNKNOWN caches remain readable offline but edge-ineligible, never promoted from lookup path or refetched merely for eligibility. Viewport endpoint or absent Post blocks cannot prove completion. Require admitted CHAPTER and actual edge geometry independently; no forum-pagination/completeness guarantee beyond protocol/operation admission.
+
+B02 ruby evidence follows UI_CONSTITUTION §14 item9: exercise equal, nested and adjacent annotations through the shared native measurement/drawing seam, traverse every oversized-cluster continuation, and verify canonical body offsets, inline actions and truthful restore precision. Compare measured geometry with actual mounted output; codec round-trip alone cannot establish annotation visibility. Existing single-ruby presentation remains a coupled regression, not a new visual baseline. Keep the authorized device/suite boundary and paused full-EINK restoration distinct from this changed-content evidence.
+
+
 ## Active Standard device
 
 Routine production UI review uses the active profile selected by `review-policy.json`. The retained Standard phone baseline is:
@@ -82,7 +89,7 @@ zh-CN
 
 Verify effective size, density, orientation, locale and font scale before capture. A Pixel 2 default 1080×1920 device or an unverified temporary `wm` override is not equivalent. Landscape, split-screen, large-font and forced-window checks are additional affected-state evidence.
 
-E-ink requirements remain preserved but do not run while the policy marks E-ink deferred/frozen. Restoring that profile reactivates its physical-device and human evidence.
+E-ink execution follows the current pause/major-UI boundary in `UI_CONSTITUTION.md` and the selection in `review-policy.json`. Active means available for conditional assessment, not mandatory independent validation: without a major UI change affecting E-ink, skip its functional verification. A qualifying change selects only necessary authorized affected evidence, not full restoration. Frozen profiles retain only their allowed direct-change checks; an E-ink source change alone cannot bypass the current trigger. Historical initial-restoration exits remain deferred and unpassed, not current Standard/local-reading execution prerequisites; an E-ink completion/readiness claim still requires scope-bound physical-device and human evidence. No skipped check becomes a pass.
 
 ## Evidence record
 

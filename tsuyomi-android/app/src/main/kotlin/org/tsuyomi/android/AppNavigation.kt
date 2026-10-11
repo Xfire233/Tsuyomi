@@ -6,8 +6,11 @@
 package org.tsuyomi.android
 
 import android.net.Uri
+import androidx.compose.foundation.background
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.staticCompositionLocalOf
+import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
 import androidx.navigation.NavBackStackEntry
 import androidx.navigation.NavGraphBuilder
@@ -27,6 +30,7 @@ import org.tsuyomi.feature.library.LibraryTagDestination
 internal object Routes {
     const val Library = "library"
     const val LibrarySearch = "library/search"
+    const val LocalBookImport = "library/import"
     const val LibrarySystem = "library/system/{filter}"
     const val LibraryCollection = "library/collection/{collectionId}"
     const val LibraryTags = "library/tags"
@@ -44,7 +48,6 @@ internal object Routes {
     const val Search = "source/search"
     const val SourceHome = "source/home"
     const val Detail = "source/detail"
-    const val Directory = "source/directory"
     const val Reader = "source/reader"
     const val Verification = "source/verification"
     const val VerifiedHomePage = "source/verification/verified-home-page"
@@ -78,6 +81,7 @@ internal fun rootRouteFor(route: String): String = when (route) {
     Routes.CollectionBookPicker,
     Routes.CollectionRule,
     Routes.LibrarySearch,
+    Routes.LocalBookImport,
     Routes.LibrarySystem,
     Routes.LibraryCollection,
     Routes.LibraryTags,
@@ -90,7 +94,6 @@ internal fun rootRouteFor(route: String): String = when (route) {
     Routes.SourceHome,
     Routes.Search,
     Routes.Detail,
-    Routes.Directory,
     Routes.Reader,
     Routes.Verification,
     Routes.VerifiedHomePage,
@@ -109,7 +112,7 @@ internal const val BookCallerRouteKey = "book.caller.route"
 
 /** Keep the caller entry's own bounded query, ordering and position state on its back stack. */
 internal fun NavHostController.navigateToBookRoute(route: String) {
-    require(route == Routes.Detail || route == Routes.Directory || route == Routes.Reader)
+    require(route == Routes.Detail || route == Routes.Reader)
     val caller = currentBackStackEntry
     val callerRoute = caller?.destination?.route
     val originRoot = caller?.savedStateHandle?.get<String>(BookCallerRootKey)
@@ -128,7 +131,6 @@ internal fun routeOwnsSourceFlow(route: String): Boolean = route == Routes.Brows
 internal fun restorationTargetForRoute(route: String): SourceRestorationTarget? = when (route) {
     Routes.Search -> SourceRestorationTarget.SEARCH
     Routes.Detail -> SourceRestorationTarget.DETAIL
-    Routes.Directory -> SourceRestorationTarget.DIRECTORY
     Routes.Reader -> SourceRestorationTarget.READER
     Routes.RemoteLibrary, Routes.LibraryMirror, Routes.LibraryMirrorFolder -> SourceRestorationTarget.SEARCH
     else -> null
@@ -157,6 +159,7 @@ internal fun navigationItems(): List<TsuyomiNavigationItem> = listOf(
 internal fun routeTitle(route: String): String = when (route) {
     Routes.Library -> stringResource(R.string.nav_library)
     Routes.LibrarySearch -> stringResource(R.string.title_library_search)
+    Routes.LocalBookImport -> stringResource(R.string.title_local_book_import)
     Routes.NewCollection -> stringResource(R.string.collection_manual_create_title)
     Routes.CollectionBookPicker -> stringResource(R.string.nav_library)
     Routes.CollectionRule -> stringResource(R.string.title_collection_rule_edit)
@@ -172,7 +175,6 @@ internal fun routeTitle(route: String): String = when (route) {
     Routes.SourceHome -> stringResource(R.string.title_source_home)
     Routes.Search -> stringResource(R.string.title_source_search)
     Routes.Detail -> stringResource(R.string.title_book_detail)
-    Routes.Directory -> stringResource(R.string.title_book_directory)
     Routes.Transfer -> stringResource(R.string.title_data_transfer)
     Routes.Reader -> stringResource(R.string.title_reader)
     Routes.Verification,
@@ -187,6 +189,13 @@ internal fun routeTitle(route: String): String = when (route) {
 }
 
 internal fun NavHostController.selectRoot(route: String) {
+    val currentEntry = currentBackStackEntry
+    val currentRoot = currentEntry?.savedStateHandle?.get<String>(BookCallerRootKey)
+        ?: currentEntry?.destination?.route?.let(::rootRouteFor)
+    if (currentRoot == route) {
+        popBackStack(route, inclusive = false)
+        return
+    }
     navigate(route) {
         popUpTo(graph.findStartDestination().id) {
             saveState = true
@@ -196,7 +205,8 @@ internal fun NavHostController.selectRoot(route: String) {
     }
 }
 
-internal fun destinationOwnsChrome(route: String): Boolean = when (route) {
+internal fun destinationOwnsAppBar(route: String): Boolean = when (route) {
+    Routes.Detail,
     Routes.Reader,
     Routes.RemoteLibrary,
     Routes.LibraryMirror,
@@ -211,8 +221,16 @@ internal fun destinationOwnsChrome(route: String): Boolean = when (route) {
     else -> false
 }
 
+internal fun destinationShowsPrimaryNavigation(route: String, layout: TsuyomiNavigationLayout): Boolean = when (route) {
+    // Detail owns its header, but shares the root sidebar in rail windows.
+    Routes.Detail -> layout == TsuyomiNavigationLayout.RAIL
+    Routes.CollectionBookPicker -> false
+    else -> !destinationOwnsAppBar(route)
+}
+
 internal class DestinationScaffold(
     val windowSize: TsuyomiWindowSize,
+    val instantNavigation: Boolean,
     val topBar: @Composable (String, NavBackStackEntry) -> Unit,
     val navigation: @Composable (String, NavBackStackEntry, TsuyomiNavigationLayout) -> Unit,
 )
@@ -221,7 +239,7 @@ internal val LocalDestinationScaffold = staticCompositionLocalOf<DestinationScaf
     error("Navigation destination has no scaffold owner")
 }
 
-/** Animate the whole destination, including its route-specific chrome, in one fixed viewport. */
+/** Navigation owns destination lifetimes; instant layers are opaque complete-window endpoints. */
 internal fun NavGraphBuilder.appDestination(
     route: String,
     instantPopEnter: Boolean = false,
@@ -238,6 +256,9 @@ internal fun NavGraphBuilder.appDestination(
             windowSize = scaffold.windowSize,
             topBar = { scaffold.topBar(route, entry) },
             navigation = { layout -> scaffold.navigation(route, entry, layout) },
+            modifier = if (scaffold.instantNavigation) {
+                Modifier.background(MaterialTheme.colorScheme.background)
+            } else Modifier,
         ) {
             content(entry)
         }

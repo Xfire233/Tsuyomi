@@ -6,6 +6,7 @@ package org.tsuyomi.feature.library
 
 import androidx.annotation.StringRes
 import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
@@ -17,8 +18,14 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.heading
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.res.stringResource
 import kotlinx.coroutines.launch
+import org.tsuyomi.core.display.DisplayProfile
+import org.tsuyomi.core.display.LocalDisplayEnvironment
 import org.tsuyomi.core.ui.components.SegmentedSelector
 import org.tsuyomi.core.ui.components.SettingsActionRow
 import org.tsuyomi.core.ui.components.SettingsGroup
@@ -28,6 +35,12 @@ import org.tsuyomi.core.ui.components.SettingsSwitchRow
 import org.tsuyomi.core.ui.components.TsuyomiButton
 import org.tsuyomi.core.ui.components.TsuyomiButtonStyle
 import org.tsuyomi.core.ui.components.TsuyomiSegment
+import org.tsuyomi.core.ui.components.PaginationBar
+import org.tsuyomi.core.ui.components.TsuyomiMeasuredPager
+import org.tsuyomi.core.ui.components.rememberTsuyomiMeasuredPagerState
+import org.tsuyomi.core.ui.components.TsuyomiMeasuredTextPager
+import org.tsuyomi.core.ui.components.TsuyomiMenuItem
+import androidx.compose.ui.unit.dp
 import org.tsuyomi.core.ui.theme.TsuyomiSpacing
 import org.tsuyomi.shared.librarydomain.UpdateCadence
 import org.tsuyomi.shared.librarydomain.UpdatePolicy
@@ -41,7 +54,7 @@ fun UpdateSettingsScreen(
     snapshot: UpdateSnapshot,
     bookLabels: Map<BookIdentity, String>,
     onSetPolicy: suspend (UpdatePolicy) -> Unit,
-    onExcludeBook: suspend (BookIdentity, Boolean) -> Unit,
+    onExcludeBook: suspend (BookIdentity.Remote, Boolean) -> Unit,
     onExcludeSource: suspend (String, Boolean) -> Unit,
     onLoadMoreSessionItems: suspend () -> Unit,
     notificationsUnavailable: Boolean,
@@ -53,6 +66,73 @@ fun UpdateSettingsScreen(
     val policy = snapshot.policy
     val manageableSourceIds = (knownSourceIds + snapshot.excludedSources).sorted()
     val automaticEnabled = policy.cadence != UpdateCadence.OFF
+    if (LocalDisplayEnvironment.current.effectiveProfile == DisplayProfile.EINK) {
+        val excludedBooks = androidx.compose.runtime.remember(snapshot.excludedBooks) {
+            snapshot.excludedBooks.sortedWith(compareBy(BookIdentity.Remote::sourceId, BookIdentity.Remote::remoteBookId))
+        }
+        val fixedKeys = androidx.compose.runtime.remember { listOf("recent", "schedule", "cadence:OFF", "cadence:HOURS_12", "cadence:DAILY", "cadence:DAYS_3", "cadence:WEEKLY", "constraints", "unmetered", "charging", "battery", "notifications", "exclusions", "load-more") }
+        val reportStart = fixedKeys.size
+        val booksStart = reportStart + snapshot.sessionItems.size
+        val sourcesStart = booksStart + excludedBooks.size
+        val itemCount = sourcesStart + manageableSourceIds.size
+        TsuyomiMeasuredPager(itemCount = itemCount,
+            itemKey = { index -> when {
+                index < reportStart -> fixedKeys[index]
+                index < booksStart -> "session:${updateIdentityKey(snapshot.sessionItems[index - reportStart].identity)}"
+                index < sourcesStart -> "excluded-book:${updateIdentityKey(excludedBooks[index - booksStart])}"
+                else -> "source:${manageableSourceIds[index - sourcesStart]}"
+            } },
+            state = rememberTsuyomiMeasuredPagerState(if (snapshot.session == null) "schedule" else "recent"),
+            modifier = modifier.fillMaxSize().testTag("library-update-settings"),
+            itemContent = { index -> when {
+                index == 0 -> snapshot.session?.let { session ->
+                    UpdatePagedText(stringResource(R.string.updates_recent_summary, updateSessionStateLabel(session.state), session.completed, session.total, session.updated, session.failed),
+                        Modifier.testTag("updates-session-summary"))
+                }
+                index == 1 -> SettingsSectionHeader(stringResource(R.string.updates_schedule_heading), Modifier.testTag("updates-section-schedule"))
+                index in 2..6 -> {
+                    val cadence = UpdateCadence.entries[index - 2]
+                    TsuyomiMenuItem(cadence.label(), { scope.launch { onSetPolicy(policy.copy(cadence = cadence)) } }, selected = policy.cadence == cadence,
+                        modifier = Modifier.testTag("updates-cadence-${cadence.name}"))
+                }
+                index == 7 -> SettingsSectionHeader(stringResource(R.string.updates_constraints_heading), Modifier.testTag("updates-section-constraints"))
+                index == 8 -> SettingsSwitchRow(title = stringResource(R.string.updates_unmetered), summary = stringResource(R.string.updates_unmetered_summary),
+                    checked = policy.unmeteredOnly, enabled = automaticEnabled, disabledReason = stringResource(R.string.updates_constraints_disabled),
+                    onCheckedChange = { scope.launch { onSetPolicy(policy.copy(unmeteredOnly = it)) } }, modifier = Modifier.testTag("updates-unmetered"))
+                index == 9 -> SettingsSwitchRow(title = stringResource(R.string.updates_charging), summary = stringResource(R.string.updates_charging_summary),
+                    checked = policy.requiresCharging, enabled = automaticEnabled, disabledReason = stringResource(R.string.updates_constraints_disabled),
+                    onCheckedChange = { scope.launch { onSetPolicy(policy.copy(requiresCharging = it)) } }, modifier = Modifier.testTag("updates-charging"))
+                index == 10 -> SettingsSwitchRow(title = stringResource(R.string.updates_battery_not_low), summary = stringResource(R.string.updates_battery_not_low_summary),
+                    checked = policy.batteryNotLow, enabled = automaticEnabled, disabledReason = stringResource(R.string.updates_constraints_disabled),
+                    onCheckedChange = { scope.launch { onSetPolicy(policy.copy(batteryNotLow = it)) } }, modifier = Modifier.testTag("updates-battery"))
+                index == 11 && notificationsUnavailable && onRequestNotifications != null -> SettingsActionRow(
+                    title = stringResource(if (notificationPermissionRequestable) R.string.updates_notifications_enable else R.string.updates_notifications_open_settings),
+                    summary = stringResource(if (notificationPermissionRequestable) R.string.updates_notifications_summary else R.string.updates_notifications_settings_summary),
+                    onClick = onRequestNotifications, modifier = Modifier.testTag("updates-notifications-enable"))
+                index == 12 -> UpdatePagedText(stringResource(R.string.updates_exclusions_summary))
+                index == 13 && snapshot.hasMoreSessionItems -> TsuyomiButton(stringResource(R.string.updates_load_more_reports, snapshot.sessionItems.size, snapshot.totalSessionItems),
+                    { scope.launch { onLoadMoreSessionItems() } }, modifier = Modifier.testTag("updates-load-more"), style = TsuyomiButtonStyle.SECONDARY)
+                index < reportStart -> Unit
+                index < booksStart -> {
+                    val item = snapshot.sessionItems[index - reportStart]
+                    UpdatePagedText(item.title + "\n" + listOfNotNull(updateItemStateLabel(item.state), updateReasonLabel(item.reason)).distinct().joinToString(" · "),
+                        Modifier.testTag("updates-session-item-${item.identity.remoteBookId}"))
+                }
+                index < sourcesStart -> {
+                    val identity = excludedBooks[index - booksStart]
+                    TsuyomiMenuItem(bookLabels[identity] ?: identity.remoteBookId, { scope.launch { onExcludeBook(identity, false) } },
+                        modifier = Modifier.testTag("updates-restore-book-${updateIdentityKey(identity)}").semantics {
+                            contentDescription = "${bookLabels[identity] ?: identity.remoteBookId}, ${identity.sourceId}"
+                        })
+                }
+                else -> {
+                    val sourceId = manageableSourceIds[index - sourcesStart]
+                    TsuyomiMenuItem(sourceId, { scope.launch { onExcludeSource(sourceId, sourceId !in snapshot.excludedSources) } },
+                        selected = sourceId in snapshot.excludedSources, modifier = Modifier.testTag("updates-source-${sourceId.hashCode()}"))
+                }
+            } })
+        return
+    }
     LazyColumn(
         modifier = modifier.fillMaxSize().testTag("library-update-settings"),
         contentPadding = PaddingValues(bottom = TsuyomiSpacing.Lg),
@@ -191,7 +271,7 @@ fun UpdateSettingsScreen(
         }
         if (snapshot.excludedBooks.isNotEmpty()) {
             item { SettingsSectionHeader(stringResource(R.string.updates_excluded_books)) }
-            items(snapshot.excludedBooks.toList().sortedWith(compareBy(BookIdentity::sourceId, BookIdentity::remoteBookId)), key = ::updateIdentityKey) { identity ->
+            items(snapshot.excludedBooks.toList().sortedWith(compareBy(BookIdentity.Remote::sourceId, BookIdentity.Remote::remoteBookId)), key = ::updateIdentityKey) { identity ->
                 SettingsActionRow(
                     title = bookLabels[identity] ?: identity.remoteBookId,
                     summary = stringResource(R.string.updates_excluded_book_summary, identity.sourceId),
@@ -291,5 +371,10 @@ internal fun updateReasonLabelRes(code: String): Int = when {
     else -> R.string.updates_reason_failed
 }
 
-fun updateIdentityKey(identity: BookIdentity): String =
+fun updateIdentityKey(identity: BookIdentity.Remote): String =
     "${identity.sourceId.length}:${identity.sourceId}${identity.remoteBookId.length}:${identity.remoteBookId}"
+
+@Composable
+private fun UpdatePagedText(text: String, modifier: Modifier = Modifier) {
+    TsuyomiMeasuredTextPager(text, modifier, fillViewport = false, alwaysShowPageControls = false)
+}

@@ -34,8 +34,8 @@ android {
     namespace = "org.tsuyomi.android"
     defaultConfig {
         applicationId = "org.tsuyomi.android"
-        versionCode = 7
-        versionName = if (buildFingerprint.isEmpty()) "0.3.0-beta.5" else "0.3.0-beta.5+$buildFingerprint"
+        versionCode = 8
+        versionName = if (buildFingerprint.isEmpty()) "0.5.0-beta.1" else "0.5.0-beta.1+$buildFingerprint"
         testInstrumentationRunnerArguments["keep_p4c_review_state"] =
             providers.gradleProperty("tsuyomi.keepP4cReviewState").orElse("false").get()
         buildConfigField("String", "OFFICIAL_REPOSITORY_KEY_ID", "\"$repositoryKeyId\"")
@@ -93,6 +93,8 @@ dependencies {
     implementation(project(":shared:library-domain"))
     implementation(project(":shared:source-contract"))
     implementation(project(":core:files"))
+    implementation(project(":core:publication"))
+    implementation(project(":source:quickjs-runtime"))
     implementation(project(":source:extension-manager"))
     debugImplementation(project(":source:extension-testkit"))
     "onlineImplementation"(project(":source:extension-testkit"))

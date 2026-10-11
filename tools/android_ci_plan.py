@@ -31,6 +31,7 @@ FULL_BUILD_TASKS = (
     ":core:security:testDebugUnitTest",
     ":core:network:testDebugUnitTest",
     ":core:preferences:testDebugUnitTest",
+    ":core:publication:testDebugUnitTest",
     ":feature:library:testDebugUnitTest",
     ":source:extension-manager:testDebugUnitTest",
     ":source:extension-testkit:testDebugUnitTest",
@@ -52,6 +53,7 @@ FULL_INSTRUMENTATION_TASKS = (
     ":core:ui:connectedDebugAndroidTest",
     ":core:security:connectedDebugAndroidTest",
     ":core:database:connectedDebugAndroidTest",
+    ":core:publication:connectedDebugAndroidTest",
     ":core:webview:connectedDebugAndroidTest",
     ":source:quickjs-runtime:connectedDebugAndroidTest",
 )
@@ -69,6 +71,7 @@ JVM_TASKS = {
     ":core:security": ":core:security:testDebugUnitTest",
     ":core:preferences": ":core:preferences:testDebugUnitTest",
     ":core:network": ":core:network:testDebugUnitTest",
+    ":core:publication": ":core:publication:testDebugUnitTest",
     ":feature:library": ":feature:library:testDebugUnitTest",
     ":source:extension-manager": ":source:extension-manager:testDebugUnitTest",
     ":source:extension-testkit": ":source:extension-testkit:testDebugUnitTest",
@@ -92,6 +95,7 @@ INSTRUMENTED_MODULES = {
     ":core:ui",
     ":core:security",
     ":core:database",
+    ":core:publication",
     ":core:webview",
     ":source:quickjs-runtime",
 }

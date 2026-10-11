@@ -35,7 +35,6 @@
     <string name="collection_rule_stay">继续编辑</string>
     <string name="collection_rule_discard">放弃修改</string>
     <string name="title_book_detail">书籍详情</string>
-    <string name="title_book_directory">章节目录</string>
     <string name="title_reader">阅读</string>
     <string name="title_verification">手动登录或验证</string>
     <string name="verification_host_identity">受控网页 · %1$s</string>
@@ -55,7 +54,6 @@
     <string name="verification_snapshot_rejected">当前页面已绑定，但内容未通过来源解析。请确认页面已加载完整后重试。</string>
     <string name="verification_snapshot_diagnostic">阶段：%1$s · 安全代码：%2$s</string>
     <string name="verification_loading">正在打开受控验证页面</string>
-    <string name="verification_notice">仅允许已声明的 HTTPS 站点。请手动完成登录或验证；Tsuyomi 不会自动填写、绕过或导出凭证。</string>
     <string name="verification_navigation_blocked">已阻止跳转到未授权站点。仅允许此内容源声明的 HTTPS 站点。</string>
     <string name="verification_cancel">取消</string>
     <string name="verification_done">已完成</string>
@@ -90,4 +88,5 @@
     <string name="source_repository_no_browser">没有可打开源码链接的浏览器。</string>
     <string name="source_subscription_invalid">无法添加此订阅。请使用包含仓库标识、根公钥标识和公钥的 HTTPS 订阅链接；已有仓库的身份不能被替换。</string>
     <string name="source_repository_official">官方仓库</string>
+    <string name="publication_numbered_section">第 %1$d 节</string>
 </resources>

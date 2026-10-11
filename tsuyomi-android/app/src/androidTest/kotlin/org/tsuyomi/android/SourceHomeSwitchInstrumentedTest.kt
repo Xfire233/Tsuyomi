@@ -89,7 +89,7 @@ internal class SourceHomeSwitchInstrumentedTest : SourceFlowInstrumentedTestFixt
                     sections = listOf(org.tsuyomi.shared.sourcecontract.SourceHomeSection(
                         "cached", "缓存书籍", (1..10).map { id ->
                             org.tsuyomi.shared.sourcecontract.SourceBookSummary(
-                                org.tsuyomi.shared.model.BookIdentity(packageInfo.manifest.sourceId.value, id.toString()),
+                                org.tsuyomi.shared.model.BookIdentity.Remote(packageInfo.manifest.sourceId.value, id.toString()),
                                 "书籍 $id", null, null, "https://www.wenku8.net/book/$id.htm",
                             )
                         },

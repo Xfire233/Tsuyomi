@@ -24,7 +24,7 @@ import org.tsuyomi.core.files.StorageQuota
 import org.tsuyomi.core.files.StorageRoot
 import org.tsuyomi.core.files.StorageRoots
 import org.tsuyomi.shared.model.BookIdentity
-import org.tsuyomi.shared.sourcecontract.ReaderBlock
+import org.tsuyomi.source.extensionmanager.ReaderDocumentJsonCodec
 import org.tsuyomi.shared.sourcecontract.ReaderDocument
 import org.tsuyomi.shared.sourcecontract.SourceBookDetail
 import org.tsuyomi.shared.sourcecontract.SourceBookSummary
@@ -53,7 +53,7 @@ internal class NormalizedSourceStore(context: Context) {
         files.write(detailPath(detail.summary.identity), SourceValueCodec.encodeDetail(detail))
     }
 
-    fun readDetail(identity: BookIdentity): SourceBookDetail? = runCatching {
+    fun readDetail(identity: BookIdentity.Remote): SourceBookDetail? = runCatching {
         files.read(detailPath(identity))?.let(SourceValueCodec::decodeDetail)
     }.getOrNull()
 
@@ -61,19 +61,20 @@ internal class NormalizedSourceStore(context: Context) {
         files.write(directoryPath(directory.bookIdentity), SourceValueCodec.encodeDirectory(directory))
     }
 
-    fun readDirectory(identity: BookIdentity): SourceDirectory? = runCatching {
+    fun readDirectory(identity: BookIdentity.Remote): SourceDirectory? = runCatching {
         files.read(directoryPath(identity))?.let(SourceValueCodec::decodeDirectory)
     }.getOrNull()
 
-    fun writeDocument(identity: BookIdentity, document: ReaderDocument) {
-        require(document.sourceId == identity.sourceId && document.remoteBookId == identity.remoteBookId) {
+    fun writeDocument(identity: BookIdentity.Remote, document: ReaderDocument) {
+        require(document.identity.book == identity) {
             "Document identity does not match storage identity"
         }
-        files.write(documentPath(identity, document.contentId), SourceValueCodec.encodeDocument(document))
+        files.write(documentPath(identity, document.identity.contentId), SourceValueCodec.encodeDocument(document))
     }
 
-    fun readDocument(identity: BookIdentity, contentId: String): ReaderDocument? = runCatching {
+    fun readDocument(identity: BookIdentity.Remote, contentId: String): ReaderDocument? = runCatching {
         files.read(documentPath(identity, contentId))?.let(SourceValueCodec::decodeDocument)
+            ?.takeIf { it.identity.book == identity && it.identity.contentId == contentId }
     }.getOrNull()
 
     fun writeHome(
@@ -141,21 +142,19 @@ internal class NormalizedSourceStore(context: Context) {
      * the UI thread.
      */
     fun writeAndVerifyDocument(
-        identity: BookIdentity,
+        identity: BookIdentity.Remote,
         chapterId: String,
         document: ReaderDocument,
     ): Boolean {
-        require(document.contentId == chapterId) { "Document content ID does not match chapter" }
+        require(document.identity.contentId == chapterId) { "Document content ID does not match chapter" }
         writeDocument(identity, document)
         return hasReadableDocument(identity, chapterId)
     }
 
     /** Reads and validates the full normalized document; callers must use a background dispatcher. */
-    fun hasReadableDocument(identity: BookIdentity, chapterId: String): Boolean =
+    fun hasReadableDocument(identity: BookIdentity.Remote, chapterId: String): Boolean =
         readDocument(identity, chapterId)?.let { document ->
-            document.sourceId == identity.sourceId &&
-                document.remoteBookId == identity.remoteBookId &&
-                document.contentId == chapterId
+            document.identity.book == identity && document.identity.contentId == chapterId
         } == true
 
     /**
@@ -166,7 +165,7 @@ internal class NormalizedSourceStore(context: Context) {
      * is derived from the identity, the write is atomic, and [writeAndVerifyDocument] still
      * read-verifies every document it records.
      */
-    fun cachedDocumentIds(identity: BookIdentity, chapterIds: Collection<String>): Set<String> {
+    fun cachedDocumentIds(identity: BookIdentity.Remote, chapterIds: Collection<String>): Set<String> {
         if (chapterIds.isEmpty()) return emptySet()
         val stored = files.entries()
             .asSequence()
@@ -175,14 +174,14 @@ internal class NormalizedSourceStore(context: Context) {
         return chapterIds.filterTo(linkedSetOf()) { chapterId -> documentPath(identity, chapterId) in stored }
     }
 
-    private fun detailPath(identity: BookIdentity): String = "detail/${key(identity)}.json"
+    private fun detailPath(identity: BookIdentity.Remote): String = "detail/${key(identity)}.json"
 
-    private fun directoryPath(identity: BookIdentity): String = "directory/${key(identity)}.json"
+    private fun directoryPath(identity: BookIdentity.Remote): String = "directory/${key(identity)}.json"
 
-    private fun documentPath(identity: BookIdentity, contentId: String): String =
+    private fun documentPath(identity: BookIdentity.Remote, contentId: String): String =
         "document/${key(identity, contentId)}.json"
 
-    private fun key(identity: BookIdentity, suffix: String = ""): String {
+    private fun key(identity: BookIdentity.Remote, suffix: String = ""): String {
         val digest = MessageDigest.getInstance("SHA-256")
             .digest("${identity.sourceId}\u0000${identity.remoteBookId}\u0000$suffix".toByteArray(Charsets.UTF_8))
         return digest.joinToString("") { byte -> "%02x".format(byte.toInt() and 0xff) }
@@ -250,30 +249,10 @@ private object SourceValueCodec {
         )
     }
 
-    fun encodeDocument(value: ReaderDocument): ByteArray = encode(
-        buildJsonObject {
-            put("schema", JsonPrimitive(SCHEMA))
-            put("kind", JsonPrimitive("document"))
-            put("sourceId", JsonPrimitive(value.sourceId))
-            put("remoteBookId", JsonPrimitive(value.remoteBookId))
-            put("contentId", JsonPrimitive(value.contentId))
-            putNullableString("revision", value.revision)
-            put("title", JsonPrimitive(value.title))
-            put("blocks", buildJsonArray { value.blocks.forEach { add(encodeBlock(it)) } })
-        },
-    )
+    fun encodeDocument(value: ReaderDocument): ByteArray = encode(ReaderDocumentJsonCodec.encodeHost(value))
 
-    fun decodeDocument(bytes: ByteArray): ReaderDocument {
-        val value = decode(bytes, "document")
-        return ReaderDocument(
-            sourceId = value.requiredString("sourceId"),
-            remoteBookId = value.requiredString("remoteBookId"),
-            contentId = value.requiredString("contentId"),
-            revision = value.nullableString("revision"),
-            title = value.requiredString("title"),
-            blocks = value.requiredArray("blocks").map(::decodeBlock),
-        )
-    }
+    fun decodeDocument(bytes: ByteArray): ReaderDocument =
+        ReaderDocumentJsonCodec.decodeHost(bytes.toString(Charsets.UTF_8))
 
     fun encodeHome(value: SourceHomePage): ByteArray = encode(
         buildJsonObject {
@@ -389,60 +368,17 @@ private object SourceValueCodec {
         remoteTargetId = value.nullableString("remoteTargetId"),
     )
 
-    private fun encodeIdentity(value: BookIdentity): JsonObject = buildJsonObject {
+    private fun encodeIdentity(value: BookIdentity.Remote): JsonObject = buildJsonObject {
         put("sourceId", JsonPrimitive(value.sourceId))
         put("remoteBookId", JsonPrimitive(value.remoteBookId))
     }
 
-    private fun decodeIdentity(value: JsonObject): BookIdentity = BookIdentity(
+    private fun decodeIdentity(value: JsonObject): BookIdentity.Remote = BookIdentity.Remote(
         sourceId = value.requiredString("sourceId"),
         remoteBookId = value.requiredString("remoteBookId"),
     )
 
-    private fun encodeBlock(value: ReaderBlock): JsonObject = when (value) {
-        is ReaderBlock.Paragraph -> buildJsonObject {
-            put("type", JsonPrimitive("paragraph"))
-            put("blockId", JsonPrimitive(value.blockId))
-            put("text", JsonPrimitive(value.text))
-        }
-        is ReaderBlock.Heading -> buildJsonObject {
-            put("type", JsonPrimitive("heading"))
-            put("blockId", JsonPrimitive(value.blockId))
-            put("text", JsonPrimitive(value.text))
-            put("level", JsonPrimitive(value.level))
-        }
-        is ReaderBlock.Image -> buildJsonObject {
-            put("type", JsonPrimitive("image"))
-            put("blockId", JsonPrimitive(value.blockId))
-            put("url", JsonPrimitive(value.url))
-            putNullableString("altText", value.altText)
-            putNullableInt("width", value.width)
-            putNullableInt("height", value.height)
-        }
-    }
 
-    private fun decodeBlock(element: JsonElement): ReaderBlock {
-        val value = element.jsonObject
-        return when (value.requiredString("type")) {
-            "paragraph" -> ReaderBlock.Paragraph(
-                blockId = value.requiredString("blockId"),
-                text = value.requiredString("text"),
-            )
-            "heading" -> ReaderBlock.Heading(
-                blockId = value.requiredString("blockId"),
-                text = value.requiredString("text"),
-                level = value.requiredInt("level"),
-            )
-            "image" -> ReaderBlock.Image(
-                blockId = value.requiredString("blockId"),
-                url = value.requiredString("url"),
-                altText = value.nullableString("altText"),
-                width = value.nullableInt("width"),
-                height = value.nullableInt("height"),
-            )
-            else -> error("Unsupported reader block type")
-        }
-    }
 
     private fun encode(value: JsonObject): ByteArray = json.encodeToString(JsonObject.serializer(), value)
         .toByteArray(Charsets.UTF_8)
@@ -467,8 +403,5 @@ private fun JsonObject.nullableString(name: String): String? =
 private fun JsonObject.nullableInt(name: String): Int? =
     get(name)?.takeUnless { it is JsonNull }?.jsonPrimitive?.intOrNull
 private fun kotlinx.serialization.json.JsonObjectBuilder.putNullableString(name: String, value: String?) {
-    put(name, value?.let(::JsonPrimitive) ?: JsonNull)
-}
-private fun kotlinx.serialization.json.JsonObjectBuilder.putNullableInt(name: String, value: Int?) {
     put(name, value?.let(::JsonPrimitive) ?: JsonNull)
 }

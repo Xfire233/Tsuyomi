@@ -9,6 +9,7 @@ import java.io.File
 import org.tsuyomi.feature.book.SourceBookState
 import java.util.concurrent.atomic.AtomicInteger
 import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.async
 import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.runBlocking
@@ -29,6 +30,68 @@ import org.tsuyomi.shared.sourcecontract.SourceBookDetail
 
 @RunWith(AndroidJUnit4::class)
 internal class SourceRemoteLibraryAddInstrumentedTest : SourceFlowInstrumentedTestFixture() {
+    @Test
+    fun cancellationDuringPostBeginAddAvailabilityLookupCancelsAndUnblocksExplicitAdd() = runBlocking {
+        assertPostBeginAddCancellation("source_availability")
+    }
+
+    @Test
+    fun cancellationDuringPostBeginAddPolicyLookupCancelsAndUnblocksExplicitAdd() = runBlocking {
+        assertPostBeginAddCancellation("source_remote_policy")
+    }
+
+    @Test
+    fun cancellationDuringPostBeginAddSelectionLookupCancelsAndUnblocksExplicitAdd() = runBlocking {
+        assertPostBeginAddCancellation("books", selectBook = true)
+    }
+
+    private suspend fun assertPostBeginAddCancellation(table: String, selectBook: Boolean = false) =
+        kotlinx.coroutines.coroutineScope {
+            val packageInfo = installFixture()
+            val sourceId = packageInfo.manifest.sourceId.value
+            val book = summary(sourceId, "post-begin-add", "取消后显式加入")
+            putCredential(sourceId)
+            val calls = AtomicInteger()
+            val flow = controller {
+                FakeSession(addRemote = { remoteBookId, token ->
+                    calls.incrementAndGet()
+                    directActionTokens.accept(sourceId, remoteBookId, token)
+                    RemoteLibraryAddResult(book.identity, RemoteLibraryAddOutcome.APPLIED)
+                })
+            }
+            try {
+                val policy = requireNotNull(library.sourceRemotePolicy(sourceId))
+                assertTrue(library.setAddWritebackEnabled(sourceId, policy.capabilitySetFingerprint, true))
+                flow.open(packageInfo)
+                if (selectBook) flow.selectBook(book)
+                val add = async(start = CoroutineStart.LAZY) {
+                    flow.remoteLibrary.addBookToWebsite(book, SOURCE_FLOW_TEST_TIME)
+                }
+                val cancelledAtLookup = cancelAtPostBeginLookup(table, add)
+                add.start()
+                withTimeout(5_000) { add.join() }
+
+                assertTrue("The post-begin lookup must be reached", cancelledAtLookup.get())
+                assertTrue(add.isCancelled)
+                assertEquals(0, calls.get())
+                val record = requireNotNull(library.bookReconciliation(sourceId, book.identity.remoteBookId))
+                assertEquals(RemoteReconciliationState.CANCELLED, record.state)
+                assertEquals("CANCELLED", reconciliationState(record.id))
+                assertTrue(library.unresolvedReconciliationsForSource(sourceId).isEmpty())
+                assertEquals(
+                    RemoteAddUiResult.Confirmed,
+                    flow.remoteLibrary.addBookToWebsite(book, SOURCE_FLOW_TEST_TIME.plusSeconds(1)),
+                )
+                assertEquals(1, calls.get())
+                assertEquals(
+                    RemoteReconciliationState.CONFIRMED,
+                    library.bookReconciliation(sourceId, book.identity.remoteBookId)?.state,
+                )
+            } finally {
+                flow.close()
+            }
+        }
+
     @Test
     fun leaseChangeAfterTransportAcceptanceEndsUnresolved() = runBlocking {
         val packageInfo = installFixture()
@@ -65,6 +128,51 @@ internal class SourceRemoteLibraryAddInstrumentedTest : SourceFlowInstrumentedTe
         } finally {
             releaseResponse.complete(Unit)
             controller.close()
+        }
+    }
+
+    @Test
+    fun replacementSessionCannotAcceptPendingAddToken() = runBlocking {
+        val packageInfo = installFixture()
+        val sourceId = packageInfo.manifest.sourceId.value
+        val replacementPackage = packageInfo.withPackageSha256(alternateSha(packageInfo.packageSha256))
+        val selected = summary(sourceId, "3009", "来源切换时加入")
+        putCredential(sourceId)
+        var websiteWrites = 0
+        var replacementCalls = 0
+        lateinit var flow: SourceFlowController
+        val firstSession = FakeSession(
+            addRemote = { remoteBookId, token ->
+                flow.open(replacementPackage)
+                directActionTokens.accept(sourceId, remoteBookId, token)
+                websiteWrites++
+                RemoteLibraryAddResult(selected.identity, RemoteLibraryAddOutcome.APPLIED)
+            },
+        )
+        val replacementSession = FakeSession(
+            addRemote = { _, _ ->
+                replacementCalls++
+                error("A pending mutation must not be forwarded to the replacement client")
+            },
+        )
+        flow = controller { candidate ->
+            if (candidate.packageSha256 == packageInfo.packageSha256) firstSession else replacementSession
+        }
+        try {
+            val policy = requireNotNull(library.sourceRemotePolicy(sourceId))
+            assertTrue(library.setAddWritebackEnabled(sourceId, policy.capabilitySetFingerprint, true))
+            flow.open(packageInfo)
+            flow.selectBook(selected)
+
+            assertEquals(RemoteAddUiResult.Cancelled, flow.addSelectedBookToWebsite(SOURCE_FLOW_TEST_TIME))
+            assertEquals(0, websiteWrites)
+            assertEquals(0, replacementCalls)
+            assertEquals(
+                RemoteReconciliationState.CANCELLED,
+                library.libraryEntries().single { it.book.identity == selected.identity }.reconciliation,
+            )
+        } finally {
+            flow.close()
         }
     }
 

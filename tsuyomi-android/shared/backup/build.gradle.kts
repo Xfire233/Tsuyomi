@@ -9,5 +9,6 @@ dependencies {
     implementation(project(":shared:locator"))
     implementation(project(":shared:model"))
     implementation(project(":shared:smart-shelf"))
+    implementation(project(":shared:library-domain"))
     implementation(libs.kotlinx.serialization.json)
 }

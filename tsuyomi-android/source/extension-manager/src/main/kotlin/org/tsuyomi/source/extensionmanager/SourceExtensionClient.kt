@@ -241,7 +241,7 @@ class SourceExtensionClient private constructor(
         )
         return malformedResponse("directory-parse", "invalid-directory") {
             val root = call("parseDirectory", arrayOf<Any?>(response.text.orEmpty(), remoteBookId), "directory-parse").jsonObject
-            val identity = BookIdentity(root.requiredString("sourceId"), root.requiredString("remoteBookId"))
+            val identity = BookIdentity.Remote(root.requiredString("sourceId"), root.requiredString("remoteBookId"))
             val chapters = root.requiredArray("chapters").map { chapter ->
                 val value = chapter.jsonObject
                 SourceChapter(
@@ -256,7 +256,7 @@ class SourceExtensionClient private constructor(
     }
 
     suspend fun checkUpdates(remoteBookId: String, previousAnchor: String?): SourceUpdateProbeResult {
-        val identity = BookIdentity(manifest.sourceId.value, remoteBookId)
+        val identity = BookIdentity.Remote(manifest.sourceId.value, remoteBookId)
         val checkedAt = System.currentTimeMillis()
         if (!supportsUpdateChecks) {
             return updateProbeResult(
@@ -353,6 +353,9 @@ class SourceExtensionClient private constructor(
                     arrayOf<Any?>(response.text.orEmpty(), remoteBookId, chapter.chapterId, chapter.title),
                     "chapter-parse",
                 ).jsonObject,
+                expectedSourceId = manifest.sourceId.value,
+                expectedRemoteBookId = remoteBookId,
+                expectedContentId = chapter.chapterId,
             )
         }
     }
@@ -396,7 +399,7 @@ class SourceExtensionClient private constructor(
                 arrayOf<Any?>(response.text.orEmpty(), remoteBookId, response.finalUrl),
                 "remote-library-add-parse",
             ).jsonObject
-            val identity = BookIdentity(root.requiredString("sourceId"), root.requiredString("remoteBookId"))
+            val identity = BookIdentity.Remote(root.requiredString("sourceId"), root.requiredString("remoteBookId"))
             if (identity.sourceId != manifest.sourceId.value || identity.remoteBookId != remoteBookId) {
                 fail(SourceErrorCode.MALFORMED_SOURCE_RESPONSE, "remote-library-add-parse", "identity-mismatch")
             }
@@ -422,7 +425,7 @@ class SourceExtensionClient private constructor(
         classify(response, "remote-library-remove-classify")
         return malformedResponse("remote-library-remove-parse", "invalid-result") {
             val root = call("parseRemoteLibraryRemove", arrayOf<Any?>(response.text.orEmpty(), remoteBookId), "remote-library-remove-parse").jsonObject
-            val identity = BookIdentity(root.requiredString("sourceId"), root.requiredString("remoteBookId"))
+            val identity = BookIdentity.Remote(root.requiredString("sourceId"), root.requiredString("remoteBookId"))
             if (identity.sourceId != manifest.sourceId.value || identity.remoteBookId != remoteBookId) {
                 fail(SourceErrorCode.MALFORMED_SOURCE_RESPONSE, "remote-library-remove-parse", "identity-mismatch")
             }
@@ -448,7 +451,7 @@ class SourceExtensionClient private constructor(
         classify(response, "remote-library-move-classify")
         return malformedResponse("remote-library-move-parse", "invalid-result") {
             val root = call("parseRemoteLibraryMove", arrayOf<Any?>(response.text.orEmpty(), remoteBookId, targetId), "remote-library-move-parse").jsonObject
-            val identity = BookIdentity(root.requiredString("sourceId"), root.requiredString("remoteBookId"))
+            val identity = BookIdentity.Remote(root.requiredString("sourceId"), root.requiredString("remoteBookId"))
             val returnedTargetId = root.requiredString("targetId")
             if (identity.sourceId != manifest.sourceId.value || identity.remoteBookId != remoteBookId || returnedTargetId != targetId) {
                 fail(SourceErrorCode.MALFORMED_SOURCE_RESPONSE, "remote-library-move-parse", "identity-mismatch")
@@ -487,7 +490,7 @@ class SourceExtensionClient private constructor(
     }
 
     private fun updateProbeResult(
-        identity: BookIdentity,
+        identity: BookIdentity.Remote,
         checkedAt: Long,
         previousAnchor: String?,
         outcome: SourceUpdateOutcome,
@@ -680,6 +683,7 @@ class SourceExtensionClient private constructor(
             fail(code, stage, error.error.name.lowercase())
         }
         return malformedResponse(stage, "invalid-json-result") {
+            requireReaderJsonNesting(result)
             JSON.parseToJsonElement(result)
         }
     }
@@ -769,7 +773,7 @@ internal fun encodeUrlQuery(
 }
 
 private fun parseSummary(value: JsonObject): SourceBookSummary = SourceBookSummary(
-    identity = BookIdentity(value.requiredString("sourceId"), value.requiredString("remoteBookId")),
+    identity = BookIdentity.Remote(value.requiredString("sourceId"), value.requiredString("remoteBookId")),
     title = value.requiredString("title"),
     author = value.optionalString("author"),
     coverUrl = value.optionalString("coverUrl"),
@@ -795,7 +799,7 @@ private fun parseUpdateCheck(value: JsonObject): ParsedSourceUpdateCheck {
     val chapters = value.requiredArray("chapters")
     require(chapters.size in 1..MAX_UPDATE_CHECK_CHAPTERS) { "Invalid update check chapter count" }
     return ParsedSourceUpdateCheck(
-        identity = BookIdentity(value.requiredLiteralString("sourceId"), value.requiredLiteralString("remoteBookId")),
+        identity = BookIdentity.Remote(value.requiredLiteralString("sourceId"), value.requiredLiteralString("remoteBookId")),
         chapters = chapters.map { element ->
             element.jsonObject.also { it.requireExactKeys("chapterId", "title") }.let { chapter ->
                 SourceUpdateChapter(
@@ -854,31 +858,19 @@ private fun parseHomePage(value: JsonObject): SourceHomePage = SourceHomePage(
 )
 
 
-private fun parseDocument(value: JsonObject): ReaderDocument = ReaderDocument(
-    sourceId = value.requiredString("sourceId"),
-    remoteBookId = value.requiredString("remoteBookId"),
-    contentId = value.requiredString("contentId"),
-    revision = value.optionalString("revision"),
-    title = value.requiredString("title"),
-    blocks = value.requiredArray("blocks").map { element ->
-        val block = element.jsonObject
-        when (block.requiredString("kind")) {
-            "paragraph" -> ReaderBlock.Paragraph(block.requiredString("blockId"), block.requiredString("text"))
-            "heading" -> ReaderBlock.Heading(
-                block.requiredString("blockId"),
-                block.requiredString("text"),
-                block["level"]!!.jsonPrimitive.int,
-            )
-            "image" -> ReaderBlock.Image(
-                blockId = block.requiredString("blockId"),
-                url = block.requiredString("url"),
-                altText = block.optionalString("altText"),
-                width = block["width"]?.jsonPrimitive?.contentOrNull?.toIntOrNull(),
-                height = block["height"]?.jsonPrimitive?.contentOrNull?.toIntOrNull(),
-            )
-            else -> throw IllegalArgumentException("Unsupported reader block")
-        }
-    },
+private fun parseDocument(
+    value: JsonObject,
+    expectedSourceId: String,
+    expectedRemoteBookId: String,
+    expectedContentId: String,
+): ReaderDocument = ReaderDocumentJsonCodec.decodeRemote(
+    value = value,
+    expectedSourceId = expectedSourceId,
+    expectedRemoteBookId = expectedRemoteBookId,
+    expectedContentId = expectedContentId,
+    // This decoder is reached only after classified chapter transport and parseChapter admission.
+    // Protocol chapter/threadPage declarations still take precedence over legacy operation provenance.
+    legacyOperationKind = org.tsuyomi.shared.sourcecontract.ReaderDocumentKind.CHAPTER,
 )
 
 private fun HxpRemoteOperationPolicy.toNetworkPolicy(): RemoteOperationRequestPolicy = RemoteOperationRequestPolicy(

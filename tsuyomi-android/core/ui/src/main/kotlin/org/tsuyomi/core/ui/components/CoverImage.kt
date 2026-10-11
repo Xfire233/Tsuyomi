@@ -4,6 +4,7 @@
  */
 package org.tsuyomi.core.ui.components
 
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.layout.Box
@@ -24,6 +25,8 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.ColorFilter
+import androidx.compose.ui.graphics.ColorMatrix
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
 import org.tsuyomi.core.display.DisplayProfile
@@ -37,6 +40,15 @@ private val fallbackPalette = listOf(
     Color(0xFF7A8B7A), Color(0xFF8B7A6B), Color(0xFF6B7A8B), Color(0xFF8B6B7A),
     Color(0xFF7A8B8B), Color(0xFF94895F), Color(0xFF6E7E5E), Color(0xFF7E6E8E),
 )
+private val einkFallbackPalette = listOf(
+    Color(0xFF333333), Color(0xFF4D4D4D), Color(0xFF666666), Color(0xFF808080),
+    Color(0xFF999999), Color(0xFFB3B3B3), Color(0xFF5A5A5A), Color(0xFF737373),
+)
+
+/** Shared cached grayscale draw filter for E-ink bitmap renderers. */
+val EInkGrayscaleColorFilter = ColorFilter.colorMatrix(
+    ColorMatrix().apply { setToSaturation(0f) },
+)
 
 /** Pure renderer: no repository reference, request construction, transport, or cache ownership. */
 @Composable
@@ -46,16 +58,13 @@ fun CoverImage(
     unresolvedBadge: Boolean = false,
     unresolvedDescription: String? = null,
 ) {
+    val eInk = LocalDisplayEnvironment.current.effectiveProfile == DisplayProfile.EINK
     val bitmap = when (state) {
         is CoverUiState.Ready -> state.bitmap
         is CoverUiState.StaleReady -> state.bitmap
         else -> null
     }
-    val contentScale = if (LocalDisplayEnvironment.current.effectiveProfile == DisplayProfile.EINK) {
-        ContentScale.Crop
-    } else {
-        ContentScale.Fit
-    }
+    val contentScale = if (eInk) ContentScale.Crop else ContentScale.Fit
 
     Surface(modifier = modifier, shape = MaterialTheme.shapes.small) {
         Box(modifier = Modifier.fillMaxSize()) {
@@ -65,9 +74,10 @@ fun CoverImage(
                     contentDescription = null,
                     modifier = Modifier.fillMaxSize(),
                     contentScale = contentScale,
+                    colorFilter = if (eInk) EInkGrayscaleColorFilter else null,
                 )
             } else {
-                FallbackCover(state.fallbackSpec(), Modifier.fillMaxSize())
+                FallbackCover(state.fallbackSpec(), Modifier.fillMaxSize(), eInk)
             }
             if (unresolvedBadge) {
                 val pendingLabel = stringResource(R.string.cover_unresolved_pending)
@@ -78,7 +88,9 @@ fun CoverImage(
                         .testTag("cover-unresolved-badge")
                         .clearAndSetSemantics { contentDescription = unresolvedDescription ?: pendingLabel },
                     shape = MaterialTheme.shapes.extraSmall,
-                    color = MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.92f),
+                    color = if (eInk) MaterialTheme.colorScheme.errorContainer else
+                        MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.92f),
+                    border = if (eInk) BorderStroke(1.dp, MaterialTheme.colorScheme.outline) else null,
                 ) {
                     Text(
                         text = pendingLabel,
@@ -93,10 +105,11 @@ fun CoverImage(
 }
 
 @Composable
-private fun FallbackCover(spec: FallbackSpec, modifier: Modifier) {
+private fun FallbackCover(spec: FallbackSpec, modifier: Modifier, eInk: Boolean) {
     val seed = "${spec.title}\u0000${spec.sourceLabel.orEmpty()}".hashCode().toLong()
-    val colorIndex = (seed % fallbackPalette.size).toInt().let { if (it < 0) it + fallbackPalette.size else it }
-    val background = fallbackPalette[colorIndex]
+    val palette = if (eInk) einkFallbackPalette else fallbackPalette
+    val colorIndex = (seed % palette.size).toInt().let { if (it < 0) it + palette.size else it }
+    val background = palette[colorIndex]
     val motif = ((seed ushr 8) % 3).toInt()
     Canvas(modifier) {
         drawRect(background)

@@ -3,7 +3,11 @@
 <resources>
     <string name="transfer_local_notice">导入和导出只通过系统文件选择器进行。Tsuyomi 不会上传文件，也不会导入帐号、Cookie、凭证、网页状态或缓存。</string>
     <string name="transfer_import_action">选择备份文件</string>
-    <string name="transfer_export_action">导出 Tsuyomi 数据</string>
+    <string name="transfer_export_action">导出元数据 JSON</string>
+    <string name="transfer_export_archive_action">导出含原书归档</string>
+    <string name="transfer_export_scope">JSON 不含书籍正文；归档包含可用的私有原书。请妥善保管备份，不要公开原书或个人阅读数据。</string>
+    <string name="transfer_review_originals">归档原书 %1$d 本；标识与原书摘要冲突时保留现有原书。</string>
+    <string name="transfer_original_conflicts">%1$d 本原书存在冲突，未覆盖现有文件；书籍元数据按已确认规则合并。</string>
     <string name="transfer_reset_preferences_title">重置界面与阅读偏好</string>
     <string name="transfer_reset_preferences_summary">恢复显示、阅读、书架布局和功能说明默认值；不会删除任何书籍或数据</string>
     <string name="transfer_reset_preferences_dialog_title">重置界面与阅读偏好？</string>
@@ -20,11 +24,13 @@
     <string name="transfer_conflict_title">合并冲突（%1$d）</string>
     <string name="transfer_conflict_shelf">集合标识已存在，将保留本地集合名称、层级和顺序。</string>
     <string name="transfer_conflict_metadata">本地书籍资料更新，将保留本地资料。</string>
+    <string name="transfer_conflict_original">同一本地书的原件指纹不同，将保留已有原件及其关联，不会替换原书。</string>
     <string name="transfer_conflict_rating">本地书籍资料更新，将保留本地评分。</string>
     <string name="transfer_conflict_tags">本地标签已达上限，部分导入标签不会加入。</string>
     <string name="transfer_conflict_progress">本地阅读进度更新或时间相同，将保留本地进度。</string>
     <string name="transfer_conflict_unknown">检测到无法覆盖的本地数据，将保留本地值。</string>
-    <string name="transfer_warning_more">另有 %1$d 条提示</string>
+    <string name="transfer_expand_all">⌄ 展开全部 %1$d 条</string>
+    <string name="transfer_collapse">⌃ 收起</string>
     <string name="transfer_sensitive_notice">继续后将合并本地数据。较新的有效书籍资料和语义阅读进度优先；不会启用来源、远程同步或订阅。</string>
     <string name="transfer_confirm_action">确认并导入</string>
     <string name="transfer_cancel_action">取消</string>

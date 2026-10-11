@@ -4,70 +4,45 @@
  */
 package org.tsuyomi.feature.library
 
-import androidx.compose.foundation.clickable
-import androidx.compose.foundation.background
-import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.aspectRatio
-import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.BoxWithConstraints
+import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
+import org.tsuyomi.core.display.DisplayProfile
+import org.tsuyomi.core.display.LocalDisplayEnvironment
+import org.tsuyomi.core.ui.components.TsuyomiMeasuredPager
+import org.tsuyomi.core.ui.components.rememberTsuyomiMeasuredPagerState
+import org.tsuyomi.core.ui.components.TsuyomiMenuItem
+import org.tsuyomi.core.ui.components.TsuyomiMeasuredTextPager
+import org.tsuyomi.core.ui.theme.TsuyomiSpacing
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.grid.GridCells
-import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
-import androidx.compose.foundation.lazy.grid.items
-import androidx.compose.foundation.lazy.items
-import androidx.compose.material3.Card
-import androidx.compose.material3.Icon
-import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Surface
-import org.tsuyomi.core.media.api.CoverUiState
-import org.tsuyomi.core.media.api.FallbackSpec
+import androidx.compose.ui.unit.dp
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.saveable.rememberSaveable
-import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
-import kotlinx.coroutines.launch
-import org.tsuyomi.shared.librarydomain.CollectionKind
-import androidx.compose.ui.Alignment
-import androidx.compose.ui.platform.LocalDensity
-import androidx.compose.ui.platform.LocalWindowInfo
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.res.stringResource
-import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.ui.semantics.liveRegion
-import androidx.compose.ui.semantics.heading
-import androidx.compose.ui.platform.testTag
-import androidx.compose.ui.semantics.semantics
-import androidx.compose.ui.semantics.selected
-import androidx.compose.ui.unit.dp
-import org.tsuyomi.shared.librarydomain.LibraryEntry
-import org.tsuyomi.shared.librarydomain.LibraryCollection
-import org.tsuyomi.core.display.DisplayProfile
-import org.tsuyomi.core.display.LocalDisplayEnvironment
-import org.tsuyomi.core.ui.components.PaginationBar
+import org.tsuyomi.core.media.api.CoverUiState
+import org.tsuyomi.core.media.api.FallbackSpec
 import org.tsuyomi.core.ui.components.StateView
 import org.tsuyomi.core.ui.components.TsuyomiButton
 import org.tsuyomi.core.ui.components.TsuyomiButtonStyle
 import org.tsuyomi.core.ui.components.TsuyomiDialog
-import org.tsuyomi.core.ui.components.TsuyomiTextField
-import org.tsuyomi.core.ui.components.TsuyomiTabOption
-import org.tsuyomi.core.ui.components.TsuyomiTextTabRow
-import org.tsuyomi.shared.librarydomain.RemoteReconciliationState
-import org.tsuyomi.shared.model.BookIdentity
-import org.tsuyomi.core.ui.components.TsuyomiButton
 import org.tsuyomi.core.ui.components.TsuyomiStateKind
-import org.tsuyomi.core.ui.icons.TsuyomiIcons
+import org.tsuyomi.core.ui.components.TsuyomiTextField
+import org.tsuyomi.shared.librarydomain.CollectionKind
+import org.tsuyomi.shared.librarydomain.LibraryCollection
+import org.tsuyomi.shared.librarydomain.LibraryEntry
+import org.tsuyomi.shared.model.BookIdentity
 
 enum class SystemLibraryFilter {
     ALL,
@@ -185,7 +160,7 @@ private fun SystemLibraryFilter.accepts(entry: LibraryEntry): Boolean = when (th
     SystemLibraryFilter.CONTINUE -> entry.readerVisitedAt != null
     SystemLibraryFilter.READ_LATER -> entry.readLater
     SystemLibraryFilter.UNREAD -> false
-    SystemLibraryFilter.DORMANT -> !entry.sourceAvailable
+    SystemLibraryFilter.DORMANT -> entry.book.identity is BookIdentity.Remote && !entry.sourceAvailable
 }
 
 private fun LibraryEntry.readerActivityAt() = readerVisitedAt ?: progress?.updatedAt
@@ -209,6 +184,7 @@ fun LibraryScreen(
     onEditFilter: () -> Unit = {},
     onClearFilter: () -> Unit = {},
     onRetry: () -> Unit,
+    onImportLocalBooks: (() -> Unit)? = null,
     onLongPressBook: (BookIdentity) -> Unit = {},
     onToggleBookSelection: (BookIdentity) -> Unit = {},
     onLongPressCollection: (String) -> Unit = {},
@@ -228,7 +204,8 @@ fun LibraryScreen(
     onViewportChanged: (LibraryViewport) -> Unit = {},
     onViewportSettled: suspend (Int, Int) -> Unit = { _, _ -> },
     coverState: @Composable (LibraryEntry) -> CoverUiState = { entry ->
-        CoverUiState.Fallback(FallbackSpec(entry.book.title, entry.book.identity.sourceId))
+        val sourceLabel = (entry.book.identity as? BookIdentity.Remote)?.sourceId
+        CoverUiState.Fallback(FallbackSpec(entry.book.title, sourceLabel))
     },
     onCoverVisibility: (LibraryEntry, Boolean) -> Unit = { _, _ -> },
     onIgnoreUpdate: suspend (org.tsuyomi.shared.librarydomain.UnresolvedUpdate) -> org.tsuyomi.shared.librarydomain.UpdateUndo? = { null },
@@ -244,18 +221,6 @@ fun LibraryScreen(
             onAction = onRetry,
             modifier = modifier,
         )
-        LocalDisplayEnvironment.current.effectiveProfile == DisplayProfile.EINK -> FrozenEInkLibraryContent(
-            state = state,
-            collections = collections,
-            showNavigationNodes = showNavigationNodes,
-            onSelectTab = onSelectTab,
-            onOpenCollection = onOpenCollection,
-            onOpenBook = { entry ->
-                if (state.selectionKind == LibrarySelectionKind.BOOK) onToggleBookSelection(entry.book.identity)
-                else onOpenBook(entry)
-            },
-            modifier = modifier.fillMaxSize(),
-        )
         else -> LibraryPresentation(
             state = state,
             primaryTabStates = primaryTabStates,
@@ -264,16 +229,21 @@ fun LibraryScreen(
             showNavigationNodes = showNavigationNodes,
             onOpenCollection = onOpenCollection,
             onSelectTab = onSelectTab,
-            onOpenBook = onOpenBook,
+            onOpenBook = { entry ->
+                if (state.selectionKind == LibrarySelectionKind.BOOK && entry.localMembership) {
+                    onToggleBookSelection(entry.book.identity)
+                } else {
+                    onOpenBook(entry)
+                }
+            },
             onOpenMirror = onOpenMirror,
             onOpenUpdateSettings = onOpenUpdateSettings,
             onCancelUpdateScan = onCancelUpdateScan,
-            coverState = coverState,
-            onCoverVisibility = onCoverVisibility,
             onRefreshUpdates = onRefreshUpdates,
             onEditFilter = onEditFilter,
             onClearFilter = onClearFilter,
             onRetry = onRetry,
+            onImportLocalBooks = onImportLocalBooks,
             onLongPressBook = onLongPressBook,
             onToggleBookSelection = onToggleBookSelection,
             onLongPressCollection = onLongPressCollection,
@@ -284,6 +254,8 @@ fun LibraryScreen(
             onIgnoreUpdate = onIgnoreUpdate,
             onViewportChanged = onViewportChanged,
             onViewportSettled = onViewportSettled,
+            coverState = coverState,
+            onCoverVisibility = onCoverVisibility,
             modifier = modifier,
         )
     }
@@ -342,21 +314,35 @@ private fun LibrarySelectionDialogs(
             val manualCollections = collections.filter {
                 it.kind == CollectionKind.MANUAL && it.collectionId !in state.selectedCollectionIds
             }
+            val eInk = LocalDisplayEnvironment.current.effectiveProfile == DisplayProfile.EINK
             TsuyomiDialog(
                 onDismissRequest = onDismiss,
                 title = if (state.selectionKind == LibrarySelectionKind.BOOK) "加入收藏夹" else "移入收藏夹",
                 body = {
-                    if (manualCollections.isEmpty()) {
-                        Text("没有可用的目标收藏夹。")
-                    } else {
-                        manualCollections.forEach { collection ->
-                            TsuyomiButton(
-                                text = collection.title,
-                                onClick = { onAddToCollection(collection.collectionId) },
-                                modifier = Modifier.fillMaxWidth(),
-                                style = TsuyomiButtonStyle.TEXT,
-                            )
+                    if (!eInk) {
+                        if (manualCollections.isEmpty()) {
+                            Text("没有可用的目标收藏夹。")
+                        } else {
+                            manualCollections.forEach { collection ->
+                                TsuyomiButton(
+                                    text = collection.title,
+                                    onClick = { onAddToCollection(collection.collectionId) },
+                                    modifier = Modifier.fillMaxWidth(),
+                                    style = TsuyomiButtonStyle.TEXT,
+                                )
+                            }
                         }
+                    } else {
+                        TsuyomiMeasuredPager(itemCount = maxOf(1, manualCollections.size),
+                            itemKey = { if (manualCollections.isEmpty()) "empty" else "collection:${manualCollections[it].collectionId}" },
+                            modifier = Modifier.fillMaxWidth().weight(1f).testTag("library-add-to-collection-pager"),
+                            itemContent = { index ->
+                                if (manualCollections.isEmpty()) TsuyomiMeasuredTextPager("没有可用的目标收藏夹。", fillViewport = false, alwaysShowPageControls = false)
+                                else {
+                                    val collection = manualCollections[index]
+                                    TsuyomiMenuItem(collection.title, { onAddToCollection(collection.collectionId) }, modifier = Modifier.testTag("library-add-collection-${collection.collectionId}"))
+                                }
+                            })
                     }
                 },
                 dismissLabel = "取消",
@@ -364,34 +350,48 @@ private fun LibrarySelectionDialogs(
         }
         LibrarySelectionDialog.CONFIRM_REMOVE -> {
             val selectingCollections = deletionFolderCount != null || state.selectionKind == LibrarySelectionKind.COLLECTION
+            val eInk = LocalDisplayEnvironment.current.effectiveProfile == DisplayProfile.EINK
+            val deletionCopy = if (selectingCollections) {
+                if (deletionFolderCount == null) stringResource(R.string.collection_delete_loading)
+                else stringResource(R.string.collection_delete_preview, deletionFolderCount, deletionMembershipCount) + "\n" +
+                    stringResource(if (deletionSubtree) R.string.collection_delete_subtree_consequence
+                        else R.string.collection_delete_reparent_consequence)
+            } else "将处理 ${state.selectedBookIds.size} 本书。网站书架不会被修改。"
             TsuyomiDialog(
                 onDismissRequest = onDismiss,
                 title = if (selectingCollections) stringResource(
                     if (deletionSubtree) R.string.collection_delete_subtree_title else R.string.collection_delete_reparent_title,
                 ) else "移除所选书籍？",
-                text = if (selectingCollections) {
-                    if (deletionFolderCount == null) stringResource(R.string.collection_delete_loading)
-                    else stringResource(R.string.collection_delete_preview, deletionFolderCount, deletionMembershipCount) + "\n" +
-                        stringResource(if (deletionSubtree) R.string.collection_delete_subtree_consequence
-                            else R.string.collection_delete_reparent_consequence)
-                } else "将处理 ${state.selectedBookIds.size} 本书。网站书架不会被修改。",
+                text = if (selectingCollections && eInk) null else deletionCopy,
                 body = {
                     if (selectingCollections) {
-                        deletionMessage?.let { Text(it, Modifier.semantics { liveRegion = LiveRegionMode.Polite }) }
-                    TsuyomiButton(
-                        text = stringResource(R.string.collection_delete_reparent),
-                        onClick = { onDeletionPolicyChange(false) },
-                        modifier = Modifier.fillMaxWidth(),
-                        enabled = deletionConfirmEnabled || deletionMessage != null,
-                        style = if (deletionSubtree) TsuyomiButtonStyle.SECONDARY else TsuyomiButtonStyle.PRIMARY,
-                    )
-                    TsuyomiButton(
-                        text = stringResource(R.string.collection_delete_subtree),
-                        onClick = { onDeletionPolicyChange(true) },
-                        modifier = Modifier.fillMaxWidth(),
-                        style = if (deletionSubtree) TsuyomiButtonStyle.PRIMARY else TsuyomiButtonStyle.SECONDARY,
-                        enabled = deletionConfirmEnabled || deletionMessage != null,
-                    )
+                        if (eInk) {
+                            TsuyomiMeasuredPager(itemCount = 4, itemKey = { "delete:$it" }, modifier = Modifier.fillMaxWidth().weight(1f).testTag("library-collection-delete-pager"),
+                                itemContent = { index -> when (index) {
+                                    0 -> TsuyomiMeasuredTextPager(deletionCopy, fillViewport = false, alwaysShowPageControls = false)
+                                    1 -> deletionMessage?.let { TsuyomiMeasuredTextPager(it, Modifier.semantics { liveRegion = LiveRegionMode.Polite }, fillViewport = false, alwaysShowPageControls = false) }
+                                    2 -> TsuyomiMenuItem(stringResource(R.string.collection_delete_reparent), { onDeletionPolicyChange(false) }, selected = !deletionSubtree,
+                                        enabled = deletionConfirmEnabled || deletionMessage != null, modifier = Modifier.testTag("library-delete-policy-reparent"))
+                                    else -> TsuyomiMenuItem(stringResource(R.string.collection_delete_subtree), { onDeletionPolicyChange(true) }, selected = deletionSubtree,
+                                        enabled = deletionConfirmEnabled || deletionMessage != null, modifier = Modifier.testTag("library-delete-policy-subtree"))
+                                } })
+                        } else {
+                            deletionMessage?.let { Text(it, Modifier.semantics { liveRegion = LiveRegionMode.Polite }) }
+                            TsuyomiButton(
+                                text = stringResource(R.string.collection_delete_reparent),
+                                onClick = { onDeletionPolicyChange(false) },
+                                modifier = Modifier.fillMaxWidth(),
+                                enabled = deletionConfirmEnabled || deletionMessage != null,
+                                style = if (deletionSubtree) TsuyomiButtonStyle.SECONDARY else TsuyomiButtonStyle.PRIMARY,
+                            )
+                            TsuyomiButton(
+                                text = stringResource(R.string.collection_delete_subtree),
+                                onClick = { onDeletionPolicyChange(true) },
+                                modifier = Modifier.fillMaxWidth(),
+                                style = if (deletionSubtree) TsuyomiButtonStyle.PRIMARY else TsuyomiButtonStyle.SECONDARY,
+                                enabled = deletionConfirmEnabled || deletionMessage != null,
+                            )
+                        }
                     }
                 },
                 confirmLabel = if (selectingCollections) stringResource(
@@ -408,267 +408,7 @@ private fun LibrarySelectionDialogs(
     }
 }
 
-private data class LibraryNode(
-    val key: String,
-    val title: String,
-    val kind: String,
-    val icon: ImageVector,
-    val onClick: () -> Unit,
-)
 
-@Composable
-private fun FrozenEInkLibraryContent(
-    state: LibraryUiState,
-    collections: List<LibraryCollection>,
-    showNavigationNodes: Boolean,
-    onSelectTab: suspend (SystemLibraryFilter) -> Unit,
-    onOpenCollection: (LibraryCollection) -> Unit,
-    onOpenBook: (LibraryEntry) -> Unit,
-    modifier: Modifier,
-) {
-    val wideWindow = with(LocalDensity.current) {
-        LocalWindowInfo.current.containerSize.width.toDp() >= 600.dp
-    }
-    val environment = LocalDisplayEnvironment.current
-    val filtered = state.projectedEntries()
-    val pageSize = if (environment.effectiveProfile == DisplayProfile.EINK) 6 else filtered.size.coerceAtLeast(1)
-    val pageCount = ((filtered.size + pageSize - 1) / pageSize).coerceAtLeast(1)
-    var page by rememberSaveable(state.filter, filtered.size) { mutableIntStateOf(1) }
-    val visible = filtered.drop((page - 1) * pageSize).take(pageSize)
-    val scope = rememberCoroutineScope()
-    val selectedTab = state.filter.takeIf { it in SystemLibraryFilter.primaryTabs } ?: SystemLibraryFilter.ALL
-    val nodes = if (showNavigationNodes) {
-        collections.map { collection ->
-            LibraryNode(
-                key = "collection:${collection.collectionId}",
-                title = collection.title,
-                kind = stringResource(collection.kind.nodeKindLabel()),
-                icon = when (collection.kind) {
-                    CollectionKind.MANUAL -> TsuyomiIcons.Folder
-                    CollectionKind.SMART -> TsuyomiIcons.SmartCollection
-                    CollectionKind.SUBSCRIPTION -> TsuyomiIcons.Mirror
-                },
-                onClick = { onOpenCollection(collection) },
-            )
-        }
-    } else {
-        emptyList()
-    }
-
-    Column(modifier.fillMaxSize().padding(horizontal = 16.dp)) {
-        if (showNavigationNodes) {
-            TsuyomiTextTabRow(
-                options = listOf(
-                    TsuyomiTabOption(SystemLibraryFilter.ALL.name, "书架"),
-                    TsuyomiTabOption(SystemLibraryFilter.CONTINUE.name, "继续阅读"),
-                    TsuyomiTabOption(SystemLibraryFilter.READ_LATER.name, "稍后再读"),
-                ),
-                selectedKey = selectedTab.name,
-                onSelect = { key ->
-                    SystemLibraryFilter.primaryTabs.firstOrNull { it.name == key }?.let { tab ->
-                        if (tab != selectedTab) scope.launch { onSelectTab(tab) }
-                    }
-                },
-            )
-        }
-        state.refreshFailure?.let { message ->
-            Text(
-                text = message,
-                color = MaterialTheme.colorScheme.error,
-                style = MaterialTheme.typography.bodyMedium,
-                modifier = Modifier.padding(top = 8.dp),
-            )
-        }
-        Text(
-            text = stringResource(R.string.library_archive_heading),
-            style = MaterialTheme.typography.headlineSmall,
-            modifier = Modifier.padding(top = 16.dp, bottom = 4.dp).semantics { heading() },
-        )
-        Text(
-            text = stringResource(R.string.library_count, filtered.size),
-            style = MaterialTheme.typography.labelLarge,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
-        when (state.layout) {
-            LibraryLayout.GRID -> LazyVerticalGrid(
-                columns = if (wideWindow) GridCells.Adaptive(160.dp) else GridCells.Fixed(3),
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                verticalArrangement = Arrangement.spacedBy(12.dp),
-                modifier = Modifier.weight(1f).padding(top = 8.dp).testTag("library-scroll-domain"),
-            ) {
-                items(nodes, key = { it.key }) { node -> LibraryNodeGridCard(node) }
-                items(visible, key = ::libraryEntryKey) { entry ->
-                    LibraryGridCard(entry, onOpenBook, entry.book.identity in state.selectedBookIds)
-                }
-            }
-            LibraryLayout.LIST -> LazyColumn(
-                Modifier.weight(1f).padding(top = 8.dp).testTag("library-scroll-domain"),
-            ) {
-                items(nodes, key = { it.key }) { node ->
-                    LibraryNodeRow(node, compact = false)
-                    HorizontalDivider()
-                }
-                items(visible, key = ::libraryEntryKey) { entry ->
-                    LibraryRow(entry, onOpenBook, entry.book.identity in state.selectedBookIds)
-                    HorizontalDivider()
-                }
-            }
-            LibraryLayout.COMPACT -> LazyColumn(
-                Modifier.weight(1f).padding(top = 8.dp).testTag("library-scroll-domain"),
-            ) {
-                items(nodes, key = { it.key }) { node ->
-                    LibraryNodeRow(node, compact = true)
-                    HorizontalDivider()
-                }
-                items(visible, key = ::libraryEntryKey) { entry ->
-                    LibraryCompactRow(entry, onOpenBook, entry.book.identity in state.selectedBookIds)
-                    HorizontalDivider()
-                }
-            }
-        }
-        if (environment.effectiveProfile == DisplayProfile.EINK && filtered.isNotEmpty()) {
-            PaginationBar(
-                page = page.coerceAtMost(pageCount),
-                pageCount = pageCount,
-                onPrevious = { page = (page - 1).coerceAtLeast(1) },
-                onNext = { page = (page + 1).coerceAtMost(pageCount) },
-                modifier = Modifier.padding(vertical = 8.dp),
-            )
-        }
-    }
-}
-
-@Composable
-private fun LibraryNodeGridCard(node: LibraryNode) {
-    Card(onClick = node.onClick, modifier = Modifier.fillMaxWidth()) {
-        Column {
-            Box(
-                modifier = Modifier.fillMaxWidth().aspectRatio(3f / 4f)
-                    .background(MaterialTheme.colorScheme.secondaryContainer),
-                contentAlignment = Alignment.Center,
-            ) {
-                Icon(
-                    imageVector = node.icon,
-                    contentDescription = null,
-                    tint = MaterialTheme.colorScheme.onSecondaryContainer,
-                    modifier = Modifier.size(48.dp),
-                )
-            }
-            Column(Modifier.padding(horizontal = 8.dp, vertical = 8.dp)) {
-                Text(node.title, style = MaterialTheme.typography.titleSmall, maxLines = 2)
-                Text(
-                    node.kind,
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            }
-        }
-    }
-}
-
-@Composable
-private fun LibraryNodeRow(node: LibraryNode, compact: Boolean) {
-    Surface(
-        modifier = Modifier.fillMaxWidth().clickable(role = Role.Button, onClick = node.onClick),
-        color = MaterialTheme.colorScheme.surface,
-    ) {
-        Row(
-            modifier = Modifier.fillMaxWidth().padding(
-                horizontal = 4.dp,
-                vertical = if (compact) 10.dp else 14.dp,
-            ),
-            horizontalArrangement = Arrangement.spacedBy(12.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Icon(
-                imageVector = node.icon,
-                contentDescription = null,
-                tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.size(24.dp),
-            )
-            Text(
-                node.title,
-                style = if (compact) MaterialTheme.typography.bodyLarge else MaterialTheme.typography.titleMedium,
-                modifier = Modifier.weight(1f),
-            )
-            Text(node.kind, style = MaterialTheme.typography.labelMedium)
-        }
-    }
-}
-
-@Composable
-private fun LibraryRow(entry: LibraryEntry, onOpenBook: (LibraryEntry) -> Unit, chosen: Boolean = false) {
-    Surface(
-        modifier = Modifier.fillMaxWidth().semantics { selected = chosen }
-            .clickable(role = Role.Button) { onOpenBook(entry) },
-        color = MaterialTheme.colorScheme.surface,
-    ) {
-        Column(Modifier.padding(horizontal = 4.dp, vertical = 14.dp)) {
-            Text(entry.book.title, style = MaterialTheme.typography.titleMedium)
-            if (chosen) Text("已选择", style = MaterialTheme.typography.labelLarge)
-            val authors = entry.book.authors.joinToString("、").ifBlank { stringResource(R.string.library_unknown_author) }
-            Text(authors, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-            Row(horizontalArrangement = Arrangement.spacedBy(12.dp), modifier = Modifier.padding(top = 6.dp)) {
-                entry.rating?.let { Text(stringResource(R.string.library_rating, it), style = MaterialTheme.typography.labelLarge) }
-                if (!entry.sourceAvailable) Text(stringResource(R.string.library_dormant), style = MaterialTheme.typography.labelLarge)
-                entry.reconciliation?.let { Text(stringResource(it.label()), style = MaterialTheme.typography.labelLarge) }
-            }
-        }
-    }
-}
-
-@Composable
-private fun LibraryGridCard(entry: LibraryEntry, onOpenBook: (LibraryEntry) -> Unit, chosen: Boolean = false) {
-    Card(
-        onClick = { onOpenBook(entry) },
-        modifier = Modifier.fillMaxWidth().semantics { selected = chosen },
-    ) {
-        Column {
-            Box(
-                modifier = Modifier.fillMaxWidth().aspectRatio(3f / 4f)
-                    .background(MaterialTheme.colorScheme.primaryContainer),
-                contentAlignment = Alignment.Center,
-            ) {
-                Text(
-                    text = entry.book.title.firstOrNull()?.toString().orEmpty(),
-                    style = MaterialTheme.typography.headlineLarge,
-                    color = MaterialTheme.colorScheme.onPrimaryContainer,
-                )
-            }
-            Text(
-                text = entry.book.title,
-                style = MaterialTheme.typography.titleSmall,
-                maxLines = 2,
-                modifier = Modifier.padding(horizontal = 8.dp, vertical = 8.dp),
-            )
-            if (chosen) Text("已选择", style = MaterialTheme.typography.labelLarge,
-                modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp))
-        }
-    }
-}
-
-@Composable
-private fun LibraryCompactRow(entry: LibraryEntry, onOpenBook: (LibraryEntry) -> Unit, chosen: Boolean = false) {
-    Surface(
-        modifier = Modifier.fillMaxWidth().semantics { selected = chosen }
-            .clickable(role = Role.Button) { onOpenBook(entry) },
-        color = MaterialTheme.colorScheme.surface,
-    ) {
-        Row(
-            modifier = Modifier.fillMaxWidth().padding(horizontal = 4.dp, vertical = 10.dp),
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-        ) {
-            Text(entry.book.title, style = MaterialTheme.typography.bodyLarge, modifier = Modifier.weight(1f))
-            if (chosen) Text("已选择", style = MaterialTheme.typography.labelMedium)
-            if (entry.readLater) {
-                Text(stringResource(R.string.library_filter_read_later), style = MaterialTheme.typography.labelMedium)
-            }
-        }
-    }
-}
-
-private fun libraryEntryKey(entry: LibraryEntry): String =
-    "${entry.book.identity.sourceId}\u0000${entry.book.identity.remoteBookId}"
 
 
 internal fun SystemLibraryFilter.label(): Int = when (this) {
@@ -679,17 +419,5 @@ internal fun SystemLibraryFilter.label(): Int = when (this) {
     SystemLibraryFilter.DORMANT -> R.string.library_filter_dormant
 }
 
-private fun CollectionKind.nodeKindLabel(): Int = when (this) {
-    CollectionKind.MANUAL -> R.string.library_node_manual_collection
-    CollectionKind.SMART -> R.string.library_node_smart_collection
-    CollectionKind.SUBSCRIPTION -> R.string.library_node_mirror
-}
 
 
-private fun RemoteReconciliationState.label(): Int = when (this) {
-    RemoteReconciliationState.PENDING_USER_ACTION -> R.string.library_reconciliation_pending_user_action
-    RemoteReconciliationState.IN_FLIGHT -> R.string.library_reconciliation_in_flight
-    RemoteReconciliationState.CONFIRMED -> R.string.library_reconciliation_confirmed
-    RemoteReconciliationState.UNRESOLVED -> R.string.library_reconciliation_unresolved
-    RemoteReconciliationState.CANCELLED -> R.string.library_reconciliation_cancelled
-}

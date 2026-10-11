@@ -4,13 +4,22 @@
  */
 package org.tsuyomi.feature.browse
 
+import androidx.compose.foundation.layout.BoxWithConstraints
+import androidx.compose.ui.semantics.Role
+import org.tsuyomi.core.ui.components.TsuyomiMeasuredPager
+import org.tsuyomi.core.ui.components.LocalTsuyomiPagerItemVisible
+import org.tsuyomi.core.ui.components.rememberTsuyomiMeasuredPagerState
+import org.tsuyomi.core.ui.components.TsuyomiMeasuredTextPager
+import org.tsuyomi.shared.sourcecontract.SourceHomeSection
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.grid.GridCells
@@ -20,7 +29,9 @@ import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.lazy.grid.rememberLazyGridState
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
+import org.tsuyomi.core.ui.components.TsuyomiToggleChip
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
@@ -29,14 +40,21 @@ import androidx.compose.runtime.key
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.saveable.SaveableStateHolder
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.focusProperties
+import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.layout.positionInRoot
+import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.input.key.KeyEventType
@@ -72,20 +90,28 @@ import org.tsuyomi.core.ui.components.TsuyomiFilterCapsuleOption
 import org.tsuyomi.core.ui.components.TsuyomiFilterCapsuleOptionRow
 import org.tsuyomi.core.ui.components.TsuyomiFilterCapsulePanel
 import org.tsuyomi.core.ui.components.TsuyomiNavigationCard
+import org.tsuyomi.core.ui.components.PaginationBar
 import org.tsuyomi.core.ui.components.TsuyomiPullToRefresh
 import org.tsuyomi.core.ui.components.TsuyomiStateKind
 import org.tsuyomi.core.ui.components.TsuyomiTabOption
 import org.tsuyomi.core.ui.components.TsuyomiTextTabRow
 import org.tsuyomi.core.ui.components.TsuyomiTextTabPagerDefaults
 import org.tsuyomi.core.ui.theme.instantMotion
+import org.tsuyomi.core.ui.icons.TsuyomiIcons
 import org.tsuyomi.core.ui.theme.rememberSystemReducedMotion
 import org.tsuyomi.core.ui.theme.TsuyomiSpacing
 import org.tsuyomi.shared.sourcecontract.SourceBookSummary
 import org.tsuyomi.shared.sourcecontract.SourceErrorCode
 import org.tsuyomi.shared.sourcecontract.SourceHomeFilter
+import org.tsuyomi.shared.sourcecontract.SourceHomeFilterOption
 import org.tsuyomi.shared.sourcecontract.SourceHomeFeature
+import org.tsuyomi.shared.sourcecontract.SourceHomePage
 
 private const val APPEND_THRESHOLD_ITEMS = 6
+
+ 
+private fun sourceHomeBookKey(book: SourceBookSummary): String =
+    "${book.identity.sourceId}:${book.identity.remoteBookId}"
 
 @Composable
 internal fun SourceHomeStandardContent(
@@ -250,6 +276,268 @@ internal fun SourceHomeStandardContent(
     }
 }
 
+
+@Composable
+internal fun SourceHomeEinkContent(
+    primary: String, pageState: SourceHomePageViewState, page: SourceHomePage,
+    filtersExpanded: Boolean, onFiltersExpandedChange: (Boolean) -> Unit,
+    onSelectFilters: (Map<String, String>) -> Unit,
+    onPreviousPage: () -> Unit, onNextPage: () -> Unit, onRetryReplacement: () -> Unit,
+    onOpenBook: (SourceBookSummary) -> Unit, onOpenFeature: (SourceHomeFeature) -> Unit,
+    onOpenVerification: () -> Unit, saveableStateHolder: SaveableStateHolder,
+    coverState: @Composable (SourceBookSummary) -> CoverUiState,
+    onCoverVisibility: (SourceBookSummary, Boolean) -> Unit, modifier: Modifier,
+) {
+    val primaryId = page.filters.firstOrNull()?.id
+    val filters = page.filters.filterNot { it.id == primaryId }
+    val wide = with(LocalDensity.current) { LocalWindowInfo.current.containerSize.width.toDp() >= 600.dp }
+    var previousCursorPage by rememberSaveable(primary, pageState.queryKey) {
+        mutableIntStateOf(pageState.cursorPageNumber)
+    }
+    LaunchedEffect(pageState.cursorPageNumber) {
+        if (previousCursorPage != pageState.cursorPageNumber) onFiltersExpandedChange(false)
+        previousCursorPage = pageState.cursorPageNumber
+    }
+    fun turnPage(turn: () -> Unit) {
+        onFiltersExpandedChange(false)
+        turn()
+    }
+    Column(modifier.fillMaxSize()) {
+        if (filters.isNotEmpty()) {
+            TsuyomiToggleChip(
+                text = stringResource(
+                    if (filtersExpanded) R.string.source_home_collapse_filters
+                    else R.string.source_home_expand_filters,
+                ),
+                selected = filtersExpanded,
+                stateDescription = stringResource(
+                    if (filtersExpanded) R.string.source_home_filters_expanded
+                    else R.string.source_home_filters_collapsed,
+                ),
+                onClick = { onFiltersExpandedChange(!filtersExpanded) },
+                leadingIcon = if (filtersExpanded) TsuyomiIcons.ToTop else TsuyomiIcons.ToBottom,
+                role = Role.Button,
+                modifier = Modifier
+                    .padding(horizontal = TsuyomiSpacing.Md, vertical = TsuyomiSpacing.Xs)
+                    .testTag("source-home-toggle-filters"),
+            )
+        }
+    saveableStateHolder.SaveableStateProvider("$primary:${pageState.queryKey}:${pageState.cursorPageNumber}") {
+        // Register the semantic anchor in its query scope, not the retained measurement subcomposition.
+        val contentState = rememberTsuyomiMeasuredPagerState()
+        BoxWithConstraints(
+            Modifier.fillMaxWidth().weight(1f).testTag("source-home-book-grid-$primary")
+                .padding(horizontal = TsuyomiSpacing.Md, vertical = TsuyomiSpacing.Xs),
+        ) {
+            val density = LocalDensity.current
+            var controlsHeight by remember { mutableIntStateOf(0) }
+            var catalogTop by remember { mutableFloatStateOf(0f) }
+            var filterPanelHeight by remember { mutableIntStateOf(0) }
+            val columns = if (wide) {
+                ((maxWidth + TsuyomiSpacing.Sm) / (150.dp + TsuyomiSpacing.Sm)).toInt().coerceAtLeast(1)
+            } else 3
+            val sectionCount = page.sections.sumOf { 1 + (it.items.size + columns - 1) / columns }
+            val statusStart = sectionCount + page.features.size
+            val statusCount = (if (pageState.replacing) 1 else 0) +
+                (if (pageState.replacementFailure != null) 1 else 0) +
+                (if (pageState.appendFailure != null) 1 else 0)
+            fun sectionAt(index: Int): Pair<SourceHomeSection, Int> {
+                var remaining = index
+                for (section in page.sections) {
+                    val size = 1 + (section.items.size + columns - 1) / columns
+                    if (remaining < size) return section to remaining
+                    remaining -= size
+                }
+                error("Section index outside source projection")
+            }
+            fun itemKey(index: Int): String = when {
+                index < sectionCount -> sectionAt(index).let { (section, row) ->
+                    if (row == 0) "section:${section.id}"
+                    else "book:${section.id}:${sourceHomeBookKey(section.items[(row - 1) * columns])}"
+                }
+                index < statusStart -> "feature:${page.features[index - sectionCount].id}"
+                else -> "status:${index - statusStart}"
+            }
+            val count = statusStart + statusCount
+            TsuyomiMeasuredPager(
+                itemCount = count,
+                itemKey = ::itemKey,
+                state = contentState,
+                modifier = Modifier.fillMaxSize().onGloballyPositioned { catalogTop = it.positionInRoot().y },
+                verticalSpacing = TsuyomiSpacing.Sm,
+                alwaysShowPageControls = pageState.cursorPreviousAvailable || pageState.cursorNextAvailable,
+                itemContent = { index ->
+                    var itemTop by remember { mutableFloatStateOf(Float.NEGATIVE_INFINITY) }
+                    // Only rows touched by the bounded panel lose focus and semantics.
+                    val covered = filtersExpanded && filters.isNotEmpty() &&
+                        (filterPanelHeight == 0 || itemTop < catalogTop + filterPanelHeight)
+                    Box(
+                        Modifier.fillMaxWidth()
+                            .onGloballyPositioned { itemTop = it.positionInRoot().y }
+                            .focusProperties { canFocus = !covered }
+                            .then(if (covered) Modifier.clearAndSetSemantics {} else Modifier),
+                    ) {
+                        when {
+                            index < sectionCount -> {
+                                val (section, row) = sectionAt(index)
+                                if (row == 0) SourceHomeSectionHeading(section.title, section.items.size)
+                                else Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(TsuyomiSpacing.Sm)) {
+                                    val first = (row - 1) * columns
+                                    repeat(columns) { column ->
+                                        Box(Modifier.weight(1f)) {
+                                            section.items.getOrNull(first + column)?.let { book ->
+                                                SourceHomeBookCard(book, true, coverState, onCoverVisibility, onOpenBook)
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                            index < statusStart -> {
+                                val feature = page.features[index - sectionCount]
+                                TsuyomiNavigationCard(
+                                    title = feature.title,
+                                    supportingText = feature.supportingText,
+                                    onClick = { onOpenFeature(feature) },
+                                    modifier = Modifier.testTag("source-home-feature-${feature.id}"),
+                                )
+                            }
+                            else -> {
+                                var status = index - statusStart
+                                if (pageState.replacing && status == 0) SourceHomeFooterMessage(stringResource(R.string.source_home_updating))
+                                else {
+                                    if (pageState.replacing) status--
+                                    val replacement = pageState.replacementFailure != null && status == 0
+                                    val failure = if (replacement) pageState.replacementFailure else pageState.appendFailure
+                                    val verification = failure?.code == SourceErrorCode.SESSION_REQUIRED || failure?.code == SourceErrorCode.VERIFICATION_REQUIRED
+                                    Column(Modifier.fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally) {
+                                        SourceHomePagedText(stringResource(if (verification) R.string.source_home_inline_verification else R.string.source_home_inline_failure))
+                                        TsuyomiButton(
+                                            stringResource(if (verification) R.string.source_home_open_verification else R.string.source_home_retry),
+                                            if (verification) onOpenVerification else if (replacement) onRetryReplacement else ({ turnPage(onNextPage) }),
+                                            style = TsuyomiButtonStyle.TEXT,
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    }
+                },
+                pageControls = { localPage, canGoPrevious, canGoNext, previous, next, pageCount, first, last ->
+                    Column(
+                        Modifier.fillMaxWidth().testTag("source-home-content-page-controls")
+                            .onSizeChanged { controlsHeight = it.height },
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                    ) {
+                        Text(stringResource(R.string.source_home_cursor_page, pageState.cursorPageNumber), style = MaterialTheme.typography.labelMedium)
+                        PaginationBar(
+                            page = localPage, pageCount = pageCount,
+                            onPrevious = { turnPage(if (canGoPrevious) previous else onPreviousPage) },
+                            onNext = { turnPage(if (canGoNext) next else onNextPage) },
+                            loading = pageState.appending,
+                            hasPreviousPage = canGoPrevious || pageState.cursorPreviousAvailable,
+                            hasNextPage = canGoNext || (pageState.cursorNextAvailable && pageState.appendFailure == null),
+                            onFirst = { turnPage(first) },
+                            onLast = { turnPage(last) },
+                        )
+                    }
+                },
+            )
+            if (filtersExpanded && filters.isNotEmpty()) {
+                // Toggle only this natural-height overlay; the catalog viewport and anchor stay fixed.
+                val catalogHeight = (maxHeight - with(density) { controlsHeight.toDp() }).coerceAtLeast(0.dp)
+                Surface(
+                    modifier = Modifier.fillMaxWidth()
+                        .heightIn(max = catalogHeight / 2)
+                        .onSizeChanged { filterPanelHeight = it.height }
+                        .testTag("source-home-eink-filter-panel"),
+                    color = MaterialTheme.colorScheme.surface,
+                ) {
+                    SourceHomeEinkFilters(
+                        filters = filters,
+                        selectedFilters = pageState.selectedFilters,
+                        onSelectFilters = { onFiltersExpandedChange(false); onSelectFilters(it) },
+                    )
+                }
+            }
+        }
+    }
+    }
+}
+
+@Composable
+private fun SourceHomeEinkFilters(
+    filters: List<SourceHomeFilter>,
+    selectedFilters: Map<String, String>,
+    onSelectFilters: (Map<String, String>) -> Unit,
+) {
+    TsuyomiMeasuredPager(
+        itemCount = filters.size,
+        itemKey = { "filter:${filters[it].id}" },
+        verticalSpacing = TsuyomiSpacing.Sm,
+        fillViewport = false,
+        modifier = Modifier.fillMaxWidth(),
+        itemContent = { index ->
+            val filter = filters[index]
+            TsuyomiMeasuredPager(
+                itemCount = filter.options.size + 1,
+                itemKey = { if (it == 0) "${filter.id}:heading" else "${filter.id}:${filter.options[it - 1].value}" },
+                fillViewport = false,
+                wrapItems = true,
+                horizontalSpacing = TsuyomiSpacing.Sm,
+                verticalSpacing = TsuyomiSpacing.Sm,
+                modifier = Modifier.fillMaxWidth(),
+                itemContent = { optionIndex ->
+                    if (optionIndex == 0) SourceHomePagedText(filter.label)
+                    else {
+                        val option = filter.options[optionIndex - 1]
+                        val selected = selectedFilters[filter.id] == option.value
+                        TsuyomiToggleChip(
+                            option.label, selected, if (selected) "已选择" else "未选择",
+                            {
+                                if (!selected) {
+                                    onSelectFilters(selectedFilters + (filter.id to option.value))
+                                }
+                            },
+                            modifier = Modifier.testTag("source-home-filter-choice-${filter.id}-${option.value}"),
+                            role = Role.RadioButton,
+                        )
+                    }
+                },
+            )
+        },
+    )
+}
+
+@Composable
+private fun SourceHomeBookCard(
+    book: SourceBookSummary,
+    active: Boolean,
+    coverState: @Composable (SourceBookSummary) -> CoverUiState,
+    onCoverVisibility: (SourceBookSummary, Boolean) -> Unit,
+    onOpenBook: (SourceBookSummary) -> Unit,
+) {
+    val visible = active && LocalTsuyomiPagerItemVisible.current
+    DisposableEffect(book.identity, book.coverUrl, book.canonicalUrl, visible) {
+        if (visible) onCoverVisibility(book, true)
+        onDispose { if (visible) onCoverVisibility(book, false) }
+    }
+    TsuyomiCoverGridCard(
+        title = book.title,
+        supportingText = null,
+        onClick = { onOpenBook(book) },
+        cover = { CoverImage(coverState(book), Modifier.fillMaxSize()) },
+        modifier = Modifier.testTag("source-home-book-${book.identity.remoteBookId}"),
+        titleInsideCover = true,
+    )
+}
+
+@Composable
+private fun SourceHomePagedText(text: String) {
+    TsuyomiMeasuredTextPager(text, Modifier.fillMaxWidth(), fillViewport = false, alwaysShowPageControls = false)
+}
+
+
+
 @Composable
 private fun SourceHomeCatalogPage(
     primary: String,
@@ -396,18 +684,7 @@ private fun SourceHomeCatalogPage(
                         items = section.items,
                         key = { book -> "${section.id}:${book.identity.sourceId}:${book.identity.remoteBookId}" },
                     ) { book ->
-                        DisposableEffect(book.identity, book.coverUrl, book.canonicalUrl, active) {
-                            if (active) onCoverVisibility(book, true)
-                            onDispose { if (active) onCoverVisibility(book, false) }
-                        }
-                        TsuyomiCoverGridCard(
-                            title = book.title,
-                            supportingText = null,
-                            onClick = { onOpenBook(book) },
-                            cover = { CoverImage(coverState(book), Modifier.fillMaxSize()) },
-                            modifier = Modifier.testTag("source-home-book-${book.identity.remoteBookId}"),
-                            titleInsideCover = true,
-                        )
+                        SourceHomeBookCard(book, active, coverState, onCoverVisibility, onOpenBook)
                     }
                 }
                 page.features.forEach { feature ->
@@ -463,10 +740,11 @@ private fun SourceHomePageControls(
     onOpenVerification: () -> Unit,
     active: Boolean,
     onPanelExpandedChange: (Boolean) -> Unit = {},
+    page: SourceHomePage? = null,
 ) {
-    val page = requireNotNull(pageState.page)
-    val primaryId = page.filters.firstOrNull()?.id
-    val secondaryFilters = page.filters.filterNot { it.id == primaryId }
+    val activePage = page ?: requireNotNull(pageState.page ?: pageState.cursorPage)
+    val primaryId = activePage.filters.firstOrNull()?.id
+    val secondaryFilters = activePage.filters.filterNot { it.id == primaryId }
     val leadingFilter = secondaryFilters.firstOrNull()
     val compactFilters = secondaryFilters.drop(1)
     var expandedFilterId by rememberSaveable(pageState.queryKey) { mutableStateOf<String?>(null) }

@@ -60,8 +60,8 @@ class LibraryUpdatesProductionJourneyInstrumentedTest {
 
     private val application: TsuyomiApplication
         get() = composeRule.activity.application as TsuyomiApplication
-    private val identity = BookIdentity(SOURCE_ID, REMOTE_BOOK_ID)
-    private val updateRowTag = "library-book-${identity.sourceId}-${identity.remoteBookId}"
+    private val identity = BookIdentity.Remote(SOURCE_ID, REMOTE_BOOK_ID)
+    private val updateRowTag = "library-book-${identity.storageKey}"
     private val updateActionsTag = "library-update-actions-${identity.sourceId}-${identity.remoteBookId}"
     private lateinit var fixtureBook: LibraryBook
     private lateinit var originalReaderPreferences: PortableReaderPreferences
@@ -104,7 +104,7 @@ class LibraryUpdatesProductionJourneyInstrumentedTest {
             ReadingProgress(
                 identity = identity,
                 locator = ReaderLocator(
-                    document = DocumentIdentity(SOURCE_ID, REMOTE_BOOK_ID, "10001"),
+                    document = DocumentIdentity(identity, "10001"),
                     blockId = "fixture-resume",
                     characterOffset = 0,
                     chapterProgress = 0.25,
@@ -455,8 +455,6 @@ class LibraryUpdatesProductionJourneyInstrumentedTest {
         }
     }
 
-    private fun identityKey(value: BookIdentity): String =
-        "${value.sourceId.length}:${value.sourceId}${value.remoteBookId.length}:${value.remoteBookId}"
 
     private companion object {
         const val SOURCE_ID = "org.tsuyomi.wenku8"

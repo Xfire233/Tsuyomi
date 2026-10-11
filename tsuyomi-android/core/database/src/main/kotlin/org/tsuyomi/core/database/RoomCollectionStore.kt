@@ -180,18 +180,20 @@ internal class RoomCollectionStore(
         database.withTransaction {
             createCollection(collection)
             identities.forEachIndexed { index, identity ->
-                val entry = requireNotNull(dao.libraryEntry(identity.sourceId, identity.remoteBookId)?.takeIf { it.locallyPinned }) {
+                val entry = requireNotNull(dao.libraryEntryByIdentityKey(identity.storageKey)?.takeIf { it.locallyPinned }) {
                     "Book is not in library"
                 }
+                val remote = identity as? BookIdentity.Remote
                 check(
                     dao.insertManualMembership(
                         ManualCollectionMembershipEntity(
-                            collection.collectionId,
-                            identity.sourceId,
-                            identity.remoteBookId,
-                            entry.addedAtEpochSecond,
-                            entry.addedAtNano,
-                            index.toLong(),
+                            collectionId = collection.collectionId,
+                            identityKey = identity.storageKey,
+                            sourceId = remote?.sourceId,
+                            remoteBookId = remote?.remoteBookId,
+                            addedAtEpochSecond = entry.addedAtEpochSecond,
+                            addedAtNano = entry.addedAtNano,
+                            displayOrder = index.toLong(),
                         ),
                     ) != -1L,
                 )
@@ -200,7 +202,7 @@ internal class RoomCollectionStore(
     }
 
     suspend fun manualCollectionIds(identity: BookIdentity): Set<String> =
-        dao.manualCollectionIds(identity.sourceId, identity.remoteBookId).toCollection(linkedSetOf())
+        dao.manualCollectionIdsByIdentity(identity.storageKey).toCollection(linkedSetOf())
 
     suspend fun addManualMemberships(collectionId: String, identities: Set<BookIdentity>): Int =
         database.withTransaction {
@@ -208,17 +210,19 @@ internal class RoomCollectionStore(
             require(collection.kind == CollectionKind.MANUAL) { "Only manual collections have stored membership" }
             var nextOrder = dao.nextManualMembershipOrder(collectionId)
             identities.count { identity ->
-                val entry = requireNotNull(dao.libraryEntry(identity.sourceId, identity.remoteBookId)?.takeIf { it.locallyPinned }) {
+                val entry = requireNotNull(dao.libraryEntryByIdentityKey(identity.storageKey)?.takeIf { it.locallyPinned }) {
                     "Book is not in library"
                 }
+                val remote = identity as? BookIdentity.Remote
                 val inserted = dao.insertManualMembership(
                     ManualCollectionMembershipEntity(
-                        collectionId,
-                        identity.sourceId,
-                        identity.remoteBookId,
-                        entry.addedAtEpochSecond,
-                        entry.addedAtNano,
-                        nextOrder,
+                        collectionId = collectionId,
+                        identityKey = identity.storageKey,
+                        sourceId = remote?.sourceId,
+                        remoteBookId = remote?.remoteBookId,
+                        addedAtEpochSecond = entry.addedAtEpochSecond,
+                        addedAtNano = entry.addedAtNano,
+                        displayOrder = nextOrder,
                     ),
                 ) != -1L
                 if (inserted) nextOrder++
@@ -229,25 +233,18 @@ internal class RoomCollectionStore(
     suspend fun removeManualMemberships(collectionId: String, identities: Set<BookIdentity>): Int =
         database.withTransaction {
             identities.count { identity ->
-                dao.deleteManualMembership(collectionId, identity.sourceId, identity.remoteBookId) != 0
+                dao.deleteManualMembershipByIdentityKey(collectionId, identity.storageKey) != 0
             }.also { compactManualMembershipOrders(collectionId) }
         }
 
     suspend fun reorderManualMemberships(collectionId: String, identities: List<BookIdentity>) =
         database.withTransaction {
-            val current = dao.manualCollectionIdentities(collectionId).map { BookIdentity(it.sourceId, it.remoteBookId) }
+            val current = dao.manualCollectionIdentities(collectionId).map { it.toIdentity() }
             require(identities.size == current.size && identities.toSet() == current.toSet()) {
                 "Manual collection reorder must contain every current member exactly once"
             }
             identities.forEachIndexed { index, identity ->
-                check(
-                    dao.updateManualMembershipDisplayOrder(
-                        collectionId,
-                        identity.sourceId,
-                        identity.remoteBookId,
-                        index.toLong(),
-                    ) == 1,
-                )
+                check(dao.updateManualMembershipOrderByIdentityKey(collectionId, identity.storageKey, index.toLong()) == 1)
             }
         }
 
@@ -272,24 +269,25 @@ internal class RoomCollectionStore(
     suspend fun addManualMembership(collectionId: String, identity: BookIdentity): Boolean = database.withTransaction {
         val collection = requireNotNull(dao.collection(collectionId)) { "Unknown collection" }
         require(collection.kind == CollectionKind.MANUAL) { "Only manual collections have stored membership" }
-        val entry = requireNotNull(dao.libraryEntry(identity.sourceId, identity.remoteBookId)?.takeIf { it.locallyPinned }) {
+        val entry = requireNotNull(dao.libraryEntryByIdentityKey(identity.storageKey)?.takeIf { it.locallyPinned }) {
             "Book is not in library"
         }
+        val remote = identity as? BookIdentity.Remote
         dao.insertManualMembership(
             ManualCollectionMembershipEntity(
-                collectionId,
-                identity.sourceId,
-                identity.remoteBookId,
-                entry.addedAtEpochSecond,
-                entry.addedAtNano,
-                dao.nextManualMembershipOrder(collectionId),
+                collectionId = collectionId,
+                identityKey = identity.storageKey,
+                sourceId = remote?.sourceId,
+                remoteBookId = remote?.remoteBookId,
+                addedAtEpochSecond = entry.addedAtEpochSecond,
+                addedAtNano = entry.addedAtNano,
+                displayOrder = dao.nextManualMembershipOrder(collectionId),
             ),
         ) != -1L
     }
 
     suspend fun removeManualMembership(collectionId: String, identity: BookIdentity): Boolean =
-        dao.deleteManualMembership(collectionId, identity.sourceId, identity.remoteBookId) != 0
-
+        dao.deleteManualMembershipByIdentityKey(collectionId, identity.storageKey) != 0
     private suspend fun entriesForSmartRule(astJson: String, now: Instant): List<BookIdentityRow> {
         val rule = SmartRuleCodec.decode(astJson).getOrThrow()
         return dao.smartCollectionIdentities(SmartShelfQueryCompiler.compile(rule, now))
@@ -317,14 +315,7 @@ internal class RoomCollectionStore(
     private suspend fun compactManualMembershipOrders(collectionId: String) {
         dao.manualMemberships(collectionId).forEachIndexed { index, membership ->
             if (membership.displayOrder != index.toLong()) {
-                check(
-                    dao.updateManualMembershipDisplayOrder(
-                        collectionId,
-                        membership.sourceId,
-                        membership.remoteBookId,
-                        index.toLong(),
-                    ) == 1,
-                )
+                check(dao.updateManualMembershipOrderByIdentityKey(collectionId, membership.identityKey, index.toLong()) == 1)
             }
         }
     }

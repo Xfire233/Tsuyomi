@@ -1,0 +1,59 @@
+{
+  "format": "tsuyomi-transfer",
+  "version": 6,
+  "createdAt": "2026-10-07T00:00:00Z",
+  "library": [
+    {
+      "identity": { "origin": "remote", "sourceId": "fixture.source", "remoteBookId": "remote-1" },
+      "title": "远程书",
+      "localPin": true,
+      "updatedAt": "2026-10-07T00:00:00Z",
+      "bookmarks": []
+    },
+    {
+      "identity": { "origin": "local", "publicationId": "f2b8ef64-9375-4fc1-b7c9-274b4beafed1" },
+      "localPublication": {
+        "format": "txt",
+        "originalSha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "originalSizeBytes": 4096,
+        "coverResourceId": "4637570b-1109-48ba-8a1b-256e868ca14c",
+        "txtOptions": {
+          "charsetName": "GB18030",
+          "headingSelections": [
+            { "paragraphOrdinal": 0, "title": "序章" },
+            { "paragraphOrdinal": 42, "title": "第二节 😀" }
+          ],
+          "paragraphsPerSection": 256
+        }
+      },
+      "title": "手动分节 TXT",
+      "localPin": false,
+      "updatedAt": "2026-10-07T00:00:00Z",
+      "bookmarks": [
+        {
+          "document": {
+            "book": { "origin": "local", "publicationId": "f2b8ef64-9375-4fc1-b7c9-274b4beafed1" },
+            "contentId": "section-42"
+          },
+          "blockId": "paragraph-42",
+          "characterOffset": 12,
+          "capturedAt": "2026-10-07T00:00:00Z"
+        }
+      ]
+    },
+    {
+      "identity": { "origin": "local", "publicationId": "f2b8ef64-9375-4fc1-b7c9-274b4beafed2" },
+      "localPublication": {
+        "format": "txt",
+        "originalSha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "originalSizeBytes": 4096,
+        "txtOptions": { "charsetName": null, "headingSelections": [], "paragraphsPerSection": 128 }
+      },
+      "title": "自动分节 TXT 独立副本",
+      "localPin": true,
+      "updatedAt": "2026-10-07T00:00:00Z",
+      "bookmarks": []
+    }
+  ],
+  "shelves": []
+}

@@ -7,6 +7,8 @@ package org.tsuyomi.shared.backup
 import java.time.Instant
 import org.tsuyomi.shared.locator.ReaderLocator
 import org.tsuyomi.shared.model.BookIdentity
+import org.tsuyomi.shared.librarydomain.LocalPublicationFormat
+import org.tsuyomi.shared.librarydomain.LocalTextParseOptions
 
 const val MAX_TRANSFER_BYTES: Int = 32 * 1024 * 1024
 
@@ -42,7 +44,25 @@ data class TransferProgress(
     val chapterProgress: Double? = null,
     val bookProgress: Double? = null,
     val updatedAt: Instant,
+    val revision: String? = null,
 )
+
+data class TransferLocalPublicationMetadata(
+    val format: LocalPublicationFormat,
+    val originalSha256: String,
+    val originalSizeBytes: Long,
+    val txtOptions: LocalTextParseOptions? = null,
+    val coverResourceId: String? = null,
+) {
+    init {
+        require(originalSha256.matches(Regex("^[0-9a-f]{64}$"))) { "Invalid original SHA-256" }
+        require(originalSizeBytes > 0) { "Original size must be positive" }
+        coverResourceId?.let { BookIdentity.requireCanonicalUuid(it, "coverResourceId") }
+        require((format == LocalPublicationFormat.TXT) == (txtOptions != null)) {
+            "TXT parse options must be present only for TXT publications"
+        }
+    }
+}
 
 data class TransferBook(
     val identity: BookIdentity,
@@ -62,7 +82,17 @@ data class TransferBook(
     val progress: TransferProgress? = null,
     val completedChapterIds: Set<String> = emptySet(),
     val bookmarks: List<ReaderLocator> = emptyList(),
-)
+    val localPublication: TransferLocalPublicationMetadata? = null,
+) {
+    init {
+        require((identity is BookIdentity.Local) == (localPublication != null)) {
+            "Local identity and portable publication metadata must be present together"
+        }
+        require(identity !is BookIdentity.Local || (coverUrl == null && canonicalUrl == null)) {
+            "Local publications cannot carry remote cover or canonical URLs"
+        }
+    }
+}
 
 data class TransferShelf(
     val id: String,
@@ -115,7 +145,7 @@ data class ImportPlan(
 )
 
 data class SourceSearchHistory(val sourceId: String, val query: String, val lastUsedAt: Instant)
-data class SourceBrowsingHistory(val identity: BookIdentity, val lastViewedAt: Instant)
+data class SourceBrowsingHistory(val identity: BookIdentity.Remote, val lastViewedAt: Instant)
 
 data class ImportSummary(
     val sessionId: String,

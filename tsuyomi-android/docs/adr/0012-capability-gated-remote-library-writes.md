@@ -26,6 +26,8 @@ Only a direct user library action may initiate a remote write. Host API 1.1 requ
 
 Transport acceptance is the cancellation linearization point. Proven pre-accept cancellation is `CANCELLED`; only a typed `applied` / `already-present` result is `CONFIRMED`; every other post-accept result is `UNRESOLVED`.
 
+Each pull/target/write/reconciliation sequence captures one immutable exact session and authority context; later stages never borrow a replacement foreground client. Overlapping pulls fence snapshot publication, and target lookup failures remain typed rather than empty success. After durable mutation begin, every suspending host lookup and lease recheck is inside the cancellation/error settlement region. Proven pre-accept cancellation revokes its token and settles `CANCELLED`, including availability, policy and local-selection lookups; it cannot leave an unrecoverable pending operation. Once transport was accepted, cancellation preserves `UNRESOLVED` and requires explicit reconciliation instead of claiming rollback.
+
 ## Rejected alternatives
 
 - Pull-only forever: rejected because users requested opt-in parity for supported source operations.

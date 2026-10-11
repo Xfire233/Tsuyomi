@@ -1,21 +1,13 @@
 {
   "schema": "tsuyomi-android-review-policy-v1",
-  "mode": "phase4-production-standard-first",
-  "effectiveFrom": "2026-09-06",
+  "mode": "phase4a-production-standard-first",
+  "effectiveFrom": "2026-10-09",
   "activeProfiles": [
-    "STANDARD"
+    "STANDARD",
+    "EINK"
   ],
-  "deferredProfiles": [
-    {
-      "profile": "EINK",
-      "status": "FROZEN",
-      "preserveImplementation": true,
-      "preserveContracts": true,
-      "preserveInventory": true,
-      "baselineBuildId": "3be8ea00cdac3ed7164fd170929bfb97a1c498cf63032fbbec4630ea5bd095d7"
-    }
-  ],
-  "phase4Milestone": "Execute the currently authorized Phase 4 Standard work selected by the owning Phase document, explicit gate outcomes and current user direction. The review policy selects profiles, nodes and evidence lanes only; it does not grant implementation scope. All catalog nodes remain production-stage obligations, actual-online prefixes require live online services plus signed deterministic fixture replay, and E-ink remains frozen until its explicit restoration trigger.",
+  "deferredProfiles": [],
+  "phase4Milestone": "Continue Standard and 0.5.0 local-publication verification. E-ink improvement and initial restoration execution are paused by the maintainer on 2026-10-09; functional verification skips E-ink unless a MAJOR UI change affects its presentation or interaction, then selects only authorized minimum affected evidence. Retained all-node restoration and physical-human exits are deferred and unpassed, not prerequisites for current Standard/local-reading execution. Actual-online prefixes retain live services plus CI-owned signed replay. No full acceptance, physical E-ink quality, readiness, deployment or publication approval is granted.",
   "routineReview": {
     "buildOnce": true,
     "deployOncePerActiveDevice": true,
@@ -23,6 +15,14 @@
     "journeysOnlyForChangedTransitions": true,
     "standaloneFixtureReview": false,
     "shareOnlineCandidateWithHuman": true
+  },
+  "einkVerification": {
+    "selection": "impact-based",
+    "minorUiChanges": "no-separate-review",
+    "lowImpactChanges": "no-separate-review",
+    "whenNeeded": "minimum-affected-scope",
+    "fullRestorationMode": "full-eink-restoration",
+    "authority": "tsuyomi-android/docs/design/UI_CONSTITUTION.md"
   },
   "nodeExecution": {
     "activeStage": "PHASE4_PRODUCTION_IMPLEMENTATION",
@@ -48,22 +48,10 @@
     },
     "deferredStages": []
   },
-  "directEinkChangeException": {
-    "allowed": [
-      "compile affected E-ink code",
-      "run affected non-visual contract tests",
-      "run one targeted launch smoke only when needed to prevent an unusable retained implementation"
-    ],
-    "forbidden": [
-      "new E-ink design decisions",
-      "routine E-ink screenshot matrices",
-      "routine E-ink Review Graph passes",
-      "updating E-ink goldens or approval state"
-    ]
-  },
   "resume": {
-    "trigger": "Explicit user decision after the active Phase 4 Standard milestone.",
+    "trigger": "The 2026-10-06 restoration authorization is historical, not an active execution trigger after the 2026-10-09 pause. A MAJOR UI change affecting E-ink permits only impact assessment and gate-authorized minimum evidence. Resuming E-ink improvement or complete restoration requires new explicit maintainer authorization; physical-human evidence is still required before readiness or acceptance claims.",
     "mode": "full-eink-restoration",
+    "baselineBuildId": "3be8ea00cdac3ed7164fd170929bfb97a1c498cf63032fbbec4630ea5bd095d7",
     "requiredScope": [
       "reconcile every change accumulated since baselineBuildId",
       "review all 28 Review Graph nodes against the retained E-ink contracts",

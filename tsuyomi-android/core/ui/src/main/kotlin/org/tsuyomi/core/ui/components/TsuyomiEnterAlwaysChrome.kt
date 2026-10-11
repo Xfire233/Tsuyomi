@@ -39,6 +39,7 @@ import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
 import org.tsuyomi.core.display.LocalDisplayEnvironment
+import org.tsuyomi.core.display.DisplayProfile
 import org.tsuyomi.core.ui.theme.instantMotion
 import org.tsuyomi.core.ui.theme.rememberSystemReducedMotion
 import kotlin.math.roundToInt
@@ -48,7 +49,8 @@ import kotlin.math.roundToInt
 fun rememberTsuyomiEnterAlwaysChromeState(
     canScroll: () -> Boolean,
 ): TsuyomiEnterAlwaysChromeState {
-    val currentCanScroll = rememberUpdatedState(canScroll)
+    val environment = LocalDisplayEnvironment.current
+    val currentCanScroll = rememberUpdatedState { environment.effectiveProfile == DisplayProfile.STANDARD && canScroll() }
     val canScrollGate = remember {
         { currentCanScroll.value() }
     }
@@ -73,6 +75,7 @@ fun rememberTsuyomiEnterAlwaysChromeState(
 
     SideEffect {
         chromeState.updateScrollBehavior(scrollBehavior)
+        if (environment.effectiveProfile == DisplayProfile.EINK) chromeState.reveal()
     }
     LaunchedEffect(chromeState) {
         snapshotFlow { canScrollGate() }.collect { enabled ->
@@ -231,6 +234,10 @@ fun TsuyomiCollapsibleChrome(
     onExpandedHeightChanged: (Int) -> Unit,
     content: @Composable () -> Unit,
 ) {
+    if (LocalDisplayEnvironment.current.effectiveProfile == DisplayProfile.EINK) {
+        Box(modifier.onSizeChanged { if (it.height > 0) onExpandedHeightChanged(it.height) }) { content() }
+        return
+    }
     val fullyCollapsed by remember(state) {
         derivedStateOf { state.isFullyCollapsed }
     }

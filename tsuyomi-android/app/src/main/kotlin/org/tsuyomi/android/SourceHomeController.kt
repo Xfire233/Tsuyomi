@@ -30,6 +30,8 @@ internal class SourceHomeController : Closeable {
         val queryKey: String,
         val selectedFilters: Map<String, String>,
         val page: SourceHomePage? = null,
+        val cursorPages: List<SourceHomePage> = emptyList(),
+        val cursorIndex: Int = 0,
         val pageIsCurrent: Boolean = true,
         val pageEpoch: Long = 0L,
         val replacing: Boolean = false,
@@ -77,6 +79,8 @@ internal class SourceHomeController : Closeable {
         val verified = activeEntry()?.takeIf { it.page != null && it.pageIsCurrent } ?: return invalidateSession()
         val returnEntry = featureReturnQueryKey?.let(cache::get)?.copy(
             page = null,
+            cursorPages = emptyList(),
+            cursorIndex = 0,
             replacing = false,
             appending = false,
             replacementFailure = null,
@@ -241,7 +245,75 @@ internal class SourceHomeController : Closeable {
         )
     }
 
-    fun append(load: suspend (Map<String, String>, String?) -> Result<SourceHomePage>) {
+    fun nextCursorPage(load: suspend (Map<String, String>, String?) -> Result<SourceHomePage>) {
+        val key = activeQueryKey ?: return
+        val entry = cache[key] ?: return
+        if (entry.replacing || entry.appending || !entry.pageIsCurrent) return
+        if (entry.cursorIndex + 1 < entry.cursorPages.size) {
+            selectCursorPage(key, entry, entry.cursorIndex + 1)
+            publish()
+        } else {
+            append(load, moveToNextCursorPage = true)
+        }
+    }
+
+    fun previousCursorPage() {
+        val key = activeQueryKey ?: return
+        val entry = cache[key] ?: return
+        if (entry.replacing || entry.appending || entry.cursorIndex == 0) return
+        selectCursorPage(key, entry, entry.cursorIndex - 1)
+        publish()
+    }
+
+    fun restoreCursorPageFromScrollPosition() {
+        val key = activeQueryKey ?: return
+        val entry = cache[key] ?: return
+        val page = entry.page ?: return
+        var index = entry.firstVisibleItemIndex
+        var anchor: org.tsuyomi.shared.model.BookIdentity.Remote? = null
+        for (section in page.sections) {
+            if (index <= section.items.size) {
+                anchor = section.items.getOrNull((index - 1).coerceAtLeast(0))?.identity
+                break
+            }
+            index -= section.items.size + 1
+        }
+        anchor ?: return
+        val cursorIndex = entry.cursorPages.indexOfFirst { snapshot ->
+            snapshot.sections.any { section -> section.items.any { it.identity == anchor } }
+        }
+        if (cursorIndex >= 0 && cursorIndex != entry.cursorIndex) {
+            cache[key] = entry.copy(cursorIndex = cursorIndex)
+            publish()
+        }
+    }
+
+    private fun selectCursorPage(key: String, entry: CacheEntry, cursorIndex: Int) {
+        val anchor = entry.cursorPages[cursorIndex].sections.firstOrNull { it.items.isNotEmpty() }
+            ?.items?.firstOrNull()?.identity
+        var mergedIndex = 0
+        for (section in entry.page?.sections.orEmpty()) {
+            val bookIndex = section.items.indexOfFirst { it.identity == anchor }
+            if (bookIndex >= 0) {
+                mergedIndex += bookIndex + 1
+                break
+            }
+            mergedIndex += section.items.size + 1
+        }
+        cache[key] = entry.copy(
+            cursorIndex = cursorIndex,
+            firstVisibleItemIndex = if (anchor == null) 0 else mergedIndex,
+            firstVisibleItemScrollOffset = 0,
+        )
+    }
+
+    fun append(load: suspend (Map<String, String>, String?) -> Result<SourceHomePage>) =
+        append(load, moveToNextCursorPage = false)
+
+    private fun append(
+        load: suspend (Map<String, String>, String?) -> Result<SourceHomePage>,
+        moveToNextCursorPage: Boolean,
+    ) {
         val key = activeQueryKey ?: return
         val entry = cache[key] ?: return
         val page = entry.page ?: return
@@ -264,6 +336,8 @@ internal class SourceHomeController : Closeable {
                     onSuccess = { incoming ->
                         current.copy(
                             page = mergeHomePages(page, incoming),
+                            cursorPages = current.cursorPages + incoming,
+                            cursorIndex = if (moveToNextCursorPage) current.cursorPages.size else current.cursorIndex,
                             appending = false,
                             appendFailure = null,
                             selectedFilters = normalizedEntrySelection(incoming, current.selectedFilters),
@@ -273,6 +347,9 @@ internal class SourceHomeController : Closeable {
                         current.copy(appending = false, appendFailure = error.toHomeFailure())
                     },
                 )
+                if (moveToNextCursorPage && result.isSuccess) {
+                    cache[key]?.let { updated -> selectCursorPage(key, updated, updated.cursorIndex) }
+                }
                 if (activeQueryKey == key) publish()
             } finally {
                 if (appendJobs[key] === coroutineContext[Job]) {
@@ -366,6 +443,8 @@ internal class SourceHomeController : Closeable {
             queryKey = key,
             selectedFilters = requestedFilters,
             page = seed?.page,
+            cursorPages = seed?.cursorPages.orEmpty(),
+            cursorIndex = seed?.cursorIndex ?: 0,
             pageIsCurrent = seed?.let { it.pageIsCurrent && it.queryKey == key } == true,
             pageEpoch = ++nextPageEpoch,
             replacing = true,
@@ -432,6 +511,7 @@ internal class SourceHomeController : Closeable {
             queryKey = normalizedKey,
             selectedFilters = normalizedSelection,
             page = incoming,
+            cursorPages = listOf(incoming),
             pageEpoch = ++nextPageEpoch,
             firstVisibleItemIndex = existing?.firstVisibleItemIndex ?: 0,
             firstVisibleItemScrollOffset = existing?.firstVisibleItemScrollOffset ?: 0,
@@ -510,6 +590,11 @@ internal class SourceHomeController : Closeable {
         queryKey = queryKey,
         selectedFilters = selectedFilters,
         page = page,
+        cursorPage = cursorPages.getOrNull(cursorIndex),
+        cursorPageNumber = cursorIndex + 1,
+        cursorPreviousAvailable = cursorIndex > 0,
+        cursorNextAvailable = cursorIndex + 1 < cursorPages.size ||
+            (pageIsCurrent && page?.nextCursor != null && page.complete == false),
         replacing = replacing,
         appending = appending,
         replacementFailure = replacementFailure,

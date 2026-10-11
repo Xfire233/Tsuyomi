@@ -5,7 +5,6 @@
 package org.tsuyomi.android
 
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.Stable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -24,8 +23,11 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.withContext
 import org.tsuyomi.reader.engine.ReaderDocumentCache
 import org.tsuyomi.core.media.api.CoverRepository
 import org.tsuyomi.core.media.api.CoverRequest
@@ -49,6 +51,12 @@ import org.tsuyomi.shared.locator.DocumentIdentity
 import org.tsuyomi.shared.locator.LocatorPrecision
 import org.tsuyomi.shared.locator.ReaderLocator
 import org.tsuyomi.shared.locator.bookmarkPositionKey
+import org.tsuyomi.shared.model.BookIdentity
+import org.tsuyomi.shared.sourcecontract.ReaderResourceRef
+import org.tsuyomi.shared.sourcecontract.nestedBlocks
+import org.tsuyomi.shared.sourcecontract.ReaderLinkTarget
+import org.tsuyomi.shared.sourcecontract.canonicalAnchorText
+import org.tsuyomi.shared.sourcecontract.targetForAnchor
 import org.tsuyomi.shared.sourcecontract.RemoteTarget
 import org.tsuyomi.source.extensionmanager.RemoteOperation
 import org.tsuyomi.shared.sourcecontract.ReaderDocument
@@ -152,6 +160,14 @@ internal class SourceSearchRouteOwner(
 
     fun acceptVerifiedPageResult() {
         state = flow.searchState
+    }
+    fun acceptCredentialsReopened() {
+        val failure = state as? SearchResultState.Failure ?: return
+        if (failure.code == SourceErrorCode.SESSION_REQUIRED ||
+            failure.code == SourceErrorCode.VERIFICATION_REQUIRED
+        ) {
+            state = SearchResultState.Idle
+        }
     }
 
     suspend fun select(book: SourceBookSummary) {
@@ -304,19 +320,45 @@ internal class SourceDetailRouteOwner(
         }
     }
 
+    fun needsDirectoryLoad(): Boolean {
+        val identity = selectedBook?.identity ?: return false
+        return when (val current = directoryState) {
+            SourceBookState.Loading -> true
+            is SourceBookState.Content -> current.value.bookIdentity != identity
+            is SourceBookState.Failure -> false
+        }
+    }
+
+    suspend fun loadDirectory(offlineOnly: Boolean = false) {
+        val book = selectedBook ?: return
+        val generation = ++requestGeneration
+        directoryState = SourceBookState.Loading
+        val requestedDirectory = flow.requestDirectory(book, offlineOnly)
+        if (isCurrent(generation, book)) directoryState = requestedDirectory
+    }
+    suspend fun resumeDirectoryIfNeeded(): Boolean {
+        if (!needsDirectoryLoad()) return false
+        loadDirectory()
+        return true
+    }
+
     suspend fun resumeDirectoryAfterVerifiedDetail() {
         val book = selectedBook ?: return
-        directoryState = flow.requestDirectory(book)
+        val generation = ++requestGeneration
+        val requestedDirectory = flow.requestDirectory(book)
+        if (isCurrent(generation, book)) directoryState = requestedDirectory
     }
 
     fun acceptVerifiedDirectoryResult() {
         val candidate = flow.directoryState
-        directoryState = if (
-            candidate is SourceBookState.Content && candidate.value.bookIdentity == selectedBook?.identity
-        ) {
-            candidate
-        } else {
-            SourceBookState.Loading
+        directoryState = when (candidate) {
+            is SourceBookState.Content -> if (candidate.value.bookIdentity == selectedBook?.identity) {
+                candidate
+            } else {
+                SourceBookState.Loading
+            }
+            is SourceBookState.Failure -> candidate
+            SourceBookState.Loading -> SourceBookState.Loading
         }
     }
 
@@ -383,14 +425,8 @@ internal class SourceDetailRouteOwner(
     suspend fun resyncRemoteLibrary(packageInfo: VerifiedHxpPackage): Boolean {
         val book = selectedBook ?: return false
         if (book.identity.sourceId != packageInfo.manifest.sourceId.value) return false
-        val result = flow.pullRemoteLibrary(packageInfo)
-        if (result !is RemoteLibraryPullResult.Success) return false
-        val targets = flow.listRemoteTargets().ifEmpty {
-            flow.remoteMirrorSnapshot(book.identity.sourceId)?.targets?.map {
-                RemoteTarget(it.targetId, it.displayName, it.parentId, it.kind)
-            }.orEmpty()
-        }
-        flow.saveRemoteMirrorSnapshot(packageInfo.manifest.displayName, result.books, targets)
+        val result = flow.refreshRemoteLibrarySnapshot(packageInfo)
+        if (result !is RemoteLibrarySnapshotRefreshResult.Success) return false
         flow.remoteLibrary.refreshSelection(book)
         onLibraryChanged()
         return true
@@ -732,11 +768,15 @@ internal class SourceReaderRouteOwner(
     var documentGeneration: Long by mutableLongStateOf(0L)
         private set
     private var recordedMountedDocumentGeneration = -1L
+    private var imageContentGeneration = 0L
     var imageStates: Map<String, CoverUiState> by mutableStateOf(emptyMap())
         private set
     private val imageJobs = mutableMapOf<String, Job>()
-    private var imageDocumentId: String? = document?.contentId
     private var pendingLocator: ReaderLocator? = null
+    private var pendingFragment: String? = null
+    private var requestedAdjacentChapter: SourceChapter? = null
+    private var pendingChapterEnd: Boolean? = null
+    private var mountedBoundaryLocator: ReaderLocator? = null
     private var prefetchedDocuments = ReaderDocumentCache(capacity = 3)
     private var preloadJob: Job? = null
     private val preloadImageJobs = mutableMapOf<String, Job>()
@@ -758,7 +798,7 @@ internal class SourceReaderRouteOwner(
 
     suspend fun load(offlineOnly: Boolean = false) {
         val book = flow.selectedBook ?: return
-        val chapter = currentChapter ?: flow.selectedChapter ?: return
+        val chapter = requestedAdjacentChapter ?: currentChapter ?: flow.selectedChapter ?: return
         val generation = ++requestGeneration
         lastLoadOfflineOnly = offlineOnly
         loading = true
@@ -770,11 +810,7 @@ internal class SourceReaderRouteOwner(
             if (!isCurrent(generation, book, chapter)) return
             chapters = (directory as? SourceBookState.Content)?.value?.chapters.orEmpty()
                 .ifEmpty { listOf(chapter) }
-            val prefetched = prefetchedDocuments.get(
-                book.identity.sourceId,
-                book.identity.remoteBookId,
-                chapter.chapterId,
-            )
+            val prefetched = prefetchedDocuments.get(DocumentIdentity(book.identity, chapter.chapterId))
             val result = flow.requestChapter(
                 book = book,
                 chapter = chapter,
@@ -791,9 +827,9 @@ internal class SourceReaderRouteOwner(
     suspend fun acceptVerifiedChapterResult() {
         val result = flow.consumeVerifiedChapterLoad() ?: return
         val book = flow.selectedBook ?: return
-        val chapter = flow.selectedChapter ?: return
+        val chapter = requestedAdjacentChapter ?: currentChapter ?: flow.selectedChapter ?: return
+        if (result.document?.let { it.identity.book != book.identity || it.identity.contentId != chapter.chapterId } == true) return
         val generation = ++requestGeneration
-        currentChapter = chapter
         chapters = (flow.directoryState as? SourceBookState.Content)?.value?.chapters.orEmpty()
             .ifEmpty { listOf(chapter) }
         applyLoadResult(result, book, chapter, generation)
@@ -801,16 +837,61 @@ internal class SourceReaderRouteOwner(
 
 
     suspend fun selectChapter(chapter: SourceChapter) {
+        selectChapter(chapter, fragment = null)
+    }
+
+    suspend fun selectAdjacentChapter(chapter: SourceChapter, end: Boolean) {
+        selectChapter(chapter, fragment = null, adjacentEnd = end)
+        if (requestedAdjacentChapter == chapter) load()
+    }
+    val verificationChapter: SourceChapter?
+        get() = requestedAdjacentChapter ?: currentChapter ?: flow.selectedChapter
+
+
+    fun dismissFailure() { failure = null }
+
+    private suspend fun selectChapter(chapter: SourceChapter, fragment: String?, adjacentEnd: Boolean? = null) {
+        val book = flow.selectedBook ?: return
+        currentCoroutineContext().ensureActive()
         val generation = ++requestGeneration
         savedState.remove<String>(PendingBookmarkKey)
         pendingLocator = null
-        flow.prepareChapter(chapter)
-        if (generation != requestGeneration) return
-        currentChapter = chapter
-        replaceDocument(null)
-        restoredLocator = null
+        pendingFragment = null
+        requestedAdjacentChapter = null
+        pendingChapterEnd = adjacentEnd
+        mountedBoundaryLocator = null
+        if (adjacentEnd != null) {
+            loading = true
+            failure = null
+            cancelPreload()
+        }
+        try {
+            if (adjacentEnd == null) flow.prepareChapter(chapter)
+            currentCoroutineContext().ensureActive()
+        } catch (cancelled: CancellationException) {
+            if (generation == requestGeneration && adjacentEnd != null) loading = false
+            throw cancelled
+        }
+        if (generation != requestGeneration || flow.selectedBook?.identity != book.identity ||
+            (adjacentEnd == null && flow.selectedChapter != chapter)
+        ) return
+        if (adjacentEnd != null) {
+            requestedAdjacentChapter = chapter
+            loading = true
+        } else {
+            currentChapter = chapter
+            replaceDocument(null)
+            restoredLocator = null
+            loading = false
+        }
         failure = null
-        loading = false
+        pendingFragment = fragment
+    }
+
+    suspend fun navigateLink(target: ReaderLinkTarget.Internal) {
+        val chapter = chapters.firstOrNull { it.chapterId == target.contentId }
+        if (chapter == null) { failure = bookmarkUnavailable(); return }
+        selectChapter(chapter, target.fragment)
     }
 
     suspend fun selectBookmark(locator: ReaderLocator) {
@@ -825,10 +906,13 @@ internal class SourceReaderRouteOwner(
         val book = flow.selectedBook ?: return
         if (locator.document.book != book.identity) return
         val generation = ++requestGeneration
+        pendingFragment = null
+        requestedAdjacentChapter = null
+        pendingChapterEnd = null
+        mountedBoundaryLocator = null
         cancelPreload()
         val loaded = document
-        if (loaded?.sourceId == book.identity.sourceId && loaded.remoteBookId == book.identity.remoteBookId &&
-            loaded.contentId == locator.document.contentId
+        if (loaded?.identity?.book == book.identity && loaded.identity.contentId == locator.document.contentId
         ) {
             restoredLocator = locator
             restorationGeneration++
@@ -878,10 +962,33 @@ internal class SourceReaderRouteOwner(
         } else null
         val sessionLocator = pendingLocator?.takeIf { locator ->
             result.document != null && locator.document.book == book.identity &&
-                locator.document.contentId == result.document.contentId
+                locator.document.contentId == result.document.identity.contentId
         }
-        val pendingTarget = bookmarkKey != null || pendingLocator != null
-        val targetLocator = bookmark ?: sessionLocator
+        val fragment = pendingFragment
+        val linkLocator = if (fragment != null && result.document != null) {
+            val loaded = result.document
+            val anchor = loaded.targetForAnchor(fragment)
+            val block = anchor?.let { target -> loaded.blocks.flatMap(ReaderBlock::nestedBlocks).firstOrNull { it.blockId == target.blockId } }
+            if (anchor == null || block == null) null else ReaderLocator(
+                loaded.identity, anchor.blockId,
+                java.security.MessageDigest.getInstance("SHA-256").digest(block.canonicalAnchorText().toByteArray(Charsets.UTF_8))
+                    .joinToString("") { "%02x".format(it.toInt() and 255) },
+                anchor.codePointOffset, capturedAt = Instant.now(),
+            )
+        } else null
+        val boundaryLocator = result.document?.let { loaded ->
+            pendingChapterEnd?.let { end ->
+                val block = if (end) loaded.blocks.last() else loaded.blocks.first()
+                val text = block.canonicalAnchorText()
+                val digest = java.security.MessageDigest.getInstance("SHA-256").digest(text.toByteArray(Charsets.UTF_8))
+                    .joinToString("") { "%02x".format(it.toInt() and 255) }
+                ReaderLocator(loaded.identity, block.blockId, digest,
+                    if (end) text.codePointCount(0, text.length) else 0,
+                    chapterProgress = if (end) 1.0 else 0.0, capturedAt = Instant.now())
+            }
+        }
+        val pendingTarget = bookmarkKey != null || pendingLocator != null || fragment != null || pendingChapterEnd != null
+        val targetLocator = boundaryLocator ?: bookmark ?: sessionLocator ?: linkLocator
         if (!isCurrent(generation, book, chapter)) return
         if (pendingTarget && result.document != null && targetLocator == null) {
             failure = bookmarkUnavailable()
@@ -889,15 +996,33 @@ internal class SourceReaderRouteOwner(
             return
         }
         result.document?.let(prefetchedDocuments::put)
+        if (result.document == null && requestedAdjacentChapter != null) {
+            failure = result.failure
+            loading = false
+            return
+        }
+        val admittedAdjacent = result.document != null && requestedAdjacentChapter != null
+        if (admittedAdjacent) currentCoroutineContext().ensureActive()
         replaceDocument(result.document)
         restoredLocator = targetLocator ?: result.restoredLocator
         if (result.document != null) {
+            mountedBoundaryLocator = boundaryLocator
+            currentChapter = chapter
+            requestedAdjacentChapter = null
+            pendingChapterEnd = null
             restorationGeneration++
             savedState.remove<String>(PendingBookmarkKey)
             pendingLocator = null
+            pendingFragment = null
         }
         failure = result.failure
         loading = false
+        if (admittedAdjacent) {
+            // The mounted document and boundary have committed; cancellation must not split durable selection from them.
+            withContext(NonCancellable) {
+                if (isCurrent(generation, book, chapter)) flow.prepareChapter(chapter)
+            }
+        }
     }
 
     private fun bookmarkUnavailable() = SourceException(
@@ -915,7 +1040,7 @@ internal class SourceReaderRouteOwner(
         silentFailure: Boolean = false,
     ) {
         val currentDocument = document ?: return
-        if (currentDocument.blocks.none { it.blockId == block.blockId && it == block }) return
+        if (currentDocument.blocks.none { block in it.nestedBlocks() }) return
         if (retry) {
             imageJobs.remove(block.blockId)?.cancel()
             imageStates = imageStates - block.blockId
@@ -926,12 +1051,15 @@ internal class SourceReaderRouteOwner(
             return
         }
         if (repository == null || packageRevision.isNullOrBlank() || credentialRevision.isNullOrBlank()) return
+        val book = currentDocument.identity.book as? BookIdentity.Remote ?: return
+        val resource = block.resource as? ReaderResourceRef.RemoteHttps ?: return
+        val expectedGeneration = imageContentGeneration
         val chapter = currentChapter ?: return
         val request = CoverRequest(
-            sourceId = currentDocument.sourceId,
+            sourceId = book.sourceId,
             packageRevision = packageRevision,
             credentialRevision = credentialRevision,
-            transportUrl = block.url,
+            transportUrl = resource.url,
             referrerUrl = chapter.url,
             targetWidthPx = 1080,
             targetHeightPx = 2400,
@@ -941,7 +1069,7 @@ internal class SourceReaderRouteOwner(
         imageJobs[block.blockId] = scope.launch {
             try {
                 repository.observe(request).collect { state ->
-                    if (document?.contentId == currentDocument.contentId) {
+                    if (imageContentGeneration == expectedGeneration && document?.identity == currentDocument.identity) {
                         imageStates = if (silentFailure && state is CoverUiState.Failed) {
                             imageStates - block.blockId
                         } else {
@@ -953,7 +1081,7 @@ internal class SourceReaderRouteOwner(
                 throw cancelled
             } catch (error: Exception) {
                 if (!silentFailure) throw error
-                if (document?.contentId == currentDocument.contentId) imageStates = imageStates - block.blockId
+                if (imageContentGeneration == expectedGeneration && document?.identity == currentDocument.identity) imageStates = imageStates - block.blockId
             }
         }
     }
@@ -965,15 +1093,15 @@ internal class SourceReaderRouteOwner(
     ) {
         val activeDocument = document ?: return
         val selectedBook = flow.selectedBook ?: return
+        if (loading) return
         if (
             expectedDocumentGeneration != documentGeneration ||
-            activeDocument.sourceId != locator.document.sourceId ||
-            activeDocument.remoteBookId != locator.document.remoteBookId ||
-            activeDocument.contentId != locator.document.contentId ||
+            activeDocument.identity != locator.document ||
             selectedBook.identity != locator.document.book
         ) {
             return
         }
+        restoredLocator = locator
         flow.saveProgress(locator, precision)
     }
 
@@ -983,8 +1111,7 @@ internal class SourceReaderRouteOwner(
         if (
             expectedDocumentGeneration != documentGeneration ||
             activeDocument != mountedDocument ||
-            selectedBook.identity.sourceId != mountedDocument.sourceId ||
-            selectedBook.identity.remoteBookId != mountedDocument.remoteBookId
+            selectedBook.identity != mountedDocument.identity.book
         ) {
             return false
         }
@@ -993,16 +1120,15 @@ internal class SourceReaderRouteOwner(
         var recorded = false
         try {
             if (!flow.recordReaderVisit(selectedBook.identity)) return false
-            if (restoredLocator == null) {
+            val boundary = mountedBoundaryLocator
+            if (boundary != null) {
+                saveProgress(boundary, boundary.precision, expectedDocumentGeneration)
+                if (mountedBoundaryLocator === boundary) mountedBoundaryLocator = null
+            } else if (restoredLocator == null) {
                 val firstBlock = mountedDocument.blocks.first()
                 flow.saveProgress(
                     ReaderLocator(
-                        document = DocumentIdentity(
-                            sourceId = mountedDocument.sourceId,
-                            remoteBookId = mountedDocument.remoteBookId,
-                            contentId = mountedDocument.contentId,
-                            revision = mountedDocument.revision,
-                        ),
+                        document = mountedDocument.identity,
                         blockId = firstBlock.blockId,
                         characterOffset = 0,
                         chapterProgress = 0.0,
@@ -1038,9 +1164,9 @@ internal class SourceReaderRouteOwner(
         val expectedDocumentGeneration = documentGeneration
         val context = ReaderPreloadContext(
             documentGeneration = expectedDocumentGeneration,
-            sourceId = activeDocument.sourceId,
-            remoteBookId = activeDocument.remoteBookId,
-            contentId = activeDocument.contentId,
+            sourceId = book.identity.sourceId,
+            remoteBookId = book.identity.remoteBookId,
+            contentId = activeDocument.identity.contentId,
             packageRevision = packageRevision,
             credentialRevision = credentialRevision,
         )
@@ -1055,6 +1181,7 @@ internal class SourceReaderRouteOwner(
             if (!isPreloadCurrent(preloadToken, expectedDocumentGeneration, activeDocument, book, chapter)) return@launch
 
             activeDocument.blocks.asSequence()
+                .flatMap { it.nestedBlocks().asSequence() }
                 .filterIsInstance<ReaderBlock.Image>()
                 .filter { image ->
                     !imageStates.containsKey(image.blockId) && imageJobs[image.blockId]?.isActive != true
@@ -1073,7 +1200,7 @@ internal class SourceReaderRouteOwner(
                 }
 
             val adjacent = nextChapter ?: return@launch
-            if (prefetchedDocuments.get(book.identity.sourceId, book.identity.remoteBookId, adjacent.chapterId) != null) {
+            if (prefetchedDocuments.get(DocumentIdentity(book.identity, adjacent.chapterId)) != null) {
                 return@launch
             }
             val prefetched = flow.prefetchChapter(book, adjacent) ?: return@launch
@@ -1085,18 +1212,21 @@ internal class SourceReaderRouteOwner(
 
     fun dispose() {
         requestGeneration++
+        imageContentGeneration++
         cancelPreload()
         imageJobs.values.forEach(Job::cancel)
         imageJobs.clear()
+        imageStates = emptyMap()
+        loading = false
     }
 
     private fun replaceDocument(next: ReaderDocument?) {
-        if (imageDocumentId != next?.contentId) {
+        if (document !== next) {
+            imageContentGeneration++
             cancelPreload()
             imageJobs.values.forEach(Job::cancel)
             imageJobs.clear()
             imageStates = emptyMap()
-            imageDocumentId = next?.contentId
         }
         document = next
         documentGeneration++
@@ -1133,7 +1263,7 @@ internal class SourceReaderRouteOwner(
         chapter: SourceChapter,
     ): Boolean = generation == requestGeneration &&
         flow.selectedBook?.identity == book.identity &&
-        currentChapter?.chapterId == chapter.chapterId
+        (requestedAdjacentChapter ?: currentChapter)?.chapterId == chapter.chapterId
 
     private data class ReaderPreloadContext(
         val documentGeneration: Long,
@@ -1179,15 +1309,19 @@ internal class SourceRemoteLibraryRouteOwner(
     var jitPrompt by mutableStateOf<JitWritebackPrompt?>(null)
         private set
     private var pendingOperationBook: SourceBookSummary? = null
+    private var requestGeneration = 0L
     val visibleBooks: List<SourceBookSummary>
         get() = selectedTargetId?.let { targetId -> books.filter { it.remoteTargetId == targetId } } ?: books
 
     suspend fun restore(sourceId: String) {
+        val request = ++requestGeneration
         reloadUnresolved(sourceId)
+        if (request != requestGeneration) return
         val snapshot = flow.remoteMirrorSnapshot(sourceId) ?: return
+        if (request != requestGeneration) return
         books = snapshot.books.map { item ->
             SourceBookSummary(
-                identity = item.book.identity,
+                identity = item.book.identity as BookIdentity.Remote,
                 title = item.book.title,
                 author = item.book.author,
                 coverUrl = item.book.coverUrl,
@@ -1202,30 +1336,37 @@ internal class SourceRemoteLibraryRouteOwner(
     }
 
     suspend fun refresh() {
+        val request = ++requestGeneration
         val packageInfo = packageProvider() ?: run {
+            loading = false
             status = RemoteLibraryRouteStatus.Failure("source-unavailable")
             return
         }
         loading = true
         status = RemoteLibraryRouteStatus.Loading
         try {
-            status = when (val result = flow.pullRemoteLibrary(packageInfo)) {
-                is RemoteLibraryPullResult.Success -> {
-                    val loadedTargets = flow.listRemoteTargets()
-                    if (loadedTargets.isNotEmpty() || targets.isEmpty()) targets = loadedTargets
-                    books = flow.saveRemoteMirrorSnapshot(packageInfo.manifest.displayName, result.books, targets)
+            val result = flow.refreshRemoteLibrarySnapshot(packageInfo)
+            if (request != requestGeneration) return
+            if (packageProvider()?.packageSha256 != packageInfo.packageSha256) {
+                status = RemoteLibraryRouteStatus.Failure("source-changed")
+                return
+            }
+            status = when (result) {
+                is RemoteLibrarySnapshotRefreshResult.Success -> {
+                    books = result.books
+                    targets = result.targets
                     selectedIds = selectedIds.intersect(books.mapTo(hashSetOf(), ::remoteLibrarySelectionId))
                     persistSelection()
+                    reloadUnresolved(packageInfo.manifest.sourceId.value)
                     if (books.isEmpty()) RemoteLibraryRouteStatus.Empty else RemoteLibraryRouteStatus.Content
                 }
-                RemoteLibraryPullResult.LoginRequired -> RemoteLibraryRouteStatus.LoginRequired
-                RemoteLibraryPullResult.VerificationRequired -> RemoteLibraryRouteStatus.VerificationRequired
-                RemoteLibraryPullResult.Cancelled -> RemoteLibraryRouteStatus.Cancelled
-                is RemoteLibraryPullResult.Failure -> RemoteLibraryRouteStatus.Failure(result.safeCode)
+                RemoteLibrarySnapshotRefreshResult.LoginRequired -> RemoteLibraryRouteStatus.LoginRequired
+                RemoteLibrarySnapshotRefreshResult.VerificationRequired -> RemoteLibraryRouteStatus.VerificationRequired
+                RemoteLibrarySnapshotRefreshResult.Cancelled -> RemoteLibraryRouteStatus.Cancelled
+                is RemoteLibrarySnapshotRefreshResult.Failure -> RemoteLibraryRouteStatus.Failure(result.safeCode)
             }
-            reloadUnresolved(packageInfo.manifest.sourceId.value)
         } finally {
-            loading = false
+            if (request == requestGeneration) loading = false
         }
     }
     fun toggleSelection(book: SourceBookSummary) {
@@ -1530,12 +1671,45 @@ internal fun rememberSourceDetailRouteOwner(
     return owner
 }
 
+private class SourceReaderRouteOwnerHolder(
+    flow: SourceFlowController,
+    private val savedState: SavedStateHandle,
+) : ViewModel() {
+    private var boundFlow = flow
+    private var owner = SourceReaderRouteOwner(flow, savedState)
+
+    fun forFlow(flow: SourceFlowController): SourceReaderRouteOwner {
+        if (boundFlow !== flow) {
+            owner.dispose()
+            owner = SourceReaderRouteOwner(flow, savedState)
+            boundFlow = flow
+        }
+        return owner
+    }
+
+    override fun onCleared() {
+        owner.dispose()
+    }
+}
+
+private class SourceReaderRouteOwnerHolderFactory(
+    private val flow: SourceFlowController,
+    private val savedState: SavedStateHandle,
+) : ViewModelProvider.Factory {
+    override fun <T : ViewModel> create(modelClass: Class<T>): T {
+        require(modelClass == SourceReaderRouteOwnerHolder::class.java)
+        @Suppress("UNCHECKED_CAST")
+        return SourceReaderRouteOwnerHolder(flow, savedState) as T
+    }
+}
+
 @Composable
 internal fun rememberSourceReaderRouteOwner(
     entry: NavBackStackEntry,
     flow: SourceFlowController,
-): SourceReaderRouteOwner {
-    val owner = remember(entry, flow) { SourceReaderRouteOwner(flow, entry.savedStateHandle) }
-    DisposableEffect(owner) { onDispose(owner::dispose) }
-    return owner
+): SourceReaderRouteOwner = remember(entry, flow) {
+    ViewModelProvider(
+        entry,
+        SourceReaderRouteOwnerHolderFactory(flow, entry.savedStateHandle),
+    ).get(SourceReaderRouteOwnerHolder::class.java).forFlow(flow)
 }

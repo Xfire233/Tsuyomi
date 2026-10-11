@@ -21,6 +21,7 @@ import org.tsuyomi.core.display.LocalDisplayEnvironment
 import org.tsuyomi.core.ui.components.StateView
 import org.tsuyomi.core.ui.components.TsuyomiButton
 import org.tsuyomi.core.ui.components.TsuyomiButtonStyle
+import org.tsuyomi.core.ui.components.TsuyomiDialog
 import org.tsuyomi.core.ui.components.TsuyomiStateKind
 import org.tsuyomi.core.ui.components.TsuyomiTopBar
 import org.tsuyomi.reader.ui.ReaderSurface
@@ -32,7 +33,7 @@ import org.tsuyomi.shared.locator.ReaderLocator
 import org.tsuyomi.shared.model.BookIdentity
 import org.tsuyomi.shared.sourcecontract.ReaderDocument
 import org.tsuyomi.shared.sourcecontract.ReaderBlock
-import org.tsuyomi.shared.sourcecontract.SourceChapter
+import org.tsuyomi.shared.sourcecontract.ReaderNavigationTarget
 import org.tsuyomi.shared.sourcecontract.SourceErrorCode
 import org.tsuyomi.shared.sourcecontract.SourceException
 
@@ -44,8 +45,8 @@ fun ReaderScreen(
     failure: SourceException?,
     restoredLocator: ReaderLocator?,
     restorationGeneration: Long,
-    chapters: List<SourceChapter>,
-    currentChapterId: String,
+    navigationTargets: List<ReaderNavigationTarget>,
+    currentContentId: String,
     bookmarks: List<ReaderLocator>,
     onToggleBookmark: (ReaderLocator) -> Unit,
     onSelectBookmark: (ReaderLocator) -> Unit,
@@ -54,7 +55,8 @@ fun ReaderScreen(
     requestedFlow: String,
     hasFlowOverride: Boolean,
     onFlowOverrideChanged: (String?) -> Unit,
-    onSelectChapter: (SourceChapter) -> Unit,
+    onSelectContent: (ReaderNavigationTarget) -> Unit,
+    onNavigateLink: (org.tsuyomi.shared.sourcecontract.ReaderLinkTarget) -> Unit,
     onNavigateUp: () -> Unit,
     imageStates: Map<String, CoverUiState>,
     onImageVisible: (ReaderBlock.Image) -> Unit,
@@ -72,20 +74,17 @@ fun ReaderScreen(
     onRetry: () -> Unit,
     onUseOfflineCache: () -> Unit,
     onOpenVerification: () -> Unit,
+    onImageHidden: (ReaderBlock.Image) -> Unit = {},
+    onSelectAdjacentContent: ((ReaderNavigationTarget, Boolean) -> Unit)? = null,
+    onDismissFailure: () -> Unit = {},
 ) {
-    val auxiliarySheetState = rememberReaderAuxiliarySheetState(
-        sourceId = bookIdentity?.sourceId.orEmpty(),
-        remoteBookId = bookIdentity?.remoteBookId.orEmpty(),
-    )
-    val returnAnchorState = rememberReaderReturnAnchorState(
-        sourceId = bookIdentity?.sourceId.orEmpty(),
-        remoteBookId = bookIdentity?.remoteBookId.orEmpty(),
-    )
+    val auxiliarySheetState = rememberReaderAuxiliarySheetState(bookIdentity)
+    val returnAnchorState = rememberReaderReturnAnchorState(bookIdentity)
     LaunchedEffect(failure) {
         if (failure != null) returnAnchorState.navigationFailed()
     }
     when {
-        loading -> ReaderRouteState(onNavigateUp, modifier) {
+        loading && document == null -> ReaderRouteState(onNavigateUp, modifier) {
             StateView(
                 kind = TsuyomiStateKind.LOADING,
                 title = stringResource(R.string.reader_loading_chapter),
@@ -98,8 +97,8 @@ fun ReaderScreen(
             restoredLocator = restoredLocator,
             restorationGeneration = restorationGeneration,
             onLocatorChanged = onLocatorChanged,
-            chapters = chapters,
-            currentChapterId = currentChapterId,
+            navigationTargets = navigationTargets,
+            currentContentId = currentContentId,
             bookmarks = bookmarks,
             onToggleBookmark = onToggleBookmark,
             onSelectBookmark = onSelectBookmark,
@@ -107,11 +106,15 @@ fun ReaderScreen(
             requestedFlow = requestedFlow,
             hasFlowOverride = hasFlowOverride,
             onFlowOverrideChanged = onFlowOverrideChanged,
-            onSelectChapter = onSelectChapter,
+            onNavigateLink = onNavigateLink,
+            onSelectContent = onSelectContent,
+            onSelectAdjacentContent = onSelectAdjacentContent,
+            chapterNavigationEnabled = !loading,
             onNavigateUp = onNavigateUp,
             onChapterCompleted = onChapterCompleted,
             imageStates = imageStates,
             onImageVisible = onImageVisible,
+            onImageHidden = onImageHidden,
             onRetryImage = onRetryImage,
             modifier = modifier,
             preferences = preferences,
@@ -156,6 +159,30 @@ fun ReaderScreen(
                 modifier = Modifier.fillMaxSize(),
             )
         }
+    }
+    if (document != null && failure != null && !loading) {
+        TsuyomiDialog(
+            title = stringResource(R.string.reader_chapter_failure),
+            text = stringResource(readerFailureMessage(failure.code)),
+            body = {
+                Text(stringResource(R.string.reader_diagnostic_id, failure.diagnostic.correlationId))
+                TsuyomiButton(
+                    text = stringResource(R.string.reader_offline),
+                    onClick = onUseOfflineCache,
+                    style = TsuyomiButtonStyle.SECONDARY,
+                )
+                if (failure.code == SourceErrorCode.SESSION_REQUIRED || failure.code == SourceErrorCode.VERIFICATION_REQUIRED) {
+                    TsuyomiButton(
+                        text = stringResource(R.string.reader_open_verification),
+                        onClick = onOpenVerification,
+                    )
+                }
+            },
+            onDismissRequest = onDismissFailure,
+            confirmLabel = stringResource(R.string.reader_retry),
+            onConfirm = onRetry,
+            dismissLabel = stringResource(android.R.string.cancel),
+        )
     }
 }
 

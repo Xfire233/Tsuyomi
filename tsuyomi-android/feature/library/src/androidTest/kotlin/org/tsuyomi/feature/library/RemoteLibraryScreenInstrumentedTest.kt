@@ -23,6 +23,12 @@ import androidx.compose.ui.test.ForcedSize
 import androidx.compose.ui.test.onRoot
 import androidx.compose.ui.unit.DpSize
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.isDisplayed
+import androidx.compose.ui.test.FontScale
+import androidx.compose.ui.test.then
+import androidx.compose.ui.test.assertIsEnabled
+import androidx.compose.ui.test.assertCountEquals
+import androidx.compose.ui.test.hasScrollToNodeAction
 import androidx.compose.ui.test.filterToOne
 import androidx.compose.ui.test.hasClickAction
 import androidx.compose.ui.test.hasAnyAncestor
@@ -36,6 +42,7 @@ import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performSemanticsAction
 import androidx.compose.ui.test.performTouchInput
+import androidx.compose.ui.test.longClick
 import androidx.compose.ui.test.down
 import androidx.compose.ui.test.moveBy
 import androidx.compose.ui.test.up
@@ -112,9 +119,9 @@ class RemoteLibraryScreenInstrumentedTest {
 
         composeRule.onNodeWithTag("remote-library-folder-favorites").assertIsDisplayed().performClick()
         assertEquals("favorites", openedTarget)
-        composeRule.onNodeWithTag("library-book-$SourceId-1").assertIsDisplayed()
+        composeRule.onNodeWithTag(remoteBookTestTag("1")).assertIsDisplayed()
         val viewportWidth = composeRule.onRoot().fetchSemanticsNode().boundsInRoot.width
-        val cardWidth = composeRule.onNodeWithTag("library-book-$SourceId-1").fetchSemanticsNode().boundsInRoot.width
+        val cardWidth = composeRule.onNodeWithTag(remoteBookTestTag("1")).fetchSemanticsNode().boundsInRoot.width
         val cellFraction = cardWidth / viewportWidth
         assertTrue("Wide grid cell occupies $cellFraction of the viewport", cellFraction in (150f / 840f)..(200f / 840f))
         composeRule.onNodeWithContentDescription("更多操作").performClick()
@@ -122,10 +129,69 @@ class RemoteLibraryScreenInstrumentedTest {
         composeRule.onNodeWithText("全部复制到本地书架").assertIsDisplayed()
     }
 
+    @OptIn(ExperimentalTestApi::class)
+    @Test
+    fun einkRetainedMirrorStatusPagesReachExplicitBookSelectionWithoutLocalRemovalPermission() {
+        val book = books.first()
+        var selectedIds by mutableStateOf(emptySet<String>())
+        var copies = 0
+        var opens = 0
+        var retries = 0
+        val einkEnvironment = environment.copy(
+            preferences = environment.preferences.copy(displayPreference = DisplayPreference.EINK),
+            effectiveProfile = DisplayProfile.EINK, decisionReason = DisplayDecisionReason.MANUAL_EINK,
+            motionPolicy = MotionPolicy.INSTANT)
+        var currentEnvironment by mutableStateOf(einkEnvironment)
+        composeRule.setContent {
+            DeviceConfigurationOverride(DeviceConfigurationOverride.ForcedSize(DpSize(320.dp, 480.dp))
+                .then(DeviceConfigurationOverride.FontScale(2f))) {
+                DisplayEnvironmentProvider(currentEnvironment) {
+                    TsuyomiTheme(currentEnvironment) {
+                        RemoteLibraryScreen(SourceId, "文库8", listOf(book), selectedIds, RemoteLibraryViewState.CONTENT,
+                            message = (0..39).joinToString("\n") { "cause-$it" }, copyConfirmationVisible = false,
+                            onNavigateUp = {}, onRefresh = { retries++ },
+                            onToggleSelection = { selectedIds = setOf(remoteLibrarySelectionId(it)) }, onClearSelection = { selectedIds = emptySet() },
+                            onRequestCopy = { copies++ }, onDismissCopy = {}, onConfirmCopy = {}, onOpenVerification = {}, onOpenBook = { opens++ },
+                            refreshFailure = true)
+                    }
+                }
+            }
+        }
+        var sawCauseEnd = false
+        var pages = 0
+        val bookCard = composeRule.onNodeWithTag(remoteBookTestTag(book.identity.remoteBookId))
+        while (!bookCard.isDisplayed()) {
+            sawCauseEnd = sawCauseEnd || composeRule.onNodeWithText("cause-39", substring = true).isDisplayed()
+            composeRule.onAllNodes(hasScrollToNodeAction()).assertCountEquals(0)
+            composeRule.onNodeWithText("下一页").assertIsEnabled().performClick()
+            pages++
+            assertTrue("Mirror selection was unreachable", pages < 200)
+        }
+        assertTrue(sawCauseEnd)
+        composeRule.onAllNodes(hasScrollToNodeAction()).assertCountEquals(0)
+        bookCard.assertIsDisplayed().performTouchInput { longClick() }
+        composeRule.runOnIdle {
+            assertEquals(setOf(remoteLibrarySelectionId(book)), selectedIds)
+            assertEquals(0, opens)
+        }
+        composeRule.onNodeWithText("选择").assertDoesNotExist()
+        composeRule.onNodeWithTag("library-drag-preview").assertDoesNotExist()
+        composeRule.onNodeWithTag("library-delete-drop-target").assertDoesNotExist()
+        composeRule.runOnIdle { currentEnvironment = environment }
+        composeRule.waitForIdle()
+        composeRule.runOnIdle { currentEnvironment = einkEnvironment }
+        composeRule.waitForIdle()
+        bookCard.assertIsDisplayed()
+        composeRule.runOnIdle { assertEquals(setOf(remoteLibrarySelectionId(book)), selectedIds) }
+        composeRule.onNodeWithContentDescription("复制所选到本地书架").performClick()
+        assertEquals(1, copies)
+        assertEquals(0, retries)
+    }
+
     @Test
     fun failedRefreshKeepsFiveBooksAndCountWithLocalizedCauseUntilExplicitRetry() {
         val retained = (1..5).map { number ->
-            SourceBookSummary(BookIdentity(SourceId, number.toString()), "收藏$number", null, null, "https://example.com/$number")
+            SourceBookSummary(BookIdentity.Remote(SourceId, number.toString()), "收藏$number", null, null, "https://example.com/$number")
         }
         var state by mutableStateOf(RemoteLibraryViewState.CONTENT)
         var refreshes = 0
@@ -156,13 +222,13 @@ class RemoteLibraryScreenInstrumentedTest {
             }
         }
         composeRule.onNodeWithText("文库8 · 5 本").assertIsDisplayed()
-        retained.forEach { composeRule.onNodeWithTag("library-book-$SourceId-${it.identity.remoteBookId}").assertIsDisplayed() }
+        retained.forEach { composeRule.onNodeWithTag(libraryBookTestTag(it.identity)).assertIsDisplayed() }
         composeRule.onNodeWithText("网络不可用。").assertIsDisplayed()
         composeRule.onNodeWithContentDescription("加入网站收藏结果待确认", useUnmergedTree = true).assertIsDisplayed()
         composeRule.onNodeWithText("重试读取").performClick()
         assertEquals(1, refreshes)
         composeRule.onNodeWithText("网站收藏为空").assertIsDisplayed()
-        composeRule.onNodeWithTag("library-book-$SourceId-1").assertDoesNotExist()
+        composeRule.onNodeWithTag(remoteBookTestTag("1")).assertDoesNotExist()
     }
     @Test
     fun refreshErrorWithoutPreviousRowsShowsFullErrorAndRetry() {
@@ -193,7 +259,7 @@ class RemoteLibraryScreenInstrumentedTest {
         }
         composeRule.onNodeWithText("网站收藏读取失败").assertIsDisplayed()
         composeRule.onNodeWithText("网络不可用。").assertIsDisplayed()
-        composeRule.onNodeWithTag("library-book-$SourceId-1").assertDoesNotExist()
+        composeRule.onNodeWithTag(remoteBookTestTag("1")).assertDoesNotExist()
         composeRule.onNodeWithText("重试读取").performClick()
         assertEquals(1, retries)
     }
@@ -231,7 +297,7 @@ class RemoteLibraryScreenInstrumentedTest {
 
         composeRule.onNodeWithText("网站收藏").assertIsDisplayed()
         composeRule.onNodeWithTag("remote-library-folder-favorites").assertDoesNotExist()
-        composeRule.onNodeWithTag("library-book-$SourceId-1").assertIsDisplayed()
+        composeRule.onNodeWithTag(remoteBookTestTag("1")).assertIsDisplayed()
         composeRule.onNodeWithContentDescription("更多操作").performClick()
         composeRule.onNodeWithText("启用网站分组").assertIsDisplayed().performClick()
         assertEquals(true, groupingEnabled)
@@ -409,7 +475,7 @@ class RemoteLibraryScreenInstrumentedTest {
             }
         }
 
-        val book = composeRule.onNodeWithTag("library-book-$SourceId-1")
+        val book = composeRule.onNodeWithTag(remoteBookTestTag("1"))
         book.performSemanticsAction(SemanticsActions.OnLongClick)
         composeRule.waitUntil(5_000) { selectedIds.size == 1 }
         composeRule.onNodeWithTag("library-drag-preview").assertDoesNotExist()
@@ -438,7 +504,7 @@ class RemoteLibraryScreenInstrumentedTest {
                     LibraryBookDragPreview(
                         entries = listOf(shortcutEntry),
                         layout = LibraryLayout.LIST,
-                        coverState = { CoverUiState.Fallback(FallbackSpec(it.book.title, it.book.identity.sourceId)) },
+                        coverState = { CoverUiState.Fallback(FallbackSpec(it.book.title, SourceId)) },
                     )
                 }
             }
@@ -460,7 +526,7 @@ class RemoteLibraryScreenInstrumentedTest {
                     LibraryBookDragPreview(
                         entries = listOf(shortcutEntry),
                         layout = LibraryLayout.COMPACT,
-                        coverState = { CoverUiState.Fallback(FallbackSpec(it.book.title, it.book.identity.sourceId)) },
+                        coverState = { CoverUiState.Fallback(FallbackSpec(it.book.title, SourceId)) },
                     )
                 }
             }
@@ -475,8 +541,8 @@ class RemoteLibraryScreenInstrumentedTest {
     @Test
     fun bookCenterAndInsertionEdgeResolveToMutuallyExclusiveDestinations() {
         val coordinator = LibraryDragCoordinator()
-        val moving = BookIdentity(SourceId, "moving")
-        val target = BookIdentity(SourceId, "target")
+        val moving = BookIdentity.Remote(SourceId, "moving")
+        val target = BookIdentity.Remote(SourceId, "target")
         coordinator.registerSource("moving", Rect(0f, 0f, 100f, 140f))
         coordinator.registerBook(target, index = 1, bounds = Rect(120f, 0f, 220f, 140f))
         coordinator.registerLibrary(Rect(0f, 0f, 300f, 500f), reorderEnabled = true)
@@ -546,7 +612,7 @@ class RemoteLibraryScreenInstrumentedTest {
                             dragCoordinator = coordinator,
                             dragEnabled = false,
                             canRemove = false,
-                            coverState = { CoverUiState.Fallback(FallbackSpec(it.book.title, it.book.identity.sourceId)) },
+                            coverState = { CoverUiState.Fallback(FallbackSpec(it.book.title, SourceId)) },
                             onCoverVisibility = { _, _ -> },
                             onOpenBook = {},
                             onLongPressBook = {},
@@ -557,7 +623,7 @@ class RemoteLibraryScreenInstrumentedTest {
                             entries = listOf(shortcutEntry.copy(book = shortcutEntry.book.copy(title = "拖拽预览书籍"))),
                             layout = LibraryLayout.GRID,
                             coverState = {
-                                CoverUiState.Fallback(FallbackSpec(it.book.title, it.book.identity.sourceId))
+                                CoverUiState.Fallback(FallbackSpec(it.book.title, SourceId))
                             },
                         )
 
@@ -570,7 +636,7 @@ class RemoteLibraryScreenInstrumentedTest {
 
         val standardRootBounds = composeRule.onNodeWithTag("library-root-node-${libraryMirrorRootId(SourceId)}")
             .fetchSemanticsNode().boundsInRoot
-        val standardBookBounds = composeRule.onNodeWithTag("library-book-$SourceId-shortcut-book")
+        val standardBookBounds = composeRule.onNodeWithTag(remoteBookTestTag("shortcut-book"))
             .fetchSemanticsNode().boundsInRoot
         val standardDragPreviewBounds = composeRule.onNodeWithTag("library-drag-preview-grid-content")
             .fetchSemanticsNode().boundsInRoot
@@ -583,14 +649,14 @@ class RemoteLibraryScreenInstrumentedTest {
 
         val rootBounds = composeRule.onNodeWithTag("library-root-node-${libraryMirrorRootId(SourceId)}")
             .fetchSemanticsNode().boundsInRoot
-        val bookBounds = composeRule.onNodeWithTag("library-book-$SourceId-shortcut-book")
+        val bookBounds = composeRule.onNodeWithTag(remoteBookTestTag("shortcut-book"))
             .fetchSemanticsNode().boundsInRoot
         val rootStatusBounds = composeRule.onNodeWithText("网站收藏 · 4 本", useUnmergedTree = true)
             .fetchSemanticsNode().boundsInRoot
         val bookTitleBounds = composeRule.onNodeWithText("快捷书籍", useUnmergedTree = true)
             .fetchSemanticsNode().boundsInRoot
         val bookStatusBounds = composeRule.onNode(
-            hasText("未开始") and hasAnyAncestor(hasTestTag("library-book-$SourceId-shortcut-book")),
+            hasText("未开始") and hasAnyAncestor(hasTestTag(remoteBookTestTag("shortcut-book"))),
             useUnmergedTree = true,
         ).fetchSemanticsNode().boundsInRoot
         val dragPreviewBounds = composeRule.onNodeWithTag("library-drag-preview-grid-content")
@@ -609,7 +675,7 @@ class RemoteLibraryScreenInstrumentedTest {
         composeRule.onNodeWithText("网站收藏 · 4 本").assertIsDisplayed()
         val mirrorWindow = composeRule.onNodeWithTag("library-root-node-${libraryMirrorRootId(SourceId)}")
             .fetchSemanticsNode().boundsInWindow
-        val bookWindow = composeRule.onNodeWithTag("library-book-$SourceId-shortcut-book")
+        val bookWindow = composeRule.onNodeWithTag(remoteBookTestTag("shortcut-book"))
             .fetchSemanticsNode().boundsInWindow
         composeRule.runOnIdle {
             coordinator.registerSource("mounted-card-drag", bookWindow)
@@ -633,11 +699,14 @@ class RemoteLibraryScreenInstrumentedTest {
         }
     }
 
+    private fun remoteBookTestTag(remoteBookId: String): String =
+        libraryBookTestTag(BookIdentity.Remote(SourceId, remoteBookId))
+
     private companion object {
         const val SourceId = "org.tsuyomi.wenku8"
         val shortcutEntry = LibraryEntry(
             book = LibraryBook(
-                identity = BookIdentity(SourceId, "shortcut-book"),
+                identity = BookIdentity.Remote(SourceId, "shortcut-book"),
                 title = "快捷书籍",
                 addedAt = Instant.EPOCH,
                 metadataUpdatedAt = Instant.EPOCH,
@@ -650,8 +719,8 @@ class RemoteLibraryScreenInstrumentedTest {
             reconciliation = null,
         )
         val books = listOf(
-            SourceBookSummary(BookIdentity(SourceId, "1"), "文学少女", "野村美月", null, "https://example.com/1"),
-            SourceBookSummary(BookIdentity(SourceId, "2"), "狼与香辛料", "支仓冻砂", null, "https://example.com/2"),
+            SourceBookSummary(BookIdentity.Remote(SourceId, "1"), "文学少女", "野村美月", null, "https://example.com/1"),
+            SourceBookSummary(BookIdentity.Remote(SourceId, "2"), "狼与香辛料", "支仓冻砂", null, "https://example.com/2"),
         )
         val targets = listOf(
             RemoteTarget("default", "默认书架", kind = "default"),
