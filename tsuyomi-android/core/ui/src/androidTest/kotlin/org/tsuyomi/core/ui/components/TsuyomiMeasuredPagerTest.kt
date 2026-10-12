@@ -911,16 +911,17 @@ class TsuyomiMeasuredPagerTest {
         val field = composeRule.onNodeWithText("Draft")
         // Selection input requests focus semantically; a physical tap also places the cursor.
         field.performTextInputSelection(TextRange(2))
+        // EditableText includes IME composition decoration; InputText is the exact editing draft.
         field.assertIsFocused()
-            .assert(SemanticsMatcher.expectValue(SemanticsProperties.EditableText, AnnotatedString("draft")))
+            .assert(SemanticsMatcher.expectValue(SemanticsProperties.InputText, AnnotatedString("draft")))
             .assert(SemanticsMatcher.expectValue(SemanticsProperties.TextSelectionRange, TextRange(2)))
         field.performTextInput("x")
         field.assertIsFocused()
-            .assert(SemanticsMatcher.expectValue(SemanticsProperties.EditableText, AnnotatedString("drxaft")))
+            .assert(SemanticsMatcher.expectValue(SemanticsProperties.InputText, AnnotatedString("drxaft")))
             .assert(SemanticsMatcher.expectValue(SemanticsProperties.TextSelectionRange, TextRange(3)))
         field.performTextInput("y")
         field.assertIsFocused()
-            .assert(SemanticsMatcher.expectValue(SemanticsProperties.EditableText, AnnotatedString("drxyaft")))
+            .assert(SemanticsMatcher.expectValue(SemanticsProperties.InputText, AnnotatedString("drxyaft")))
             .assert(SemanticsMatcher.expectValue(SemanticsProperties.TextSelectionRange, TextRange(4)))
     }
 
