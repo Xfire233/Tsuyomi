@@ -4,6 +4,12 @@
  */
 package org.tsuyomi.core.ui.components
 
+import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.layout.ColumnScope
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxScope
@@ -40,6 +46,7 @@ import androidx.compose.ui.unit.dp
 import org.tsuyomi.core.display.DisplayProfile
 import org.tsuyomi.core.display.LocalDisplayEnvironment
 import org.tsuyomi.core.ui.theme.TsuyomiSpacing
+import org.tsuyomi.core.ui.theme.TsuyomiEInkPalette
 import org.tsuyomi.core.ui.theme.coverCardTitle
 
 /** Cover-led Material card with external metadata or a bounded in-cover title treatment. */
@@ -53,12 +60,8 @@ fun TsuyomiCoverGridCard(
     titleInsideCover: Boolean = false,
 ) {
     val layout = currentCoverCardLayout()
-    Card(
-        onClick = onClick,
-        modifier = modifier.fillMaxWidth(),
-        shape = MaterialTheme.shapes.medium,
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-    ) {
+    val eInk = LocalDisplayEnvironment.current.effectiveProfile == DisplayProfile.EINK
+    val cardContent: @Composable ColumnScope.() -> Unit = {
         if (titleInsideCover || layout.usesWideTitleLane) {
             TsuyomiCoverCardContent(title, supportingText, cover)
         } else {
@@ -83,7 +86,7 @@ fun TsuyomiCoverGridCard(
                     text = title,
                     maxLines = 2,
                     overflow = TextOverflow.Ellipsis,
-                    style = titleStyle.copy(lineBreak = coverTitleLineBreak()),
+                    style = titleStyle.copy(lineBreak = LineBreak.Simple),
                 )
                 if (supportingText.isNullOrBlank()) {
                     Spacer(Modifier.weight(1f))
@@ -98,6 +101,21 @@ fun TsuyomiCoverGridCard(
                 }
             }
         }
+    }
+    if (eInk) {
+        TsuyomiCard(
+            onClick = onClick,
+            modifier = modifier.fillMaxWidth().semantics { contentDescription = title },
+            content = cardContent,
+        )
+    } else {
+        Card(
+            onClick = onClick,
+            modifier = modifier.fillMaxWidth(),
+            shape = MaterialTheme.shapes.medium,
+            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+            content = cardContent,
+        )
     }
 }
 
@@ -193,7 +211,7 @@ private fun CoverCardTitleLane(
             text = title,
             maxLines = titleMaxLines,
             overflow = TextOverflow.Ellipsis,
-            style = MaterialTheme.typography.coverCardTitle.copy(lineBreak = coverTitleLineBreak()),
+            style = MaterialTheme.typography.coverCardTitle.copy(lineBreak = LineBreak.Simple),
         )
         supportingText?.takeIf(String::isNotBlank)?.let { text ->
             Text(
@@ -216,25 +234,26 @@ fun BoxScope.TsuyomiCoverTitleOverlay(
 ) {
     val eInk = LocalDisplayEnvironment.current.effectiveProfile == DisplayProfile.EINK
     val expandedFontScale = LocalDensity.current.fontScale > 1.5f
-    val topPadding = if (!eInk && expandedFontScale) TsuyomiSpacing.Xs else 28.dp
-    val titleStyle = if (eInk) {
-        MaterialTheme.typography.titleSmall
+    val topPadding = if (eInk || expandedFontScale) TsuyomiSpacing.Xs else 28.dp
+    val titleStyle = MaterialTheme.typography.coverCardTitle
+    val overlayBackground = if (eInk) {
+        Modifier.background(TsuyomiEInkPalette.Ink)
     } else {
-        MaterialTheme.typography.coverCardTitle
+        Modifier.drawWithCache {
+            val fadeEnd = (topPadding.toPx() / size.height).coerceIn(0f, 1f)
+            val gradient = Brush.verticalGradient(
+                0f to Color.Transparent,
+                fadeEnd to Color.Black.copy(alpha = 0.65f),
+                1f to Color.Black.copy(alpha = 0.82f),
+            )
+            onDrawBehind { drawRect(gradient) }
+        }
     }
     Column(
         modifier = modifier
             .align(Alignment.BottomCenter)
             .fillMaxWidth()
-            .drawWithCache {
-                val fadeEnd = (topPadding.toPx() / size.height).coerceIn(0f, 1f)
-                val gradient = Brush.verticalGradient(
-                    0f to Color.Transparent,
-                    fadeEnd to Color.Black.copy(alpha = 0.65f),
-                    1f to Color.Black.copy(alpha = 0.82f),
-                )
-                onDrawBehind { drawRect(gradient) }
-            }
+            .then(overlayBackground)
             .padding(
                 start = TsuyomiSpacing.Sm,
                 top = topPadding,
@@ -246,8 +265,8 @@ fun BoxScope.TsuyomiCoverTitleOverlay(
             text = title,
             maxLines = 2,
             overflow = TextOverflow.Ellipsis,
-            style = titleStyle.copy(lineBreak = coverTitleLineBreak()),
-            color = Color.White,
+            style = titleStyle.copy(lineBreak = LineBreak.Simple),
+            color = if (eInk) TsuyomiEInkPalette.Paper else Color.White,
         )
         supportingText?.takeIf(String::isNotBlank)?.let { text ->
             Text(
@@ -255,16 +274,11 @@ fun BoxScope.TsuyomiCoverTitleOverlay(
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
                 style = MaterialTheme.typography.labelMedium,
-                color = Color.White.copy(alpha = 0.9f),
+                color = if (eInk) TsuyomiEInkPalette.Paper else Color.White.copy(alpha = 0.9f),
             )
         }
     }
 }
-
-/** Keep the frozen E-ink wrapping while Standard covers use each available title line before wrapping. */
-@Composable
-private fun coverTitleLineBreak(): LineBreak =
-    if (LocalDisplayEnvironment.current.effectiveProfile == DisplayProfile.EINK) LineBreak.Heading else LineBreak.Simple
 
 private fun TextStyle.lineHeightOrFontSize(): TextUnit =
     lineHeight.takeIf { it != TextUnit.Unspecified } ?: fontSize

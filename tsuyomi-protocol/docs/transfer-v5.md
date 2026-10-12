@@ -3,11 +3,11 @@
 
 # `tsuyomi-transfer` v5 boundary
 
-`tsuyomi-transfer` v5 is the current portable UTF-8 JSON exchange contract. It retains v1–v4's stable `(sourceId, remoteBookId)` book identity, deterministic ordering, and 32 MiB maximum document size. It never carries chapter bodies, credentials, cookies, browser sessions, source-install state, caches, device display state, or source/website effects.
+`tsuyomi-transfer` v5 is a retained remote-only UTF-8 JSON input contract; current exporters emit [v6](../schemas/tsuyomi-transfer-v6.schema.json). V5 retains v1–v4's stable `(sourceId, remoteBookId)` book identity, deterministic ordering, and 32 MiB maximum document size. It never carries chapter bodies, credentials, cookies, browser sessions, source-install state, caches, device display state, or source/website effects.
 
 ## Compatibility
 
-Current exporters emit `version: 5`. Importers accept strict, closed v1–v4 documents as input only; a document claiming an earlier version must not carry v5 fields. In particular, v4's `bookmarkedChapterIds` remains a v4-only input field and is converted to degraded chapter-start locators with `chapterProgress: 0` and an epoch capture time. V1 and v2 imply `localPin: true`; v3–v5 require explicit `localPin`.
+V5 documents declare `version: 5`; their shape is immutable. Current importers also accept strict, closed v1–v4 documents as input only; a document claiming an earlier version must not carry v5 fields. In particular, v4's `bookmarkedChapterIds` remains a v4-only input field and is converted to degraded chapter-start locators with `chapterProgress: 0` and an epoch capture time. V1 and v2 imply `localPin: true`; v3–v5 require explicit `localPin`.
 
 The normative v5 shape is [`schemas/tsuyomi-transfer-v5.schema.json`](../schemas/tsuyomi-transfer-v5.schema.json). The schema enforces record shape and bounds. The semantic validator additionally rejects duplicate book identities, duplicate shelf IDs, dangling shelf references, shelf cycles, noncanonical library order, bookmark-document/book mismatches, and duplicate bookmark positions before durable mutation.
 
@@ -29,4 +29,4 @@ Bookmarks are independent of local library membership, reading progress, and com
 
 V5 retains v4's portable Reader preference grammar, including `scroll`, `paged`, and `dual` flow, typography, alignment, and uppercase `#RRGGBB` colors. All Reader fields remain optional, so a partial import does not rewrite an omitted preference.
 
-Exporters sort books by `(sourceId, remoteBookId)`, shelves by parent/position/ID, set-valued arrays lexically, and bookmarks by their stable semantic position. V5 exporters emit both `localPin` and `bookmarks` explicitly. Re-exporting any legacy input produces v5 canonical bytes, so a legacy input digest is not a v5 export digest.
+V5's canonical order is books by `(sourceId, remoteBookId)`, shelves by parent/position/ID, set-valued arrays lexically, and bookmarks by their stable semantic position, with explicit `localPin` and `bookmarks`. Current exporters instead produce v6 with explicit remote/local book identity, including from legacy inputs; an imported legacy digest is not its current export digest.

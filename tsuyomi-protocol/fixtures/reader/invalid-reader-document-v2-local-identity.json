@@ -1,0 +1,10 @@
+{
+  "version": 2,
+  "kind": "chapter",
+  "identity": { "origin": "local", "publicationId": "00000000-0000-4000-8000-000000000001", "contentId": "chapter-1" },
+  "title": "Invalid host identity",
+  "revision": "revision-2",
+  "contentDigest": "3333333333333333333333333333333333333333333333333333333333333333",
+  "anchors": [],
+  "blocks": [{ "id": "paragraph-1", "kind": "paragraph", "text": "A source cannot inject local identity." }]
+}

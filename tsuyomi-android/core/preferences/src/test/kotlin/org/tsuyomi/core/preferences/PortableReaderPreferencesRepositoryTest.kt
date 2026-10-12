@@ -7,6 +7,8 @@ package org.tsuyomi.core.preferences
 import androidx.datastore.core.DataStore
 import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.core.emptyPreferences
+import androidx.datastore.preferences.core.edit
+import androidx.datastore.preferences.core.stringSetPreferencesKey
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.first
@@ -33,7 +35,7 @@ class PortableReaderPreferencesRepositoryTest {
             foregroundColor = "#112233",
             backgroundColor = "#AABBCC",
         )
-        val identity = BookIdentity("fixture.source", "flow-override")
+        val identity = BookIdentity.Remote("fixture.source", "flow-override")
 
         repository.update(global)
         repository.preferences.first().also { persisted ->
@@ -55,7 +57,7 @@ class PortableReaderPreferencesRepositoryTest {
         assertEquals("paged", latestGlobal.flow)
         assertEquals(
             RequestedReaderFlow("paged", false),
-            repository.requestedFlow(BookIdentity("other.source", "flow-override"), latestGlobal).first(),
+            repository.requestedFlow(BookIdentity.Remote("other.source", "flow-override"), latestGlobal).first(),
         )
 
         repository.setFlowOverride(identity, null)
@@ -68,7 +70,7 @@ class PortableReaderPreferencesRepositoryTest {
     fun interface_reset_clears_reader_overrides_and_all_reader_presentation_keys() = runBlocking {
         val store = InMemoryReaderPreferencesDataStore()
         val repository = PortableReaderPreferencesRepository(store)
-        val identity = BookIdentity("fixture.source", "reset-flow")
+        val identity = BookIdentity.Remote("fixture.source", "reset-flow")
         repository.update(
             PortableReaderPreferences(
                 flow = "dual",
@@ -97,6 +99,29 @@ class PortableReaderPreferencesRepositoryTest {
         assertEquals(null, reset.foregroundColor)
         assertEquals(null, reset.backgroundColor)
         assertEquals(RequestedReaderFlow("scroll", false), repository.requestedFlow(identity, reset).first())
+    }
+
+    @Test
+    fun legacy_remote_override_survives_local_override_and_repository_recreation() = runBlocking {
+        val store = InMemoryReaderPreferencesDataStore()
+        val publicationId = "00000000-0000-0000-0000-000000000005"
+        val remote = BookIdentity.Remote("fixture.source", publicationId)
+        val local = BookIdentity.Local(publicationId)
+        val legacy = java.util.Base64.getUrlEncoder().withoutPadding()
+            .encodeToString("fixture.source\u0000$publicationId".toByteArray(Charsets.UTF_8)) + "|paged"
+        store.edit { it[stringSetPreferencesKey("reader_flow_overrides_v1")] = setOf(legacy) }
+        val repository = PortableReaderPreferencesRepository(store)
+        val global = PortableReaderPreferences(flow = "scroll")
+        assertEquals(RequestedReaderFlow("paged", true), repository.requestedFlow(remote, global).first())
+        assertEquals(RequestedReaderFlow("scroll", false), repository.requestedFlow(local, global).first())
+
+        repository.setFlowOverride(local, "dual")
+        val recreated = PortableReaderPreferencesRepository(store)
+        assertEquals(RequestedReaderFlow("paged", true), recreated.requestedFlow(remote, global).first())
+        assertEquals(RequestedReaderFlow("dual", true), recreated.requestedFlow(local, global).first())
+        recreated.setFlowOverride(local, null)
+        assertEquals(RequestedReaderFlow("paged", true), recreated.requestedFlow(remote, global).first())
+        assertEquals(RequestedReaderFlow("dual", false), recreated.requestedFlow(local, global).first())
     }
 }
 

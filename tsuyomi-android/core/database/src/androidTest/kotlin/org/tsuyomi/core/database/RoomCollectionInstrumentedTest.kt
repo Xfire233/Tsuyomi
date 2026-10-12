@@ -21,6 +21,8 @@ import org.tsuyomi.shared.librarydomain.LibraryBook
 import org.tsuyomi.shared.librarydomain.LibraryCollection
 import org.tsuyomi.shared.librarydomain.ReadingProgress
 import org.tsuyomi.shared.model.BookIdentity
+import org.tsuyomi.shared.librarydomain.LocalPublicationFormat
+import org.tsuyomi.shared.librarydomain.LocalPublicationMetadata
 import org.tsuyomi.shared.smartshelf.MatchMode
 import org.tsuyomi.shared.smartshelf.ProgressState
 import org.tsuyomi.shared.smartshelf.SmartPredicate
@@ -35,6 +37,34 @@ class RoomCollectionInstrumentedTest {
 
     @After
     fun closeDatabase() = fixture.close()
+    @Test
+    fun local_publications_participate_in_generic_smart_rules_but_never_remote_source_rules() = runBlocking {
+        val local = BookIdentity.Local("f2b8ef64-9375-4fc1-b7c9-274b4beafed1")
+        repository.addToLibrary(LibraryBook(local, "Local", Instant.EPOCH, Instant.EPOCH,
+            localPublication = LocalPublicationMetadata(LocalPublicationFormat.EPUB, "a".repeat(64), 1234, false)))
+        repository.setLocalTags(local, listOf("收藏"))
+        repository.saveProgress(progress(local, "spine-1", 12, 0.4, Instant.ofEpochSecond(1)))
+        val source = SmartRuleNode.Predicate(SmartPredicate.SourceIn(setOf("fixture.source")))
+        val dormant = SmartRuleNode.Predicate(SmartPredicate.IsDormantSource)
+        val updated = SmartRuleNode.Predicate(SmartPredicate.HasUnresolvedUpdate)
+        val rules = mapOf(
+            "generic-reading" to SmartRuleNode.All(listOf(
+                SmartRuleNode.Predicate(SmartPredicate.TagContains(MatchMode.ALL, setOf("收藏"))),
+                SmartRuleNode.Predicate(SmartPredicate.ProgressIn(setOf(ProgressState.READING))),
+            )),
+            "remote-source" to source,
+            "not-remote-source" to SmartRuleNode.Not(source),
+            "remote-dormant" to dormant,
+            "not-remote-dormant" to SmartRuleNode.Not(dormant),
+            "remote-updated" to updated,
+        )
+        rules.forEach { (id, root) -> repository.createSmartCollection(LibraryCollection(id, CollectionKind.SMART, id, null, 0), SmartRule(root = root)) }
+        listOf("generic-reading", "not-remote-source", "not-remote-dormant").forEach { id ->
+            assertEquals(listOf(local), repository.collectionEntries(id).map { it.book.identity })
+        }
+        listOf("remote-source", "remote-dormant", "remote-updated").forEach { id -> assertTrue(repository.collectionEntries(id).isEmpty()) }
+    }
+
     @Test
     fun concurrentOppositeParentAssignmentsLeaveExactlyOneAcyclicDirection() = runBlocking {
         repository.createCollection(LibraryCollection("alpha", CollectionKind.MANUAL, "Alpha", null, 0))
@@ -61,8 +91,8 @@ class RoomCollectionInstrumentedTest {
     }
     @Test
     fun smartCollectionEvaluatesTypedAstAgainstLiveRoomState() = runBlocking {
-        val matching = BookIdentity("org.tsuyomi.wenku8", "smart-1")
-        val excluded = BookIdentity("org.tsuyomi.other", "smart-2")
+        val matching = BookIdentity.Remote("org.tsuyomi.wenku8", "smart-1")
+        val excluded = BookIdentity.Remote("org.tsuyomi.other", "smart-2")
         repository.addToLibrary(LibraryBook(matching, "100% 奇幻", Instant.EPOCH, Instant.EPOCH))
         repository.addToLibrary(LibraryBook(excluded, "普通", Instant.EPOCH, Instant.EPOCH))
         repository.setLocalTags(matching, listOf("奇幻"))
@@ -70,7 +100,7 @@ class RoomCollectionInstrumentedTest {
             ReadingProgress(
                 matching,
                 ReaderLocator(
-                    document = DocumentIdentity(matching.sourceId, matching.remoteBookId, "chapter"),
+                    document = DocumentIdentity(matching, "chapter"),
                     bookProgress = 0.5,
                     capturedAt = Instant.EPOCH.plusSeconds(1),
                 ),
@@ -101,9 +131,9 @@ class RoomCollectionInstrumentedTest {
 
     @Test
     fun smartRulesMatchJsonEncodedAuthorsAndRemoteTagsLiterally() = runBlocking {
-        val matching = BookIdentity("fixture.source", "encoded-match")
-        val nearAuthor = BookIdentity("fixture.source", "encoded-near-author")
-        val nearTag = BookIdentity("fixture.source", "encoded-near-tag")
+        val matching = BookIdentity.Remote("fixture.source", "encoded-match")
+        val nearAuthor = BookIdentity.Remote("fixture.source", "encoded-near-author")
+        val nearTag = BookIdentity.Remote("fixture.source", "encoded-near-tag")
         val author = "Ada \"Quoted\" \\ Backslash"
         val tag = "100%_literal"
         repository.addToLibrary(
@@ -149,10 +179,11 @@ class RoomCollectionInstrumentedTest {
 
     @Test
     fun smartRulesIgnoreInvalidProgressAndRejectRulesOverTheSqlArgumentLimit() = runBlocking {
-        val identity = BookIdentity("fixture.source", "invalid-smart-progress")
+        val identity = BookIdentity.Remote("fixture.source", "invalid-smart-progress")
         repository.addToLibrary(LibraryBook(identity, "Invalid progress", Instant.EPOCH, Instant.EPOCH))
         database.libraryDao().insertProgressIfAbsent(
             ReadingProgressEntity(
+                identity.storageKey,
                 identity.sourceId,
                 identity.remoteBookId,
                 "chapter",
@@ -199,7 +230,7 @@ class RoomCollectionInstrumentedTest {
 
     @Test
     fun deletionPreviewAndReparentPreserveNearestParentOrderAndBookRecord() = runBlocking {
-        val book = LibraryBook(BookIdentity("source", "member"), "Book", Instant.EPOCH, Instant.EPOCH)
+        val book = LibraryBook(BookIdentity.Remote("source", "member"), "Book", Instant.EPOCH, Instant.EPOCH)
         repository.addToLibrary(book)
         repository.createCollection(LibraryCollection("grandparent", CollectionKind.MANUAL, "Grandparent", null, 0))
         repository.createCollection(LibraryCollection("parent", CollectionKind.MANUAL, "Parent", "grandparent", 10))
@@ -229,7 +260,7 @@ class RoomCollectionInstrumentedTest {
 
     @Test
     fun overlappingBatchSubtreeDeletionIsAtomicAndLeavesBooksIntact() = runBlocking {
-        val identity = BookIdentity("source", "member")
+        val identity = BookIdentity.Remote("source", "member")
         repository.addToLibrary(LibraryBook(identity, "Book", Instant.EPOCH, Instant.EPOCH))
         repository.createCollection(LibraryCollection("parent", CollectionKind.MANUAL, "Parent", null, 0))
         repository.createManualCollectionWithMemberships(
@@ -242,7 +273,7 @@ class RoomCollectionInstrumentedTest {
         // Preview and cancel perform no mutation; a stale preview cannot silently delete changed memberships.
         assertEquals(3, repository.collections().size)
         assertEquals(listOf(identity), repository.collectionEntries("child").map { it.book.identity })
-        val late = BookIdentity("source", "late")
+        val late = BookIdentity.Remote("source", "late")
         repository.addToLibrary(LibraryBook(late, "Late", Instant.EPOCH, Instant.EPOCH))
         assertTrue(repository.addManualMembership("child", late))
         assertFalse(repository.deleteCollections(plan))
@@ -259,7 +290,7 @@ class RoomCollectionInstrumentedTest {
 
     @Test
     fun overlappingBatchReparentPromotesOnlySurvivorsInOriginalOrder() = runBlocking {
-        val identity = BookIdentity("source", "survivor")
+        val identity = BookIdentity.Remote("source", "survivor")
         repository.addToLibrary(LibraryBook(identity, "Survivor", Instant.EPOCH, Instant.EPOCH))
         repository.createCollection(LibraryCollection("parent", CollectionKind.MANUAL, "Parent", null, 0))
         repository.createCollection(LibraryCollection("child", CollectionKind.MANUAL, "Child", "parent", 0))
@@ -282,7 +313,7 @@ class RoomCollectionInstrumentedTest {
 
     @Test
     fun smartRuleUpdatePreservesIdentityAndRejectsManualConversion() = runBlocking {
-        val identity = BookIdentity("source", "match")
+        val identity = BookIdentity.Remote("source", "match")
         repository.addToLibrary(LibraryBook(identity, "Book", Instant.EPOCH, Instant.EPOCH))
         val initial = SmartRule(root = SmartRuleNode.All(listOf(
             SmartRuleNode.Predicate(SmartPredicate.SourceIn(setOf("other"))),

@@ -17,9 +17,24 @@ const createAjv = () => {
 const compare = (left, right) => (left < right ? -1 : left > right ? 1 : 0);
 const transferMaxBytes = 32 * 1024 * 1024;
 
+const identityTuple = (identity) => identity.origin === 'local'
+  ? ['local', identity.publicationId]
+  : ['remote', identity.sourceId, identity.remoteBookId];
+const identityKey = (identity) => JSON.stringify(identityTuple(identity));
+const compareIdentity = (left, right) => {
+  const leftLocal = left.origin === 'local';
+  const rightLocal = right.origin === 'local';
+  if (leftLocal !== rightLocal) return leftLocal ? 1 : -1;
+  if (leftLocal) return compare(left.publicationId, right.publicationId);
+  return compare(left.sourceId, right.sourceId) || compare(left.remoteBookId, right.remoteBookId);
+};
+const documentIdentityTuple = (document) => document.book
+  ? identityTuple(document.book)
+  : ['remote', document.sourceId, document.remoteBookId];
+
 const bookmarkPositionKey = (locator) => {
   const document = locator.document;
-  const identity = [document.sourceId, document.remoteBookId, document.contentId, document.revision ?? null];
+  const identity = [...documentIdentityTuple(document), document.contentId, document.revision ?? null];
   if (locator.blockId !== undefined && locator.characterOffset !== undefined) {
     return JSON.stringify([...identity, 'offset', locator.blockId, locator.characterOffset]);
   }
@@ -53,12 +68,12 @@ const transferIssues = (document) => {
 
   const bookIds = new Set();
   for (const [index, book] of document.library.entries()) {
-    const key = `${book.identity.sourceId}\u0000${book.identity.remoteBookId}`;
+    const key = identityKey(book.identity);
     if (bookIds.has(key)) issues.push(`duplicate-book:${key}`);
     bookIds.add(key);
     if (index > 0) {
       const previous = document.library[index - 1].identity;
-      if (compare(`${previous.sourceId}\u0000${previous.remoteBookId}`, key) > 0) issues.push('library-order');
+      if (compareIdentity(previous, book.identity) > 0) issues.push('library-order');
     }
   }
 
@@ -81,18 +96,31 @@ const transferIssues = (document) => {
     }
   }
   for (const book of document.library) {
-    const key = `${book.identity.sourceId}\u0000${book.identity.remoteBookId}`;
+    const key = identityKey(book.identity);
     for (const shelfId of book.shelfIds ?? []) {
       if (!shelves.has(shelfId)) issues.push(`missing-shelf:${shelfId}`);
     }
     if (document.version >= 3 && book.localPin === false && (book.shelfIds?.length ?? 0) > 0) {
-      issues.push(`unpinned-manual-membership:${book.identity.sourceId}\u0000${book.identity.remoteBookId}`);
+      issues.push(`unpinned-manual-membership:${key}`);
     }
-    if (document.version === 5) {
+    if (document.version === 6) {
+      if (book.identity.origin === 'local' && !book.localPublication) issues.push(`missing-local-publication:${key}`);
+      if (book.identity.origin !== 'local' && book.localPublication) issues.push(`remote-local-publication:${key}`);
+      const options = book.localPublication?.txtOptions;
+      if (options) {
+        for (let index = 1; index < options.headingSelections.length; index += 1) {
+          if (options.headingSelections[index - 1].paragraphOrdinal >= options.headingSelections[index].paragraphOrdinal) {
+            issues.push(`txt-heading-order:${key}`);
+            break;
+          }
+        }
+      }
+    }
+    if (document.version >= 5) {
       if ((book.bookmarks?.length ?? 0) > 20000) issues.push(`bookmark-limit:${key}`);
       const bookmarkPositions = new Set();
       for (const [bookmarkIndex, bookmark] of (book.bookmarks ?? []).entries()) {
-        if (bookmark.document.sourceId !== book.identity.sourceId || bookmark.document.remoteBookId !== book.identity.remoteBookId) {
+        if (JSON.stringify(documentIdentityTuple(bookmark.document)) !== JSON.stringify(identityTuple(book.identity))) {
           issues.push(`bookmark-document-book-mismatch:${key}:${bookmarkIndex}`);
         }
         const bookmarkKey = bookmarkPositionKey(bookmark);
@@ -281,6 +309,50 @@ test('transfer v5 semantic validation rejects foreign documents and duplicate po
   assert.ok(transferIssues(duplicate).some((issue) => issue.startsWith('duplicate-bookmark-position:')));
 });
 
+test('transfer v6 local bookmarks are publication-scoped and identical bytes remain independent identities', async () => {
+  const document = await loadJson('../fixtures/transfer/valid-v6-local-publication.json');
+  assert.deepEqual(transferIssues(document), []);
+
+  const foreign = await loadJson('../fixtures/transfer/invalid-v6-foreign-local-bookmark.json');
+  assert.ok(transferIssues(foreign).some((issue) => issue.startsWith('bookmark-document-book-mismatch:')));
+
+  const secondCopy = structuredClone(document.library[0]);
+  secondCopy.identity.publicationId = 'f2b8ef64-9375-4fc1-b7c9-274b4beafed2';
+  secondCopy.bookmarks[0].document.book.publicationId = secondCopy.identity.publicationId;
+  document.library.push(secondCopy);
+  assert.deepEqual(transferIssues(document), []);
+});
+
+test('TXT v6 fixture preserves ordered options and opaque cover identity deterministically across mixed origins', async () => {
+  const document = await loadJson('../fixtures/transfer/valid-v6-local-txt.json');
+  assert.deepEqual(transferIssues(document), []);
+  const locals = document.library.filter((book) => book.identity.origin === 'local');
+  assert.equal(locals[0].localPublication.coverResourceId, '4637570b-1109-48ba-8a1b-256e868ca14c');
+  assert.deepEqual(locals[0].localPublication.txtOptions, { charsetName: 'GB18030', headingSelections: [{ paragraphOrdinal: 0, title: '序章' }, { paragraphOrdinal: 42, title: '第二节 😀' }], paragraphsPerSection: 256 });
+  assert.deepEqual(locals[1].localPublication.txtOptions, { charsetName: null, headingSelections: [], paragraphsPerSection: 128 });
+  assert.equal(locals[0].localPublication.originalSha256, locals[1].localPublication.originalSha256);
+  assert.notEqual(identityKey(locals[0].identity), identityKey(locals[1].identity));
+  const reversed = structuredClone(document);
+  reversed.library.reverse();
+  assert.ok(transferIssues(reversed).includes('library-order'));
+  reversed.library.sort((left, right) => compareIdentity(left.identity, right.identity));
+  assert.equal(JSON.stringify(reversed), JSON.stringify(document));
+  assert.deepEqual(transferIssues(JSON.parse(JSON.stringify(document))), []);
+});
+
+test('TXT v6 conformance cases separate schema bounds from strict semantic heading order', async () => {
+  const validate = createAjv().compile(await loadJson('../schemas/tsuyomi-transfer-v6.schema.json'));
+  const fixture = await loadJson('../fixtures/transfer/valid-v6-local-txt.json');
+  const cases = await loadJson('../fixtures/transfer/conformance-v6-txt-options.json');
+  for (const value of cases.cases) {
+    const document = structuredClone(fixture);
+    document.library[1].localPublication.txtOptions = value.options;
+    const schemaValid = validate(document);
+    assert.equal(schemaValid, value.schemaValid, value.name);
+    assert.equal(schemaValid && transferIssues(document).length === 0, value.semanticallyValid, value.name);
+  }
+});
+
 test('transfer semantic conformance rejects duplicate stable book identities', async () => {
   const document = await loadJson('../fixtures/transfer/duplicate-book-identity.json');
   assert.ok(transferIssues(document).some((issue) => issue.startsWith('duplicate-book:')));
@@ -404,6 +476,7 @@ test('reader document and semantic locator schemas accept their fixtures', async
   const ajv = createAjv();
   for (const [schemaPath, fixturePath] of [
     ['../schemas/reader-document-v1.schema.json', '../fixtures/reader/valid-thread-page-document.json'],
+    ['../schemas/reader-document-v2.schema.json', '../fixtures/reader/valid-reader-document-v2.json'],
     ['../schemas/reader-locator-v1.schema.json', '../fixtures/reader/valid-reader-locator.json'],
     ['../schemas/forum-navigation-v1.schema.json', '../fixtures/reader/valid-forum-navigation.json'],
   ]) {
@@ -427,6 +500,17 @@ test('reader document rejects raw HTML and locator requires a semantic fallback'
   delete locator.chapterProgress;
   delete locator.bookProgress;
   assert.equal(locatorValidator(locator), false);
+});
+
+test('reader document v2 rejects host-only identity and local resource fields', async () => {
+  const ajv = createAjv();
+  const validate = ajv.compile(await loadJson('../schemas/reader-document-v2.schema.json'));
+  for (const fixture of [
+    '../fixtures/reader/invalid-reader-document-v2-local-resource.json',
+    '../fixtures/reader/invalid-reader-document-v2-local-identity.json',
+  ]) {
+    assert.equal(validate(await loadJson(fixture)), false, fixture);
+  }
 });
 
 test('transfer schema excludes arbitrary extension data', async () => {

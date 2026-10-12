@@ -36,7 +36,7 @@ class RemoteMirrorMembershipTest {
     }
 
     private fun book(remoteBookId: String, targetId: String?) = SourceBookSummary(
-        identity = BookIdentity("org.tsuyomi.wenku8", remoteBookId),
+        identity = BookIdentity.Remote("org.tsuyomi.wenku8", remoteBookId),
         title = remoteBookId,
         author = null,
         coverUrl = null,

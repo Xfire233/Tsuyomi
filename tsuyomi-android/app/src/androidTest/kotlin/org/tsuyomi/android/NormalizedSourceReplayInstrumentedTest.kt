@@ -33,7 +33,7 @@ internal class NormalizedSourceReplayInstrumentedTest : SourceFlowInstrumentedTe
     @Test
     fun validated_detail_directory_and_document_replay_offline_without_raw_transport_cache() = runBlocking {
         val packageInfo = installFixture()
-        val identity = BookIdentity(SOURCE_FLOW_TEST_SOURCE_ID, "1234")
+        val identity = BookIdentity.Remote(SOURCE_FLOW_TEST_SOURCE_ID, "1234")
         val selected = summary(identity.sourceId, identity.remoteBookId, "搜索结果")
         val chapters = listOf(
             SourceChapter(
@@ -44,10 +44,7 @@ internal class NormalizedSourceReplayInstrumentedTest : SourceFlowInstrumentedTe
             ),
         )
         val document = ReaderDocument(
-            sourceId = identity.sourceId,
-            remoteBookId = identity.remoteBookId,
-            contentId = "10001",
-            revision = null,
+            identity = DocumentIdentity(identity, "10001"),
             title = "第一章",
             blocks = listOf(ReaderBlock.Paragraph("p-0001", "确定性的离线正文。")),
         )
@@ -245,15 +242,12 @@ internal class NormalizedSourceReplayInstrumentedTest : SourceFlowInstrumentedTe
 
     @Test
     fun history_only_visit_resumes_first_cached_chapter_without_creating_progress_or_pin() = runBlocking {
-        val identity = BookIdentity(SOURCE_FLOW_TEST_SOURCE_ID, "history-only")
+        val identity = BookIdentity.Remote(SOURCE_FLOW_TEST_SOURCE_ID, "history-only")
         val book = summary(identity.sourceId, identity.remoteBookId, "历史续读")
         val first = SourceChapter("first", "第一章", "https://www.wenku8.net/book/history-only/first")
         val second = SourceChapter("second", "第二章", "https://www.wenku8.net/book/history-only/second")
         val firstDocument = ReaderDocument(
-            sourceId = identity.sourceId,
-            remoteBookId = identity.remoteBookId,
-            contentId = first.chapterId,
-            revision = null,
+            identity = DocumentIdentity(identity, first.chapterId),
             title = first.title,
             blocks = listOf(ReaderBlock.Paragraph("first-p", "历史首章")),
         )
@@ -284,7 +278,7 @@ internal class NormalizedSourceReplayInstrumentedTest : SourceFlowInstrumentedTe
     @Test
     fun partial_summary_never_narrows_richer_authors_but_detail_remains_authoritative() = runBlocking {
         val packageInfo = installFixture()
-        val identity = BookIdentity(SOURCE_FLOW_TEST_SOURCE_ID, "author-preservation")
+        val identity = BookIdentity.Remote(SOURCE_FLOW_TEST_SOURCE_ID, "author-preservation")
         library.saveBook(
             LibraryBook(
                 identity = identity,
@@ -308,7 +302,7 @@ internal class NormalizedSourceReplayInstrumentedTest : SourceFlowInstrumentedTe
             flow.prepareBook(summary)
             flow.saveProgress(
                 ReaderLocator(
-                    document = DocumentIdentity(identity.sourceId, identity.remoteBookId, "chapter-1"),
+                    document = DocumentIdentity(identity, "chapter-1"),
                     blockId = "block-1",
                     characterOffset = 0,
                     capturedAt = SOURCE_FLOW_TEST_TIME,
@@ -326,9 +320,9 @@ internal class NormalizedSourceReplayInstrumentedTest : SourceFlowInstrumentedTe
 
     @Test
     fun reader_bookmark_toggle_persists_without_creating_a_local_pin() = runBlocking {
-        val identity = BookIdentity(SOURCE_FLOW_TEST_SOURCE_ID, "bookmark-flow")
+        val identity = BookIdentity.Remote(SOURCE_FLOW_TEST_SOURCE_ID, "bookmark-flow")
         val bookmark = ReaderLocator(
-            document = DocumentIdentity(identity.sourceId, identity.remoteBookId, "chapter-1"),
+            document = DocumentIdentity(identity, "chapter-1"),
             blockId = "paragraph-1",
             characterOffset = 7,
             textAnchorDigest = "a".repeat(64),
@@ -368,8 +362,8 @@ internal class NormalizedSourceReplayInstrumentedTest : SourceFlowInstrumentedTe
     }
     @Test
     fun normalized_detail_preserves_update_date_and_decodes_legacy_detail() {
-        val storedIdentity = BookIdentity(SOURCE_FLOW_TEST_SOURCE_ID, "1234")
-        val legacyIdentity = BookIdentity(SOURCE_FLOW_TEST_SOURCE_ID, "5678")
+        val storedIdentity = BookIdentity.Remote(SOURCE_FLOW_TEST_SOURCE_ID, "1234")
+        val legacyIdentity = BookIdentity.Remote(SOURCE_FLOW_TEST_SOURCE_ID, "5678")
         val store = NormalizedSourceStore(context)
         store.writeDetail(
             SourceBookDetail(
@@ -394,7 +388,7 @@ internal class NormalizedSourceReplayInstrumentedTest : SourceFlowInstrumentedTe
         assertNull(legacy?.lastUpdatedDate)
     }
 
-    private fun legacyDetailFile(identity: BookIdentity): File {
+    private fun legacyDetailFile(identity: BookIdentity.Remote): File {
         val key = MessageDigest.getInstance("SHA-256")
             .digest("${identity.sourceId}\u0000${identity.remoteBookId}\u0000".toByteArray(Charsets.UTF_8))
             .joinToString("") { byte -> "%02x".format(byte.toInt() and 0xff) }

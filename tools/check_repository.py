@@ -89,6 +89,12 @@ TOOLING_SCOPE_RESOURCES = (
     "`find-skills`",
     "`to-spec`",
     "`tsuyomi-context-router`",
+    "`writing-for-agents`",
+    "`grill-with-docs`",
+    "`domain-modeling`",
+    "`diagnosing-bugs`",
+    "`code-review`",
+    "`retro`",
     "Context7",
     "UIAutomator2",
     "`node_repl`",
@@ -96,7 +102,7 @@ TOOLING_SCOPE_RESOURCES = (
     "`grep_app`",
 )
 TOOLING_NATIVE_RESOURCES = TOOLING_SCOPE_RESOURCES[:22]
-TOOLING_SKILL_RESOURCES = TOOLING_SCOPE_RESOURCES[22:30]
+TOOLING_SKILL_RESOURCES = TOOLING_SCOPE_RESOURCES[22:36]
 TOOLING_MCP_RESOURCES = ("`context7`", "`uiautomator2`", "`node_repl`", "`websearch`", "`grep_app`")
 PROJECT_SKILL_REQUIRED_SECTIONS = ("## When to use", "## Do not use", "## Required inputs")
 DOCUMENTATION_REQUIRED_SECTIONS = (

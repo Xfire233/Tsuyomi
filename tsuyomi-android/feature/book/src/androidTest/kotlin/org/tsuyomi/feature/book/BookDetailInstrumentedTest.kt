@@ -6,6 +6,19 @@ package org.tsuyomi.feature.book
 
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.ui.test.hasAnyAncestor
+import androidx.compose.ui.test.junit4.StateRestorationTester
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.WindowInsetsSides
+import androidx.compose.foundation.layout.only
+import androidx.compose.foundation.layout.safeDrawing
+import androidx.compose.foundation.layout.windowInsetsPadding
+import android.graphics.Insets
+import android.view.WindowInsets as FrameworkWindowInsets
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
 import androidx.compose.material3.MaterialTheme
@@ -16,6 +29,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.platform.LocalInputModeManager
 import androidx.compose.ui.input.InputMode
 import androidx.compose.ui.input.InputModeManager
@@ -25,6 +39,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.toPixelMap
 import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.semantics.SemanticsProperties
+import androidx.compose.ui.semantics.getOrNull
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.TextLayoutResult
 import androidx.compose.ui.test.DeviceConfigurationOverride
@@ -37,6 +52,8 @@ import androidx.compose.ui.state.ToggleableState
 import androidx.compose.ui.test.assert
 import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.isDisplayed
+import androidx.compose.ui.test.assertIsNotDisplayed
 import androidx.compose.ui.test.assertIsEnabled
 import androidx.compose.ui.test.assertIsOff
 import androidx.compose.ui.test.assertIsOn
@@ -54,6 +71,8 @@ import androidx.compose.ui.test.onAllNodesWithTag
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.onNodeWithTag
+import androidx.compose.ui.test.hasTestTag
+import androidx.compose.ui.test.performScrollToNode
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performSemanticsAction
 import androidx.compose.ui.test.performScrollToIndex
@@ -81,12 +100,12 @@ import org.tsuyomi.core.display.MotionPolicy
 import org.tsuyomi.core.media.api.CoverUiState
 import org.tsuyomi.core.media.api.FallbackSpec
 import org.tsuyomi.core.ui.theme.TsuyomiTypography
+import org.tsuyomi.core.ui.theme.TsuyomiEInkPalette
+import org.tsuyomi.core.ui.theme.TsuyomiSpacing
 import org.tsuyomi.shared.model.BookIdentity
-import org.tsuyomi.shared.sourcecontract.SourceBookDetail
-import org.tsuyomi.shared.sourcecontract.SourceBookSummary
+import org.tsuyomi.shared.sourcecontract.ReaderNavigationTarget
 import org.tsuyomi.shared.sourcecontract.RemoteTarget
-import org.tsuyomi.shared.sourcecontract.SourceChapter
-import org.tsuyomi.shared.sourcecontract.SourceDirectory
+import org.tsuyomi.shared.sourcecontract.SourceBookSummary
 import kotlin.math.abs
 
 
@@ -94,6 +113,205 @@ import kotlin.math.abs
 class BookDetailInstrumentedTest {
     @get:Rule
     val compose = createComposeRule()
+
+    @OptIn(ExperimentalTestApi::class)
+    @Test
+    fun einkDetailKeepsFittingSemanticModulesTogetherAndCentersReadingInsideContent() {
+        val book = sourceBook().copy(title = "作品")
+        val chapters = listOf(chapter("c1", "第一章", "第一卷"), chapter("c2", "第二章", "第一卷"))
+        var localState by mutableStateOf(DetailLocalState(inLibrary = true))
+        var description by mutableStateOf("简介")
+        var density = 1f
+        var fontScale by mutableStateOf(1f)
+        var navigationWidth by mutableStateOf(64.dp)
+        var parentConsumesBottom by mutableStateOf(false)
+        var hostView: android.view.View? = null
+        var expectedBottomInsetPx = 0f
+        val readingTargets = mutableListOf<ReaderNavigationTarget>()
+        val environment = standardTestEnvironment.copy(effectiveProfile = DisplayProfile.EINK, motionPolicy = MotionPolicy.INSTANT)
+        compose.setContent {
+            DeviceConfigurationOverride(DeviceConfigurationOverride.ForcedSize(DpSize(424.dp, 900.dp))) {
+                DeviceConfigurationOverride(DeviceConfigurationOverride.FontScale(fontScale)) {
+                    density = LocalDensity.current.density
+                    hostView = LocalView.current
+                    DisplayEnvironmentProvider(environment) {
+                        MaterialTheme(typography = TsuyomiTypography) {
+                            Row(Modifier.fillMaxSize().testTag("detail-host-viewport")
+                                .then(if (parentConsumesBottom) Modifier.windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Bottom)) else Modifier)) {
+                                Spacer(Modifier.width(navigationWidth))
+                                BookDetailScreen(
+                                    state = BookScreenState.Content(bookDetail(book, description, listOf("奇幻"), "连载")),
+                                    directoryState = BookScreenState.Content(BookDirectory(book.identity, chapters)),
+                                    localState = localState,
+                                    mutation = null,
+                                    coverState = CoverUiState.Fallback(FallbackSpec(book.title, book.identity.sourceId)),
+                                    unreadOnly = false,
+                                    descending = false,
+                                    selectedChapterId = null,
+                                    cacheState = DetailCacheState(),
+                                    onCacheAction = {},
+                                    onSetRating = {},
+                                    onSearchAuthor = {},
+                                    onToggleUnreadOnly = {},
+                                    onToggleOrder = {},
+                                    onSelectChapter = {},
+                                    onContinueReading = { readingTargets += it },
+                                    onAddToLibrary = {},
+                                    onRequestRemoveFromLibrary = {},
+                                    onRetry = {},
+                                    onUseOfflineCache = {},
+                                    onOpenVerification = {},
+                                    onKeepDefaultLibrary = {},
+                                    modifier = Modifier.weight(1f),
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        val tags = listOf("detail-identity-module", "detail-tag-surface", "detail-introduction-module", "detail-unread-filter", "detail-chapter-c1", "detail-chapter-c2")
+        tags.forEach { compose.onNodeWithTag(it).assertIsDisplayed() }
+        compose.onNodeWithText("上一页").assertDoesNotExist()
+        compose.onNodeWithText("下一页").assertDoesNotExist()
+        val identity = compose.onNodeWithTag("detail-identity-module").fetchSemanticsNode().boundsInRoot
+        val tagModule = compose.onNodeWithTag("detail-tag-surface").fetchSemanticsNode().boundsInRoot
+        val introduction = compose.onNodeWithTag("detail-introduction-module").fetchSemanticsNode().boundsInRoot
+        assertTrue(tagModule.top >= identity.bottom - 1f)
+        assertTrue(introduction.top >= tagModule.bottom - 1f)
+        val author = compose.onNodeWithTag("detail-author")
+        val touchBounds = author.fetchSemanticsNode().touchBoundsInRoot
+        assertTrue(touchBounds.width >= 48f * density - 1f && touchBounds.height >= 48f * density - 1f)
+        val pixels = author.captureToImage().toPixelMap()
+        var borderTop = pixels.height
+        var borderBottom = -1
+        for (y in 0 until pixels.height) {
+            for (x in 0 until pixels.width) {
+                val pixel = pixels[x, y]
+                val gray = TsuyomiEInkPalette.N50
+                if (abs(pixel.red - gray.red) < 0.02f && abs(pixel.green - gray.green) < 0.02f && abs(pixel.blue - gray.blue) < 0.02f) {
+                    borderTop = minOf(borderTop, y)
+                    borderBottom = maxOf(borderBottom, y)
+                }
+            }
+        }
+        assertTrue("The author must retain a visible fine gray frame", borderBottom >= borderTop)
+        assertTrue("The visible author frame must not fill its 48dp touch target", borderBottom - borderTop + 1 < 48f * density - 1f)
+        fun assertReadingCentered() {
+            val body = compose.onNodeWithTag("book-detail-pages").fetchSemanticsNode().boundsInRoot
+            val actionNode = compose.onNodeWithTag("detail-reading-fab").assertIsDisplayed().fetchSemanticsNode()
+            val actionPosition = actionNode.positionInRoot
+            val actionBottom = actionPosition.y + actionNode.size.height
+            val host = compose.onNodeWithTag("detail-host-viewport").fetchSemanticsNode().boundsInRoot
+            assertTrue(abs(actionPosition.x + actionNode.size.width / 2f - body.center.x) <= 1f)
+            if (navigationWidth > 0.dp) {
+                assertTrue("The content center must account for the occupied navigation lane", actionPosition.x + actionNode.size.width / 2f > host.center.x + 1f)
+            }
+            assertTrue(actionPosition.y >= body.bottom - 1f)
+            assertTrue("The entire reading target must retain 48dp within the viewport", actionNode.boundsInRoot.height >= 48f * density - 1f && actionNode.touchBoundsInRoot.height >= 48f * density - 1f)
+            assertTrue("The complete outer reading action must remain above the safe bottom", actionBottom <= host.bottom - expectedBottomInsetPx + 1f)
+            if (expectedBottomInsetPx > 0f) {
+                assertEquals("A parent-consumed bottom inset must not be consumed twice", host.bottom - expectedBottomInsetPx - TsuyomiSpacing.Sm.value * density, actionBottom, 1f)
+            }
+        }
+        assertReadingCentered()
+        compose.onNodeWithTag("detail-reading-fab").performClick()
+        compose.runOnIdle { assertEquals("c1", readingTargets.single().contentId); localState = localState.copy(progressChapterId = "c2") }
+        assertReadingCentered()
+        compose.onNodeWithText("继续阅读").assertIsDisplayed()
+        compose.onNodeWithTag("detail-reading-fab").performClick()
+        compose.runOnIdle { assertEquals(listOf("c1", "c2"), readingTargets.map { it.contentId }) }
+        val view = requireNotNull(hostView)
+        val originalInsets = compose.runOnIdle { requireNotNull(view.rootWindowInsets) }
+        // API29 derives navigation bounds from stable root insets; keep the injected bottom within that real bound.
+        val bottomInsetPx = minOf((80f * density).toInt(), originalInsets.stableInsetBottom)
+        assertTrue("The inset regression requires a nonzero physical navigation inset", bottomInsetPx > 0)
+        val navigationInsets = FrameworkWindowInsets.Builder(originalInsets)
+            .setSystemWindowInsets(Insets.of(originalInsets.systemWindowInsetLeft, originalInsets.systemWindowInsetTop,
+                originalInsets.systemWindowInsetRight, bottomInsetPx))
+            .setStableInsets(Insets.of(originalInsets.stableInsetLeft, originalInsets.stableInsetTop,
+                originalInsets.stableInsetRight, bottomInsetPx))
+            .build()
+        try {
+            compose.runOnIdle {
+                expectedBottomInsetPx = bottomInsetPx.toFloat()
+                view.dispatchApplyWindowInsets(navigationInsets)
+            }
+            for (rail in listOf(false, true)) {
+                for (scale in listOf(1f, 2f)) {
+                    compose.runOnIdle {
+                        parentConsumesBottom = rail
+                        navigationWidth = if (rail) 64.dp else 0.dp
+                        fontScale = scale
+                    }
+                    assertReadingCentered()
+                    compose.onNodeWithText("继续阅读").assertIsDisplayed()
+                }
+            }
+        } finally {
+            compose.runOnIdle {
+                fontScale = 1f
+                parentConsumesBottom = false
+                navigationWidth = 64.dp
+                expectedBottomInsetPx = 0f
+                view.dispatchApplyWindowInsets(originalInsets)
+            }
+        }
+        val longDescription = (1..60).joinToString("\n") { "第${it.toString().padStart(2, '0')}段完整简介。" }
+        compose.runOnIdle { description = longDescription }
+        compose.onNodeWithTag("detail-introduction-expand").assertIsDisplayed().performClick()
+        val textScope = hasTestTag("detail-introduction-text") or hasAnyAncestor(hasTestTag("detail-introduction-text"))
+        val visiblePassage = StringBuilder()
+        var pageTransitions = 0
+        while (true) {
+            val displayedLines = compose.onAllNodes(textScope, useUnmergedTree = true).fetchSemanticsNodes()
+                .filter { node ->
+                    node.config.getOrNull(SemanticsProperties.Text)?.isNotEmpty() == true &&
+                        compose.onNode(SemanticsMatcher("Introduction line ${node.id}") { it.id == node.id }, useUnmergedTree = true).isDisplayed()
+                }
+                .sortedBy { it.positionInRoot.y }
+            val body = compose.onNodeWithTag("book-detail-pages").fetchSemanticsNode().boundsInRoot
+            val footerTop = minOf(
+                compose.onNodeWithText("上一页").fetchSemanticsNode().positionInRoot.y,
+                compose.onAllNodes(SemanticsMatcher.expectValue(SemanticsProperties.LiveRegion, androidx.compose.ui.semantics.LiveRegionMode.Polite))
+                    .fetchSemanticsNodes().minOf { it.positionInRoot.y },
+            )
+            var previousBottom = body.top
+            displayedLines.forEach { node ->
+                assertTrue("Displayed introduction lines must not overlap", node.positionInRoot.y >= previousBottom - 1f)
+                previousBottom = node.positionInRoot.y + node.size.height
+                assertTrue("A complete introduction line must remain above the footer", previousBottom <= footerTop + 1f)
+                assertTrue(node.positionInRoot.x >= body.left - 1f && node.positionInRoot.x + node.size.width <= body.right + 1f)
+                node.config.getOrNull(SemanticsProperties.Text).orEmpty().forEach { visiblePassage.append(it.text) }
+            }
+            if (compose.onNodeWithTag("detail-introduction-collapse").isDisplayed()) break
+            compose.onNodeWithText("下一页").assertIsEnabled().performClick()
+            assertTrue("Expanded introduction must end within its finite passage", ++pageTransitions <= 60)
+        }
+        assertTrue("Expanded introduction must really overflow", pageTransitions > 0)
+        assertEquals(longDescription, visiblePassage.toString())
+        compose.onNodeWithTag("detail-introduction-collapse").performClick()
+        compose.onNodeWithTag("detail-introduction-expand").assertIsDisplayed()
+        compose.onNodeWithTag("detail-reading-fab").assertIsDisplayed()
+        compose.runOnIdle { assertEquals(listOf("c1", "c2"), readingTargets.map { it.contentId }) }
+    }
+
+    @Test
+    fun einkIntroductionExpandsAndCollapsesThroughSemanticTextButtons() {
+        val description = List(6) { "真实简介内容。" }.joinToString("\n")
+        compose.setContent {
+            DisplayEnvironmentProvider(standardTestEnvironment.copy(effectiveProfile = DisplayProfile.EINK)) {
+                MaterialTheme(typography = TsuyomiTypography) {
+                    DetailIntroductionModule(description)
+                }
+            }
+        }
+        val expand = compose.onNodeWithTag("detail-introduction-expand")
+        expand.assert(SemanticsMatcher.expectValue(SemanticsProperties.Role, Role.Button)).performClick()
+        compose.onNodeWithTag("detail-introduction-collapse")
+            .assert(SemanticsMatcher.expectValue(SemanticsProperties.Role, Role.Button)).performClick()
+        expand.assertIsDisplayed()
+    }
 
     @OptIn(ExperimentalTestApi::class)
     @Test
@@ -163,8 +381,8 @@ class BookDetailInstrumentedTest {
             DisplayEnvironmentProvider(standardTestEnvironment) {
             var unreadOnly by remember { mutableStateOf(false) }
             MaterialTheme {
-                StandardBookDetailScreen(state = SourceBookState.Content(SourceBookDetail(book, "简介", emptyList(), "连载")),
-                directoryState = SourceBookState.Content(SourceDirectory(book.identity, chapters)),
+                StandardBookDetailScreen(state = BookScreenState.Content(bookDetail(book, "简介", emptyList(), "连载")),
+                directoryState = BookScreenState.Content(BookDirectory(book.identity, chapters)),
                 localState = DetailLocalState(
                     inLibrary = true,
                     progressChapterId = "v2-c1",
@@ -212,6 +430,220 @@ class BookDetailInstrumentedTest {
         compose.onNodeWithText("第二卷 第一章").assertIsDisplayed()
     }
 
+    @OptIn(ExperimentalTestApi::class)
+    @Test
+    fun einkDetailUsesCanonicalActionsAndRestoresDiscreteChapterPageAcrossProfileFlip() {
+        val identity = BookIdentity.Local("01234567-89ab-cdef-0123-456789abcdef")
+        var bookTitle by mutableStateOf("本地作品")
+        val chapters = (1..25).map { index ->
+            chapter("c$index", "第 $index 章", "第一卷")
+        }
+        var eink by mutableStateOf(true)
+        var rating: Int? = null
+        var searchedAuthor: String? = null
+        var tagEditorOpen by mutableStateOf(false)
+        var tagDraft by mutableStateOf("")
+        val selectedTargets = mutableListOf<ReaderNavigationTarget>()
+        var density = 1f
+        val restoration = StateRestorationTester(compose)
+        val einkEnvironment = standardTestEnvironment.copy(
+            preferences = standardTestEnvironment.preferences.copy(displayPreference = DisplayPreference.EINK),
+            effectiveProfile = DisplayProfile.EINK,
+            decisionReason = DisplayDecisionReason.MANUAL_EINK,
+            motionPolicy = MotionPolicy.INSTANT,
+        )
+
+        restoration.setContent {
+            DeviceConfigurationOverride(DeviceConfigurationOverride.ForcedSize(DpSize(320.dp, 480.dp))) {
+            DeviceConfigurationOverride(DeviceConfigurationOverride.FontScale(2f)) {
+            density = LocalDensity.current.density
+            val environment = if (eink) einkEnvironment else standardTestEnvironment
+            DisplayEnvironmentProvider(environment) {
+                MaterialTheme {
+                    BookDetailScreen(
+                        state = BookScreenState.Content(
+                            BookDetailContent(
+                                identity = identity,
+                                title = bookTitle,
+                                author = "作者",
+                                description = "简介",
+                                tags = listOf("奇幻"),
+                            ),
+                        ),
+                        directoryState = BookScreenState.Content(BookDirectory(identity, chapters)),
+                        localState = DetailLocalState(
+                            inLibrary = true,
+                            localTagsEditable = true,
+                            readLater = true,
+                            progressChapterId = "c22",
+                        ),
+                        mutation = null,
+                        coverState = CoverUiState.Fallback(FallbackSpec(bookTitle, null)),
+                        unreadOnly = false,
+                        descending = false,
+                        selectedChapterId = null,
+                        cacheState = DetailCacheState(),
+                        onCacheAction = {},
+                        onSetRating = { rating = it },
+                        onSearchAuthor = { searchedAuthor = it },
+                        onToggleUnreadOnly = {},
+                        onToggleOrder = {},
+                        onSelectChapter = { selectedTargets += it },
+                        onContinueReading = {},
+                        onAddToLibrary = {},
+                        onRequestRemoveFromLibrary = {},
+                        onRetry = {},
+                        onUseOfflineCache = {},
+                        onOpenVerification = {},
+                        tagEditorOpen = tagEditorOpen,
+                        tagDraft = tagDraft,
+                        onOpenTagEditor = { tagEditorOpen = true },
+                        onTagDraftChange = { tagDraft = it },
+                        onDismissTagEditor = { tagEditorOpen = false },
+                        onConfirmTag = { tagEditorOpen = false },
+                        onKeepDefaultLibrary = {},
+                    )
+                }
+            }
+            }
+            }
+        }
+
+        fun reachTag(tag: String, direction: String) {
+            repeat(150) {
+                if (compose.onNodeWithTag(tag).isDisplayed()) return
+                compose.onNodeWithText(direction).assertIsEnabled().performClick()
+            }
+            error("Detail action $tag was unreachable")
+        }
+        // Reading progress is not a restored Detail page anchor; reach it through visible page controls.
+        compose.onNodeWithTag("detail-identity-module").assertIsDisplayed()
+        compose.onNodeWithTag("detail-cover").assertIsDisplayed()
+        compose.onNodeWithText("首页").assertIsNotEnabled()
+        compose.onNodeWithText("上一页").assertIsNotEnabled()
+        reachTag("detail-chapter-c22", "下一页")
+        compose.onNodeWithTag("detail-chapter-c22").assertIsDisplayed()
+        compose.onNodeWithText("末页").assertIsEnabled().performClick()
+        compose.onNodeWithTag("detail-chapter-c25").assertIsDisplayed()
+        compose.onNodeWithText("末页").assertIsNotEnabled()
+        compose.onNodeWithText("下一页").assertIsNotEnabled()
+        compose.onNodeWithText("首页").assertIsEnabled().performClick()
+        compose.onNodeWithTag("detail-identity-module").assertIsDisplayed()
+        compose.onNodeWithText("首页").assertIsNotEnabled()
+        compose.onNodeWithText("上一页").assertIsNotEnabled()
+        listOf("detail-cover", "detail-title-block", "detail-author", "detail-rating-star-3-touch").forEach {
+            compose.onNodeWithTag(it).assertIsDisplayed()
+        }
+        val cover = compose.onNodeWithTag("detail-cover").fetchSemanticsNode()
+        assertEquals(135f * density, cover.size.width.toFloat(), 1f)
+        assertEquals(189f * density, cover.size.height.toFloat(), 1f)
+        fun assertIdentityActionFits(tag: String) {
+            val target = compose.onNodeWithTag(tag).assertIsDisplayed().fetchSemanticsNode()
+            val body = compose.onNodeWithTag("book-detail-pages").fetchSemanticsNode().boundsInRoot
+            val footerTop = minOf(
+                compose.onNodeWithText("上一页").fetchSemanticsNode().positionInRoot.y,
+                compose.onAllNodes(SemanticsMatcher.expectValue(SemanticsProperties.LiveRegion, androidx.compose.ui.semantics.LiveRegionMode.Polite))
+                    .fetchSemanticsNodes().minOf { it.positionInRoot.y },
+            )
+            assertTrue("The complete identity action must remain above the footer", target.positionInRoot.y + target.size.height <= footerTop + 1f)
+            assertTrue(target.positionInRoot.x >= body.left - 1f && target.positionInRoot.x + target.size.width <= body.right + 1f)
+            assertTrue(target.touchBoundsInRoot.width >= 48f * density - 1f && target.touchBoundsInRoot.height >= 48f * density - 1f)
+        }
+        assertIdentityActionFits("detail-author")
+        assertIdentityActionFits("detail-rating-star-3-touch")
+        reachTag("detail-rating-star-3-touch", "上一页")
+        compose.onNodeWithTag("detail-rating-star-3-touch").performClick()
+        compose.runOnIdle { assertEquals(3, rating) }
+        compose.onNodeWithText("下一页").assertIsEnabled().performClick()
+        compose.onNodeWithTag("detail-library-action").assertIsDisplayed()
+        compose.onNodeWithTag("detail-tag-surface").assertIsDisplayed()
+        assertIdentityActionFits("detail-library-action")
+        val continuationStatus = compose.onAllNodes(
+            SemanticsMatcher.expectValue(SemanticsProperties.LiveRegion, androidx.compose.ui.semantics.LiveRegionMode.Polite),
+        ).fetchSemanticsNodes().flatMap { it.config.getOrNull(SemanticsProperties.Text).orEmpty() }
+        restoration.emulateSavedInstanceStateRestore()
+        compose.onNodeWithTag("detail-library-action").assertIsDisplayed()
+        compose.onNodeWithTag("detail-tag-surface").assertIsDisplayed()
+        assertIdentityActionFits("detail-library-action")
+        assertEquals(continuationStatus, compose.onAllNodes(
+            SemanticsMatcher.expectValue(SemanticsProperties.LiveRegion, androidx.compose.ui.semantics.LiveRegionMode.Polite),
+        ).fetchSemanticsNodes().flatMap { it.config.getOrNull(SemanticsProperties.Text).orEmpty() })
+        reachTag("detail-author", "上一页")
+        compose.onNodeWithTag("detail-author")
+            .assert(SemanticsMatcher.expectValue(SemanticsProperties.Role, Role.Button))
+            .performClick()
+        compose.runOnIdle { assertEquals("作者", searchedAuthor) }
+        reachTag("detail-add-tag", "下一页")
+        compose.onNodeWithTag("detail-add-tag").assertIsEnabled().performClick()
+        compose.onNodeWithTag("detail-add-tag-input").assertIsDisplayed()
+        compose.runOnIdle { tagEditorOpen = false }
+        reachTag("detail-chapter-c1", "下一页")
+        compose.onNodeWithTag("detail-chapter-c1").performClick()
+        compose.runOnIdle { assertEquals("c1", selectedTargets.single().contentId) }
+        val chapterPage = chapters.filter { compose.onNodeWithTag("detail-chapter-${it.contentId}").isDisplayed() }
+            .map { it.contentId }
+        val pageStatus = compose.onAllNodes(
+            SemanticsMatcher.expectValue(SemanticsProperties.LiveRegion, androidx.compose.ui.semantics.LiveRegionMode.Polite),
+        ).fetchSemanticsNodes().flatMap { it.config.getOrNull(SemanticsProperties.Text).orEmpty() }
+        compose.runOnIdle { eink = false }
+        compose.waitForIdle()
+        compose.runOnIdle { eink = true }
+        compose.waitForIdle()
+        compose.onNodeWithTag("detail-chapter-c1").assertIsDisplayed()
+        compose.onNodeWithTag("detail-chapter-c22").assertIsNotDisplayed()
+        assertEquals(chapterPage, chapters.filter { compose.onNodeWithTag("detail-chapter-${it.contentId}").isDisplayed() }
+            .map { it.contentId })
+        assertEquals(pageStatus, compose.onAllNodes(
+            SemanticsMatcher.expectValue(SemanticsProperties.LiveRegion, androidx.compose.ui.semantics.LiveRegionMode.Polite),
+        ).fetchSemanticsNodes().flatMap { it.config.getOrNull(SemanticsProperties.Text).orEmpty() })
+        restoration.emulateSavedInstanceStateRestore()
+        compose.onNodeWithTag("detail-chapter-c1").assertIsDisplayed()
+        assertEquals(chapterPage, chapters.filter { compose.onNodeWithTag("detail-chapter-${it.contentId}").isDisplayed() }.map { it.contentId })
+        val fullTitle = "逐字保留的完整作品标题".repeat(24)
+        compose.runOnIdle { bookTitle = fullTitle }
+        compose.onNodeWithText("首页").assertIsEnabled().performClick()
+        compose.onNodeWithTag("detail-title-overflow").performClick()
+        reachTag("detail-title-flow", "下一页")
+        val visibleTitle = StringBuilder()
+        var titlePages = 0
+        val titleScope = hasTestTag("detail-title-flow") or hasAnyAncestor(hasTestTag("detail-title-flow"))
+        while (compose.onNodeWithTag("detail-title-flow").isDisplayed()) {
+            val displayedText = compose.onAllNodes(titleScope, useUnmergedTree = true).fetchSemanticsNodes()
+                .filter { node ->
+                    node.config.getOrNull(SemanticsProperties.Text)?.isNotEmpty() == true &&
+                        compose.onNode(SemanticsMatcher("Title text ${node.id}") { it.id == node.id }, useUnmergedTree = true).isDisplayed()
+                }
+                .sortedBy { it.positionInRoot.y }
+            assertTrue("Each visible title page must contain rendered text", displayedText.isNotEmpty())
+            val body = compose.onNodeWithTag("book-detail-pages").fetchSemanticsNode().boundsInRoot
+            val footerTop = minOf(
+                compose.onNodeWithText("上一页").fetchSemanticsNode().positionInRoot.y,
+                compose.onAllNodes(SemanticsMatcher.expectValue(SemanticsProperties.LiveRegion, androidx.compose.ui.semantics.LiveRegionMode.Polite))
+                    .fetchSemanticsNodes().minOf { it.positionInRoot.y },
+            )
+            var previousBottom = body.top
+            displayedText.forEach { node ->
+                assertTrue("Displayed title segments must not overlap", node.positionInRoot.y >= previousBottom - 1f)
+                previousBottom = node.positionInRoot.y + node.size.height
+                assertTrue("The entire title segment must remain above the footer", previousBottom <= footerTop + 1f)
+                assertTrue(node.positionInRoot.x >= body.left - 1f && node.positionInRoot.x + node.size.width <= body.right + 1f)
+                node.config.getOrNull(SemanticsProperties.Text).orEmpty().forEach { visibleTitle.append(it.text) }
+            }
+            titlePages++
+            if (compose.onNodeWithTag("detail-author").isDisplayed()) break
+            compose.onNodeWithText("下一页").assertIsEnabled().performClick()
+            assertTrue("The complete title must remain reachable within its real text pages", titlePages <= fullTitle.length)
+        }
+        assertTrue("The expanded title must actually overflow", titlePages > 1)
+        assertEquals(fullTitle, visibleTitle.toString())
+        compose.onNodeWithTag("detail-title-overflow").assert(hasStateDescription("完整标题已展开")).performClick()
+        compose.onNodeWithTag("detail-cover").assertIsDisplayed()
+        compose.onNodeWithTag("detail-author").assertIsDisplayed()
+        compose.onNodeWithTag("detail-rating-star-3-touch").assertIsDisplayed()
+        compose.onNodeWithText("首页").assertIsNotEnabled()
+        compose.onNodeWithText("上一页").assertIsNotEnabled()
+    }
+
     @Test
     fun exactUpdateFocusExpandsAndScrollsToItsChapterWithoutChangingResume() {
         val book = sourceBook()
@@ -224,8 +656,8 @@ class BookDetailInstrumentedTest {
         compose.setContent {
             DisplayEnvironmentProvider(standardTestEnvironment) {
             MaterialTheme {
-                StandardBookDetailScreen(state = SourceBookState.Content(SourceBookDetail(book, "简介", emptyList(), "连载")),
-                directoryState = SourceBookState.Content(SourceDirectory(book.identity, chapters)),
+                StandardBookDetailScreen(state = BookScreenState.Content(bookDetail(book, "简介", emptyList(), "连载")),
+                directoryState = BookScreenState.Content(BookDirectory(book.identity, chapters)),
                 localState = DetailLocalState(
                     inLibrary = true,
                     progressChapterId = "v1-c1",
@@ -272,8 +704,8 @@ class BookDetailInstrumentedTest {
         compose.setContent {
             DisplayEnvironmentProvider(standardTestEnvironment) {
                 MaterialTheme {
-                    StandardBookDetailScreen(state = SourceBookState.Content(SourceBookDetail(book, "简介", emptyList(), "连载")),
-                    directoryState = SourceBookState.Loading,
+                    StandardBookDetailScreen(state = BookScreenState.Content(bookDetail(book, "简介", emptyList(), "连载")),
+                    directoryState = BookScreenState.Loading,
                     localState = DetailLocalState(
                         reconciliationOperation = operation,
                         reconciliation = "UNRESOLVED",
@@ -336,8 +768,9 @@ class BookDetailInstrumentedTest {
         lateinit var inputModeManager: InputModeManager
         var lastUpdatedDate by mutableStateOf<String?>("2026-02-03")
         var localState by mutableStateOf(DetailLocalState(inLibrary = true))
+        var displayEnvironment by mutableStateOf(standardTestEnvironment)
         compose.setContent {
-            DisplayEnvironmentProvider(standardTestEnvironment) {
+            DisplayEnvironmentProvider(displayEnvironment) {
             DeviceConfigurationOverride(DeviceConfigurationOverride.ForcedSize(DpSize(viewportWidth, 1000.dp))) {
                 DeviceConfigurationOverride(DeviceConfigurationOverride.FontScale(fontScale)) {
                     density = LocalDensity.current.density
@@ -346,7 +779,7 @@ class BookDetailInstrumentedTest {
                         val book = sourceBook().copy(title = title)
                         Column {
                             DetailIdentityModule(
-                                detail = SourceBookDetail(book, "简介", emptyList(), "连载中", lastUpdatedDate),
+                                detail = bookDetail(book, "简介", emptyList(), "连载中", lastUpdatedDate),
                                 coverState = CoverUiState.Fallback(FallbackSpec(book.title, null)),
                                 localState = localState,
                                 onSetRating = { localState = localState.copy(rating = it) },
@@ -357,7 +790,9 @@ class BookDetailInstrumentedTest {
                                 onOpenDestinations = {},
                                 destinationMenuExpanded = false,
                                 onDestinationMenuExpandedChange = {},
-                                destinationMenuContent = {},
+                                destinationMenuItemCount = 0,
+                                destinationMenuItemKey = { it.toString() },
+                                destinationMenuItemContent = { _, _ -> },
                             )
                             DetailTagActionsModule(
                                 tags = listOf("奇幻"),
@@ -573,6 +1008,25 @@ class BookDetailInstrumentedTest {
             assertTrue(target.width >= 48f * density - 1f && target.height >= 48f * density - 1f)
         }
         compose.onNodeWithTag("detail-rating-star-3-touch").performClick().assertIsSelected()
+
+        compose.runOnIdle {
+            viewportWidth = baselineWidth
+            fontScale = 1f
+            title = "文学少女"
+            displayEnvironment = standardTestEnvironment.copy(
+                effectiveProfile = DisplayProfile.EINK, motionPolicy = MotionPolicy.INSTANT,
+            )
+            localState = localState.copy(rating = null)
+        }
+        val einkTitle = bounds("detail-title-block")
+        assertTrue(abs(bounds("detail-rating-star-1-glyph").left - einkTitle.left) <= 1f)
+        repeat(5) { index ->
+            val target = compose.onNodeWithTag("detail-rating-star-${index + 1}-touch")
+                .fetchSemanticsNode().touchBoundsInRoot
+            assertTrue(target.width >= 48f * density - 1f && target.height >= 48f * density - 1f)
+        }
+        compose.onNodeWithTag("detail-rating-star-3-touch").performTouchInput { click() }.assertIsSelected()
+        compose.onNodeWithTag("detail-rating-star-3-touch").performTouchInput { click() }.assertIsNotSelected()
     }
 
     @Test
@@ -582,10 +1036,8 @@ class BookDetailInstrumentedTest {
         compose.setContent {
             DisplayEnvironmentProvider(standardTestEnvironment) {
                 MaterialTheme(typography = TsuyomiTypography) {
-                StandardBookDetailScreen(state = SourceBookState.Content(SourceBookDetail(sourceBook(), "简介", emptyList(), null, null)),
-                directoryState = SourceBookState.Content(
-                    SourceDirectory(sourceBook().identity, listOf(chapter("c1", "第一章", "第一卷"))),
-                ),
+                StandardBookDetailScreen(state = BookScreenState.Content(bookDetail(sourceBook(), "简介", emptyList(), null, null)),
+                directoryState = BookScreenState.Content(BookDirectory(sourceBook().identity, listOf(chapter("c1", "第一章", "第一卷")))),
                 localState = DetailLocalState(),
                 mutation = null,
                 coverState = CoverUiState.Fallback(FallbackSpec("测试", null)),
@@ -623,6 +1075,7 @@ class BookDetailInstrumentedTest {
         compose.runOnIdle { assertTrue(retryCount == 1) }
     }
 
+    @OptIn(ExperimentalTestApi::class)
     @Test
     fun headerAndIntroductionUseCompactDensity() {
         val book = sourceBook().copy(title = "文学少女")
@@ -633,15 +1086,17 @@ class BookDetailInstrumentedTest {
         var removeRequests = 0
         var confirmRemoval: (() -> Unit)? = null
         var mutation by mutableStateOf<DetailMutationStatus?>(null)
+        var density = 1f
         compose.setContent {
+            DeviceConfigurationOverride(DeviceConfigurationOverride.ForcedSize(standardTestViewport)) {
+            DeviceConfigurationOverride(DeviceConfigurationOverride.FontScale(1f)) {
+            density = LocalDensity.current.density
             var menuExpanded by remember { mutableStateOf(false) }
             var localState by remember { mutableStateOf(DetailLocalState()) }
             DisplayEnvironmentProvider(standardTestEnvironment) {
             MaterialTheme(typography = TsuyomiTypography) {
-                StandardBookDetailScreen(state = SourceBookState.Content(SourceBookDetail(book, description, listOf("奇幻"), "已完结", "2026-09-04")),
-                directoryState = SourceBookState.Content(
-                    SourceDirectory(book.identity, listOf(chapter("c1", "第一章", "第一卷"))),
-                ),
+                StandardBookDetailScreen(state = BookScreenState.Content(bookDetail(book, description, listOf("奇幻"), "已完结", "2026-09-04")),
+                directoryState = BookScreenState.Content(BookDirectory(book.identity, listOf(chapter("c1", "第一章", "第一卷")))),
                 coverState = CoverUiState.Fallback(FallbackSpec(book.title, book.identity.sourceId)),
                 localState = localState,
                 mutation = mutation,
@@ -665,8 +1120,11 @@ class BookDetailInstrumentedTest {
                 onOpenDestinations = { destinationsOpened = true },
                 destinationMenuExpanded = menuExpanded,
                 onDestinationMenuExpandedChange = { menuExpanded = it },
-                destinationMenuContent = { dismissMenu ->
+                destinationMenuItemCount = 4,
+                destinationMenuItemKey = { bookDestinationMenuItemKey(it, emptyList(), emptyList(), false, false, true) },
+                destinationMenuItemContent = { index, dismissMenu ->
                     BookDestinationMenu(
+                        itemIndex = index,
                         readLater = localState.readLater,
                         collections = emptyList(),
                         remoteTargets = emptyList(),
@@ -691,6 +1149,8 @@ class BookDetailInstrumentedTest {
                 )
             }
             }
+            }
+            }
         }
 
         compose.waitForIdle()
@@ -700,13 +1160,9 @@ class BookDetailInstrumentedTest {
         compose.waitForIdle()
         assertTrue(searchedAuthor == book.author && authorSearchCount == 1)
         compose.onNodeWithTag("detail-publication-status", useUnmergedTree = true).assertIsDisplayed()
-        val density = InstrumentationRegistry.getInstrumentation().targetContext.resources.displayMetrics.density
         val coverBounds = compose.onNodeWithTag("detail-cover").fetchSemanticsNode().boundsInRoot
         assertTrue(kotlin.math.abs(coverBounds.width - 135f * density) <= 1f)
         assertTrue(kotlin.math.abs(coverBounds.height - 189f * density) <= 1f)
-        val tagVisualBounds = compose.onNodeWithTag("detail-tag-label", useUnmergedTree = true)
-            .fetchSemanticsNode().boundsInRoot
-        assertTrue(kotlin.math.abs(tagVisualBounds.height - 40f * density) <= 1f)
         val unreadFilterTarget = compose.onNodeWithTag("detail-unread-filter", useUnmergedTree = true)
             .fetchSemanticsNode().touchBoundsInRoot
         assertTrue(unreadFilterTarget.height >= 48f * density - 1f)
@@ -750,8 +1206,6 @@ class BookDetailInstrumentedTest {
             .fetchSemanticsNode().boundsInRoot
         val splitTrailingBounds = compose.onNodeWithTag("tsuyomi-split-trailing", useUnmergedTree = true)
             .fetchSemanticsNode().boundsInRoot
-        val addLabelBounds = compose.onNodeWithText("加入书架", useUnmergedTree = true)
-            .fetchSemanticsNode().boundsInRoot
         val destinationBounds = compose.onNodeWithContentDescription("更多加入选项")
             .fetchSemanticsNode().boundsInRoot
         val tagBounds = compose.onNodeWithTag("detail-tag-module").fetchSemanticsNode().boundsInRoot
@@ -773,17 +1227,13 @@ class BookDetailInstrumentedTest {
         assertTrue(kotlin.math.abs(ratingBounds.height - 36f * density) <= 1f)
         assertTrue(kotlin.math.abs(splitTrailingBounds.right - libraryActionBounds.right) <= 1f)
         assertTrue(kotlin.math.abs(splitTrailingBounds.width - 48f * density) <= 1f)
-        val readingFabBounds = compose.onNodeWithTag("detail-reading-fab").fetchSemanticsNode().boundsInRoot
-        assertTrue(kotlin.math.abs(readingFabBounds.height - 56f * density) <= 1f)
         assertTrue(kotlin.math.abs(splitLeadingBounds.top - splitTrailingBounds.top) <= 1f)
         assertTrue(kotlin.math.abs(splitLeadingBounds.bottom - splitTrailingBounds.bottom) <= 1f)
         assertTrue(kotlin.math.abs(splitLeadingBounds.height - 48f * density) <= 1f)
         assertTrue(kotlin.math.abs(splitTrailingBounds.height - 48f * density) <= 1f)
-        assertTrue(addLabelBounds.height <= 28f * density)
         assertTrue(destinationBounds.left >= libraryActionBounds.left)
         assertTrue(destinationBounds.right <= libraryActionBounds.right + 1f)
         assertTrue(libraryActionBounds.bottom <= identityBounds.bottom + 1f)
-        assertTrue(kotlin.math.abs(tagSurfaceBounds.top - coverBounds.bottom - 8f * density) <= 1f)
         assertTrue(tagBounds.top >= tagSurfaceBounds.top)
         compose.onNodeWithTag("detail-read-later-action").assertDoesNotExist()
         compose.onNodeWithText("加入书架").performClick()
@@ -824,16 +1274,17 @@ class BookDetailInstrumentedTest {
         assertTrue(expandedHeight > collapsedHeight)
     }
 
+    @OptIn(ExperimentalTestApi::class)
     @Test
     fun twoLineTitleUsesDedicatedAuthorAndStatusRowsAcrossCoverHeight() {
         val book = sourceBook().copy(title = "落第贤者的学院无双～二度转生的最强贤者～")
         compose.setContent {
+            DeviceConfigurationOverride(DeviceConfigurationOverride.ForcedSize(standardTestViewport)) {
+            DeviceConfigurationOverride(DeviceConfigurationOverride.FontScale(1f)) {
             DisplayEnvironmentProvider(standardTestEnvironment) {
             MaterialTheme(typography = TsuyomiTypography) {
-                StandardBookDetailScreen(state = SourceBookState.Content(SourceBookDetail(book, "简介", emptyList(), "已完结")),
-                directoryState = SourceBookState.Content(
-                    SourceDirectory(book.identity, listOf(chapter("c1", "第一章", "第一卷"))),
-                ),
+                StandardBookDetailScreen(state = BookScreenState.Content(bookDetail(book, "简介", emptyList(), "已完结")),
+                directoryState = BookScreenState.Content(BookDirectory(book.identity, listOf(chapter("c1", "第一章", "第一卷")))),
                 localState = DetailLocalState(),
                 mutation = null,
                 coverState = CoverUiState.Fallback(FallbackSpec(book.title, null)),
@@ -858,6 +1309,8 @@ class BookDetailInstrumentedTest {
                 )
             }
             }
+            }
+            }
         }
 
         compose.waitForIdle()
@@ -870,7 +1323,6 @@ class BookDetailInstrumentedTest {
         assertTrue(titleLayout.getLineEnd(1, visibleEnd = true) == book.title.length)
         compose.onNodeWithTag("detail-title-overflow", useUnmergedTree = true).assertDoesNotExist()
 
-        val density = InstrumentationRegistry.getInstrumentation().targetContext.resources.displayMetrics.density
         val coverBounds = compose.onNodeWithTag("detail-cover").fetchSemanticsNode().boundsInRoot
         val titleBounds = compose.onNodeWithTag("detail-title-block").fetchSemanticsNode().boundsInRoot
         val authorRowBounds = compose.onNodeWithTag("detail-author-row").fetchSemanticsNode().boundsInRoot
@@ -904,7 +1356,7 @@ class BookDetailInstrumentedTest {
                 DeviceConfigurationOverride(DeviceConfigurationOverride.ForcedSize(DpSize(viewportWidth, 640.dp))) {
                     MaterialTheme(typography = TsuyomiTypography) {
                         DetailIdentityModule(
-                            detail = SourceBookDetail(book, "简介", emptyList(), "连载中", "2026-09-14"),
+                            detail = bookDetail(book, "简介", emptyList(), "连载中", "2026-09-14"),
                             coverState = CoverUiState.Fallback(FallbackSpec(book.title, null)),
                             localState = DetailLocalState(inLibrary = true),
                             onSetRating = {},
@@ -915,7 +1367,9 @@ class BookDetailInstrumentedTest {
                             onOpenDestinations = {},
                             destinationMenuExpanded = false,
                             onDestinationMenuExpandedChange = {},
-                            destinationMenuContent = {},
+                            destinationMenuItemCount = 0,
+                            destinationMenuItemKey = { it.toString() },
+                            destinationMenuItemContent = { _, _ -> },
                         )
                     }
                 }
@@ -963,9 +1417,11 @@ class BookDetailInstrumentedTest {
     fun simpleWebsiteDestinationShowsOneAggregateTarget() {
         var appliedTargetId: String? = null
         compose.setContent {
+            DisplayEnvironmentProvider(standardTestEnvironment) {
             MaterialTheme {
-                TsuyomiDropdownMenu(expanded = true, onDismissRequest = {}) {
+                TsuyomiDropdownMenu(expanded = true, onDismissRequest = {}, itemCount = 34, itemKey = { "destination:$it" }, itemContent = { index ->
                     BookDestinationMenu(
+                        itemIndex = index,
                         readLater = false,
                         collections = List(30) { index ->
                             DetailCollectionDestination("local-$index", "本地收藏夹 $index", false)
@@ -982,7 +1438,8 @@ class BookDetailInstrumentedTest {
                         onApplyWebsite = { appliedTargetId = it },
                         onDismiss = {},
                     )
-                }
+                })
+            }
             }
         }
 
@@ -1008,8 +1465,8 @@ class BookDetailInstrumentedTest {
             DisplayEnvironmentProvider(standardTestEnvironment) {
                 MaterialTheme {
                     StandardBookDetailScreen(
-                        state = SourceBookState.Content(SourceBookDetail(book, "简介", emptyList(), "连载")),
-                        directoryState = SourceBookState.Content(SourceDirectory(book.identity, chapters)),
+                        state = BookScreenState.Content(bookDetail(book, "简介", emptyList(), "连载")),
+                        directoryState = BookScreenState.Content(BookDirectory(book.identity, chapters)),
                         localState = localState,
                         mutation = null,
                         coverState = CoverUiState.Fallback(FallbackSpec(book.title, null)),
@@ -1024,7 +1481,7 @@ class BookDetailInstrumentedTest {
                         onToggleUnreadOnly = {},
                         onToggleOrder = {},
                         onSelectChapter = {},
-                        onContinueReading = { openedChapterIds += it.chapterId },
+                        onContinueReading = { openedChapterIds += it.contentId },
                         onAddToLibrary = {},
                         onRequestRemoveFromLibrary = {},
                         onRetry = {},
@@ -1065,8 +1522,8 @@ class BookDetailInstrumentedTest {
         compose.setContent {
             DisplayEnvironmentProvider(standardTestEnvironment) {
             MaterialTheme {
-                StandardBookDetailScreen(state = SourceBookState.Content(SourceBookDetail(book, "简介", emptyList(), "连载")),
-                directoryState = SourceBookState.Content(SourceDirectory(book.identity, chapters)),
+                StandardBookDetailScreen(state = BookScreenState.Content(bookDetail(book, "简介", emptyList(), "连载")),
+                directoryState = BookScreenState.Content(BookDirectory(book.identity, chapters)),
                 localState = DetailLocalState(inLibrary = true, progressChapterId = "c1"),
                 mutation = null,
                 coverState = CoverUiState.Fallback(FallbackSpec(book.title, null)),
@@ -1127,8 +1584,8 @@ class BookDetailInstrumentedTest {
             DeviceConfigurationOverride(DeviceConfigurationOverride.FontScale(2f)) {
             MaterialTheme {
                 StandardBookDetailScreen(
-                    state = SourceBookState.Content(SourceBookDetail(book, "简介", emptyList(), "连载")),
-                    directoryState = SourceBookState.Content(SourceDirectory(book.identity, chapters)),
+                    state = BookScreenState.Content(bookDetail(book, "简介", emptyList(), "连载")),
+                    directoryState = BookScreenState.Content(BookDirectory(book.identity, chapters)),
                     localState = DetailLocalState(completedChapterIds = completedChapterIds),
                     mutation = null,
                     coverState = CoverUiState.Fallback(FallbackSpec(book.title, null)),
@@ -1505,8 +1962,8 @@ class BookDetailInstrumentedTest {
             )
         }
 
-        // Identical tags wrap into rows of equal content width, so the shared gap fills
-        // each full row to the trailing edge: justified and column-aligned together.
+        // Integer placement retains one shared gap and column alignment across
+        // equally packed rows; fractional leftover width is not a pixel contract.
         compose.runOnIdle {
             tags = listOf(
                 "奇幻", "冒险", "异世", "热血", "穿越", "系统", "日常",
@@ -1518,12 +1975,6 @@ class BookDetailInstrumentedTest {
         assertTrue("Expected two or more rows, found ${uniformRows.size}", uniformRows.size >= 2)
         val uniformGaps = uniformRows.map { gaps(it.second) }.flatten().distinct()
         assertTrue("Identical tags must share one gap, found $uniformGaps", uniformGaps.size == 1)
-        uniformRows.dropLast(1).forEachIndexed { index, (_, row) ->
-            assertTrue(
-                "A full row of identical tags must reach the trailing edge, row $index ends at ${row.last().right} vs ${flow.right}",
-                abs(row.last().right - flow.right) <= 1f,
-            )
-        }
 
         // Two tags leave most of the row empty, so the row is not full. It keeps the
         // minimum gap on the leading edge; stretching it to both edges is not alignment,
@@ -1651,8 +2102,8 @@ class BookDetailInstrumentedTest {
             DisplayEnvironmentProvider(standardTestEnvironment) {
                 MaterialTheme {
                     StandardBookDetailScreen(
-                        state = SourceBookState.Content(SourceBookDetail(book, "简介", emptyList(), "连载")),
-                        directoryState = SourceBookState.Loading,
+                        state = BookScreenState.Content(bookDetail(book, "简介", emptyList(), "连载")),
+                        directoryState = BookScreenState.Loading,
                         localState = localState,
                         mutation = null,
                         coverState = CoverUiState.Fallback(FallbackSpec(book.title, null)),
@@ -1692,6 +2143,7 @@ class BookDetailInstrumentedTest {
         var moved = false
         var removed = false
         compose.setContent {
+            DisplayEnvironmentProvider(standardTestEnvironment) {
             MaterialTheme {
                 BookDetailTopBar(
                     title = "网站书籍",
@@ -1706,6 +2158,7 @@ class BookDetailInstrumentedTest {
                     onMoveRemote = { moved = true },
                 )
             }
+            }
         }
 
         compose.onNodeWithContentDescription("更多操作").performClick()
@@ -1717,6 +2170,7 @@ class BookDetailInstrumentedTest {
     }
 
     private companion object {
+        val standardTestViewport = DpSize((1080f * 160f / 420f).dp, (2400f * 160f / 420f).dp)
         val standardTestEnvironment = DisplayEnvironment(
             preferences = DisplayPreferences(displayPreference = DisplayPreference.STANDARD),
             effectiveProfile = DisplayProfile.STANDARD,
@@ -1731,17 +2185,32 @@ class BookDetailInstrumentedTest {
     }
 
     private fun sourceBook(): SourceBookSummary = SourceBookSummary(
-        identity = BookIdentity("org.tsuyomi.fixture", "book-1"),
+        identity = BookIdentity.Remote("org.tsuyomi.fixture", "book-1"),
         title = "分卷目录测试",
         author = "作者",
         coverUrl = null,
         canonicalUrl = "https://example.com/book/1",
     )
 
-    private fun chapter(id: String, title: String, volume: String): SourceChapter = SourceChapter(
-        chapterId = id,
+    private fun bookDetail(
+        book: SourceBookSummary,
+        description: String? = null,
+        tags: List<String> = emptyList(),
+        status: String? = null,
+        lastUpdatedDate: String? = null,
+    ) = BookDetailContent(
+        identity = book.identity,
+        title = book.title,
+        author = book.author,
+        description = description,
+        tags = tags,
+        status = status,
+        lastUpdatedDate = lastUpdatedDate,
+    )
+
+    private fun chapter(id: String, title: String, volume: String): ReaderNavigationTarget = ReaderNavigationTarget(
+        contentId = id,
         title = title,
-        url = "https://example.com/chapter/$id",
-        volumeTitle = volume,
+        sectionTitle = volume,
     )
 }

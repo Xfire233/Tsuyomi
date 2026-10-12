@@ -41,6 +41,7 @@ import org.tsuyomi.shared.sourcecontract.SourceException
 
 
 internal const val VerifiedSearchResultSequenceKey = "source.search.verified-page-sequence"
+internal const val SearchCredentialsReopenedSequenceKey = "source.search.credentials-reopened-sequence"
 internal const val VerifiedDetailResultSequenceKey = "source.detail.verified-page-sequence"
 internal const val VerifiedDirectoryResultSequenceKey = "source.directory.verified-page-sequence"
 internal const val VerifiedChapterResultSequenceKey = "source.chapter.verified-page-sequence"
@@ -214,16 +215,17 @@ internal class SourceRouteOwner(
         }
     }
     suspend fun openLibraryDetail(entry: LibraryEntry): Boolean {
+        val identity = entry.book.identity as? BookIdentity.Remote ?: return false
         val packageInfo = installer.activePackage
-            ?.takeIf { it.manifest.sourceId.value == entry.book.identity.sourceId }
+            ?.takeIf { it.manifest.sourceId.value == identity.sourceId }
             ?: return false
         flow.open(packageInfo)
-        val preparedFromCache = flow.prepareDetail(entry.book.identity)
+        val preparedFromCache = flow.prepareDetail(identity)
         if (!preparedFromCache) {
             val canonicalUrl = entry.book.canonicalUrl ?: return false
             flow.prepareLocalDetail(
                 SourceBookSummary(
-                    identity = entry.book.identity,
+                    identity = identity,
                     title = entry.book.title,
                     author = entry.book.author,
                     coverUrl = entry.book.coverUrl,
@@ -272,15 +274,16 @@ internal class SourceRouteOwner(
     }
 
     private suspend fun resolveUpdateBook(identity: BookIdentity): SourceBookSummary? {
+        val remote = identity as? BookIdentity.Remote ?: return null
         val book = library.book(identity)
-            ?: library.remoteMirrorSnapshot(identity.sourceId)
+            ?: library.remoteMirrorSnapshot(remote.sourceId)
                 ?.books
                 ?.firstOrNull { it.book.identity == identity }
                 ?.book
             ?: return null
         val canonicalUrl = book.canonicalUrl?.takeIf(String::isNotBlank) ?: return null
         return SourceBookSummary(
-            identity = identity,
+            identity = remote,
             title = book.title,
             author = book.author,
             coverUrl = book.coverUrl,
@@ -302,11 +305,12 @@ internal class SourceRouteOwner(
     }
 
     suspend fun resumeReading(entry: LibraryEntry): Boolean {
+        val identity = entry.book.identity as? BookIdentity.Remote ?: return false
         val packageInfo = installer.activePackage
-            ?.takeIf { it.manifest.sourceId.value == entry.book.identity.sourceId }
+            ?.takeIf { it.manifest.sourceId.value == identity.sourceId }
             ?: return false
         flow.open(packageInfo)
-        if (!flow.prepareResume(entry.book.identity)) return false
+        if (!flow.prepareResume(identity)) return false
         navController.navigateToBookRoute(Routes.Reader)
         return true
     }
@@ -321,13 +325,14 @@ internal class SourceRouteOwner(
     }
 
     suspend fun openRemoteDestination(entry: LibraryEntry, destination: LibraryDropDestination.RemoteMirror) {
+        val identity = entry.book.identity as? BookIdentity.Remote ?: return
         val packageInfo = installer.activePackage
-            ?.takeIf { it.manifest.sourceId.value == entry.book.identity.sourceId }
+            ?.takeIf { it.manifest.sourceId.value == identity.sourceId }
             ?: return
         flow.open(packageInfo)
         flow.prepareBook(
             org.tsuyomi.shared.sourcecontract.SourceBookSummary(
-                identity = entry.book.identity,
+                identity = identity,
                 title = entry.book.title,
                 author = entry.book.author,
                 coverUrl = entry.book.coverUrl,
@@ -357,16 +362,23 @@ internal class SourceRouteOwner(
     }
 
     suspend fun completeVerification() {
-        credentialGeneration++
-        flow.reopenWithStoredCredentials()
+        if (flow.reopenWithStoredCredentials()) {
+            credentialGeneration++
+            val searchEntry = navController.previousBackStackEntry
+                ?.takeIf { it.destination.route == Routes.Search }
+            if (searchEntry != null) {
+                searchEntry.savedStateHandle[SearchCredentialsReopenedSequenceKey] =
+                    (searchEntry.savedStateHandle[SearchCredentialsReopenedSequenceKey] ?: 0L) + 1L
+            }
+        }
         navController.navigateUp()
     }
 
     suspend fun completeVerifiedPage() {
-        credentialGeneration++
-        flow.reopenAfterVerifiedPage(
-            retainVerifiedHome = navController.currentDestination?.route == Routes.VerifiedHomePage,
-        )
+        if (flow.reopenAfterVerifiedPage(
+                retainVerifiedHome = navController.currentDestination?.route == Routes.VerifiedHomePage,
+            )
+        ) credentialGeneration++
         navController.navigateUp()
     }
 
@@ -438,13 +450,14 @@ internal class SourceRouteOwner(
             diagnostic = (flow.directoryState as? org.tsuyomi.feature.book.SourceBookState.Failure)?.diagnostic,
         )
     }
-    suspend fun chapterVerifiedPageRequestUrl(): String? = flow.chapterVerifiedPageRequestUrl()
+    suspend fun chapterVerifiedPageRequestUrl(chapter: org.tsuyomi.shared.sourcecontract.SourceChapter? = flow.selectedChapter): String? =
+        flow.chapterVerifiedPageRequestUrl(chapter)
 
-    suspend fun useChapterVerifiedPage(snapshot: CapturedVerifiedPage): VerifiedPageUseResult {
+    suspend fun useChapterVerifiedPage(snapshot: CapturedVerifiedPage, chapter: org.tsuyomi.shared.sourcecontract.SourceChapter? = flow.selectedChapter): VerifiedPageUseResult {
         val previous = navController.previousBackStackEntry
             ?.takeIf { it.destination.route == Routes.Reader }
             ?: return VerifiedPageUseResult(accepted = false)
-        val accepted = flow.chapterVerifiedPage(snapshot)
+        val accepted = flow.chapterVerifiedPage(snapshot, chapter)
         if (accepted) {
             previous.savedStateHandle[VerifiedChapterResultSequenceKey] =
                 (previous.savedStateHandle[VerifiedChapterResultSequenceKey] ?: 0L) + 1L

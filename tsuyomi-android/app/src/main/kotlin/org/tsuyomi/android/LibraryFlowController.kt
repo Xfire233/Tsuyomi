@@ -16,11 +16,17 @@ import androidx.compose.runtime.setValue
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.CoroutineStart
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
+import kotlinx.coroutines.job
 import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.sync.Semaphore
+import kotlinx.coroutines.sync.withPermit
 import java.time.Instant
 import java.util.UUID
 import org.tsuyomi.shared.librarydomain.CollectionKind
@@ -157,6 +163,9 @@ internal class LibraryFlowController private constructor(
     private var coverPackageRevision: String? = null
     private var coverCredentialRevision: String? = null
     private var coverScope: CoroutineScope? = null
+    private var coverPublications: LocalPublicationManager? = null
+    private var coverPublicationGeneration = -1L
+    private val publicationCoverConcurrency = Semaphore(2)
     private val visibleCoverEntries = linkedMapOf<BookIdentity, LibraryEntry>()
     private val visibleUpdateCoverBooks = linkedMapOf<BookIdentity, LibraryBook>()
     private val coverJobs = mutableMapOf<BookIdentity, Job>()
@@ -185,9 +194,12 @@ internal class LibraryFlowController private constructor(
         packageRevision: String?,
         credentialRevision: String?,
         scope: CoroutineScope,
+        localPublications: LocalPublicationManager?,
+        publicationGeneration: Long,
     ) {
         if (coverRepository === repository && coverSourceId == sourceId &&
-            coverPackageRevision == packageRevision && coverCredentialRevision == credentialRevision
+            coverPackageRevision == packageRevision && coverCredentialRevision == credentialRevision &&
+            coverPublications === localPublications && coverPublicationGeneration == publicationGeneration
         ) return
         coverJobs.values.forEach(Job::cancel)
         coverJobs.clear()
@@ -198,6 +210,8 @@ internal class LibraryFlowController private constructor(
         coverPackageRevision = packageRevision
         coverCredentialRevision = credentialRevision
         coverScope = scope
+        coverPublications = localPublications
+        coverPublicationGeneration = publicationGeneration
         visibleCoverEntries.values.forEach { entry -> startCoverRequest(entry.book) }
         visibleUpdateCoverBooks.values.forEach(::startCoverRequest)
     }
@@ -233,8 +247,11 @@ internal class LibraryFlowController private constructor(
 
     fun coverState(entry: LibraryEntry): CoverUiState = coverState(entry.book)
 
-    fun coverState(book: LibraryBook): CoverUiState = coverStates[book.identity]
-        ?: CoverUiState.Fallback(FallbackSpec(book.title, book.identity.sourceId))
+    fun coverState(book: LibraryBook): CoverUiState {
+        val fallback = FallbackSpec(book.title, (book.identity as? BookIdentity.Remote)?.sourceId)
+        if (book.localPublication?.originalAvailable == false) return CoverUiState.Absent(fallback)
+        return coverStates[book.identity] ?: CoverUiState.Fallback(fallback)
+    }
 
     private fun isCoverVisible(identity: BookIdentity): Boolean =
         identity in visibleCoverEntries || identity in visibleUpdateCoverBooks
@@ -242,7 +259,33 @@ internal class LibraryFlowController private constructor(
     private fun startCoverRequest(book: LibraryBook) {
         val identity = book.identity
         coverJobs.remove(identity)?.cancel()
-        val fallback = FallbackSpec(book.title, identity.sourceId)
+        val fallback = FallbackSpec(book.title, (identity as? BookIdentity.Remote)?.sourceId)
+        if (identity is BookIdentity.Local) {
+            val publications = coverPublications
+            val scope = coverScope
+            if (publications == null || scope == null) {
+                retainCoverState(identity, CoverUiState.Fallback(fallback))
+                return
+            }
+            retainCoverState(identity, CoverUiState.Loading(fallback))
+            val publicationGeneration = coverPublicationGeneration
+            val request = scope.launch(start = CoroutineStart.LAZY) {
+                val context = currentCoroutineContext()
+                try {
+                    val state = publicationCoverConcurrency.withPermit { loadPublicationCover(book, publications) }
+                    context.ensureActive()
+                    if (coverJobs[identity] === context.job && coverPublications === publications &&
+                        coverPublicationGeneration == publicationGeneration
+                    ) retainCoverState(identity, state)
+                } finally {
+                    if (coverJobs[identity] === context.job) coverJobs.remove(identity)
+                }
+            }
+            coverJobs[identity] = request
+            request.start()
+            return
+        }
+        val remoteIdentity = identity as BookIdentity.Remote
         val url = book.coverUrl
         val repository = coverRepository
         val sourceId = coverSourceId
@@ -253,7 +296,7 @@ internal class LibraryFlowController private constructor(
             retainCoverState(identity, CoverUiState.Absent(fallback))
             return
         }
-        if (repository == null || sourceId != identity.sourceId || packageRevision == null ||
+        if (repository == null || sourceId != remoteIdentity.sourceId || packageRevision == null ||
             credentialRevision == null || scope == null
         ) {
             retainCoverState(identity, CoverUiState.Fallback(fallback))
@@ -563,7 +606,7 @@ internal class LibraryFlowController private constructor(
         updates: List<org.tsuyomi.shared.librarydomain.UnresolvedUpdate>,
         session: org.tsuyomi.shared.librarydomain.UpdateSessionSummary?,
     ) {
-        val byIdentity = updates.associateBy { it.identity }
+        val byIdentity: Map<BookIdentity, org.tsuyomi.shared.librarydomain.UnresolvedUpdate> = updates.associateBy { it.identity }
         val localIdentities = rootEntries.mapTo(hashSetOf()) { it.book.identity }
         val mirrorOnly = updates.mapNotNull { update ->
             updatePresentationBooks[update.identity]

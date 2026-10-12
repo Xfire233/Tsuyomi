@@ -12,10 +12,10 @@ import org.tsuyomi.shared.locator.DocumentIdentity
 import org.tsuyomi.shared.locator.LocatorPrecision
 import org.tsuyomi.shared.locator.ReaderLocator
 
+import org.tsuyomi.shared.model.BookIdentity
 class ReaderTransitionContractsTest {
     private val document = DocumentIdentity(
-        sourceId = "org.tsuyomi.example",
-        remoteBookId = "book-42",
+        book = BookIdentity.Remote("org.tsuyomi.example", "book-42"),
         contentId = "chapter-7",
         revision = "revision-1",
     )
@@ -40,8 +40,7 @@ class ReaderTransitionContractsTest {
     fun compatibleSwitchRejectsCrossDocumentTarget() {
         val source = epochs()
         val differentDocument = DocumentIdentity(
-            sourceId = document.sourceId,
-            remoteBookId = document.remoteBookId,
+            book = document.book,
             contentId = "chapter-8",
             revision = "revision-1",
         )

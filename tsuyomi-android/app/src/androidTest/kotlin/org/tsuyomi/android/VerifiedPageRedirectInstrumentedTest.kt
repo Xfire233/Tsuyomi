@@ -185,7 +185,7 @@ class VerifiedPageRedirectInstrumentedTest {
                 client.chapter(chapter, "1234")
             }
 
-            assertEquals("10001", document.contentId)
+            assertEquals("10001", document.identity.contentId)
             assertEquals("第一章 雾中的灯塔", document.title)
             assertEquals(2, document.blocks.size)
         } finally {

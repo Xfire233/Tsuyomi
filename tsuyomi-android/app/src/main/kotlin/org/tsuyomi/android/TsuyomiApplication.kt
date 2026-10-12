@@ -27,6 +27,7 @@ import org.tsuyomi.core.database.MIGRATION_9_10
 import org.tsuyomi.core.database.MIGRATION_10_11
 import org.tsuyomi.core.database.MIGRATION_11_12
 import org.tsuyomi.core.database.MIGRATION_12_13
+import org.tsuyomi.core.database.MIGRATION_13_14
 import org.tsuyomi.core.database.RoomLibraryRepository
 import org.tsuyomi.core.database.RoomTransferRepository
 import org.tsuyomi.core.database.TsuyomiDatabase
@@ -82,6 +83,7 @@ class TsuyomiApplication : Application() {
                 MIGRATION_10_11,
                 MIGRATION_11_12,
                 MIGRATION_12_13,
+                MIGRATION_13_14,
             )
             .build()
     }
@@ -94,11 +96,17 @@ class TsuyomiApplication : Application() {
     val transferRepository: RoomTransferRepository by lazy(LazyThreadSafetyMode.SYNCHRONIZED) {
         RoomTransferRepository(database)
     }
+    internal val localPublications by lazy(LazyThreadSafetyMode.SYNCHRONIZED) {
+        LocalPublicationManager(this)
+    }
     val libraryPreferencesRepository: LibraryPreferencesRepository by lazy(LazyThreadSafetyMode.SYNCHRONIZED) {
         LibraryPreferencesRepository(preferencesDataStore)
     }
     val readerPreferencesRepository: PortableReaderPreferencesRepository by lazy(LazyThreadSafetyMode.SYNCHRONIZED) {
         PortableReaderPreferencesRepository(preferencesDataStore)
+    }
+    internal val transferCoordinator by lazy(LazyThreadSafetyMode.SYNCHRONIZED) {
+        TransferCoordinator(this, transferRepository, readerPreferencesRepository)
     }
     val featureIntroductionPreferencesRepository: FeatureIntroductionPreferencesRepository by lazy(LazyThreadSafetyMode.SYNCHRONIZED) {
         FeatureIntroductionPreferencesRepository(preferencesDataStore)
@@ -119,6 +127,10 @@ class TsuyomiApplication : Application() {
 
     override fun onCreate() {
         super.onCreate()
+        // The isolated parser owns descriptors only, never app storage, sessions or background work.
+        val parserProcess = "$packageName:publication_parser"
+        val processName = Application.getProcessName()
+        if (processName == parserProcess || processName.startsWith("$parserProcess:")) return
         updateScope.launch { updateRuntime.restore() }
     }
 

@@ -153,7 +153,7 @@ class SourceException(
 ) : Exception(code.name)
 
 data class SourceBookSummary(
-    val identity: BookIdentity,
+    val identity: BookIdentity.Remote,
     val title: String,
     val author: String?,
     val coverUrl: String?,
@@ -267,21 +267,21 @@ data class RemoteLibraryPage(
 enum class RemoteLibraryAddOutcome { APPLIED, ALREADY_PRESENT }
 
 data class RemoteLibraryAddResult(
-    val identity: BookIdentity,
+    val identity: BookIdentity.Remote,
     val outcome: RemoteLibraryAddOutcome,
 )
 
 enum class RemoteLibraryRemoveOutcome { APPLIED, ALREADY_ABSENT }
 
 data class RemoteLibraryRemoveResult(
-    val identity: BookIdentity,
+    val identity: BookIdentity.Remote,
     val outcome: RemoteLibraryRemoveOutcome,
 )
 
 enum class RemoteLibraryMoveOutcome { APPLIED, ALREADY_AT_TARGET }
 
 data class RemoteLibraryMoveResult(
-    val identity: BookIdentity,
+    val identity: BookIdentity.Remote,
     val targetId: String,
     val outcome: RemoteLibraryMoveOutcome,
 )
@@ -337,7 +337,7 @@ data class SourceChapter(
 }
 
 data class SourceDirectory(
-    val bookIdentity: BookIdentity,
+    val bookIdentity: BookIdentity.Remote,
     val chapters: List<SourceChapter>,
 ) {
     init {
@@ -370,7 +370,7 @@ enum class SourceUpdateOutcome {
  * chapter prefix; callers persist no source URL, HTML, or chapter text in this result.
  */
 data class SourceUpdateProbeResult(
-    val identity: BookIdentity,
+    val identity: BookIdentity.Remote,
     val sourceVersion: String,
     val packageSha256: String,
     val checkedAt: Long,
@@ -424,68 +424,3 @@ data class SourceUpdateProbeResult(
     }
 }
 
-sealed interface ReaderBlock {
-    val blockId: String
-
-    data class Paragraph(
-        override val blockId: String,
-        val text: String,
-    ) : ReaderBlock {
-        init {
-            requireValidBlockId(blockId)
-            require(text.isNotBlank() && text.codePointCount(0, text.length) <= 100_000) { "Invalid paragraph" }
-        }
-    }
-
-    data class Heading(
-        override val blockId: String,
-        val text: String,
-        val level: Int,
-    ) : ReaderBlock {
-        init {
-            requireValidBlockId(blockId)
-            require(text.isNotBlank() && level in 1..6) { "Invalid heading" }
-        }
-    }
-
-    data class Image(
-        override val blockId: String,
-        val url: String,
-        val altText: String?,
-        val width: Int?,
-        val height: Int?,
-    ) : ReaderBlock {
-        init {
-            requireValidBlockId(blockId)
-            require(url.length in 1..4096) { "Invalid image URL" }
-            require(width == null || width > 0)
-            require(height == null || height > 0)
-        }
-    }
-}
-
-data class ReaderDocument(
-    val sourceId: String,
-    val remoteBookId: String,
-    val contentId: String,
-    val revision: String?,
-    val title: String,
-    val blocks: List<ReaderBlock>,
-) {
-    init {
-        SourceId(sourceId)
-        BookIdentity(sourceId, remoteBookId)
-        require(contentId.codePointCount(0, contentId.length) in 1..256) { "Invalid content ID" }
-        revision?.let { require(it.length <= 256) { "Invalid document revision" } }
-        require(title.codePointCount(0, title.length) in 1..512) { "Invalid document title" }
-        require(blocks.isNotEmpty() && blocks.size <= 20_000) { "Invalid document blocks" }
-        require(blocks.map { it.blockId }.distinct().size == blocks.size) { "Duplicate block identity" }
-    }
-
-    val fingerprint: String?
-        get() = revision?.takeIf(SHA_256::matches)
-}
-
-private fun requireValidBlockId(blockId: String) {
-    require(blockId.codePointCount(0, blockId.length) in 1..1024) { "Invalid block ID" }
-}

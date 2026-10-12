@@ -56,8 +56,8 @@ class LibraryTabReloadRaceInstrumentedTest {
     fun books_that_other_tests_removed_from_the_library_still_occupy_the_continue_tab() = runBlocking {
         val application = composeRule.activity.application as TsuyomiApplication
         val repository = application.libraryRepository
-        val target = BookIdentity("fixture.tab.race", "target")
-        val leftovers = (0 until 40).map { BookIdentity("fixture.tab.race", "leftover-$it") }
+        val target = BookIdentity.Remote("fixture.tab.race", "target")
+        val leftovers = (0 until 40).map { BookIdentity.Remote("fixture.tab.race", "leftover-$it") }
         try {
             (listOf(target) + leftovers).forEach { identity ->
                 val entry = LibraryBook(
@@ -72,7 +72,7 @@ class LibraryTabReloadRaceInstrumentedTest {
                     ReadingProgress(
                         identity = identity,
                         locator = ReaderLocator(
-                            document = DocumentIdentity(identity.sourceId, identity.remoteBookId, "chapter-1"),
+                            document = DocumentIdentity(identity, "chapter-1"),
                             blockId = "block-1",
                             characterOffset = 10,
                             bookProgress = 0.25,
@@ -93,7 +93,7 @@ class LibraryTabReloadRaceInstrumentedTest {
         }
     }
 
-    private fun identityCount(identity: BookIdentity): Long =
+    private fun identityCount(identity: BookIdentity.Remote): Long =
         identity.remoteBookId.substringAfterLast('-').toLongOrNull() ?: 0L
 
     /** The pager pre-composes neighbouring pages, so the surface tag alone is ambiguous. */
@@ -104,8 +104,8 @@ class LibraryTabReloadRaceInstrumentedTest {
     fun the_continue_tab_renders_the_newest_reader_activity_while_older_progress_remains() {
         val application = composeRule.activity.application as TsuyomiApplication
         val repository = application.libraryRepository
-        val target = BookIdentity("fixture.tab.race", "target")
-        val leftovers = (0 until 40).map { BookIdentity("fixture.tab.race", "leftover-$it") }
+        val target = BookIdentity.Remote("fixture.tab.race", "target")
+        val leftovers = (0 until 40).map { BookIdentity.Remote("fixture.tab.race", "leftover-$it") }
         try {
             runBlocking {
                 (listOf(target) + leftovers).forEach { identity ->
@@ -121,7 +121,7 @@ class LibraryTabReloadRaceInstrumentedTest {
                         ReadingProgress(
                             identity = identity,
                             locator = ReaderLocator(
-                                document = DocumentIdentity(identity.sourceId, identity.remoteBookId, "chapter-1"),
+                                document = DocumentIdentity(identity, "chapter-1"),
                                 blockId = "block-1",
                                 characterOffset = 10,
                                 bookProgress = 0.25,
@@ -190,8 +190,8 @@ class LibraryTabReloadRaceInstrumentedTest {
             scope = CoroutineScope(Dispatchers.IO + scopeJob),
             produceFile = { preferenceFile },
         )
-        val visited = BookIdentity("fixture.tab.race", "visited-book")
-        val filler = (0 until 60).map { BookIdentity("fixture.tab.race", "filler-$it") }
+        val visited = BookIdentity.Remote("fixture.tab.race", "visited-book")
+        val filler = (0 until 60).map { BookIdentity.Remote("fixture.tab.race", "filler-$it") }
         try {
             listOf(visited) .plus(filler).forEach { identity ->
                 val entry = LibraryBook(
@@ -208,7 +208,7 @@ class LibraryTabReloadRaceInstrumentedTest {
                 ReadingProgress(
                     identity = visited,
                     locator = ReaderLocator(
-                        document = DocumentIdentity(visited.sourceId, visited.remoteBookId, "chapter-1"),
+                        document = DocumentIdentity(visited, "chapter-1"),
                         blockId = "block-1",
                         characterOffset = 10,
                         bookProgress = 0.25,

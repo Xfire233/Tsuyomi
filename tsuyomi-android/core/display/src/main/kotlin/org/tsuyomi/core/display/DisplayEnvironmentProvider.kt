@@ -5,11 +5,14 @@
 
 package org.tsuyomi.core.display
 
+import androidx.compose.ui.graphics.ColorFilter
+import androidx.compose.ui.graphics.ColorMatrix
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.drawWithContent
+import androidx.compose.ui.graphics.graphicsLayer
 
 /** The immutable global display environment supplied by the application composition root. */
 val LocalDisplayEnvironment = staticCompositionLocalOf<DisplayEnvironment> {
@@ -42,3 +45,14 @@ fun Modifier.displayRedrawLayer(): Modifier {
         drawContent()
     }
 }
+
+/** Filters the managed render layer without separating native-view drawing from input coordinates. */
+@Composable
+fun Modifier.displayGrayscaleLayer(): Modifier {
+    if (LocalDisplayEnvironment.current.effectiveProfile != DisplayProfile.EINK) return this
+    return graphicsLayer { colorFilter = grayscaleColorFilter }
+}
+
+private val grayscaleColorFilter = ColorFilter.colorMatrix(
+    ColorMatrix().apply { setToSaturation(0f) },
+)

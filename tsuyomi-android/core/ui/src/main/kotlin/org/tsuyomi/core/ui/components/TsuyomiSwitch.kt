@@ -10,6 +10,14 @@ import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.interaction.collectIsFocusedAsState
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.ui.Alignment
+import org.tsuyomi.core.ui.theme.tsuyomiFocusRing
+import org.tsuyomi.core.ui.theme.rememberSystemReducedMotion
 import androidx.compose.foundation.selection.toggleable
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
@@ -49,19 +57,23 @@ fun TsuyomiSwitch(
     enabled: Boolean = true,
 ) {
     val interactionSource = remember { MutableInteractionSource() }
-    TsuyomiSwitchVisual(
-        checked = checked,
-        enabled = enabled,
-        modifier = modifier.toggleable(
-            value = checked,
-            interactionSource = interactionSource,
-            indication = null,
-            enabled = enabled,
-            role = Role.Switch,
-            onValueChange = onCheckedChange,
-        ),
-        clearSemantics = false,
-    )
+    val focused by interactionSource.collectIsFocusedAsState()
+    val shape = RoundedCornerShape(4.dp)
+    Box(
+        modifier = modifier.heightIn(min = 48.dp).widthIn(min = TrackWidth)
+            .tsuyomiFocusRing(shape, focused, MaterialTheme.colorScheme.primary)
+            .toggleable(
+                value = checked,
+                interactionSource = interactionSource,
+                indication = null,
+                enabled = enabled,
+                role = Role.Switch,
+                onValueChange = onCheckedChange,
+            ),
+        contentAlignment = Alignment.Center,
+    ) {
+        TsuyomiSwitchVisual(checked = checked, enabled = enabled)
+    }
 }
 
 /**
@@ -77,7 +89,7 @@ fun TsuyomiSwitchVisual(
 ) {
     val environment = LocalDisplayEnvironment.current
     val eInk = environment.effectiveProfile == DisplayProfile.EINK
-    val instant = environment.instantMotion
+    val instant = environment.instantMotion || rememberSystemReducedMotion()
 
     val effectiveFraction = if (instant) {
         if (checked) 1f else 0f

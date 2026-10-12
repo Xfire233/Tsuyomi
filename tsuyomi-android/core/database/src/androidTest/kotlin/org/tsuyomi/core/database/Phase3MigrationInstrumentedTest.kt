@@ -12,6 +12,8 @@ import java.time.Instant
 import org.tsuyomi.shared.locator.DocumentIdentity
 import org.tsuyomi.shared.locator.LocatorPrecision
 import org.tsuyomi.shared.locator.ReaderLocator
+import org.tsuyomi.shared.model.BookIdentity
+import org.tsuyomi.shared.locator.bookmarkPositionKey
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Rule
@@ -423,7 +425,7 @@ class Phase3MigrationInstrumentedTest {
                 assertEquals(
                     LocatorPrecision.DEGRADED,
                     ReaderLocator(
-                        document = DocumentIdentity("fixture.source", "retained-42", cursor.getString(0), cursor.getString(1)),
+                        document = DocumentIdentity(BookIdentity.Remote("fixture.source", "retained-42"), cursor.getString(0), cursor.getString(1)),
                         blockId = cursor.getString(2),
                         textAnchorDigest = cursor.getString(3),
                         characterOffset = if (cursor.isNull(4)) null else cursor.getInt(4),
@@ -477,6 +479,125 @@ class Phase3MigrationInstrumentedTest {
             db.query("PRAGMA foreign_key_check").use { cursor -> assertEquals(0, cursor.count) }
         }
     }
+
+    @Test
+    fun migration_13_to_14_preserves_real_remote_relationships_and_durable_state() {
+        val databaseName = "origin-qualified-room13-migration"
+        val identity = BookIdentity.Remote("fixture.source", "书:42😀")
+        val other = BookIdentity.Remote("other.source", identity.remoteBookId)
+        val bookmark = ReaderLocator(
+            DocumentIdentity(identity, "chapter-9", "revision-1"),
+            blockId = "block-3", textAnchorDigest = "a".repeat(64), characterOffset = 17,
+            chapterProgress = 0.4, bookProgress = 0.25, capturedAt = Instant.ofEpochSecond(99, 7),
+        )
+        val changedProjections = linkedMapOf(
+            "books" to "source_id,remote_book_id,title,authors_json,author_sort_key,cover_url,canonical_url,status,remote_tags_json,source_update_key,has_unread_update,added_at_epoch_second,added_at_nano,metadata_updated_at_epoch_second,metadata_updated_at_nano",
+            "library_entries" to "source_id,remote_book_id,added_at_epoch_second,added_at_nano,rating,read_later,display_order,local_pin",
+            "manual_collection_memberships" to "collection_id,source_id,remote_book_id,added_at_epoch_second,added_at_nano,display_order",
+            "local_book_tags" to "source_id,remote_book_id,normalized_tag,display_tag",
+            "reading_progress" to "source_id,remote_book_id,content_id,revision,block_id,text_anchor_digest,character_offset,chapter_progress,book_progress,updated_at_epoch_second,updated_at_nano",
+            "reader_history" to "source_id,remote_book_id,last_visited_at_epoch_second,last_visited_at_nano",
+            "completed_chapters" to "source_id,remote_book_id,chapter_id,completed_at_epoch_second,completed_at_nano",
+            "reader_bookmarks" to "source_id,remote_book_id,bookmark_position_key,content_id,revision,block_id,text_anchor_digest,character_offset,chapter_progress,book_progress,captured_at_epoch_second,captured_at_nano",
+        )
+        val unchangedTables = listOf(
+            "collections", "remote_mirror_items", "browsing_history", "remote_mirror_bindings", "remote_mirror_targets",
+            "source_availability", "source_remote_policy", "remote_library_reconciliation", "search_history",
+            "smart_rules", "subscription_drafts", "import_sessions", "import_warnings", "update_sessions",
+            "update_session_items", "update_baselines", "unresolved_updates", "update_policy",
+            "update_book_exclusions", "update_source_exclusions", "update_ignore_undos",
+        )
+        val projections = changedProjections + unchangedTables.associateWith { "*" }
+        val before = helper.createDatabase(databaseName, 13).use { db ->
+            listOf(identity, other).forEach { remote ->
+                db.execSQL(
+                    "INSERT INTO books(source_id,remote_book_id,title,authors_json,author_sort_key,cover_url,canonical_url,status,remote_tags_json,source_update_key,has_unread_update,added_at_epoch_second,added_at_nano,metadata_updated_at_epoch_second,metadata_updated_at_nano) VALUES (?,?,'旧书名','[\"作者\"]',X'010203','https://example.test/cover','https://example.test/book','ongoing','[\"奇幻\"]','old-update',1,10,1,20,2)",
+                    arrayOf(remote.sourceId, remote.remoteBookId),
+                )
+                db.execSQL("INSERT INTO library_entries VALUES (?,?,10,1,4,1,3,1)", arrayOf(remote.sourceId, remote.remoteBookId))
+            }
+            db.execSQL("INSERT INTO collections VALUES ('favorites','MANUAL','收藏',NULL,0,10,1,20,2),('smart','SMART','智能',NULL,1,10,1,20,2),('draft','SUBSCRIPTION','订阅草稿',NULL,2,10,1,20,2)")
+            val tuple = arrayOf(identity.sourceId, identity.remoteBookId)
+            db.execSQL("INSERT INTO manual_collection_memberships VALUES ('favorites',?,?,10,1,7)", tuple)
+            db.execSQL("INSERT INTO local_book_tags VALUES (?,?,'收藏','收藏')", tuple)
+            db.execSQL("INSERT INTO reading_progress VALUES (?,?,'chapter-9','revision-1','block-3',?,17,0.4,0.25,99,7)", tuple + "a".repeat(64))
+            db.execSQL("INSERT INTO reader_history VALUES (?,?,101,9)", tuple)
+            db.execSQL("INSERT INTO completed_chapters VALUES (?,?,'chapter-2',98,6)", tuple)
+            db.execSQL("INSERT INTO reader_bookmarks VALUES (?,?,?,'chapter-9','revision-1','block-3',?,17,0.4,0.25,99,7)", tuple + arrayOf(bookmark.bookmarkPositionKey(), "a".repeat(64)))
+            db.execSQL("INSERT INTO remote_mirror_bindings VALUES ('fixture.source','来源',0,100)")
+            db.execSQL("INSERT INTO remote_mirror_targets VALUES ('fixture.source','folder','收藏夹',NULL,'folder',0,100)")
+            db.execSQL("INSERT INTO remote_mirror_items VALUES (?,?,'folder',100)", tuple)
+            db.execSQL("INSERT INTO browsing_history VALUES (?,?,102,10)", tuple)
+            db.execSQL("INSERT INTO source_availability VALUES ('fixture.source','1.2.3',1,7)")
+            db.execSQL("INSERT INTO source_remote_policy VALUES ('fixture.source','publisher','capabilities','https://example.test',1,1,1,1)")
+            db.execSQL("INSERT INTO remote_library_reconciliation VALUES ('receipt',?,?,'package','1.2.3','capabilities',7,'UNRESOLVED',100,101,'diagnostic','MOVE','folder','收藏夹')", tuple)
+            db.execSQL("INSERT INTO search_history VALUES ('fixture.source','查询','查询',103,11)")
+            db.execSQL("INSERT INTO smart_rules VALUES ('smart',1,'{\"version\":1}',1)")
+            db.execSQL("INSERT INTO subscription_drafts VALUES ('draft','saved','[]','{}',0,'session')")
+            db.execSQL("INSERT INTO import_sessions VALUES ('session','TSUYOMI_TRANSFER','digest','plan.json','PREPARED',100,101,NULL,'{}',NULL)")
+            db.execSQL("INSERT INTO import_warnings VALUES ('session',0,'existing-book-metadata-retained','book','metadata','CONFLICT')")
+            db.execSQL("INSERT INTO update_sessions VALUES ('update','manual','QUEUED',1,0,0,0,NULL,NULL,NULL,0,104,NULL)")
+            db.execSQL("INSERT INTO update_session_items VALUES ('update',?,?,'旧书名','PENDING',NULL,NULL)", tuple)
+            db.execSQL("INSERT INTO update_baselines VALUES (?,?,'anchor','[]','2026-10-06',105)", tuple)
+            db.execSQL("INSERT INTO unresolved_updates VALUES (?,?,'旧书名','anchor','[]','[\"chapter-3\"]','2026-10-06',106,3)", tuple)
+            db.execSQL("INSERT INTO update_policy VALUES ('default','DAILY',1,1,1)")
+            db.execSQL("INSERT INTO update_book_exclusions VALUES (?,?)", tuple)
+            db.execSQL("INSERT INTO update_source_exclusions VALUES ('fixture.source')")
+            db.execSQL("INSERT INTO update_ignore_undos VALUES ('undo',?,?,'旧书名','anchor','[]','[\"chapter-3\"]','2026-10-06',106,3,999999)", tuple)
+            db.query("PRAGMA foreign_key_check").use { assertEquals(0, it.count) }
+            projections.mapValues { (table, columns) -> migrationRows(db, table, columns) }
+        }
+
+        helper.runMigrationsAndValidate(databaseName, 14, true, MIGRATION_13_14).use { db ->
+            projections.forEach { (table, columns) -> assertEquals(table, before.getValue(table), migrationRows(db, table, columns)) }
+            changedProjections.keys.forEach { table ->
+                db.query("SELECT identity_key,source_id,remote_book_id FROM $table").use { cursor ->
+                    assertTrue(table, cursor.count > 0)
+                    while (cursor.moveToNext()) {
+                        assertEquals(BookIdentity.Remote(cursor.getString(1), cursor.getString(2)).storageKey, cursor.getString(0))
+                    }
+                }
+            }
+            db.query("SELECT origin,publication_id,local_format,local_original_sha256,local_original_size_bytes,local_original_available,local_txt_options_json,local_cover_resource_id FROM books").use { cursor ->
+                assertEquals(2, cursor.count)
+                while (cursor.moveToNext()) {
+                    assertEquals("remote", cursor.getString(0))
+                    (1 until cursor.columnCount).forEach { assertTrue(cursor.isNull(it)) }
+                }
+            }
+            db.query("PRAGMA foreign_key_check").use { assertEquals(0, it.count) }
+            db.execSQL("PRAGMA foreign_keys=ON")
+            db.execSQL("DELETE FROM books WHERE identity_key=?", arrayOf(identity.storageKey))
+            listOf("library_entries", "manual_collection_memberships", "local_book_tags", "reading_progress", "reader_history", "completed_chapters").forEach { table ->
+                db.query("SELECT COUNT(*) FROM $table WHERE identity_key=?", arrayOf(identity.storageKey)).use { cursor ->
+                    assertTrue(cursor.moveToFirst())
+                    assertEquals(table, 0, cursor.getInt(0))
+                }
+            }
+            listOf("remote_mirror_items", "browsing_history").forEach { table ->
+                db.query("SELECT COUNT(*) FROM $table").use { cursor -> cursor.moveToFirst(); assertEquals(0, cursor.getInt(0)) }
+            }
+            db.query("SELECT bookmark_position_key FROM reader_bookmarks WHERE identity_key=?", arrayOf(identity.storageKey)).use { cursor ->
+                assertTrue(cursor.moveToFirst())
+                assertEquals(bookmark.bookmarkPositionKey(), cursor.getString(0))
+            }
+            db.query("SELECT title FROM books WHERE identity_key=?", arrayOf(other.storageKey)).use { cursor -> assertTrue(cursor.moveToFirst()); assertEquals("旧书名", cursor.getString(0)) }
+            db.query("PRAGMA foreign_key_check").use { assertEquals(0, it.count) }
+        }
+    }
+
+    private fun migrationRows(db: androidx.sqlite.db.SupportSQLiteDatabase, table: String, columns: String): List<List<String?>> =
+        db.query(if (columns == "*") "SELECT * FROM $table ORDER BY rowid" else "SELECT $columns FROM $table ORDER BY source_id,remote_book_id").use { cursor ->
+            buildList {
+                while (cursor.moveToNext()) add((0 until cursor.columnCount).map { column ->
+                    when (cursor.getType(column)) {
+                        android.database.Cursor.FIELD_TYPE_NULL -> null
+                        android.database.Cursor.FIELD_TYPE_BLOB -> cursor.getBlob(column).joinToString("") { "%02x".format(it) }
+                        else -> cursor.getString(column)
+                    }
+                })
+            }
+        }
 
     private companion object {
         const val DATABASE = "phase3-migration"

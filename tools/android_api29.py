@@ -17,6 +17,7 @@ import os
 import platform
 import re
 import secrets
+import signal
 import shutil
 import socket
 import subprocess
@@ -38,6 +39,11 @@ from android_ci_plan import AndroidCiPlan, git_paths, plan_for_paths
 
 TASK_PATTERN = re.compile(r"^:[A-Za-z0-9_.:-]+$")
 TEST_CLASS_PATTERN = re.compile(r"^[A-Za-z_][A-Za-z0-9_$.]*(?:#[A-Za-z_][A-Za-z0-9_$]*)?$")
+ANDROID_TEST_FAILURE_PATTERN = re.compile(
+    r"[A-Za-z_$][A-Za-z0-9_$]*(?:\.[A-Za-z_$][A-Za-z0-9_$]*)+ > "
+    r"[^\r\n]+\[[^\r\n\]]+\] FAILED[ \t]*(?:\r?\n)?"
+)
+_ANSI_SGR_PATTERN = re.compile(r"\x1b\[[0-9;:]*m")
 
 
 class RunnerError(RuntimeError):
@@ -296,7 +302,7 @@ def capture_command(
     log: Path,
     cwd: Path | None,
     env: dict[str, str] | None,
-    timeout: int,
+    timeout: float,
     input_text: str | None = None,
 ) -> CommandResult:
     append_log(log, f"$ {display_command(command)}")
@@ -329,32 +335,349 @@ def capture_command(
     return CommandResult(tuple(command), completed.returncode, completed.stdout)
 
 
-def run_gradle(command: Sequence[str], *, cwd: Path, env: dict[str, str], log: Path) -> int:
-    append_log(log, f"$ {display_command(command)}")
-    try:
-        process = subprocess.Popen(
-            list(command),
-            cwd=cwd,
-            env=env,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT,
-            text=True,
-            encoding="utf-8",
-            errors="replace",
-            bufsize=1,
-        )
-    except OSError as error:
-        raise RunnerError(f"Could not start Gradle: {error}") from error
+class _WindowsInvocationJob:
+    """Fence one suspended invocation before it can create descendants."""
 
-    assert process.stdout is not None
-    with log.open("a", encoding="utf-8", newline="") as handle:
-        for line in process.stdout:
-            sys.stdout.write(line)
-            sys.stdout.flush()
-            handle.write(line)
-    returncode = process.wait()
-    append_log(log, f"[exit {returncode}]")
-    return returncode
+    def __init__(self) -> None:
+        import ctypes
+        from ctypes import wintypes
+
+        # Native JOBOBJECT_EXTENDED_LIMIT_INFORMATION layout, including ABI alignment.
+        class Basic(ctypes.Structure):
+            _fields_ = [
+                ("PerProcessUserTimeLimit", ctypes.c_longlong), ("PerJobUserTimeLimit", ctypes.c_longlong),
+                ("LimitFlags", wintypes.DWORD), ("MinimumWorkingSetSize", ctypes.c_size_t),
+                ("MaximumWorkingSetSize", ctypes.c_size_t), ("ActiveProcessLimit", wintypes.DWORD),
+                ("Affinity", ctypes.c_size_t), ("PriorityClass", wintypes.DWORD), ("SchedulingClass", wintypes.DWORD),
+            ]
+
+        class IO(ctypes.Structure):
+            _fields_ = [(name, ctypes.c_ulonglong) for name in (
+                "ReadOperationCount", "WriteOperationCount", "OtherOperationCount",
+                "ReadTransferCount", "WriteTransferCount", "OtherTransferCount",
+            )]
+
+        class Extended(ctypes.Structure):
+            _fields_ = [
+                ("BasicLimitInformation", Basic), ("IoInfo", IO), ("ProcessMemoryLimit", ctypes.c_size_t),
+                ("JobMemoryLimit", ctypes.c_size_t), ("PeakProcessMemoryUsed", ctypes.c_size_t),
+                ("PeakJobMemoryUsed", ctypes.c_size_t),
+            ]
+
+        class Accounting(ctypes.Structure):
+            _fields_ = [
+                ("TotalUserTime", ctypes.c_longlong), ("TotalKernelTime", ctypes.c_longlong),
+                ("ThisPeriodTotalUserTime", ctypes.c_longlong), ("ThisPeriodTotalKernelTime", ctypes.c_longlong),
+                ("TotalPageFaultCount", wintypes.DWORD), ("TotalProcesses", wintypes.DWORD),
+                ("ActiveProcesses", wintypes.DWORD), ("TotalTerminatedProcesses", wintypes.DWORD),
+            ]
+
+        class ThreadEntry(ctypes.Structure):
+            _fields_ = [
+                ("dwSize", wintypes.DWORD), ("cntUsage", wintypes.DWORD), ("threadID", wintypes.DWORD),
+                ("ownerProcessID", wintypes.DWORD), ("basePriority", wintypes.LONG),
+                ("deltaPriority", wintypes.LONG), ("flags", wintypes.DWORD),
+            ]
+
+        self.ctypes = ctypes
+        self.thread_entry = ThreadEntry
+        self.accounting = Accounting
+        self.api = ctypes.WinDLL("kernel32", use_last_error=True)
+        self.api.CreateJobObjectW.argtypes = [ctypes.c_void_p, wintypes.LPCWSTR]
+        self.api.CreateJobObjectW.restype = wintypes.HANDLE
+        self.api.SetInformationJobObject.argtypes = [wintypes.HANDLE, ctypes.c_int, ctypes.c_void_p, wintypes.DWORD]
+        self.api.SetInformationJobObject.restype = wintypes.BOOL
+        self.api.AssignProcessToJobObject.argtypes = [wintypes.HANDLE, wintypes.HANDLE]
+        self.api.AssignProcessToJobObject.restype = wintypes.BOOL
+        self.api.OpenProcess.argtypes = [wintypes.DWORD, wintypes.BOOL, wintypes.DWORD]
+        self.api.OpenProcess.restype = wintypes.HANDLE
+        self.api.CreateToolhelp32Snapshot.argtypes = [wintypes.DWORD, wintypes.DWORD]
+        self.api.CreateToolhelp32Snapshot.restype = wintypes.HANDLE
+        self.api.Thread32First.argtypes = [wintypes.HANDLE, ctypes.POINTER(ThreadEntry)]
+        self.api.Thread32First.restype = wintypes.BOOL
+        self.api.Thread32Next.argtypes = self.api.Thread32First.argtypes
+        self.api.Thread32Next.restype = wintypes.BOOL
+        self.api.OpenThread.argtypes = [wintypes.DWORD, wintypes.BOOL, wintypes.DWORD]
+        self.api.OpenThread.restype = wintypes.HANDLE
+        self.api.GetProcessIdOfThread.argtypes = [wintypes.HANDLE]
+        self.api.GetProcessIdOfThread.restype = wintypes.DWORD
+        self.api.ResumeThread.argtypes = [wintypes.HANDLE]
+        self.api.ResumeThread.restype = wintypes.DWORD
+        self.api.TerminateJobObject.argtypes = [wintypes.HANDLE, wintypes.UINT]
+        self.api.TerminateJobObject.restype = wintypes.BOOL
+        self.api.QueryInformationJobObject.argtypes = [wintypes.HANDLE, ctypes.c_int, ctypes.c_void_p, wintypes.DWORD, ctypes.POINTER(wintypes.DWORD)]
+        self.api.QueryInformationJobObject.restype = wintypes.BOOL
+        self.api.CloseHandle.argtypes = [wintypes.HANDLE]
+        self.api.CloseHandle.restype = wintypes.BOOL
+        # Unnamed, non-inheritable handle: only this owner can close the job.
+        self.handle = None
+        try:
+            self.handle = self.api.CreateJobObjectW(None, None)
+            if not self.handle:
+                raise ctypes.WinError(ctypes.get_last_error())
+            limits = Extended()
+            limits.BasicLimitInformation.LimitFlags = 0x2000  # JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE; no breakaway.
+            if not self.api.SetInformationJobObject(self.handle, 9, ctypes.byref(limits), ctypes.sizeof(limits)):
+                raise ctypes.WinError(ctypes.get_last_error())
+        except BaseException as error:
+            if self.handle:
+                try:
+                    self.close()
+                except BaseException as cleanup_error:
+                    error.add_note(f"Owned Windows job setup cleanup failed: {type(cleanup_error).__name__}")
+            raise
+
+    def _close_handle(self, handle: Any) -> None:
+        primary_error = sys.exc_info()[1]
+        try:
+            if not self.api.CloseHandle(handle):
+                raise self.ctypes.WinError(self.ctypes.get_last_error())
+        except BaseException as error:
+            if primary_error is None:
+                raise
+            primary_error.add_note(f"Owned Windows auxiliary handle close failed: {type(error).__name__}")
+
+    def assign_and_resume(self, process: subprocess.Popen[str]) -> None:
+        ctypes = self.ctypes
+        handle = None
+        try:
+            handle = self.api.OpenProcess(0x0101, False, process.pid)  # PROCESS_SET_QUOTA | PROCESS_TERMINATE
+            if not handle:
+                raise ctypes.WinError(ctypes.get_last_error())
+            if not self.api.AssignProcessToJobObject(self.handle, handle):
+                raise ctypes.WinError(ctypes.get_last_error())
+        finally:
+            if handle:
+                self._close_handle(handle)
+
+        # Popen closes CreateProcess's primary-thread handle. Enumerate only this
+        # fenced, suspended PID and fail closed if its primary thread is ambiguous.
+        invalid_snapshot = ctypes.c_void_p(-1).value
+        snapshot = None
+        try:
+            snapshot = self.api.CreateToolhelp32Snapshot(0x00000004, 0)  # TH32CS_SNAPTHREAD
+            if snapshot == invalid_snapshot:
+                raise ctypes.WinError(ctypes.get_last_error())
+            thread_id = None
+            entry = self.thread_entry()
+            entry.dwSize = ctypes.sizeof(entry)
+            if not self.api.Thread32First(snapshot, ctypes.byref(entry)):
+                raise ctypes.WinError(ctypes.get_last_error())
+            while True:
+                if entry.dwSize < self.thread_entry.ownerProcessID.offset + 4:
+                    raise RunnerError("Windows thread snapshot omitted process ownership")
+                if entry.ownerProcessID == process.pid:
+                    if thread_id is not None:
+                        raise RunnerError("Owned suspended process has more than one initial thread")
+                    thread_id = entry.threadID
+                entry.dwSize = ctypes.sizeof(entry)
+                if not self.api.Thread32Next(snapshot, ctypes.byref(entry)):
+                    error = ctypes.get_last_error()
+                    if error != 18:  # ERROR_NO_MORE_FILES
+                        raise ctypes.WinError(error)
+                    break
+        finally:
+            if snapshot is not None and snapshot != invalid_snapshot:
+                self._close_handle(snapshot)
+        if thread_id is None:
+            raise RunnerError("Owned suspended process has no initial thread")
+        thread = None
+        try:
+            thread = self.api.OpenThread(0x0802, False, thread_id)  # QUERY_LIMITED_INFORMATION | SUSPEND_RESUME
+            if not thread:
+                raise ctypes.WinError(ctypes.get_last_error())
+            if self.api.GetProcessIdOfThread(thread) != process.pid:
+                raise RunnerError("Windows initial-thread ownership changed before resume")
+            previous_count = self.api.ResumeThread(thread)
+            if previous_count == 0xFFFFFFFF:
+                raise ctypes.WinError(ctypes.get_last_error())
+            if previous_count != 1:
+                raise RunnerError("Owned Windows initial thread did not resume from its creation fence")
+        finally:
+            if thread:
+                self._close_handle(thread)
+
+    def terminate(self) -> None:
+        if self.handle is None:
+            return
+        if not self.api.TerminateJobObject(self.handle, 1):
+            raise self.ctypes.WinError(self.ctypes.get_last_error())
+        accounting = self.accounting()
+        deadline = time.monotonic() + 10
+        while True:
+            if not self.api.QueryInformationJobObject(
+                self.handle, 1, self.ctypes.byref(accounting), self.ctypes.sizeof(accounting), None,
+            ):
+                raise self.ctypes.WinError(self.ctypes.get_last_error())
+            if accounting.ActiveProcesses == 0:
+                return
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise RunnerError("Owned Windows job members did not exit after bounded termination")
+            time.sleep(min(0.05, remaining))
+
+    def close(self) -> None:
+        if self.handle is None:
+            return
+        termination_error = None
+        try:
+            self.terminate()
+        except BaseException as error:
+            termination_error = error
+        finally:
+            try:
+                # KILL_ON_JOB_CLOSE is the final backstop even when accounting fails.
+                if not self.api.CloseHandle(self.handle):
+                    raise self.ctypes.WinError(self.ctypes.get_last_error())
+                self.handle = None
+            except BaseException as error:
+                if termination_error is None:
+                    termination_error = error
+                else:
+                    termination_error.add_note(f"Owned Windows job handle close also failed: {type(error).__name__}")
+        if termination_error is not None:
+            raise termination_error
+
+
+def run_gradle(
+    command: Sequence[str], *, cwd: Path, env: dict[str, str], log: Path,
+    stop_on_test_failure: bool = False,
+) -> int:
+    append_log(log, f"$ {display_command(command)}")
+    windows_job = None
+    process = None
+    cleanup_attempted = False
+
+    def stop_owned_invocation() -> int:
+        assert process is not None
+        if windows_job:
+            # Closing this retained handle kills descendants even after the leader exits.
+            windows_job.close()
+            # Assignment can fail while the owned child is still suspended outside the job.
+            if process.poll() is None:
+                process.kill()
+        else:
+            # This group was created by this Popen, not discovered by process name.
+            shutdown_error = None
+            try:
+                try:
+                    os.killpg(process.pid, signal.SIGTERM)
+                except ProcessLookupError:
+                    pass
+                try:
+                    process.wait(timeout=10)
+                except subprocess.TimeoutExpired:
+                    pass
+            except BaseException as error:
+                shutdown_error = error
+                raise
+            finally:
+                # Finish the owned group even if its leader exited or grace was interrupted.
+                try:
+                    try:
+                        os.killpg(process.pid, signal.SIGKILL)
+                    except ProcessLookupError:
+                        pass
+                except BaseException as error:
+                    if shutdown_error is None:
+                        shutdown_error = error
+                        raise
+                    shutdown_error.add_note(f"Owned POSIX group kill also failed: {type(error).__name__}")
+                finally:
+                    try:
+                        returncode = process.wait(timeout=10)
+                    except BaseException as error:
+                        if shutdown_error is None:
+                            if isinstance(error, subprocess.TimeoutExpired):
+                                raise RunnerError(f"Owned Gradle invocation did not exit after bounded shutdown; see {log}") from error
+                            raise
+                        shutdown_error.add_note(f"Owned POSIX group reap also failed: {type(error).__name__}")
+            return returncode
+        try:
+            return process.wait(timeout=10)
+        except subprocess.TimeoutExpired as error:
+            raise RunnerError(f"Owned Gradle invocation did not exit after bounded shutdown; see {log}") from error
+
+    try:
+        try:
+            if stop_on_test_failure and os.name == "nt":
+                windows_job = _WindowsInvocationJob()
+            process = subprocess.Popen(
+                list(command), cwd=cwd, env=env,
+                stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                text=True, encoding="utf-8", errors="replace", bufsize=1,
+                # CREATE_SUSPENDED prevents spawn/exit until job assignment and ResumeThread.
+                creationflags=(subprocess.CREATE_NEW_PROCESS_GROUP | 0x00000004) if windows_job else 0,
+                start_new_session=stop_on_test_failure and os.name != "nt",
+            )
+            if windows_job:
+                windows_job.assign_and_resume(process)
+        except OSError as error:
+            raise RunnerError(f"Could not start Gradle: {error}") from error
+        assert process is not None
+        assert process.stdout is not None
+        first_test_failure = False
+        with log.open("a", encoding="utf-8", newline="") as handle:
+            for line in process.stdout:
+                sys.stdout.write(line)
+                sys.stdout.flush()
+                handle.write(line)
+                if stop_on_test_failure and ANDROID_TEST_FAILURE_PATTERN.fullmatch(_ANSI_SGR_PATTERN.sub("", line)):
+                    first_test_failure = True
+                    handle.flush()
+                    break
+        if first_test_failure:
+            append_log(log, "First Android per-test FAILED record observed; stopping only the owned Gradle invocation.")
+            cleanup_attempted = True
+            returncode = stop_owned_invocation()
+            append_log(log, f"[exit {returncode}; first Android test failure]")
+            return 1
+        returncode = process.wait()
+        append_log(log, f"[exit {returncode}]")
+        return returncode
+    finally:
+        primary_error = sys.exc_info()[1]
+        cleanup_error = None
+        try:
+            # Ownership starts before launch and lasts through setup/success/error.
+            if stop_on_test_failure and process is not None and not cleanup_attempted:
+                stop_owned_invocation()
+        except BaseException as error:
+            cleanup_error = error
+        try:
+            if windows_job:
+                windows_job.close()
+        except BaseException as error:
+            if cleanup_error is None:
+                cleanup_error = error
+            else:
+                cleanup_error.add_note(f"Owned Windows job close also failed: {type(error).__name__}")
+        try:
+            # Also reclaim a suspended child if job assignment or termination failed.
+            if windows_job and process is not None and process.poll() is None:
+                process.kill()
+                process.wait(timeout=10)
+        except BaseException as error:
+            if cleanup_error is None:
+                cleanup_error = error
+            else:
+                cleanup_error.add_note(f"Owned Windows child cleanup also failed: {type(error).__name__}")
+        try:
+            if process is not None and process.stdout is not None:
+                process.stdout.close()
+        except BaseException as error:
+            if cleanup_error is None:
+                cleanup_error = error
+            else:
+                cleanup_error.add_note(f"Owned Gradle pipe close also failed: {type(error).__name__}")
+        if cleanup_error is not None:
+            if primary_error is None:
+                raise cleanup_error
+            primary_error.add_note(f"Owned invocation cleanup failed: {type(cleanup_error).__name__}")
+            try:
+                append_log(log, f"Owned invocation cleanup failed while preserving {type(primary_error).__name__}: {type(cleanup_error).__name__}")
+            except BaseException as log_error:
+                primary_error.add_note(f"Cleanup warning could not be recorded: {type(log_error).__name__}")
 
 
 def clean_gradle_environment(sdk: Path, serial: str | None = None) -> dict[str, str]:
@@ -534,7 +857,7 @@ def adb(
     *,
     env: dict[str, str],
     log: Path,
-    timeout: int = 10,
+    timeout: float = 10,
 ) -> CommandResult:
     return capture_command(
         [str(tools.adb), "-s", serial, *arguments],
@@ -545,8 +868,10 @@ def adb(
     )
 
 
-def owned_avd_name(tools: SdkTools, serial: str, env: dict[str, str], log: Path) -> str | None:
-    result = adb(tools, serial, ("emu", "avd", "name"), env=env, log=log)
+def owned_avd_name(
+    tools: SdkTools, serial: str, env: dict[str, str], log: Path, *, timeout: float = 10,
+) -> str | None:
+    result = adb(tools, serial, ("emu", "avd", "name"), env=env, log=log, timeout=timeout)
     if result.returncode != 0:
         return None
     lines = [line.strip() for line in result.output.splitlines() if line.strip()]
@@ -555,8 +880,11 @@ def owned_avd_name(tools: SdkTools, serial: str, env: dict[str, str], log: Path)
     return lines[0] if len(lines) == 1 else None
 
 
-def require_owned_avd(tools: SdkTools, serial: str, expected_name: str, env: dict[str, str], log: Path) -> None:
-    actual_name = owned_avd_name(tools, serial, env, log)
+def require_owned_avd(
+    tools: SdkTools, serial: str, expected_name: str, env: dict[str, str], log: Path,
+    *, timeout: float = 10,
+) -> None:
+    actual_name = owned_avd_name(tools, serial, env, log, timeout=timeout)
     if actual_name != expected_name:
         raise RunnerError(
             f"Refusing device operation: serial {serial} reported AVD {actual_name!r}, expected owned AVD {expected_name!r}."
@@ -571,23 +899,286 @@ def wait_for_boot(
     profile: Profile,
     env: dict[str, str],
     log: Path,
+    *,
+    deadline: float | None = None,
 ) -> None:
-    deadline = time.monotonic() + profile.boot_timeout_seconds
+    """Wait without mutating the device; boot_completed alone is not user readiness."""
+    deadline = deadline if deadline is not None else time.monotonic() + profile.boot_timeout_seconds
+    transport_errors = {
+        f"{prefix} {message}"
+        for prefix in ("error:", "adb:", f"{tools.adb.name}:")
+        for message in ("closed", "device offline", f"device '{serial}' not found")
+    }
+
+    def query(arguments: Sequence[str]) -> str | None:
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            raise RunnerError(f"Owned emulator boot deadline expired; see {log}")
+        result = adb(tools, serial, arguments, env=env, log=log, timeout=min(5, remaining))
+        output = result.output.strip()
+        if result.returncode != 0:
+            if output in transport_errors:
+                return None
+            raise RunnerError(f"Unexpected boot query failure: {output!r}; see {log}")
+        return output
+
     while time.monotonic() < deadline:
         exited = process.poll()
         if exited is not None:
             raise RunnerError(f"Owned emulator process exited before boot with status {exited}; see {log}")
-        try:
-            state = adb(tools, serial, ("get-state",), env=env, log=log, timeout=5)
-            if state.returncode == 0 and state.output.strip() == "device":
-                boot = adb(tools, serial, ("shell", "getprop", "sys.boot_completed"), env=env, log=log, timeout=5)
-                if boot.returncode == 0 and boot.output.strip() == "1":
-                    require_owned_avd(tools, serial, expected_name, env, log)
+        state = query(("get-state",))
+        if state == "device":
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise RunnerError(f"Owned emulator boot identity deadline expired; see {log}")
+            require_owned_avd(tools, serial, expected_name, env, log, timeout=min(5, remaining))
+            boot = query(("shell", "getprop", "sys.boot_completed"))
+            if boot == "1":
+                user_state = query(("shell", "am", "get-started-user-state", "0"))
+                if user_state == "RUNNING_UNLOCKED":
                     return
-        except RunnerError as error:
-            append_log(log, f"Waiting for owned emulator boot: {error}")
-        time.sleep(2)
-    raise RunnerError(f"Owned emulator did not boot within {profile.boot_timeout_seconds}s; see {log}")
+                if user_state not in (None, "BOOTING", "RUNNING_LOCKED", "RUNNING_UNLOCKING"):
+                    raise RunnerError(f"Unexpected user 0 boot state: {user_state!r}; see {log}")
+            elif boot not in (None, "", "0"):
+                raise RunnerError(f"Unexpected sys.boot_completed: {boot!r}; see {log}")
+        elif state not in (None, "offline"):
+            raise RunnerError(f"Unexpected adb boot state: {state!r}; see {log}")
+        time.sleep(min(2, max(0, deadline - time.monotonic())))
+    raise RunnerError(f"Owned emulator did not boot with user 0 unlocked within {profile.boot_timeout_seconds}s; see {log}")
+
+
+def prepare_runtime(
+    tools: SdkTools,
+    process: subprocess.Popen[str],
+    serial: str,
+    expected_name: str,
+    profile: Profile,
+    env: dict[str, str],
+    log: Path,
+    *,
+    deadline: float | None = None,
+    receipt: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Initialize the pinned userdebug runtime once, before app/test dispatch."""
+    started = time.monotonic()
+    boot_deadline = deadline if deadline is not None else started + profile.boot_timeout_seconds
+    phase_deadline = boot_deadline
+    receipt = receipt if receipt is not None else {}
+    receipt.update({"phase": "prerequisites", "root_requests": 0, "stop_requests": [], "start_requests": []})
+
+    def command(arguments: Sequence[str]) -> CommandResult:
+        if process.poll() is not None:
+            raise RunnerError(f"Owned emulator exited during runtime preparation; see {log}")
+        remaining = phase_deadline - time.monotonic()
+        if remaining <= 0:
+            raise RunnerError(f"Runtime preparation deadline expired in {receipt['phase']}; see {log}")
+        return adb(tools, serial, arguments, env=env, log=log, timeout=min(10, remaining))
+
+    def query(arguments: Sequence[str]) -> str:
+        result = command(arguments)
+        if result.returncode != 0:
+            raise RunnerError(f"Runtime preparation command failed: {result.output.strip()!r}; see {log}")
+        return result.output.strip()
+
+    def bind_identity() -> None:
+        remaining = phase_deadline - time.monotonic()
+        if remaining <= 0:
+            raise RunnerError(f"Runtime preparation identity deadline expired; see {log}")
+        require_owned_avd(tools, serial, expected_name, env, log, timeout=min(10, remaining))
+
+    def heap_properties() -> dict[str, str]:
+        return {
+            name: query(("shell", "getprop", name))
+            for name in ("dalvik.vm.heapsize", "dalvik.vm.heapgrowthlimit", "dalvik.vm.heapstartsize", "dalvik.vm.extra-opts")
+        }
+
+    def runtime_processes() -> tuple[dict[str, dict[str, int]], set[int]]:
+        output = query(("shell", "ps", "-A", "-o", "PID,PPID,NAME"))
+        lines = output.splitlines()
+        if not lines or lines[0].split() != ["PID", "PPID", "NAME"]:
+            raise RunnerError(f"Unexpected runtime process table: {output!r}; see {log}")
+        runtime: dict[str, dict[str, int]] = {}
+        pids: set[int] = set()
+        for line in lines[1:]:
+            fields = line.split(maxsplit=2)
+            if len(fields) != 3 or not fields[0].isdigit() or not fields[1].isdigit():
+                raise RunnerError(f"Unexpected runtime process row: {line!r}; see {log}")
+            pid, parent = int(fields[0]), int(fields[1])
+            pids.add(pid)
+            name = fields[2]
+            if (name in ("zygote64", "zygote") and parent == 1) or name == "system_server":
+                role = {"zygote64": "zygote", "zygote": "zygote_secondary", "system_server": "system_server"}[name]
+                if role in runtime:
+                    raise RunnerError(f"Multiple runtime processes for {role}; see {log}")
+                runtime[role] = {"pid": pid, "ppid": parent}
+        return runtime, pids
+
+    bind_identity()
+    capability = {name: query(("shell", "getprop", name)) for name in ("ro.build.type", "ro.debuggable", "ro.zygote")}
+    receipt["capability"] = capability
+    if capability != {"ro.build.type": "userdebug", "ro.debuggable": "1", "ro.zygote": "zygote64_32"}:
+        raise RunnerError(f"Runtime preparation requires the pinned debuggable userdebug zygote64_32 image: {capability!r}")
+    if query(("shell", "getprop", "sys.boot_completed")) != "1" or query(("shell", "am", "get-started-user-state", "0")) != "RUNNING_UNLOCKED":
+        raise RunnerError("Runtime preparation requires completed boot and user 0 RUNNING_UNLOCKED")
+    before = heap_properties()
+    receipt["properties_before"] = before
+    if not before["dalvik.vm.heapsize"]:
+        raise RunnerError("Pinned image has not published dalvik.vm.heapsize; refusing runtime initialization")
+
+    receipt["phase"] = "root"
+    root_started = time.monotonic()
+    phase_deadline = min(boot_deadline, root_started + 20)
+    receipt["root_requests"] = 1
+    root = command(("root",))
+    receipt["root_output"] = root.output
+    receipt["root_returncode"] = root.returncode
+    root_transport_closed = root.returncode == 1 and root.output == "adb: unable to connect for root: closed\n"
+    receipt["root_transport_closed"] = root_transport_closed
+    # This exact closure leaves acknowledgement unknown; only the UID probe proves root.
+    # Normal and empty exit-0 replies use the same bounded probe, never another request.
+    if not root_transport_closed and (
+        root.returncode != 0 or root.output.strip() not in ("", "restarting adbd as root", "adbd is already running as root")
+    ):
+        raise RunnerError(f"Pinned image adb root denied or unexpected: {root.output.strip()!r}; see {log}")
+    transport_errors = {
+        f"{prefix} {message}"
+        for prefix in ("error:", "adb:", f"{tools.adb.name}:")
+        for message in ("closed", "device offline", f"device '{serial}' not found")
+    }
+    while True:
+        uid = command(("shell", "id", "-u"))
+        output = uid.output.strip()
+        if uid.returncode == 0 and output == "0":
+            break
+        if not ((uid.returncode == 0 and output == "2000") or (uid.returncode != 0 and output in transport_errors)):
+            raise RunnerError(f"Unexpected root transition result: {output!r}; see {log}")
+        time.sleep(min(0.25, max(0, phase_deadline - time.monotonic())))
+    receipt["shell_uid"] = 0
+    receipt["root_seconds"] = round(time.monotonic() - root_started, 3)
+    phase_deadline = boot_deadline
+    bind_identity()
+    receipt["properties_after_root"] = heap_properties()
+    if receipt["properties_after_root"] != before:
+        raise RunnerError("Image heap properties changed during root transition; refusing runtime initialization")
+
+    old, _ = runtime_processes()
+    services = ("zygote", "zygote_secondary")
+    if set(old) != {*services, "system_server"} or old["system_server"]["ppid"] != old["zygote"]["pid"]:
+        raise RunnerError(f"Expected init-owned primary/secondary and primary-owned system_server: {old!r}")
+    receipt["runtime_before"] = old
+    for service in services:
+        if query(("shell", "getprop", f"init.svc.{service}")) != "running":
+            raise RunnerError(f"Expected running pinned init service {service}; see {log}")
+
+    runtime_started = time.monotonic()
+    phase_deadline = min(boot_deadline, runtime_started + 60)
+    receipt["phase"] = "stopping_runtime"
+    # Installed /init.zygote64_32.rc: primary onrestart does not cycle secondary;
+    # secondary onrestart restarts primary. Use stop/start, not restart hooks, and
+    # stop secondary before primary; neither may start until BOTH are fully gone.
+    for service in reversed(services):
+        receipt["stop_requests"].append(service)
+        if query(("shell", "stop", service)):
+            raise RunnerError(f"Unexpected stop acknowledgement for {service}; see {log}")
+    old_pids = {entry["pid"] for entry in old.values()}
+    while True:
+        states = {service: query(("shell", "getprop", f"init.svc.{service}")) for service in services}
+        runtime, pids = runtime_processes()
+        receipt["stopped_service_states"] = states
+        if all(state == "stopped" for state in states.values()) and not old_pids.intersection(pids) and not runtime:
+            break
+        if any(state not in ("running", "stopping", "stopped") for state in states.values()):
+            raise RunnerError(f"Unexpected init stop states: {states!r}; see {log}")
+        time.sleep(min(0.25, max(0, phase_deadline - time.monotonic())))
+    receipt["old_runtime_stopped"] = True
+    receipt["stop_seconds"] = round(time.monotonic() - runtime_started, 3)
+    receipt["phase"] = "retiring_framework_publications"
+    retirement_started = time.monotonic()
+    retirement: dict[str, Any] = {}
+    receipt["publication_retirement"] = retirement
+    # Early system-context creation accepts no display service, but a dead old
+    # display Binder throws before new services start. PID exit alone is not
+    # servicemanager publication retirement; activity must retire as well.
+    while True:
+        publications = {name: query(("shell", "service", "check", name)) for name in ("display", "activity")}
+        observation = {
+            "states": publications,
+            "elapsed_seconds": round(time.monotonic() - retirement_started, 3),
+        }
+        retirement.setdefault("first", observation)
+        retirement["last"] = observation
+        for name, output in publications.items():
+            if output not in (f"Service {name}: found", f"Service {name}: not found"):
+                raise RunnerError(f"Unexpected stopped framework publication {name}: {output!r}; see {log}")
+        if all(output == f"Service {name}: not found" for name, output in publications.items()):
+            break
+        retirement["last_found"] = observation
+        time.sleep(min(0.25, max(0, phase_deadline - time.monotonic())))
+    receipt["publication_retirement_seconds"] = round(time.monotonic() - retirement_started, 3)
+    bind_identity()
+    receipt["phase"] = "starting_runtime"
+    for service in services:
+        receipt["start_requests"].append(service)
+        if query(("shell", "start", service)):
+            raise RunnerError(f"Unexpected start acknowledgement for {service}; see {log}")
+
+    observed: dict[str, dict[str, int]] = {}
+    receipt["runtime_after"] = observed
+    while True:
+        runtime, pids = runtime_processes()
+        if old_pids.intersection(pids):
+            raise RunnerError("Old runtime PID reappeared after orderly stop; refusing readiness")
+        for role, entry in observed.items():
+            if runtime.get(role) != entry:
+                raise RunnerError(f"New runtime {role} exited or was replaced during readiness; see {log}")
+        observed.update(runtime)
+        states = {service: query(("shell", "getprop", f"init.svc.{service}")) for service in services}
+        if any(state not in ("running", "stopped") for state in states.values()):
+            raise RunnerError(f"Unexpected init start states: {states!r}; see {log}")
+        if set(runtime) == {*services, "system_server"} and all(state == "running" for state in states.values()):
+            if runtime["system_server"]["ppid"] != runtime["zygote"]["pid"]:
+                raise RunnerError(f"New system_server is not a child of the new primary: {runtime!r}")
+            activity = query(("shell", "service", "check", "activity"))
+            if activity == "Service activity: found":
+                user_query = command(("shell", "am", "get-started-user-state", "0"))
+                user_state = user_query.output.strip()
+                receipt["activity_query"] = {"returncode": user_query.returncode, "output": user_query.output}
+                if user_query.returncode == 224 and user_state == "cmd: Failure calling service activity: Broken pipe (32)":
+                    # Android 10 cmd returns Binder DEAD_OBJECT (-EPIPE -> exit 224).
+                    # Publication can expose an unavailable Binder, not a callable service.
+                    # Keep this query pending ONLY while the new runtime remains identical.
+                    current_runtime, _ = runtime_processes()
+                    receipt["activity_dead_object"] = {
+                        **receipt["activity_query"], "runtime_after_query": current_runtime,
+                    }
+                    if current_runtime != observed:
+                        raise RunnerError(f"New runtime exited or changed after activity DEAD_OBJECT: {current_runtime!r}; see {log}")
+                    user_state = None
+                elif user_query.returncode != 0:
+                    raise RunnerError(f"Runtime activity readiness command failed: {user_state!r}; see {log}")
+                receipt["user_state"] = user_state
+                if user_state == "RUNNING_UNLOCKED":
+                    package = query(("shell", "cmd", "package", "path", "--user", "0", "android"))
+                    receipt["package_query"] = package
+                    if not package.startswith("package:/") or not package.endswith("/framework-res.apk") or "\n" in package:
+                        raise RunnerError(f"Unexpected user 0 framework package query: {package!r}; see {log}")
+                    break
+                if user_state not in (None, "BOOTING", "RUNNING_LOCKED", "RUNNING_UNLOCKING"):
+                    raise RunnerError(f"Unexpected restarted user 0 state: {user_state!r}; see {log}")
+            elif activity != "Service activity: not found":
+                raise RunnerError(f"Unexpected activity service query: {activity!r}; see {log}")
+        time.sleep(min(0.25, max(0, phase_deadline - time.monotonic())))
+    receipt["properties_after"] = heap_properties()
+    if receipt["properties_after"] != before:
+        raise RunnerError("Image heap properties changed during runtime initialization")
+    bind_identity()
+    final_runtime, _ = runtime_processes()
+    if final_runtime != observed:
+        raise RunnerError(f"Prepared runtime changed before handoff: {final_runtime!r}; see {log}")
+    receipt["runtime_seconds"] = round(time.monotonic() - runtime_started, 3)
+    receipt["total_seconds"] = round(time.monotonic() - started, 3)
+    receipt["phase"] = "ready"
+    return receipt
 
 
 def configure_emulator(
@@ -977,8 +1568,22 @@ def main(argv: Sequence[str] | None = None) -> int:
 
         require_renderer(tools, profile, emulator_env, emulator_log)
         create_avd(tools, profile, avd_name, emulator_env, emulator_log)
+        # Initialize the host daemon before boot queries classify device transport errors.
+        adb_server = capture_command(
+            [str(tools.adb), "start-server"],
+            log=adb_log, cwd=None, env=emulator_env, timeout=10,
+        )
+        if adb_server.returncode != 0:
+            raise RunnerError(f"Could not start adb server; see {adb_log}")
         emulator_process = start_emulator(tools, profile, avd_name, port, emulator_env, emulator_log)
-        wait_for_boot(tools, emulator_process, serial, avd_name, profile, emulator_env, adb_log)
+        boot_deadline = time.monotonic() + profile.boot_timeout_seconds
+        wait_for_boot(tools, emulator_process, serial, avd_name, profile, emulator_env, adb_log, deadline=boot_deadline)
+        evidence["runtime_preparation"] = {}
+        evidence["runtime_preparation"] = prepare_runtime(
+            tools, emulator_process, serial, avd_name, profile, emulator_env, adb_log,
+            deadline=boot_deadline, receipt=evidence["runtime_preparation"],
+        )
+        write_evidence(evidence_path, evidence)
         configure_emulator(tools, serial, avd_name, profile, emulator_env, adb_log)
         device = device_evidence(
             tools,
@@ -1006,6 +1611,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                 cwd=android_root,
                 env=clean_gradle_environment(sdk, serial=serial),
                 log=instrumentation_log,
+                stop_on_test_failure=True,
             )
             evidence["timings_seconds"]["instrumentation"] = round(time.monotonic() - phase_started, 3)
             write_evidence(evidence_path, evidence)

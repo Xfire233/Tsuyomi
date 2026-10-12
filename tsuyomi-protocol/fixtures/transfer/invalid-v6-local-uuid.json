@@ -1,0 +1,23 @@
+{
+  "format": "tsuyomi-transfer",
+  "version": 6,
+  "createdAt": "2026-10-07T00:00:00Z",
+  "library": [
+    {
+      "identity": {
+        "origin": "local",
+        "publicationId": "F2B8EF64-9375-4FC1-B7C9-274B4BEAFED1"
+      },
+      "localPublication": {
+        "format": "txt",
+        "originalSha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        "originalSizeBytes": 17
+      },
+      "title": "本地文本",
+      "localPin": true,
+      "updatedAt": "2026-10-07T00:00:00Z",
+      "bookmarks": []
+    }
+  ],
+  "shelves": []
+}

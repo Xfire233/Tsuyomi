@@ -36,7 +36,9 @@ import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import org.tsuyomi.shared.librarydomain.LibraryEntry
 import org.tsuyomi.core.media.api.CoverUiState
 import org.tsuyomi.feature.library.CollectionRuleScreen
@@ -149,7 +151,7 @@ private fun NavGraphBuilder.libraryHomeRoute(
                 } },
                 onOpenBook = { entry ->
                     controller.openOrToggleEntry(entry)
-                    scope.launch {
+                    scope.launch(Dispatchers.Main.immediate) {
                         if (controller.state.filter == SystemLibraryFilter.CONTINUE && entry.sourceAvailable) {
                             if (!resumeReading(entry)) openBookDetail(entry)
                         } else {
@@ -246,7 +248,7 @@ private fun NavGraphBuilder.librarySearchRoute(
             },
             onOpenBook = { book ->
                 controller.openOrToggleEntry(book)
-                scope.launch { openBookDetail(book) }
+                scope.launch(Dispatchers.Main.immediate) { openBookDetail(book) }
             },
             coverState = coverState,
             onCoverVisibility = onCoverVisibility,
@@ -276,9 +278,11 @@ private fun NavGraphBuilder.libraryNodeRoutes(
             ?: SystemLibraryFilter.ALL
         LaunchedEffect(filter) {
             controller.selectTab(filter)
-            navController.navigate(Routes.Library) {
-                popUpTo(Routes.Library) { inclusive = false }
-                launchSingleTop = true
+            withContext(Dispatchers.Main.immediate) {
+                navController.navigate(Routes.Library) {
+                    popUpTo(Routes.Library) { inclusive = false }
+                    launchSingleTop = true
+                }
             }
         }
     }
@@ -314,7 +318,7 @@ private fun NavGraphBuilder.libraryNodeRoutes(
                 onCoverVisibility = onCoverVisibility,
                 onOpenBook = { entry ->
                     controller.openOrToggleEntry(entry)
-                    scope.launch { openBookDetail(entry) }
+                    scope.launch(Dispatchers.Main.immediate) { openBookDetail(entry) }
                 },
                 onRetry = { scope.launch { controller.reload(failureMessage) } },
                 onLongPressBook = controller::longPressBook,
@@ -350,7 +354,7 @@ private fun NavGraphBuilder.libraryNodeRoutes(
                 onAddSelectionToCollection = { id -> scope.launch {
                     controller.addSelectionToCollection(id, failureMessage)
                 } },
-                onRemoveSelection = { scope.launch {
+                onRemoveSelection = { scope.launch(Dispatchers.Main.immediate) {
                     val deletingCurrent = collectionId in controller.deletionPreview?.selectedIds.orEmpty()
                     if (controller.removeSelection(failureMessage, changedMessage) && deletingCurrent) navController.navigateUp()
                 } },
@@ -391,7 +395,7 @@ private fun NavGraphBuilder.libraryTagsRoutes(
             onOpenCollection = {},
             onOpenBook = { entry ->
                 controller.openOrToggleEntry(entry)
-                scope.launch { openBookDetail(entry) }
+                scope.launch(Dispatchers.Main.immediate) { openBookDetail(entry) }
             },
             onRetry = { scope.launch { controller.reload(failureMessage) } },
             onLongPressBook = controller::longPressBook,
@@ -423,7 +427,7 @@ internal fun LibraryFlowController.tagProjection(
     entries = fullLocalEntries().filter { entry ->
         when (ownership) {
             LibraryTagOwnership.LOCAL -> entry.localTags.any { normalizeLocalLibraryTagName(it) == normalizedTag }
-            LibraryTagOwnership.SOURCE -> entry.book.identity.sourceId == sourceId &&
+            LibraryTagOwnership.SOURCE -> (entry.book.identity as? org.tsuyomi.shared.model.BookIdentity.Remote)?.sourceId == sourceId &&
                 entry.book.remoteTags.any { normalizeSourceLibraryTagName(it) == normalizedTag }
         }
     },
@@ -472,7 +476,7 @@ private fun handleLibraryDrop(
             }
             is LibraryDropDestination.RemoteMirror -> payload.identities.singleOrNull()?.let { identity ->
                 controller.state.entries.firstOrNull { it.book.identity == identity }?.let { entry ->
-                    scope.launch { openRemoteDestination(entry, destination) }
+                    scope.launch(Dispatchers.Main.immediate) { openRemoteDestination(entry, destination) }
                 }
             }
             is LibraryDropDestination.Root,
@@ -668,8 +672,10 @@ private fun CollectionRuleRoute(
     BackHandler(enabled = !showDiscard) { leave() }
     LaunchedEffect(upRequested) {
         if (upRequested) {
-            saved[RuleUpKey] = false
-            leave()
+            withContext(Dispatchers.Main.immediate) {
+                saved[RuleUpKey] = false
+                leave()
+            }
         }
     }
     if (showDiscard) {
@@ -702,7 +708,7 @@ private fun CollectionRuleRoute(
         title = draft.title,
         tree = tree,
         collections = controller.collections,
-        sourceIds = controller.searchableEntries.map { it.book.identity.sourceId }.distinct(),
+        sourceIds = controller.searchableEntries.mapNotNull { (it.book.identity as? org.tsuyomi.shared.model.BookIdentity.Remote)?.sourceId }.distinct(),
         sourceLabels = controller.tagSourceLabels(),
         tagChoices = buildSet {
             for (entry in controller.searchableEntries) {
@@ -738,7 +744,7 @@ private fun CollectionRuleRoute(
         onChooseBooks = {
             if (!saving && !draft.advancedExpanded) {
                 owner.edit { it.copy(booksBeforePick = it.selectedBooks) }
-                scope.launch {
+                scope.launch(Dispatchers.Main.immediate) {
                     if (owner.flush()) navController.navigate(Routes.CollectionBookPicker)
                     else saveFailed = true
                 }
@@ -757,7 +763,7 @@ private fun CollectionRuleRoute(
             if (latest.title.isNotBlank() && latest.title.trim().length <= (if (smart) 512 else 256)) {
                 if (latestFailing.isEmpty() && !saving) {
                     saving = true
-                    scope.launch {
+                    scope.launch(Dispatchers.Main.immediate) {
                         try {
                             if (!owner.flush()) {
                                 saveFailed = true

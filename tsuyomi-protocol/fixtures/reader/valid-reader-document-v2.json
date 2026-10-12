@@ -1,0 +1,89 @@
+{
+  "version": 2,
+  "kind": "chapter",
+  "identity": {
+    "sourceId": "org.tsuyomi.example",
+    "remoteBookId": "book-42",
+    "contentId": "chapter-1"
+  },
+  "title": "旧站的灯火",
+  "revision": "2026-10-07-rich-reader",
+  "contentDigest": "1111111111111111111111111111111111111111111111111111111111111111",
+  "anchors": [
+    { "id": "start", "blockId": "chapter-heading", "codePointOffset": 0 },
+    { "id": "arrival", "blockId": "paragraph-1", "codePointOffset": 0 },
+    { "id": "note-1", "blockId": "note-block-1", "codePointOffset": 0 }
+  ],
+  "blocks": [
+    {
+      "id": "chapter-heading",
+      "kind": "heading",
+      "level": 1,
+      "text": "第一章　潮声",
+      "anchorId": "start"
+    },
+    {
+      "id": "paragraph-1",
+      "kind": "paragraph",
+      "text": "沿海站里，灯火仍然亮着。¹",
+      "spans": [
+        { "start": 5, "end": 7, "kind": "strong" },
+        { "start": 7, "end": 9, "kind": "link", "target": { "type": "internal", "contentId": "chapter-2", "fragment": "arrival" } },
+        { "start": 9, "end": 11, "kind": "ruby", "annotation": "liàng zhe" },
+        { "start": 12, "end": 13, "kind": "noteReference", "noteId": "note-1" }
+      ]
+    },
+    {
+      "id": "station-image",
+      "kind": "image",
+      "url": "https://media.example.test/station.jpg",
+      "altText": "雨夜的旧车站",
+      "width": 1200,
+      "height": 800
+    },
+    {
+      "id": "quoted-letter",
+      "kind": "quote",
+      "text": "我会在最后一班车之前回来。",
+      "spans": [{ "start": 4, "end": 8, "kind": "emphasis" }],
+      "attribution": "旧信"
+    },
+    {
+      "id": "route-list",
+      "kind": "list",
+      "ordered": true,
+      "start": 2,
+      "items": [
+        { "itemId": "route-item-1", "blocks": [{ "id": "route-p-1", "kind": "paragraph", "text": "沿着海堤向北。" }] },
+        { "itemId": "route-item-2", "blocks": [{ "id": "route-p-2", "kind": "paragraph", "text": "在灯塔旁停留。", "preformatted": false }] }
+      ]
+    },
+    {
+      "id": "arrival-table",
+      "kind": "table",
+      "rows": [
+        { "cells": [{ "text": "车次", "header": true }, { "text": "时间", "header": true }] },
+        { "cells": [{ "text": "末班车" }, { "text": "23:40", "spans": [{ "start": 0, "end": 5, "kind": "code" }] }] }
+      ]
+    },
+    {
+      "id": "note-block-1",
+      "kind": "note",
+      "noteId": "note-1",
+      "label": "1",
+      "anchorId": "note-1",
+      "blocks": [{ "id": "note-p-1", "kind": "paragraph", "text": "此处的灯火指站台尽头的信号灯。" }]
+    },
+    {
+      "id": "post-9001",
+      "kind": "post",
+      "postId": "9001",
+      "authorId": "reader-7",
+      "authorName": "海边的读者",
+      "floor": 21,
+      "createdAt": "2026-10-07T08:15:30Z",
+      "replyToPostId": "9000",
+      "blocks": [{ "id": "post-9001-text", "kind": "paragraph", "text": "我也在那座车站等过人。" }]
+    }
+  ]
+}

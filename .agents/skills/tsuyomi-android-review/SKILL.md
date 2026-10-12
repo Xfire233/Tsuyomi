@@ -11,7 +11,7 @@ This is the repository's optional assistant execution procedure and a directly r
 
 ## When to use
 
-Use this Skill for any Android UI, navigation, interaction, accessibility, display-profile, screenshot, or Review Graph change in this repository. Workflow-only edits to this Skill, its policy, catalog, review scripts, or tooling registry use `UI-R1` change detection without a device pass unless the report selects runtime evidence.
+Use this Skill for any Android UI, navigation, interaction, accessibility, display-profile, screenshot, or Review Graph change in this repository. Workflow-only edits to this Skill, its policy, catalog, review scripts, or tooling registry use `UI-R1` change detection without a device pass. Runtime obligations selected by a report are not device-execution permission.
 
 ## Do not use
 
@@ -25,7 +25,8 @@ Read the installed `android-cli` Skill first. Then read:
 
 1. `.agents/skills/tsuyomi-android-review/review-policy.json` — current executable profile/stage selection;
 2. only the affected sections of `UI_CONSTITUTION.md` and `UI_ATLAS.md`;
-3. affected nodes from `.agents/skills/tsuyomi-android-review/review-node-catalog.json`.
+3. affected nodes from `.agents/skills/tsuyomi-android-review/review-node-catalog.json`;
+4. [`QUALITY_GATES.md` — assistant local execution authorization](../../../tsuyomi-android/docs/process/QUALITY_GATES.md#assistant-local-execution-authorization), the sole owner of local scope increases, device lifecycle and artifact-bound approval boundaries.
 
 `review-node-catalog.json` alone owns node identities and required states. Never copy that catalog into another checklist.
 
@@ -33,13 +34,13 @@ Read the installed `android-cli` Skill first. Then read:
 
 Every visible UI creation or refactor must use the following sources together. They are complementary, not interchangeable:
 
-1. `UI_CONSTITUTION.md`, `review-policy.json`, and the standalone Review Graph catalog define product intent, execution selection and approval boundaries.
+1. `UI_CONSTITUTION.md`, `review-policy.json`, and the standalone Review Graph catalog define product intent, profile selection and evidence requirements; owning gates record authorization/approval.
 2. Claude Code official `frontend-design` supplies an intentional visual direction, differentiation, composition, and self-critique.
 3. Google `android/skills` and current Android documentation supply Compose, Material 3, accessibility, adaptive-layout, edge-to-edge, and testing correctness.
 4. This Skill owns Tsuyomi implementation review on policy-selected devices, evidence routing, and human handoff.
 5. Community skills may provide candidate tactics only after their source, maintenance, install count, repository reputation, security report, and full `SKILL.md` are reviewed.
 
-When sources conflict, use this precedence:
+For product guidance, use this precedence. Local assistant execution instead follows the latest explicit maintainer direction and the owning `QUALITY_GATES.md` authorization boundary; the source stack never grants extra tests, device work or approval.
 
 ```text
 human review + UI_CONSTITUTION
@@ -60,7 +61,7 @@ Before editing visible UI:
 2. Read the official Claude `frontend-design` skill and the applicable official Android skills or docs.
 3. State two compact design directions. Critique both against the user request, Tsuyomi identity, information density, touch ergonomics, accessibility, implementation cost, and the current active-profile policy. Select one direction; do not blend incompatible ideas.
 4. For Material 3 Expressive, default to **Foundational** intensity. Permit at most one deliberate hero moment on a screen, preserve standard navigation and labels, and use semantic `MaterialTheme` roles rather than hard-coded visual tokens.
-5. Use a separately owned iteration device when parallel code iteration overlaps a frozen human handoff (`Tsuyomi_Review_Work_API29` is the maintainer's example name). The shared online candidate runs only on an explicitly designated dedicated-test-account device; that designation does not authorize replacement of the existing daily canonical. Resolve serial by the actual AVD name; serial numbers are not ownership. Match the agreed Standard physical geometry, orientation and baseline font scale before visual evidence.
+5. Keep iteration off a frozen human target. A separately owned iteration device is usable only within the gate-authorized scope; overlapping review does not authorize creating another AVD. The shared online candidate runs only on an explicitly designated dedicated-test-account device, without permission to replace the daily canonical. Resolve serial by actual AVD name; serial numbers are not ownership. Match the designated profile's physical geometry, orientation and baseline font scale before visual evidence.
 6. Verify the actual changed production surface: interaction, semantics/layout, PNG at 1:1 where visual judgment matters, relevant state restoration, and the exact API 29 window. Screenshot assertions never prove behavior.
 7. Hand off the exact production APK/build identity, evidence and pending human-only claims. Deployment is not approval.
 
@@ -95,7 +96,8 @@ Use the installed `find-skills` skill for open-ecosystem discovery and Android C
 
 This Skill defines only the stable procedure. It must not copy the policy's current mode, stage, milestone, counts, profile partition, or prefix lists into prose. At `UI-R0`, read the file, validate it, record its SHA-256, and derive the current execution matrix from its fields.
 
-The policy selects review work; it does not grant Phase implementation authorization, human approval, merge permission, release permission, or readiness for a deferred profile. Those outcomes remain with the owning Phase/gate/human authority.
+The policy selects evidence obligations; it does not grant local execution, Phase implementation, human approval, merge/release permission or deferred-profile readiness. Apply the owning [local authorization boundary](../../../tsuyomi-android/docs/process/QUALITY_GATES.md#assistant-local-execution-authorization) before commands or test additions/extensions. Active profiles, initial-restoration mode and `UI-R1` accounting do not override it or the Constitution's E-ink pause/major-UI trigger. Retained restoration obligations may be deferred without being passed; unexecuted required evidence remains `PENDING`. Approval outcomes remain in the owning gate/checkpoint, not this Skill or an agent-written handoff.
+
 ## Invariants
 
 - Gradle Wrapper owns build, compiler, lint, unit, instrumentation, screenshot tests, dependencies, and CI correctness.
@@ -108,9 +110,9 @@ The policy selects review work; it does not grant Phase implementation authoriza
 
 ### Local API 29 CI preflight
 
-Local API 29 CI is permitted only in explicit `HIGH`. In that mode, after the bounded diagnostic ladder, run the planner-selected local gate through `tools/android_api29.py --mode high --build`. Every non-prepare run precompiles its selected instrumentation before AVD work; `HIGH` omits `--no-daemon` for precompile and serialized instrumentation so Gradle may reuse a daemon between phases, while hosted `ci` retains `--no-daemon`. Non-focused `--build` adds the planner-selected build work and is the only local full gate. The runner has one shared `android_api29_profile.json` for local and hosted automation, creates only a disposable automation AVD, collects evidence under `tsuyomi-android/build/api29-ci/`, and cleans its own AVD/emulator in `finally`. `HIGH` increases compilation throughput only: device execution remains serialized.
+Use local API 29 CI only within the separately authorized admission/diagnostic scope defined by [`QUALITY_GATES.md`](../../../tsuyomi-android/docs/process/QUALITY_GATES.md#bounded-failure-escalation), with explicit `HIGH`; selecting HIGH alone does not authorize preflight or its disposable AVD. The full gate is the non-focused planner-selected `tools/android_api29.py --mode high --build` run. Every non-prepare run precompiles its selected instrumentation before AVD work; `HIGH` omits `--no-daemon` for precompile and serialized instrumentation so Gradle may reuse a daemon between phases, while hosted `ci` retains `--no-daemon`. The shared `android_api29_profile.json` selects automation inputs; evidence is collected under `tsuyomi-android/build/api29-ci/`. Its owned emulator and AVD must be stopped/deleted in `finally` on success, failure or cancellation, with cleanup failures recorded. HIGH increases compilation throughput only; device execution remains serialized.
 
-In `LOW`, do not invoke the local API 29 runner, matrix, preflight, or `--prepare-only`; bounded direct development is not CI and hosted protected checks are the only CI path. `--mode ci` is reserved for hosted execution with `GITHUB_ACTIONS=true`. In `HIGH`, use `--task` with an exact `--test-class` only for the focused diagnostic step. It is explicitly not a full gate. The required order is focused test, directly adjacent sequence, then the complete planner-selected local gate; hosted protected checks independently remain final acceptance and cannot be bypassed by local evidence. On a repeated signature, collect logs/device state and classify the shared lifecycle, helper or synchronization boundary before any change—never invent a speculative production patch.
+In `LOW`, do not invoke the local API 29 runner, matrix, preflight or `--prepare-only`; bounded direct development is not CI. `--mode ci` is reserved for hosted execution with `GITHUB_ACTIONS=true`. Authorized focused `--task`/exact `--test-class` runs are diagnostic evidence, not a full gate and not permission to continue into adjacent/full execution. Only the separately authorized admission task follows the owning gate's focused/adjacent/full sequence; hosted protected checks independently remain required. On a repeated signature, collect available logs/device state and classify the shared lifecycle, helper or synchronization boundary before any change—never invent a speculative production patch.
 
 The automation AVD is a CI-only exception: it does not replace a visual/human review device, canonical APK, canonical AVD, or human authorization. Its environment evidence records image/emulator revision, system fingerprint, WebView version, resolved local head/worktree overlay and phase timings for comparison; it must not claim host, kernel or emulator-build identity with hosted CI. Compare timing only for equal resolved head/overlay policy, scope, selected tasks, profile/image revision and host evidence. Contributor-facing Windows/Linux commands and host limitations are documented in [`tsuyomi-android/CONTRIBUTING.md`](../../../tsuyomi-android/CONTRIBUTING.md#local-api-29-runner).
 
@@ -120,17 +122,17 @@ The automation AVD is a CI-only exception: it does not replace a visual/human re
 
 Use Android Studio before a formal review pass for the smallest interactive feedback loop:
 
-1. Run the current test method/class from the editor gutter; do not launch an unrelated suite.
+1. Run only the current mapped test method, or a class already explicitly authorized for that proof, from the editor gutter; do not launch an unrelated suite.
 2. Use production Compose Preview, Live Edit/Apply Changes, targeted debugger editor analysis, debugger, profiler or Layout Inspector only for the question each tool owns.
-3. Use the checked-in `tsuyomi-android/.run/` Gradle configurations for app compilation, app JVM tests or the bounded app assemble+lint admission smoke. For another module, select that module's exact Gradle task in the Gradle tool window rather than adding another permanent configuration.
+3. Select only the exact authorized tasks from checked-in `tsuyomi-android/.run/` configurations or the Gradle tool window. A saved app JVM-test or assemble+lint configuration is not permission to run the whole configuration; do not add another permanent configuration for a one-off module task.
 4. Android Studio output is iteration feedback. Gradle still owns compiler, lint and test proof; Layout Inspector does not replace behavioral instrumentation or accessibility review.
 
 ### UI-R0 — Reconcile
 
-1. Prefer an exact previous UI-R1 report/baseline. Without one, UI-R1 derives a content-hash baseline from Git `origin/main`, then `main`; use `--base-ref=<checkpoint-or-target>` when the active change packet starts elsewhere. Only an unavailable file baseline and unavailable Git merge-base cause conservative cold-start full scope.
+1. Prefer an exact previous UI-R1 report/baseline. Without one, UI-R1 derives a content-hash baseline from Git `origin/main`, then `main`; use `--base-ref=<checkpoint-or-target>` when the active change packet starts elsewhere. Only unavailable file and Git merge-base baselines cause conservative cold-start full impact accounting, never automatic full execution.
 2. Read and validate `review-policy.json`; record its mode, active/deferred profiles, selected node stages, actual-online lane, resume conditions, and SHA-256.
 3. Confirm the standalone catalog schema/version, exact production review build ID, locale, active contracts, and the policy-derived node partition. Never compare against counts copied into this Skill.
-4. Preflight the active isolated AVD before deployment: observed size, density, API, orientation, locale, font scale, and profile must match the contract. Stop on drift; repair the AVD once rather than capturing invalid evidence.
+4. Preflight only the authorized designated AVD before deployment: observed size, density, API, orientation, locale, font scale and profile must match the contract. Stop/report drift; do not automatically repair, recreate or substitute a device outside its authorized ownership/state boundary.
 
 ### UI-R1 — Detect before building
 
@@ -152,20 +154,20 @@ UI-R1 compares content hashes, recomputes the production review build ID, applie
 
 Rules:
 
-- Product/Phase contracts, catalog schema, shared theme/scaffold, or genuinely unknown Android changes expand conservatively.
+- Product/Phase contracts, catalog schema, shared theme/scaffold or genuinely unknown Android changes expand impact accounting conservatively, not assistant execution authorization.
 - Historical design records and review procedures select `X06`; module/file mappings select the owning surface family, and cross-cutting `X*` nodes are added only for named capabilities.
 - Workflow-only changes stop after UI-R1: no Gradle, emulator, APK, layout, or PNG work.
 - Empty scope never upgrades pending review state.
-- `--force-full-review` means every current catalog node is impact-accounted. Runtime evidence uses the package and evidence lanes selected by policy; any node prefix in `actualOnlineRequirements` receives both required evidence lanes before finalization.
+- `--force-full-review` means every current catalog node is impact-accounted. Policy-required runtime/actual-online lanes remain completion obligations, but commands stay within the gate-authorized mapping; required lanes not executed stay `PENDING` and block finalization rather than trigger an automatic matrix.
 
 ### UI-R2 — One build, one deploy, evidence by owner
 
-When UI-R1 requires runtime evidence:
+When UI-R1 identifies runtime obligations and their mapped execution is authorized by the owning gate:
 Before changing a device display, bind its serial to `adb -s <serial> emu avd name` and record `adb -s <serial> shell wm size` **both physical and override** values. The active profile requires the prescribed *physical* size; `wm size` overrides cannot make a differently sized AVD equivalent. For a temporary narrow/large-type pass, restore the recorded pre-pass override (`wm size reset` if none, otherwise the exact prior override) and verify it again. Never infer restoration from a screenshot or hard-code `1080x2400`: an override of 1080x2400 on a physical 1080x1920 Pixel 2 previously left the bottom and right of the host emulator unclickable. Before a human touch handoff, verify real mouse input on the affected lower/right controls; ADB-injected taps and Windows hit tests cannot prove emulator mouse mapping.
 
 1. Build the affected production `online` APK once; it uses debug signing and the real transport. CI owns its separate deterministic fixture/test targets. Workflow-only edits do not require an APK build or device pass; an explicit deployment request is separate runtime scope.
 2. Deploy once to the explicitly authorized dedicated-account device, using Android CLI delta install/run. Preserve app data and signing identity. Do not replace the existing daily canonical or install/run fixture-cleaning instrumentation on the shared candidate.
-3. Account for every affected current-stage node/state obligation, but do not automatically create one PNG per obligation:
+3. Account for every affected current-stage node/state obligation, but execute only changed/directly coupled claims in the authorized mapping. Choose the lowest existing evidence seam per claim; neither this list nor a missing test authorizes test additions/extensions, another PNG or an extra run:
    - deterministic static geometry/copy → existing screenshot assertion;
    - bounds, semantics, focusability, or overlap → `android layout --diff`;
    - changed transition/persistence → focused instrumentation or Journey;
@@ -203,7 +205,7 @@ Bounded fallback:
 
 ### UI-R3 — Journeys only for changed transitions
 
-Select only Journeys whose transition, persistence, input, or high-risk contract changed. Established candidates are:
+Select only already-authorized Journeys whose transition, persistence, input or high-risk contract changed. Their presence below does not authorize a run. Established candidates are:
 
 - `L01-layout-selection`
 - `S02-search-single-submit`
@@ -219,19 +221,19 @@ Journeys selected by `actualOnlineRequirements.nodePrefixes` use the policy-requ
 
 ### UI-R4 — Human handoff
 
-After selected automation finishes, stop further input and freeze the same APK, source, route and reusable test session for the human. Record remaining qualitative items as `PENDING`; do not repeat already proven operations merely for handoff. Human-only judgments include long-reading comfort, Reader seek feel, TalkBack experience, trust/destructive wording and visual/brand quality.
+After selected automation finishes, stop further input and background state changes and freeze the single designated retained human target: exact installed APK SHA-256, source/build, device/profile, route/state and reusable test session. Follow the owning gate's temporary-device cleanup rules; do not leave a disposable automation AVD as a second review target. Record remaining qualitative items as `PENDING`; do not repeat already proven operations merely for handoff. Human-only judgments include long-reading comfort, Reader seek feel, TalkBack experience, trust/destructive wording and visual/brand quality.
 
-Qualitative and full-matrix items for every deferred profile remain explicitly deferred. When the policy's resume trigger is satisfied, its retained physical-device and human evidence requirements become mandatory again.
+Qualitative and full-matrix items for every deferred or paused profile scope remain explicitly deferred and unpassed. They are not prerequisites for continuing separately authorized Standard/local-reading verification. A major-UI impact assessment does not resume paused improvement or full restoration. When the policy's explicit restoration resume trigger is satisfied, retained physical-device and human evidence requirements become mandatory again for that completion/readiness claim, not automatic local execution; any required but unexecuted item remains `PENDING`.
 
 ### UI-R4.1 — Production-device human review
 
-Human review uses the exact production APK, build ID, route, state, active profile and evidence already produced by UI-R2/UI-R3. Review comments are recorded in the owning gate/checkpoint or ignored local handoff; there is no in-app reviewer, bridge daemon or app-private approval channel.
+Human review uses the exact installed production APK SHA-256, build ID, route, state, active profile and evidence already produced by UI-R2/UI-R3. Approval is recorded only in the owning gate/checkpoint; an ignored local handoff may carry transient review notes, not approval authority. There is no in-app reviewer, bridge daemon or app-private approval channel.
 
-Default to one explicitly designated dedicated-account `online` candidate, used sequentially by automation then human review. A separate development AVD is optional only when iteration overlaps the frozen human handoff; it is not a second mandatory acceptance lane.
+Use one explicitly designated retained dedicated-account `online` candidate sequentially for automation then human review, under the owning gate's authorization/lifecycle rules. Overlapping iteration does not authorize an extra development AVD or a second acceptance lane.
 
-Deployment/replacement still needs the device-specific user authorization. Preserve application data, signing identity and encrypted source-scoped sessions. The dedicated Wenku8 test account may use normal WebView login automation and transient private credential input; other accounts remain manual. Challenges pause for the human. Never embed credentials in hosted CI, public source or APKs, never export them to evidence, and never treat login permission as website-write permission. Do not use credential-clearing `LiveWebViewVerificationInstrumentedTest` setup on this candidate. Restarted reusable sessions do not require another login unless expired or challenged.
+Deploying successive builds to the designated working AVD during the authorized verification sequence does not require approval for each install. Once the human candidate is frozen, do not replace its APK or change its review state until the owner explicitly resumes iteration. Preserve application data, signing identity and encrypted source-scoped sessions. The dedicated Wenku8 test account may use normal WebView login automation and transient private credential input; other accounts remain manual. Challenges pause for the human. Never embed credentials in hosted CI, public source or APKs, never export them to evidence, and never treat login permission as website-write permission. Do not use credential-clearing `LiveWebViewVerificationInstrumentedTest` setup on this candidate. Restarted reusable sessions do not require another login unless expired or challenged.
 
-Create an absent iteration device with the SDK/AVD tooling for the current host; the optional Windows helper is `Create-ReviewAvds.ps1 -ReviewWorkOnly`. Do not recreate canonical devices. The agreed Standard API 29 profile is portrait physical 1080×2400, 420dpi and font scale 1.0. Additional narrow, landscape or large-type scenarios restore their recorded prior display overrides before handoff. Verify actual human mouse input on affected lower/right controls when a touch handoff is claimed; injected taps do not prove host input coordinates. Approval remains explicit, human-only and artifact-bound.
+Starting and reusing the designated existing AVD requires no per-start approval; creating an additional differently numbered AVD alongside it requires explicit maintainer confirmation. The optional Windows helper is `Create-ReviewAvds.ps1 -ReviewWorkOnly`; never recreate canonical devices or use force/replacement flags on another owner's AVD. Follow [`AVD_MATRIX.md`](../../../tsuyomi-android/docs/verification/AVD_MATRIX.md#assistant-device-ownership-and-cleanup) for inventory, state restoration and temporary cleanup. The agreed Standard API 29 recipe is portrait physical 1080×2400, 420dpi and font scale 1.0; use the designated profile's actual recipe. Authorized narrow, landscape or large-type scenarios restore recorded prior display settings before handoff. Verify actual human mouse input on affected lower/right controls when a touch handoff is claimed; injected tap success is not human mouse acceptance.
 
 
 ## Tool ownership and escalation
@@ -242,7 +244,7 @@ Create an absent iteration device with the SDK/AVD tooling for the current host;
 | Official guidance | `android docs search/fetch` | direct official URL is already known |
 | Deploy/AVD/layout/PNG | Android CLI | documented command fails while device remains healthy |
 | Input/system surface | layout coordinates, then UIAutomator2 | Android CLI cannot perform the interaction |
-| Human review record | owning gate/checkpoint plus ignored local handoff | cross-host evidence transfer needs an explicitly authorized channel |
+| Human approval record | owning gate/checkpoint only; ignored local handoff carries transient notes, not approval | cross-host evidence transfer needs an explicitly authorized channel |
 | Kotlin diagnostics | compiler/lint/LSP | `android studio analyze-file` answers a remaining targeted IDE question |
 | Runtime composition | Android Studio Layout Inspector/debugger/profiler | layout/trace cannot expose the state |
 | Final qualitative verdict | human | never delegated to AI |
@@ -253,27 +255,30 @@ Run `android studio check` once per IDE-assisted session. Successful compiler/li
 
 - Embedded Running Devices + Layout Inspector is the best interactive supplement for hierarchy, attributes, overlap, recomposition and reference-image overlays. It does not carry human comments or replace canonical Android CLI evidence.
 - Compose Preview, Animation Preview and Compose UI Check should preflight isolated components, accessibility and adaptive-layout issues before device review. They do not prove navigation, persistence, system bars or real-window behavior.
-- Live Edit can shorten pure composable function-body iteration on an optional API 30+ development AVD, but the canonical review AVD is API 29, which Google does not support for Live Edit. Live Edit state is not an exact APK and never supplies final evidence; always rebuild and verify the exact API 29 APK.
+- Live Edit can shorten pure composable function-body iteration on an explicitly authorized API 30+ development AVD; this does not authorize a new device. The API 29 review recipe does not support Live Edit. Live Edit state is not an exact APK and never supplies final evidence; rebuild and verify the exact designated API 29 APK within the authorized scope.
 - Gemini Transform UI / Match UI can propose Preview diffs, but it is a separate cloud-assisted editor, not the Tsuyomi review authority or OMP comment channel. Use only when explicitly requested and review every diff.
 - Google Journeys may exercise a pre-installed APK without adopting a new AGP test-suite integration. A build-toolchain upgrade does not authorize replacing existing Journey ownership. Keep the changed-transition-only rule; AI vision navigation is evidence for the selected Journey, not human qualitative approval.
 
 ## Known host failures
 
-- Windows `CreateProcess error=206` in `validateDebugScreenshotTest` is a host/classpath-launch failure. Confirm screenshot sources compile, record the blocked validation exactly once, and let CI/another supported host own the golden result. Repeated identical retries waste the review pass.
+- Windows `CreateProcess error=206` in `validateDebugScreenshotTest` is a host/classpath-launch failure. Use any already-authorized screenshot compilation evidence, record the blocked validation exactly once and let CI/another authorized supported host own the golden result; the failure does not authorize another compile/run or identical retries.
 - A failed Android CLI layout does not invalidate a successful Android CLI PNG. Record the capabilities separately.
 
 ## Scope selection
 
+This list identifies evidence obligations, not permission to execute or add/extend tests. Apply [`QUALITY_GATES.md`](../../../tsuyomi-android/docs/process/QUALITY_GATES.md#assistant-local-execution-authorization) and its exact mapping first; preserve `PENDING` for required evidence outside the authorized local boundary.
+
 - Workflow/docs-only → UI-R1 only.
-- Review workflow/catalog changes → UI-R1; add runtime evidence only when production behavior or the evidence mechanism changed.
-- Product static geometry → affected production screenshot assertion plus affected current-stage node on every active profile.
-- Navigation/persistence/state transition → affected contract test plus selected current-stage Journey.
-- Direct deferred-profile source change → the minimal direct-change exception from `review-policy.json`; no full matrix.
+- Review workflow/catalog changes → UI-R1; identify runtime obligations only when production behavior or the evidence mechanism changed, without automatically executing them.
+- Product static geometry → lowest authorized production appearance/layout seam for the affected claim and current-stage node. Conditional EINK requires the Constitution's major-UI trigger before any functional evidence assessment; minor UI, low-impact or non-UI implementation risk does not create a separate E-ink round.
+- Navigation/persistence/state transition → lowest authorized behavioral seam: affected contract test or production Journey, not both for the same claim.
+- Direct deferred-profile source change → the minimal direct-change exception from `review-policy.json`; no full matrix. An E-ink source change alone cannot bypass the Constitution's major-UI trigger or resume paused improvement.
 - Full AI review → every current catalog node impact-accounted according to the active/deferred partition; policy-selected actual-online prefixes receive their additional evidence lanes.
-- Deferred-profile restoration → the policy's complete retained graph, inventory, Journeys, adaptive matrix, and physical human review.
+- Deferred/paused-profile restoration → retained complete graph, inventory, Journeys, adaptive matrix and physical human evidence remain unpassed completion/readiness requirements, not current Standard/local-reading execution prerequisites. Resume full restoration only with explicit maintainer authorization; a major-UI check alone does not resume it.
 - Actual-online review → policy-required production package, real host state and live task flows on the shared online candidate; signed deterministic replay belongs to CI, with no standalone fixture acceptance and no fixture-only verdict substitution. Device deployment is separately authorized.
 - Resolve the policy partition before every Gradle/device command. Tests for a profile currently marked deferred/frozen remain retained but ignored from routine instrumentation and screenshot registration; a test's presence in a class never makes that profile active.
-- Journey debugging in explicit `HIGH` follows `QUALITY_GATES.md`: exact reproduction, stable affected test, adjacent sequence, then the local planner-selected API 29 gate before hosted protected final acceptance. The entire planner-selected local matrix is required preflight in `HIGH`, but never an inner retry loop. In `LOW`, no local API 29 runner executes; hosted protected checks are the CI path.
+- UI-R1 `requiresDeviceProfiles` reports required device obligations, not execution permission; `conditionalDeviceProfiles` needs the Constitution's major-UI trigger and affected-path assessment before proposing E-ink functional evidence. Record risk and minimum evidence only when applicable; a skipped incremental check is not required, never passed, and does not close retained restoration exits. Required evidence outside local authorization stays `PENDING`. `--force-full-review` accounts for all nodes, not an automatic E-ink matrix; historical initial-restoration coverage cannot override an explicit pause.
+- Journey debugging follows [`QUALITY_GATES.md`](../../../tsuyomi-android/docs/process/QUALITY_GATES.md#bounded-failure-escalation): no automatic widening from a focused check. The HIGH full planner-selected gate is required only for a separately, explicitly authorized admission task; LOW invokes no local API 29 runner. Hosted protected admission remains independent.
 - When the same failure signature crosses Journeys or appears only in class order, stop broad execution, capture diagnostic state, and classify the shared helper, lifecycle owner, device state, or synchronization boundary before changing anything. Never make speculative production changes to satisfy Compose idling; report the boundary change immediately.
 
 ## Evidence and handoff

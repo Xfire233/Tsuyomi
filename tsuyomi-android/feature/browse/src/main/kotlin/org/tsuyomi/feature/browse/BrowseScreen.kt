@@ -49,8 +49,6 @@ import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import org.tsuyomi.core.display.DisplayProfile
-import org.tsuyomi.core.display.LocalDisplayEnvironment
 import org.tsuyomi.core.ui.components.InfoBanner
 import org.tsuyomi.core.ui.components.TsuyomiCheckboxRow
 import org.tsuyomi.core.ui.components.TsuyomiDialog
@@ -72,6 +70,11 @@ import org.tsuyomi.core.ui.components.TsuyomiVisibilityEdge
 import org.tsuyomi.core.ui.components.TsuyomiTopBarAction
 import org.tsuyomi.core.ui.icons.TsuyomiIcons
 import org.tsuyomi.core.ui.theme.TsuyomiSpacing
+import org.tsuyomi.core.display.DisplayProfile
+import org.tsuyomi.core.display.LocalDisplayEnvironment
+import org.tsuyomi.core.ui.components.TsuyomiMeasuredPager
+import org.tsuyomi.core.ui.components.TsuyomiMeasuredTextPager
+import org.tsuyomi.core.ui.components.rememberTsuyomiMeasuredPagerState
 
 enum class BrowsePublisherIdentity { SIGNED, LOCAL_UNSIGNED }
 
@@ -242,10 +245,6 @@ fun BrowseTopBar(
     )
 }
 
-/**
- * Standard Browse is the repository-backed installed/available split. The explicitly frozen
- * E-ink renderer receives the active installed source, or the first installed source as fallback.
- */
 @Composable
 fun BrowseScreen(
     state: BrowseUiState,
@@ -256,42 +255,12 @@ fun BrowseScreen(
     onDismissFailure: () -> Unit,
     installedSources: List<BrowseInstalledSource>,
     modifier: Modifier = Modifier,
-    activeSourceId: String? = null,
     catalog: BrowseCatalogState,
     onCatalogAction: (BrowseCatalogAction) -> Unit,
     onSourceAction: (BrowseSourceAction) -> Unit,
     onProvidePublisherKey: (String) -> Unit = {},
     onDismissPublisherKey: () -> Unit = {},
 ) {
-    val activeSource = installedSources.firstOrNull { it.sourceId == activeSourceId } ?: installedSources.firstOrNull()
-    if (LocalDisplayEnvironment.current.effectiveProfile == DisplayProfile.EINK &&
-        state is BrowseUiState.Approval &&
-        (state.publisherIdentity == BrowsePublisherIdentity.LOCAL_UNSIGNED || state.requiresSignedIdentityTransition)
-    ) {
-        Column(modifier.fillMaxSize().verticalScroll(rememberScrollState())) {
-            ApprovalSourceCard(state, onApproveInstall, onApproveUnsigned, onDismissApproval)
-        }
-        return
-    }
-    if (LocalDisplayEnvironment.current.effectiveProfile == DisplayProfile.EINK) {
-        FrozenEInkBrowseScreen(
-            state = state,
-            onRequestImport = onRequestImport,
-            onOpenInstalledSource = {
-                activeSource?.let { onSourceAction(BrowseSourceAction.Search(it.sourceId)) }
-            },
-            onApproveInstall = { allowDowngrade -> onApproveInstall(allowDowngrade, false, false) },
-            onDismissApproval = onDismissApproval,
-            onDismissFailure = onDismissFailure,
-            onDismissPublisherKey = onDismissPublisherKey,
-            modifier = modifier,
-            remoteLibraryAvailable = activeSource?.remoteLibraryAvailable == true,
-            onOpenRemoteLibrary = {
-                activeSource?.let { onSourceAction(BrowseSourceAction.OpenRemoteLibrary(it.sourceId)) }
-            },
-        )
-        return
-    }
 
     BrowseScreenContent(
         state = state,
@@ -359,7 +328,7 @@ private fun BrowseScreenContent(
             modifier = Modifier.fillMaxWidth(),
         )
         when (state) {
-            is BrowseUiState.Approval -> Column(Modifier.weight(1f).verticalScroll(rememberScrollState())) {
+            is BrowseUiState.Approval -> Column(Modifier.weight(1f).then(if (LocalDisplayEnvironment.current.effectiveProfile == DisplayProfile.EINK) Modifier else Modifier.verticalScroll(rememberScrollState()))) {
                 ApprovalSourceCard(state, onApproveInstall, onApproveUnsigned, onDismissApproval)
                 Spacer(Modifier.height(TsuyomiSpacing.Lg))
             }
@@ -490,6 +459,15 @@ private fun InstalledSourcesContent(
         return
     }
 
+    if (LocalDisplayEnvironment.current.effectiveProfile == DisplayProfile.EINK) {
+        TsuyomiMeasuredPager(itemCount = installedSources.size, itemKey = { installedSources[it].sourceId }, modifier = modifier.fillMaxSize(),
+            itemContent = { index ->
+                val source = installedSources[index]
+                InstalledSourceRow(source, { onSourceAction(BrowseSourceAction.Search(source.sourceId)) },
+                    { onSourceAction(BrowseSourceAction.OpenHome(source.sourceId)) }, { onSourceAction(BrowseSourceAction.OpenRemoteLibrary(source.sourceId)) },
+                    { onDetailsSourceIdChange(source.sourceId) }, { onRequestUninstall(source.sourceId) })
+            })
+    } else {
     LazyColumn(
         modifier = modifier,
         state = scrollState,
@@ -509,6 +487,7 @@ private fun InstalledSourcesContent(
                 onRequestUninstall = { onRequestUninstall(source.sourceId) },
             )
         }
+    }
     }
     installedSources.firstOrNull { it.sourceId == detailsSourceId }?.let { source ->
         InstalledSourceDetailsDialog(
@@ -583,7 +562,15 @@ private fun InstalledSourceRow(
     onRequestUninstall: () -> Unit,
 ) {
     val primaryAction = if (source.homeAvailable) onOpenHome else onSearch
-    var menuExpanded by rememberSaveable(source.sourceId) { mutableStateOf(false) }
+    if (LocalDisplayEnvironment.current.effectiveProfile == DisplayProfile.EINK) {
+        TsuyomiMeasuredPager(itemCount = 3, itemKey = { "${source.sourceId}:$it" }, fillViewport = false,
+            itemContent = { index -> when (index) {
+                0 -> TsuyomiMenuItem(source.name, primaryAction, modifier = Modifier.testTag("browse-source-identity-${source.sourceId}"))
+                1 -> BrowsePagedText(if (source.publisherIdentity == BrowsePublisherIdentity.LOCAL_UNSIGNED) stringResource(R.string.browse_installed_unsigned_version, source.version) else source.version)
+                else -> InstalledSourceEntryButton(source, primaryAction, onSearch, onOpenRemoteLibrary, onOpenDetails, onRequestUninstall)
+            } })
+        return
+    }
     FlowRow(
         modifier = Modifier
             .fillMaxWidth()
@@ -618,56 +605,20 @@ private fun InstalledSourceRow(
                 overflow = TextOverflow.Ellipsis,
             )
         }
-        TsuyomiSplitButton(
-            text = stringResource(R.string.browse_source_enter_action),
-            trailingIcon = TsuyomiIcons.Disclosure,
-            trailingDescription = stringResource(R.string.browse_source_more_actions, source.name),
-            onLeadingClick = primaryAction,
-            onMenuOpen = {},
-            menuExpanded = menuExpanded,
-            onMenuExpandedChange = { menuExpanded = it },
-            leadingEnabled = true,
-            modifier = Modifier.testTag("browse-source-entry-${source.sourceId}"),
-        ) { dismissMenu ->
-            if (source.homeAvailable) {
-                TsuyomiMenuItem(
-                    label = stringResource(R.string.browse_source_search_action),
-                    onClick = {
-                        dismissMenu()
-                        onSearch()
-                    },
-                )
-            }
-            if (source.remoteLibraryAvailable) {
-                TsuyomiMenuItem(
-                    label = stringResource(R.string.browse_remote_library_action),
-                    onClick = {
-                        dismissMenu()
-                        onOpenRemoteLibrary()
-                    },
-                )
-            }
-            TsuyomiMenuItem(
-                label = stringResource(R.string.browse_source_details_title),
-                onClick = {
-                    dismissMenu()
-                    onOpenDetails()
-                },
-            )
-            TsuyomiMenuItem(
-                label = stringResource(R.string.browse_source_uninstall_action),
-                onClick = {
-                    dismissMenu()
-                    onRequestUninstall()
-                },
-            )
-        }
+        InstalledSourceEntryButton(source, primaryAction, onSearch, onOpenRemoteLibrary, onOpenDetails, onRequestUninstall)
     }
     HorizontalDivider(Modifier.padding(horizontal = TsuyomiSpacing.Md))
 }
 
 @Composable
 private fun InstalledSourceDetailsDialog(source: BrowseInstalledSource, onDismiss: () -> Unit) {
+    if (LocalDisplayEnvironment.current.effectiveProfile == DisplayProfile.EINK) {
+        val values = listOf(source.name, source.sourceId, source.version, source.summary,
+            if (source.publisherIdentity == BrowsePublisherIdentity.LOCAL_UNSIGNED) stringResource(R.string.browse_source_details_unsigned_origin) else "") + sourceCapabilityLabels(source)
+        TsuyomiDialog(onDismissRequest = onDismiss, title = stringResource(R.string.browse_source_details_title), dismissLabel = stringResource(R.string.browse_close_action),
+            body = { TsuyomiMeasuredPager(itemCount = values.size, itemKey = { "${source.sourceId}:details:$it" }, itemContent = { BrowsePagedText(values[it]) }, modifier = Modifier.fillMaxWidth().weight(1f, fill = false), fillViewport = false) })
+        return
+    }
     TsuyomiDialog(
         onDismissRequest = onDismiss,
         title = stringResource(R.string.browse_source_details_title),
@@ -758,6 +709,20 @@ private fun BrowseCatalogContent(
                 item.repositoryName.contains(catalogQuery, ignoreCase = true)
         }
     }
+    if (LocalDisplayEnvironment.current.effectiveProfile == DisplayProfile.EINK) {
+        TsuyomiMeasuredPager(itemCount = 4 + visibleItems.size, itemKey = { if (it < 4) "catalog-control:$it" else catalogItemKey(visibleItems[it - 4]) },
+            modifier = modifier.fillMaxSize(), itemContent = { index -> when (index) {
+                0 -> RepositoryManagementAction(onManageRepositories, repositoryManagerFocusRequester)
+                1 -> TsuyomiTextField(catalogQuery, onCatalogQueryChange, label = stringResource(R.string.browse_catalog_search_label), singleLine = true, modifier = Modifier.fillMaxWidth().testTag("browse-catalog-search"))
+                2 -> TsuyomiButton(stringResource(R.string.browse_catalog_refresh_action), { onCatalogAction(BrowseCatalogAction.Refresh) }, enabled = refreshAllowed)
+                3 -> CatalogStatusNotice(catalog, refreshAllowed, onCatalogAction)
+                else -> {
+                    val item = visibleItems[index - 4]
+                    BrowseCatalogItemRow(item, catalog.busySourceId == catalogItemKey(item) || (item.repositoryId == "official" && catalog.busySourceId == item.sourceId),
+                        installationAllowed, { onDetailsSourceIdChange(catalogItemKey(item)) }, { onCatalogAction(BrowseCatalogAction.Install(item.sourceId, item.repositoryId)) })
+                }
+            } })
+    } else {
     LazyColumn(
         modifier = modifier,
         state = scrollState,
@@ -816,6 +781,7 @@ private fun BrowseCatalogContent(
             }
         }
     }
+    }
     catalog.items.firstOrNull { catalogItemKey(it) == detailsSourceId }?.let { item ->
         BrowseCatalogDetailsDialog(
             item = item,
@@ -851,6 +817,33 @@ private fun RepositoryManagementDialog(
         subscription?.link?.let { subscriptionLink = it }
     }
 
+    if (LocalDisplayEnvironment.current.effectiveProfile == DisplayProfile.EINK) {
+        TsuyomiDialog(onDismissRequest = onDismiss, title = stringResource(R.string.browse_repository_manage_title), dismissLabel = stringResource(R.string.browse_close_action), restoreFocusTo = restoreFocusTo,
+            body = {
+                val focusManager = LocalFocusManager.current
+                val fixedCount = 10
+                TsuyomiMeasuredPager(itemCount = fixedCount + catalog.repositories.size,
+                    itemKey = { if (it < fixedCount) "subscription:$it" else "repository:${catalog.repositories[it - fixedCount].id}" },
+                    modifier = Modifier.fillMaxWidth().weight(1f, fill = false), fillViewport = false, itemContent = { index -> when (index) {
+                        0 -> BrowsePagedText(stringResource(R.string.browse_repository_manage_message))
+                        1 -> TsuyomiTextField(subscriptionLink, { subscriptionLink = it }, label = stringResource(R.string.browse_repository_link_label), singleLine = true, modifier = Modifier.fillMaxWidth().testTag("browse-subscription-link"))
+                        2 -> TsuyomiButton(stringResource(R.string.browse_repository_inspect_action), { focusManager.clearFocus(); onCatalogAction(BrowseCatalogAction.InspectSubscription(subscriptionLink)) },
+                            enabled = subscriptionLink.isNotBlank() && subscription?.busy != true, modifier = Modifier.testTag("browse-subscription-inspect"))
+                        3 -> if (subscription?.problem != null) BrowsePagedText(stringResource(R.string.browse_repository_inspect_error))
+                        4 -> if (subscription?.busy == true) BrowsePagedText(stringResource(R.string.browse_repository_inspecting))
+                        5 -> subscription?.indexUrl?.let { BrowsePagedText(stringResource(R.string.browse_repository_confirm_index_url) + "\n" + it) }
+                        6 -> subscription?.rootFingerprint?.let { BrowsePagedText(stringResource(R.string.browse_repository_confirm_root_fingerprint) + "\n" + it) }
+                        7 -> if (subscription?.rootFingerprint != null) BrowsePagedText(stringResource(R.string.browse_repository_confirm_message))
+                        8 -> if (subscription?.rootFingerprint != null && subscription.indexUrl != null) TsuyomiButton(stringResource(R.string.browse_repository_confirm_action), { onCatalogAction(BrowseCatalogAction.ConfirmSubscription) }, enabled = !subscription.busy, modifier = Modifier.testTag("browse-subscription-confirm"))
+                        9 -> if (subscription?.rootFingerprint != null) TsuyomiButton(stringResource(R.string.browse_repository_cancel_subscription_action), { onCatalogAction(BrowseCatalogAction.CancelSubscription) }, enabled = !subscription.busy, modifier = Modifier.testTag("browse-subscription-cancel"))
+                        else -> {
+                            val repository = catalog.repositories[index - fixedCount]
+                            RepositoryRegistryRow(repository, { onCatalogAction(BrowseCatalogAction.SetSubscriptionEnabled(repository.id, it)) }, { onRequestRemove(repository.id) })
+                        }
+                    } })
+            })
+        return
+    }
     TsuyomiDialog(
         onDismissRequest = onDismiss,
         title = stringResource(R.string.browse_repository_manage_title),
@@ -1039,6 +1032,18 @@ private fun BrowseCatalogItemRow(
     onInstall: () -> Unit,
 ) {
     val action = catalogItemAction(item, busy, installationAllowed)
+    if (LocalDisplayEnvironment.current.effectiveProfile == DisplayProfile.EINK) {
+        TsuyomiMeasuredPager(itemCount = 4, itemKey = { "${catalogItemKey(item)}:$it" }, fillViewport = false,
+            itemContent = { index -> when (index) {
+                0 -> TsuyomiMenuItem(item.name, onOpenDetails)
+                1 -> BrowsePagedText(stringResource(R.string.browse_catalog_row_metadata, item.version, item.language, item.repositoryName,
+                    stringResource(if (item.official) R.string.browse_catalog_repository_official else R.string.browse_catalog_repository_third_party)))
+                2 -> BrowsePagedText(item.summary)
+                else -> TsuyomiButton(stringResource(action.label), onInstall, enabled = action.enabled, style = action.style,
+                    modifier = Modifier.testTag("browse-catalog-install-${item.repositoryId}-${item.sourceId}"))
+            } })
+        return
+    }
     Column(
         modifier = Modifier
             .fillMaxWidth()
@@ -1130,6 +1135,19 @@ private fun BrowseCatalogDetailsDialog(
     onOpenSourceCode: () -> Unit,
     onDismiss: () -> Unit,
 ) {
+    if (LocalDisplayEnvironment.current.effectiveProfile == DisplayProfile.EINK) {
+        val values = listOf(item.name, "${item.version} ${item.language}", item.summary,
+            stringResource(R.string.browse_catalog_repository) + "\n" + item.repositoryName,
+            stringResource(R.string.browse_catalog_publisher) + "\n" + item.publisherFingerprint,
+            if (item.identityConflict) stringResource(R.string.browse_catalog_identity_conflict_message) else "",
+            stringResource(R.string.browse_catalog_license) + "\n" + item.license,
+            stringResource(R.string.browse_catalog_source_revision) + "\n" + item.sourceRevision,
+            stringResource(R.string.browse_catalog_source_url) + "\n" + item.sourceUrl)
+        TsuyomiDialog(onDismissRequest = onDismiss, title = stringResource(R.string.browse_catalog_details_title),
+            confirmLabel = stringResource(R.string.browse_catalog_open_source_code), onConfirm = onOpenSourceCode, dismissLabel = stringResource(R.string.browse_close_action),
+            body = { TsuyomiMeasuredPager(itemCount = values.size, itemKey = { "${catalogItemKey(item)}:details:$it" }, itemContent = { BrowsePagedText(values[it]) }, modifier = Modifier.fillMaxWidth().weight(1f, fill = false), fillViewport = false) })
+        return
+    }
     TsuyomiDialog(
         onDismissRequest = onDismiss,
         title = stringResource(R.string.browse_catalog_details_title),
@@ -1207,6 +1225,18 @@ private fun RepositoryRegistryRow(
     onSetEnabled: (Boolean) -> Unit,
     onRequestRemove: () -> Unit,
 ) {
+    if (LocalDisplayEnvironment.current.effectiveProfile == DisplayProfile.EINK) {
+        TsuyomiMeasuredPager(itemCount = 5, itemKey = { "repository:${repository.id}:$it" }, fillViewport = false,
+            itemContent = { index -> when (index) {
+                0 -> BrowsePagedText(repository.name)
+                1 -> BrowsePagedText(repository.indexUrl)
+                2 -> BrowsePagedText(stringResource(R.string.browse_repository_root_fingerprint, repository.rootFingerprint))
+                3 -> if (repository.official) BrowsePagedText(stringResource(R.string.browse_repository_official_locked))
+                    else TsuyomiCheckboxRow(checked = repository.enabled, onCheckedChange = onSetEnabled, label = stringResource(R.string.browse_repository_enabled), modifier = Modifier.testTag("browse-repository-enabled-${repository.id}"))
+                else -> if (!repository.official) TsuyomiButton(stringResource(R.string.browse_repository_remove_action), onRequestRemove, modifier = Modifier.testTag("browse-repository-remove-${repository.id}"))
+            } })
+        return
+    }
     Column(Modifier.padding(top = TsuyomiSpacing.Md)) {
         Text(repository.name, style = MaterialTheme.typography.titleSmall)
         Text(
@@ -1251,6 +1281,18 @@ private fun PublisherKeyRequiredCard(
     modifier: Modifier,
 ) {
     var publicKey by rememberSaveable(state.keyId) { mutableStateOf("") }
+    if (LocalDisplayEnvironment.current.effectiveProfile == DisplayProfile.EINK) {
+        TsuyomiMeasuredPager(itemCount = 6, itemKey = { "publisher:${state.keyId}:$it" }, modifier = modifier.fillMaxSize(),
+            itemContent = { index -> when (index) {
+                0 -> BrowsePagedText(stringResource(R.string.browse_publisher_key_message))
+                1 -> BrowsePagedText(stringResource(R.string.browse_publisher_key_id) + "\n" + state.keyId)
+                2 -> BrowsePagedText(state.problem.orEmpty())
+                3 -> TsuyomiTextField(publicKey, { publicKey = it }, label = stringResource(R.string.browse_publisher_key_input_label), singleLine = true)
+                4 -> TsuyomiButton(stringResource(R.string.browse_publisher_key_verify_action), { onProvidePublisherKey(publicKey) }, enabled = publicKey.isNotBlank(), modifier = Modifier.testTag("browse-publisher-key-verify"))
+                else -> TsuyomiButton(stringResource(R.string.browse_cancel_action), onDismiss)
+            } })
+        return
+    }
     Column(
         modifier = modifier
             .fillMaxWidth()
@@ -1314,6 +1356,36 @@ private fun ApprovalSourceCard(
     var nonOfficialConfirmed by remember(state.sourceId, state.packageSha256, state.publisherFingerprint) { mutableStateOf(false) }
     var unsignedRiskConfirmed by remember(state.sourceId, state.packageSha256) { mutableStateOf(false) }
     var identityTransitionConfirmed by remember(state.sourceId, state.packageSha256) { mutableStateOf(false) }
+    if (LocalDisplayEnvironment.current.effectiveProfile == DisplayProfile.EINK) {
+        val diffCount = if (expanded) state.capabilities.size + state.resourceLimitIncreases.size else 0
+        TsuyomiMeasuredPager(itemCount = 13 + diffCount, itemKey = { "approval:${state.sourceId}:$it" }, modifier = Modifier.fillMaxSize(),
+            itemContent = { index -> when {
+                index == 0 -> BrowsePagedText("${state.sourceName} ${state.version}")
+                index == 1 -> BrowsePagedText(stringResource(if (unsigned) R.string.browse_install_unsigned_candidate_summary else R.string.browse_install_candidate_summary, state.sourceId))
+                index == 2 -> if (unsigned) BrowsePagedText(stringResource(R.string.browse_install_unsigned_warning))
+                index == 3 -> BrowsePagedText(if (unsigned) stringResource(R.string.browse_install_unsigned_digest, state.packageSha256) else state.publisherFingerprint.orEmpty())
+                index == 4 -> TsuyomiButton(stringResource(if (expanded) R.string.browse_install_diff_collapse else R.string.browse_install_diff_expand, state.capabilities.size, state.resourceLimitIncreases.size), { expanded = !expanded })
+                index in 5 until 5 + diffCount -> {
+                    val diffIndex = index - 5
+                    BrowsePagedText(if (diffIndex < state.capabilities.size) stringResource(R.string.browse_install_added_capability, state.capabilities[diffIndex])
+                        else stringResource(R.string.browse_install_limit_increase, resourceLimitIncreaseLabel(state.resourceLimitIncreases[diffIndex - state.capabilities.size])))
+                }
+                else -> when (index - diffCount) {
+                    5 -> if (state.isDowngrade) TsuyomiCheckboxRow(checked = downgradeConfirmed, onCheckedChange = { downgradeConfirmed = it }, label = stringResource(R.string.browse_approval_downgrade))
+                    6 -> if (state.isLegacyMigration || state.requiresSignedIdentityTransition) TsuyomiCheckboxRow(checked = legacyMigrationConfirmed, onCheckedChange = { legacyMigrationConfirmed = it }, label = stringResource(if (state.requiresSignedIdentityTransition) R.string.browse_approval_signed_transition else R.string.browse_approval_legacy_migration))
+                    7 -> if (state.requiresNonOfficialConsent) TsuyomiCheckboxRow(checked = nonOfficialConfirmed, onCheckedChange = { nonOfficialConfirmed = it }, label = stringResource(R.string.browse_approval_nonofficial), modifier = Modifier.testTag("browse-approval-nonofficial"))
+                    8 -> if (unsigned) TsuyomiCheckboxRow(checked = unsignedRiskConfirmed, onCheckedChange = { unsignedRiskConfirmed = it }, label = stringResource(R.string.browse_approval_unsigned_risk), modifier = Modifier.testTag("browse-approval-unsigned-risk"))
+                    9 -> if (state.requiresUnsignedIdentityTransition) TsuyomiCheckboxRow(checked = identityTransitionConfirmed, onCheckedChange = { identityTransitionConfirmed = it }, label = stringResource(R.string.browse_approval_unsigned_transition), modifier = Modifier.testTag("browse-approval-unsigned-transition"))
+                    10 -> TsuyomiButton(stringResource(R.string.browse_approval_install_action), {
+                        if (unsigned) onApproveUnsigned(downgradeConfirmed, unsignedRiskConfirmed, identityTransitionConfirmed) else onApprove(downgradeConfirmed, legacyMigrationConfirmed, nonOfficialConfirmed)
+                    }, enabled = (!state.isDowngrade || downgradeConfirmed) && (!(state.isLegacyMigration || state.requiresSignedIdentityTransition) || legacyMigrationConfirmed) &&
+                        (!state.requiresNonOfficialConsent || nonOfficialConfirmed) && (!unsigned || unsignedRiskConfirmed) && (!state.requiresUnsignedIdentityTransition || identityTransitionConfirmed))
+                    11 -> TsuyomiButton(stringResource(R.string.browse_cancel_action), onDismiss)
+                    else -> Unit
+                }
+            } })
+        return
+    }
     Surface(
         modifier = Modifier.fillMaxWidth().padding(horizontal = TsuyomiSpacing.Md),
         shape = MaterialTheme.shapes.medium,
@@ -1461,198 +1533,6 @@ private fun ApprovalSourceCard(
     }
 }
 
-@Composable
-private fun FrozenEInkBrowseScreen(
-    state: BrowseUiState,
-    onRequestImport: () -> Unit,
-    onOpenInstalledSource: () -> Unit,
-    onApproveInstall: (allowDowngrade: Boolean) -> Unit,
-    onDismissApproval: () -> Unit,
-    onDismissFailure: () -> Unit,
-    onDismissPublisherKey: () -> Unit,
-    modifier: Modifier,
-    remoteLibraryAvailable: Boolean,
-    onOpenRemoteLibrary: () -> Unit,
-) {
-    when (state) {
-        BrowseUiState.Empty -> FrozenEInkEmptySourceScreen(onRequestImport, modifier)
-        is BrowseUiState.Preparing -> StateView(
-            kind = TsuyomiStateKind.LOADING,
-            title = stringResource(R.string.browse_preparing_title),
-            message = stringResource(R.string.browse_preparing_message, state.fileName),
-            modifier = modifier,
-        )
-        is BrowseUiState.Installed -> FrozenEInkInstalledSourceScreen(
-            state,
-            onOpenInstalledSource,
-            onRequestImport,
-            remoteLibraryAvailable,
-            onOpenRemoteLibrary,
-            modifier,
-        )
-        is BrowseUiState.Failure -> FrozenEInkFailureSourceScreen(state, onRequestImport, onDismissFailure, modifier)
-        is BrowseUiState.Approval -> FrozenEInkSourceApprovalScreen(
-            state,
-            onApproveInstall,
-            onDismissApproval,
-            modifier,
-        )
-        is BrowseUiState.PublisherKeyRequired -> FrozenEInkFailureSourceScreen(
-            state = BrowseUiState.Failure(BrowseInstallFailure.VERIFICATION),
-            onRequestImport = onRequestImport,
-            onDismiss = onDismissPublisherKey,
-            modifier = modifier,
-        )
-    }
-}
-
-@Composable
-private fun FrozenEInkEmptySourceScreen(onRequestImport: () -> Unit, modifier: Modifier) {
-    Column(
-        modifier = modifier.fillMaxSize().padding(horizontal = 24.dp),
-        verticalArrangement = Arrangement.Center,
-        horizontalAlignment = Alignment.CenterHorizontally,
-    ) {
-        Text(text = stringResource(R.string.browse_empty_title))
-        Text(
-            text = stringResource(R.string.browse_empty_message),
-            modifier = Modifier.padding(top = 12.dp, bottom = 24.dp),
-        )
-        TsuyomiButton(
-            text = stringResource(R.string.browse_import_action),
-            onClick = onRequestImport,
-            style = TsuyomiButtonStyle.PRIMARY,
-        )
-    }
-}
-
-@Composable
-private fun FrozenEInkInstalledSourceScreen(
-    state: BrowseUiState.Installed,
-    onOpenSource: () -> Unit,
-    onRequestImport: () -> Unit,
-    remoteLibraryAvailable: Boolean,
-    onOpenRemoteLibrary: () -> Unit,
-    modifier: Modifier,
-) {
-    Column(
-        modifier = modifier.fillMaxSize().padding(horizontal = 24.dp),
-        verticalArrangement = Arrangement.Center,
-        horizontalAlignment = Alignment.CenterHorizontally,
-    ) {
-        Text(text = stringResource(R.string.browse_installed_title, state.sourceName))
-        Text(
-            text = stringResource(
-                if (state.publisherIdentity == BrowsePublisherIdentity.LOCAL_UNSIGNED) R.string.browse_installed_unsigned_message
-                else R.string.browse_installed_message,
-                state.version,
-            ),
-            modifier = Modifier.padding(top = 12.dp, bottom = 24.dp),
-        )
-        TsuyomiButton(
-            text = stringResource(R.string.browse_open_source_action),
-            onClick = onOpenSource,
-            style = TsuyomiButtonStyle.PRIMARY,
-        )
-        if (remoteLibraryAvailable) {
-            TsuyomiButton(
-                text = stringResource(R.string.browse_remote_library_action),
-                onClick = onOpenRemoteLibrary,
-                modifier = Modifier.padding(top = 8.dp),
-                style = TsuyomiButtonStyle.SECONDARY,
-            )
-        }
-        TsuyomiButton(
-            text = stringResource(R.string.browse_import_another_action),
-            onClick = onRequestImport,
-            modifier = Modifier.padding(top = 8.dp),
-            style = TsuyomiButtonStyle.SECONDARY,
-        )
-    }
-}
-
-@Composable
-private fun FrozenEInkFailureSourceScreen(
-    state: BrowseUiState.Failure,
-    onRequestImport: () -> Unit,
-    onDismiss: () -> Unit,
-    modifier: Modifier,
-) {
-    Column(
-        modifier = modifier.fillMaxSize().padding(horizontal = 24.dp),
-        verticalArrangement = Arrangement.Center,
-        horizontalAlignment = Alignment.CenterHorizontally,
-    ) {
-        Text(text = stringResource(R.string.browse_install_failed_title))
-        Text(text = installFailureMessage(state.reason), modifier = Modifier.padding(vertical = 12.dp))
-        if (state.reason != BrowseInstallFailure.IDENTITY_CONFLICT) {
-            TsuyomiButton(
-                text = stringResource(R.string.browse_try_again_action),
-                onClick = onRequestImport,
-                style = TsuyomiButtonStyle.PRIMARY,
-            )
-        }
-        TsuyomiButton(
-            text = stringResource(R.string.browse_dismiss_action),
-            onClick = onDismiss,
-            modifier = Modifier.padding(top = 8.dp),
-            style = TsuyomiButtonStyle.TEXT,
-        )
-    }
-}
-
-@Composable
-private fun FrozenEInkSourceApprovalScreen(
-    state: BrowseUiState.Approval,
-    onApprove: (Boolean) -> Unit,
-    onDismiss: () -> Unit,
-    modifier: Modifier,
-) {
-    var downgradeConfirmed by remember(state.sourceId, state.version) { mutableStateOf(false) }
-    Column(
-        modifier = modifier
-            .fillMaxSize()
-            .verticalScroll(rememberScrollState())
-            .padding(PaddingValues(horizontal = 24.dp, vertical = 20.dp)),
-        verticalArrangement = Arrangement.spacedBy(16.dp),
-    ) {
-        Text(text = stringResource(R.string.browse_approval_title, state.sourceName))
-        Text(text = stringResource(R.string.browse_approval_identity, state.sourceId, state.version))
-        Text(text = stringResource(R.string.browse_approval_publisher, requireNotNull(state.publisherFingerprint)))
-        HorizontalDivider()
-        if (state.capabilities.isNotEmpty()) {
-            Text(text = stringResource(R.string.browse_approval_capabilities))
-            state.capabilities.forEach { capability -> Text(text = "• $capability") }
-        }
-        if (state.resourceLimitIncreases.isNotEmpty()) {
-            Text(text = stringResource(R.string.browse_approval_resource_limits))
-            state.resourceLimitIncreases.forEach { increase -> Text(text = "• ${resourceLimitIncreaseLabel(increase)}") }
-        }
-        if (state.capabilities.isEmpty() && state.resourceLimitIncreases.isEmpty()) {
-            Text(text = stringResource(R.string.browse_approval_no_new_grants))
-        }
-        if (state.isDowngrade) {
-            TsuyomiCheckboxRow(
-                checked = downgradeConfirmed,
-                onCheckedChange = { downgradeConfirmed = it },
-                label = stringResource(R.string.browse_approval_downgrade),
-            )
-        }
-        TsuyomiButton(
-            text = stringResource(R.string.browse_approval_install_action),
-            onClick = { onApprove(downgradeConfirmed) },
-            enabled = !state.isDowngrade || downgradeConfirmed,
-            modifier = Modifier.fillMaxWidth(),
-            style = TsuyomiButtonStyle.PRIMARY,
-        )
-        TsuyomiButton(
-            text = stringResource(R.string.browse_cancel_action),
-            onClick = onDismiss,
-            modifier = Modifier.fillMaxWidth(),
-            style = TsuyomiButtonStyle.SECONDARY,
-        )
-    }
-}
 
 @Composable
 private fun installFailureMessage(reason: BrowseInstallFailure): String = stringResource(
@@ -1704,3 +1584,29 @@ private fun resourceLimitIncreaseLabel(increase: BrowseResourceLimitIncrease): S
     increase.activeValue,
     increase.candidateValue,
 )
+
+@Composable
+private fun BrowsePagedText(text: String) {
+    TsuyomiMeasuredTextPager(text, Modifier.fillMaxWidth(), fillViewport = false, alwaysShowPageControls = false)
+}
+
+@Composable
+private fun InstalledSourceEntryButton(source: BrowseInstalledSource, primaryAction: () -> Unit, onSearch: () -> Unit,
+    onOpenRemoteLibrary: () -> Unit, onOpenDetails: () -> Unit, onRequestUninstall: () -> Unit) {
+    var expanded by rememberSaveable(source.sourceId) { mutableStateOf(false) }
+    val searchCount = if (source.homeAvailable) 1 else 0
+    val remoteCount = if (source.remoteLibraryAvailable) 1 else 0
+    TsuyomiSplitButton(text = stringResource(R.string.browse_source_enter_action), trailingIcon = TsuyomiIcons.Disclosure,
+        trailingDescription = stringResource(R.string.browse_source_more_actions, source.name), onLeadingClick = primaryAction,
+        onMenuOpen = {}, menuExpanded = expanded, onMenuExpandedChange = { expanded = it }, leadingEnabled = true,
+        modifier = Modifier.testTag("browse-source-entry-${source.sourceId}"),
+        menuItemCount = searchCount + remoteCount + 2,
+        menuItemKey = { index -> when { index < searchCount -> "search"; index < searchCount + remoteCount -> "remote"; index == searchCount + remoteCount -> "details"; else -> "uninstall" } },
+        menuItemContent = { index, dismiss ->
+            val label = when { index < searchCount -> R.string.browse_source_search_action; index < searchCount + remoteCount -> R.string.browse_remote_library_action;
+                index == searchCount + remoteCount -> R.string.browse_source_details_title; else -> R.string.browse_source_uninstall_action }
+            TsuyomiMenuItem(stringResource(label), { dismiss(); when {
+                index < searchCount -> onSearch(); index < searchCount + remoteCount -> onOpenRemoteLibrary(); index == searchCount + remoteCount -> onOpenDetails(); else -> onRequestUninstall()
+            } })
+        })
+}

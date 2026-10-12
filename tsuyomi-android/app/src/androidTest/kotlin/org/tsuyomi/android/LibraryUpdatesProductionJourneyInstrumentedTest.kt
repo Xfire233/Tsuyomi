@@ -26,7 +26,6 @@ import java.io.File
 import java.time.Instant
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
-import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
@@ -35,6 +34,9 @@ import org.junit.Before
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
+import org.junit.rules.ExternalResource
+import org.junit.rules.RuleChain
+import org.junit.rules.TestRule
 import org.tsuyomi.shared.librarydomain.LibraryBook
 import org.tsuyomi.shared.librarydomain.ReadingProgress
 import org.tsuyomi.shared.librarydomain.SourceAvailability
@@ -55,13 +57,20 @@ import org.tsuyomi.shared.model.BookIdentity
  */
 @RunWith(AndroidJUnit4::class)
 class LibraryUpdatesProductionJourneyInstrumentedTest {
-    @get:Rule
     val composeRule = createAndroidComposeRule<MainActivity>()
 
+    @get:Rule
+    val journeyRules: TestRule = RuleChain.outerRule(object : ExternalResource() {
+        // Restore shared preferences only after Activity and composition coroutines are disposed.
+        override fun after() {
+            tearDownFixtureJourney()
+        }
+    }).around(composeRule)
+
     private val application: TsuyomiApplication
-        get() = composeRule.activity.application as TsuyomiApplication
-    private val identity = BookIdentity(SOURCE_ID, REMOTE_BOOK_ID)
-    private val updateRowTag = "library-book-${identity.sourceId}-${identity.remoteBookId}"
+        get() = InstrumentationRegistry.getInstrumentation().targetContext.applicationContext as TsuyomiApplication
+    private val identity = BookIdentity.Remote(SOURCE_ID, REMOTE_BOOK_ID)
+    private val updateRowTag = "library-book-${identity.storageKey}"
     private val updateActionsTag = "library-update-actions-${identity.sourceId}-${identity.remoteBookId}"
     private lateinit var fixtureBook: LibraryBook
     private lateinit var originalReaderPreferences: PortableReaderPreferences
@@ -72,6 +81,7 @@ class LibraryUpdatesProductionJourneyInstrumentedTest {
     private lateinit var originalDisplayPreferences: DisplayPreferences
     private var mirrorBindingExisted = false
     private lateinit var fixtureArchive: File
+    private var fixtureSetupStarted = false
 
     @Before
     fun setUpFixtureJourney() = runBlocking {
@@ -79,12 +89,13 @@ class LibraryUpdatesProductionJourneyInstrumentedTest {
         originalDisplayPreferences = application.displayController.preferences.first()
         originalReaderPreferences = application.readerPreferencesRepository.preferences.first()
         originalLibraryPreferences = application.libraryPreferencesRepository.preferences.first()
-        application.libraryPreferencesRepository.updateShowUpdatesOnly(false)
         preexistingSessionIds = updateSessionIds()
         originalSourceAvailability = application.libraryRepository.sourceAvailability(SOURCE_ID)
         sourceWasExcluded = sourceIsExcluded()
         mirrorBindingExisted = application.libraryRepository.remoteMirrorBindings()
             .any { it.sourceId == SOURCE_ID }
+        fixtureSetupStarted = true
+        application.libraryPreferencesRepository.updateShowUpdatesOnly(false)
         deleteFixtureUpdateRows()
         if (sourceWasExcluded) deleteSourceExclusion()
         deleteFixtureReaderState()
@@ -104,7 +115,7 @@ class LibraryUpdatesProductionJourneyInstrumentedTest {
             ReadingProgress(
                 identity = identity,
                 locator = ReaderLocator(
-                    document = DocumentIdentity(SOURCE_ID, REMOTE_BOOK_ID, "10001"),
+                    document = DocumentIdentity(identity, "10001"),
                     blockId = "fixture-resume",
                     characterOffset = 0,
                     chapterProgress = 0.25,
@@ -120,9 +131,8 @@ class LibraryUpdatesProductionJourneyInstrumentedTest {
         Unit
     }
 
-    @After
-    fun tearDownFixtureJourney() = runBlocking {
-        if (application.packageName != "org.tsuyomi.android.fixture") return@runBlocking
+    private fun tearDownFixtureJourney() = runBlocking {
+        if (!fixtureSetupStarted || application.packageName != "org.tsuyomi.android.fixture") return@runBlocking
         // Opt-in only: retain this signed-fixture run for host-side Android CLI visual inspection.
         if (InstrumentationRegistry.getArguments().getString("keep_p4c_review_state") == "true") return@runBlocking
         Phase2SourceGateway.resetOperationCounts()
@@ -455,8 +465,6 @@ class LibraryUpdatesProductionJourneyInstrumentedTest {
         }
     }
 
-    private fun identityKey(value: BookIdentity): String =
-        "${value.sourceId.length}:${value.sourceId}${value.remoteBookId.length}:${value.remoteBookId}"
 
     private companion object {
         const val SOURCE_ID = "org.tsuyomi.wenku8"

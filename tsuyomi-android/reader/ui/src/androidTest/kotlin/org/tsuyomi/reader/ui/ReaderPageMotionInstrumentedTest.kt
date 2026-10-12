@@ -38,10 +38,12 @@ import org.tsuyomi.core.preferences.DisplayPreference
 import org.tsuyomi.core.preferences.DisplayPreferences
 import org.tsuyomi.core.ui.theme.TsuyomiTheme
 import org.tsuyomi.shared.backup.PortableReaderPreferences
+import org.tsuyomi.shared.locator.DocumentIdentity
 import org.tsuyomi.shared.locator.ReaderLocator
 import org.tsuyomi.shared.sourcecontract.ReaderBlock
 import org.tsuyomi.shared.sourcecontract.ReaderDocument
-import org.tsuyomi.shared.sourcecontract.SourceChapter
+import org.tsuyomi.shared.sourcecontract.ReaderNavigationTarget
+import org.tsuyomi.shared.model.BookIdentity
 
 @OptIn(ExperimentalTestApi::class)
 class ReaderPageMotionInstrumentedTest {
@@ -169,7 +171,7 @@ class ReaderPageMotionInstrumentedTest {
                 down(Offset(width * 0.20f, center.y))
                 moveTo(Offset(width * 0.80f, center.y))
             }
-            composeRule.mainClock.advanceTimeBy(110)
+            composeRule.mainClock.advanceTimeByFrame()
             assertEquals(1, pageColumnLefts().size)
             assertEquals(0, commits.get())
             pressBack()
@@ -235,28 +237,27 @@ class ReaderPageMotionInstrumentedTest {
                     TsuyomiTheme(standardEnvironment) {
                         ReaderSurface(
                             document = motionDocument,
-                            auxiliarySheetState = rememberReaderAuxiliarySheetState(
-                                motionDocument.sourceId,
-                                motionDocument.remoteBookId,
-                            ),
+                            auxiliarySheetState = rememberReaderAuxiliarySheetState(motionDocument.identity.book),
                             restoredLocator = restored.value,
                             restorationGeneration = restorationGeneration.value,
                             onLocatorChanged = { _, _ -> },
-                            chapters = listOf(motionChapter),
-                            currentChapterId = motionChapter.chapterId,
+                            navigationTargets = listOf(motionChapter),
+                            currentContentId = motionChapter.contentId,
                             bookmarks = emptyList(),
                             onToggleBookmark = {},
                             onRemoveBookmark = {},
-                            onSelectBookmark = { locator ->
+                            onSelectBookmark = {},
+                            requestedFlow = "paged",
+                            hasFlowOverride = false,
+                            onFlowOverrideChanged = {},
+                            onSelectContent = {},
+                            onNavigateUp = {},
+                            onNavigateLink = {},
+                            onReturnToOrigin = { locator ->
                                 returned.set(locator)
                                 restored.value = locator
                                 restorationGeneration.value += 1L
                             },
-                            requestedFlow = "paged",
-                            hasFlowOverride = false,
-                            onFlowOverrideChanged = {},
-                            onSelectChapter = {},
-                            onNavigateUp = {},
                             preferences = PortableReaderPreferences(flow = "paged"),
                         )
                     }
@@ -321,12 +322,12 @@ class ReaderPageMotionInstrumentedTest {
                     TsuyomiTheme(environment) {
                         ReaderSurface(
                             document = motionDocument,
-                            auxiliarySheetState = rememberReaderAuxiliarySheetState(motionDocument.sourceId, motionDocument.remoteBookId),
+                            auxiliarySheetState = rememberReaderAuxiliarySheetState(motionDocument.identity.book),
                             restoredLocator = null,
                             restorationGeneration = 0L,
                             onLocatorChanged = { locator, _ -> onLocatorChanged(locator) },
-                            chapters = listOf(motionChapter),
-                            currentChapterId = motionChapter.chapterId,
+                            navigationTargets = listOf(motionChapter),
+                            currentContentId = motionChapter.contentId,
                             bookmarks = emptyList(),
                             onToggleBookmark = {},
                             onRemoveBookmark = {},
@@ -334,8 +335,10 @@ class ReaderPageMotionInstrumentedTest {
                             requestedFlow = "paged",
                             hasFlowOverride = false,
                             onFlowOverrideChanged = {},
-                            onSelectChapter = {},
+                            onSelectContent = {},
                             onNavigateUp = {},
+                            onNavigateLink = {},
+                            onReturnToOrigin = {},
                             onChapterCompleted = onChapterCompleted,
                             preferences = preferences,
                         )
@@ -347,16 +350,13 @@ class ReaderPageMotionInstrumentedTest {
     }
 
     private companion object {
-        val motionChapter = SourceChapter(
-            chapterId = "chapter-motion",
+        val motionChapter = ReaderNavigationTarget(
+            contentId = "chapter-motion",
             title = "分页动画",
-            url = "https://example.test/chapter-motion",
+
         )
         val motionDocument = ReaderDocument(
-            sourceId = "org.tsuyomi.reader.test",
-            remoteBookId = "page-motion",
-            contentId = motionChapter.chapterId,
-            revision = null,
+            identity = DocumentIdentity(BookIdentity.Remote("org.tsuyomi.reader.test", "page-motion"), motionChapter.contentId, null),
             title = motionChapter.title,
             blocks = listOf(
                 ReaderBlock.Paragraph(

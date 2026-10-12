@@ -19,7 +19,7 @@
 
 Extensions never own canonical library or progress records. Uninstalling an extension removes executable/package state and its optional source-local storage only after confirmation; books and progress remain dormant.
 
-The global display preference is one enum: `auto`, `standard`, or `eInk`. Advanced logical refresh override is `automatic`, `quality`, `balanced`, or `fast`. Effective device classification and transient refresh counters are derived runtime state, not durable protocol data. There are no separate browsing and reader E-ink settings.
+The global display preference is `auto`, `standard`, or `eInk`. The final2026-10-06 0.5.0 scope is monochrome E-ink, generic optimization and manual redraw only; the old persisted automatic/quality/balanced/fast override is superseded. No unimplemented advanced preference or unused color-panel capability state. Device classification/redraw epoch stay Android-local/derived, not portable. No separate browsing/reader E-ink switches; default E-ink pagination and explicit flow choice do not overwrite Standard requested-flow preference.
 
 ## Relational invariants
 
@@ -34,6 +34,21 @@ The initial Room model must enforce these logical keys:
 - source credential partition: unique source/extension ownership, never joined into export queries.
 
 Room row IDs are private implementation details and never appear in protocol documents, extension APIs, or durable file names.
+
+### 0.5.0 local-publication lifecycle — accepted scope 2026-10-06
+
+These invariants govern the local-publication implementation. Room v14 preserves existing remote data and rekeys the shared book state to explicit remote/local identities without destructive fallback; transfer v6 preserves the closed legacy v1–v5 input boundaries.
+
+- Import keeps a complete application-private durable original, independent of later provider availability; no URI-reference mode selected. Originals/indispensable resources are not LRU cache and survive cache clearing or Library unpinning. Android uninstall removes them; archive recovery is defined by ADR0008.
+- Portable publication ID and verified byte fingerprint have distinct roles. ADR0009 owns user-confirmed duplicate association/independent copy, not automatic merging. Originals, metadata, rebuildable rendition/index/page plans, remote caches and per-job staging have distinct lifecycles.
+- A same-ID format/size/SHA-256 conflict retains the existing original descriptor and availability, including a missing-original reassociation descriptor. Import review reports it independently of the ordinary newer-title/author merge; metadata timestamps never detach admitted originals.
+- File admission and Room commit are recoverable stages, not a cross-filesystem ACID transaction. Cancellation, provider failure, insufficient space and process death must preserve existing books and give truthful per-book results; cleanup touches only the job's uncommitted data.
+- Two separately confirmed deletes: remove private original/resources while preserving metadata, collections, progress, history and bookmarks as a missing/re-associable publication; or remove that publication's original and all its reading/library state, including independent bookmarks. Neither deletes the provider's original file, another publication, global preferences or remote source data.
+- Cancel/invalidate active Reader/import/layout/resource owners before deletion. Recover interrupted file/Room removal consistently; late callbacks cannot recreate deleted books or erase retained state. Missing-original state is not an uninstalled-source error.
+- Portable metadata excludes original bytes, paths, provider URIs, credentials and derived layout. Optional original-containing archive is an explicit separate versioned manifest/digest/path/quota-validated recoverable export, not an expanded transfer v5.
+- A local book's optional HTTPS resource permission is non-portable private state bound to its publication ID/original digest and reviewed public origins/resource types, per READER. Backup restore or an independent duplicate cannot grant network authority. Revocation and late resource callbacks obey the active owner/epoch; no source cookie or capability inheritance.
+- A verified local original may retain a bounded native admission record beside its private bytes. This derived record stores validated catalog/navigation/resource descriptors and compatibility findings, never chapter prose, executable handles, layout, provider authority or network grants. Bind it to publication identity, original format/size/SHA, parser/normalizer revisions and parse options; validate it before reuse. Stage and atomically publish it through the existing original owner, charge it against the existing private-store budget, and remove it with either original-removal scope. It is not an evictable rendition cache or portable archive authority. Missing, corrupt or obsolete records require one complete re-admission without changing the original, reading state or identity; failure preserves those user-owned data and is reported truthfully.
+- EPUB cover selection prefers the manifest `cover-image` property, then accepts an explicit legacy `meta name="cover"` reference in either supported EPUB version. Both paths use the same admitted resource checks; the first spine image is not an implicit cover. For an already imported EPUB with no cover ID, bounded cover-only recovery may use its verified private original without reimporting or reparsing chapter bodies. Persist the admitted cover resource before conditionally filling only the missing cover ID for that same available original; preserve book identity, original bytes, progress, bookmarks, history and unrelated metadata. Recovery and removal share lifecycle fencing so late work cannot recreate deleted resources or records. Missing-cover results may be reused for the exact original within the bounded process cache, never treating cancellation as a successful absence.
 
 ## Transactions
 
@@ -56,7 +71,7 @@ An invalid envelope aborts before mutation. Invalid independent records are skip
 
 ## Progress
 
-Canonical progress contains `updatedAt`, stable chapter ID when known, text anchor, character offset, chapter progression, and whole-book progression. Rendered page number and mutable scroll extent are view state only.
+Canonical progress contains `updatedAt`, stable chapter ID and document revision when known, text anchor, character offset, chapter progression, and whole-book progression. Transfer v6 preserves document revision through Room export/restore; legacy inputs stay closed and do not invent one. Rendered page number and mutable scroll extent are view state only.
 
 Conflict selection follows protocol rules before writing Room. The newer valid `updatedAt` wins, including intentional backward movement. Legacy imports without row timestamps use the backup `createdAt` and retain a reduced-precision warning.
 

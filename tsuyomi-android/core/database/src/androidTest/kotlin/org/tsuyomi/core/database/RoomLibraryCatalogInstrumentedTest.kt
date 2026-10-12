@@ -54,7 +54,7 @@ class RoomLibraryCatalogInstrumentedTest {
 
     @Test
     fun manualMembershipIsUniqueByCollectionAndStableBookIdentity() = runBlocking {
-        val identity = BookIdentity("fixture.source", "book-42")
+        val identity = BookIdentity.Remote("fixture.source", "book-42")
         repository.addToLibrary(LibraryBook(identity, "First title", addedAt = Instant.EPOCH, metadataUpdatedAt = Instant.EPOCH))
         repository.createCollection(LibraryCollection("favorites", CollectionKind.MANUAL, "收藏", null, 0))
 
@@ -64,7 +64,7 @@ class RoomLibraryCatalogInstrumentedTest {
 
     @Test
     fun readLaterIsExplicitDurableLibraryEntryState() = runBlocking {
-        val identity = BookIdentity("fixture.source", "read-later")
+        val identity = BookIdentity.Remote("fixture.source", "read-later")
         repository.addToLibrary(
             LibraryBook(identity, "稍后阅读", addedAt = Instant.EPOCH, metadataUpdatedAt = Instant.EPOCH),
         )
@@ -89,7 +89,7 @@ class RoomLibraryCatalogInstrumentedTest {
 
     @Test
     fun removingLocalPinRetainsMetadataAndReadLaterUntilReadded() = runBlocking {
-        val identity = BookIdentity("fixture.source", "retained-state")
+        val identity = BookIdentity.Remote("fixture.source", "retained-state")
         val addedAt = Instant.parse("2026-09-01T12:00:00Z")
         val book = LibraryBook(identity, "保留状态", addedAt, addedAt)
         val savedProgress = progress(identity, "chapter-7", 23, 0.4, addedAt.plusSeconds(1))
@@ -139,7 +139,7 @@ class RoomLibraryCatalogInstrumentedTest {
 
     @Test
     fun manualMembershipAppendUsesNextFreeOrderAfterDeletion() = runBlocking {
-        val identities = (1..4).map { BookIdentity("fixture.source", "ordered-$it") }
+        val identities = (1..4).map { BookIdentity.Remote("fixture.source", "ordered-$it") }
         identities.forEach { identity ->
             repository.addToLibrary(LibraryBook(identity, identity.remoteBookId, addedAt = Instant.EPOCH, metadataUpdatedAt = Instant.EPOCH))
         }
@@ -155,7 +155,7 @@ class RoomLibraryCatalogInstrumentedTest {
 
     @Test
     fun selectionBatchMutationsPersistLibraryAndManualCollectionOrder() = runBlocking {
-        val identities = (1..4).map { BookIdentity("fixture.source", "batch-$it") }
+        val identities = (1..4).map { BookIdentity.Remote("fixture.source", "batch-$it") }
         identities.forEachIndexed { index, identity ->
             repository.addToLibrary(
                 LibraryBook(
@@ -198,7 +198,7 @@ class RoomLibraryCatalogInstrumentedTest {
 
     @Test
     fun importTagMergePreservesExistingTagsAndFillsOnlyRemainingCapacity() = runBlocking {
-        val identity = BookIdentity("fixture.source", "tag-merge")
+        val identity = BookIdentity.Remote("fixture.source", "tag-merge")
         repository.addToLibrary(LibraryBook(identity, "标签", addedAt = Instant.EPOCH, metadataUpdatedAt = Instant.EPOCH))
         val existing = (0 until 63).mapTo(linkedSetOf()) { "existing-${it.toString().padStart(2, '0')}" }
         repository.setLocalTags(identity, existing)
@@ -230,7 +230,7 @@ class RoomLibraryCatalogInstrumentedTest {
 
     @Test
     fun importReviewSurfacesExistingRoomConflictsBeforeConfirmation() = runBlocking {
-        val identity = BookIdentity("fixture.source", "review-conflicts")
+        val identity = BookIdentity.Remote("fixture.source", "review-conflicts")
         val existingAt = Instant.parse("2026-08-09T00:00:00Z")
         repository.addToLibrary(LibraryBook(identity, "本地标题", Instant.EPOCH, existingAt, authors = setOf("本地作者")))
         repository.setRating(identity, 5)
@@ -314,7 +314,7 @@ class RoomLibraryCatalogInstrumentedTest {
 
     @Test
     fun importReviewReportsRetainedRatingWithoutTreatingUnknownStatusAsMetadata() = runBlocking {
-        val identity = BookIdentity("fixture.source", "review-null-rating")
+        val identity = BookIdentity.Remote("fixture.source", "review-null-rating")
         val existingAt = Instant.parse("2026-08-09T00:00:00Z")
         repository.addToLibrary(
             LibraryBook(

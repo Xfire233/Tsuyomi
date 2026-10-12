@@ -13,7 +13,7 @@
 
 - 制品对应源码已通过受保护 PR 正常合并到 `main`，发布工作树干净（`git status --porcelain` 为空）；记录 PR head、base、准入 run、merge commit 与远端 `main`，squash 时核对源树对应关系；
 - 五个 required checks 在最终 PR head 上全部成功（`repository-policy`、`protocol-conformance`、`extensions-baseline`、`android-build-test-lint-goldens`、`android-api29-instrumentation`），且已获 `QUALITY_GATES.md` G4.5 要求的人工合并确认；合并后的三项轻量 main health 单独记录，不重复触发 Android 重型门禁，也不替代 PR 准入；
-- 在受支持的发布签名主机上，本地 `HIGH` planner-selected 门禁已通过，证据绑定确切源码／版本／资源输入；此仓库的签名脚本与 DPAPI 密钥托管要求 Windows。该本机发布前置条件仅适用于获授权的发布维护者，不是普通贡献者的本地检查要求。后续只有文档／工具差异时明确记录差异及其受影响验证，不能把另一输入冒充同一次执行；
+- 在受支持的发布签名主机上，本地 `HIGH` planner-selected 门禁已通过，证据绑定确切源码／版本／资源输入；只有维护者在当前发布 checkpoint 中明确指定的跨主机证据分工可例外，指定检查必须在获准环境实际通过，本地未执行项仍如实记录。`0.5.0-beta.1` 的限定分工见 [Phase 4 发布决定](../phases/PHASE_4.md#050-beta1-prerelease-delivery-decision--2026-10-11)。此仓库的签名脚本与 DPAPI 密钥托管要求 Windows。该发布前置条件仅适用于获授权的发布维护者，不是普通贡献者的本地检查要求。后续只有文档／工具差异时明确记录差异及其受影响验证，不能把另一输入冒充同一次执行；
 - 用户已明确授权本次发布；物理手机验收状态按第 8 节如实记录，不得用模拟器证据代替。
 
 ## 2. 版本身份
@@ -48,11 +48,11 @@ Set-Location tsuyomi-android
 
 下列签名命令仅适用于 Windows PowerShell；脚本依赖 Windows Android SDK build-tools 安装位置、Java 17（默认 `C:\Program Files\Java\jdk-17`）以及获准发布维护者在工作树外托管的签名材料。该私钥/证书与个人机器状态不是普通贡献或构建的前置条件；无权访问签名材料者不得尝试签名或替代密钥。
 
-在 `tsuyomi-android` 目录核对本次已合并源码的版本后设置参数。以下为 beta.5 / versionCode7；后续发布需使用对应源码的实际值，脚本会拒绝 APK 身份不匹配：
+在 `tsuyomi-android` 目录核对本次已合并源码的版本后设置参数。以下为待发布的 `0.5.0-beta.1` / versionCode `8`；执行前仍须核对合并源码的实际值，脚本会拒绝 APK 身份不匹配：
 
 ```powershell
-$VersionName = '0.3.0-beta.5'
-$VersionCode = 7
+$VersionName = '0.5.0-beta.1'
+$VersionCode = 8
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File tools/Publish-AndroidRelease.ps1 `
   -VersionName $VersionName -VersionCode $VersionCode -SourceRevision (git rev-parse HEAD)
 ```
@@ -114,3 +114,7 @@ source-revision: <40 hex>
 ## 9. 回退
 
 不移动已发布 tag、不替换已发布资产。回退按 [`REPOSITORY_GOVERNANCE.md`](REPOSITORY_GOVERNANCE.md) 执行：revert 引入问题的提交，保留数据，重跑受影响检查，再发布新的 patch 版本。
+
+## 10. 可选助手工作流的版本收尾
+
+在配置了项目助手工作流的会话中，明确版本完成或发布收尾时，按 [`retro`](../../../.agents/skills/retro/SKILL.md) 对本次版本已有证据执行一次复盘；重复收尾只补充新增事实。它记录过程根因、改进责任与验证办法，不重跑发布检查，不代表验收或稳定化批准，也不要求普通贡献者安装助手。触发、发现与输出归属见 [`TOOLING.md`](../../../TOOLING.md#skills)。

@@ -1,0 +1,17 @@
+{
+  "version": 2,
+  "kind": "chapter",
+  "identity": { "sourceId": "org.tsuyomi.example", "remoteBookId": "book-42", "contentId": "chapter-1" },
+  "title": "Invalid local resource",
+  "revision": "revision-2",
+  "contentDigest": "2222222222222222222222222222222222222222222222222222222222222222",
+  "anchors": [],
+  "blocks": [
+    {
+      "id": "local-image",
+      "kind": "image",
+      "url": "https://media.example.test/image.png",
+      "resource": { "kind": "local", "publicationId": "00000000-0000-4000-8000-000000000001", "resourceId": "00000000-0000-4000-8000-000000000002", "mimeType": "image/png", "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" }
+    }
+  ]
+}

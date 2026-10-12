@@ -9,6 +9,7 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.ui.Alignment
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.WindowInsetsSides
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -38,11 +39,15 @@ import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.paneTitle
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.text.rememberTextMeasurer
 import org.tsuyomi.core.ui.R
 import org.tsuyomi.core.ui.icons.TsuyomiIcons
 import org.tsuyomi.core.ui.theme.TsuyomiSpacing
+import org.tsuyomi.core.display.DisplayProfile
+import org.tsuyomi.core.display.LocalDisplayEnvironment
 
 @Immutable
 data class TsuyomiTopBarAction(
@@ -55,6 +60,7 @@ data class TsuyomiTopBarAction(
     val menuExpanded: Boolean? = null,
     val onMenuExpandedChange: ((Boolean) -> Unit)? = null,
     val testTag: String? = null,
+    val stateDescription: String? = null,
 )
 
 /** An optional bounded source/context menu attached directly to the compact app-bar title. */
@@ -84,6 +90,17 @@ fun TsuyomiTopBar(
     maxVisibleActions: Int? = null,
     titleMenu: TsuyomiTopBarTitleMenu? = null,
 ) {
+    val eInk = LocalDisplayEnvironment.current.effectiveProfile == DisplayProfile.EINK
+    val expandedHeight = if (eInk) {
+        with(LocalDensity.current) {
+            maxOf(
+                TopAppBarDefaults.TopAppBarExpandedHeight,
+                MaterialTheme.typography.titleLarge.lineHeight.toDp() + MaterialTheme.typography.labelMedium.lineHeight.toDp() + TsuyomiSpacing.Sm * 2,
+            )
+        }
+    } else {
+        TopAppBarDefaults.TopAppBarExpandedHeight
+    }
     val narrowWindow = with(LocalDensity.current) {
         LocalWindowInfo.current.containerSize.width.toDp() < 360.dp
     }
@@ -91,15 +108,17 @@ fun TsuyomiTopBar(
     val visibleActions = actions.take(actionBudget)
     val folded = actions.drop(actionBudget)
     val foldedActions = folded.map { action ->
-        TsuyomiOverflowAction(action.menuTitle ?: action.label, action.onClick, action.icon, menu = action.menu)
+        TsuyomiOverflowAction(action.menuTitle ?: action.label, action.onClick, action.icon, menu = action.menu,
+            stateDescription = action.stateDescription)
     }
     var overflowExpanded by remember { mutableStateOf(false) }
     val requestedActionIndex = folded.indexOfFirst { it.menuExpanded == true }
     TopAppBar(
+        expandedHeight = expandedHeight,
         title = {
             val menu = titleMenu?.takeIf { it.actions.isNotEmpty() }
             if (menu == null) {
-                TopBarTitle(title, subtitle)
+                TopBarTitle(title, subtitle, reserveSubtitleSpace = onNavigateUp == null)
             } else {
                 TsuyomiOverflowMenu(
                     actions = menu.actions,
@@ -115,7 +134,7 @@ fun TsuyomiTopBar(
                             horizontalArrangement = Arrangement.spacedBy(TsuyomiSpacing.Xs),
                             verticalAlignment = Alignment.CenterVertically,
                         ) {
-                            TopBarTitle(title, subtitle, Modifier.weight(1f, fill = false))
+                            TopBarTitle(title, subtitle, Modifier.weight(1f, fill = false), reserveSubtitleSpace = onNavigateUp == null)
                             Icon(TsuyomiIcons.Disclosure, contentDescription = null)
                         }
                     },
@@ -134,13 +153,16 @@ fun TsuyomiTopBar(
         },
         actions = {
             visibleActions.forEach { action ->
+                val actionModifier = (action.testTag?.let(Modifier::testTag) ?: Modifier).semantics {
+                    action.stateDescription?.let { stateDescription = it }
+                }
                 if (action.menu.isEmpty()) {
-                    TsuyomiIconButton(action.icon, action.label, action.onClick)
+                    TsuyomiIconButton(action.icon, action.label, action.onClick, modifier = actionModifier)
                 } else {
                     TsuyomiOverflowMenu(
                         actions = action.menu,
                         contentDescription = action.label,
-                        modifier = action.testTag?.let { tag -> Modifier.testTag(tag) } ?: Modifier,
+                        modifier = actionModifier,
                         triggerIcon = action.icon,
                         expanded = action.menuExpanded,
                         onExpandedChange = action.onMenuExpandedChange,
@@ -169,12 +191,32 @@ fun TsuyomiTopBar(
 }
 
 @Composable
-private fun TopBarTitle(title: String, subtitle: String?, modifier: Modifier = Modifier) {
+private fun TopBarTitle(title: String, subtitle: String?, modifier: Modifier = Modifier, reserveSubtitleSpace: Boolean) {
     Column(modifier.semantics { heading() }) {
         Text(title, maxLines = 1, overflow = TextOverflow.Ellipsis)
-        subtitle?.let {
+        val eInk = LocalDisplayEnvironment.current.effectiveProfile == DisplayProfile.EINK
+        // Root bars retain a shared baseline; secondary single-line titles centre beside Back.
+        if (eInk && (subtitle != null || reserveSubtitleSpace)) {
+            val style = MaterialTheme.typography.labelMedium
+            // Both populated and empty slots use the same real Latin/CJK font metrics and pixel
+            // rounding. Converting the declared lineHeight alone differs from Text measurement.
+            val subtitleHeight = with(LocalDensity.current) {
+                rememberTextMeasurer().measure(text = "Mg本", style = style, maxLines = 1).size.height.toDp()
+            }
+            androidx.compose.foundation.layout.Box(Modifier.height(subtitleHeight)) {
+                if (subtitle != null) {
+                    Text(
+                        text = subtitle,
+                        style = style,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
+            }
+        } else if (subtitle != null) {
             Text(
-                text = it,
+                text = subtitle,
                 style = MaterialTheme.typography.labelMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 maxLines = 1,

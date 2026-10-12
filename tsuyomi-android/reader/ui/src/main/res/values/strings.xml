@@ -10,12 +10,24 @@
     <string name="reader_page_count_seeking">%1$d/%2$d 页 · 松手定位</string>
     <string name="reader_previous_chapter">上一章</string>
     <string name="reader_contents">目录</string>
+    <string name="reader_previous_page">上一页</string>
+    <string name="reader_next_page">下一页</string>
     <string name="reader_expand_full_contents">展开全部 %1$d 章</string>
     <string name="reader_ungrouped_volume">正文</string>
     <string name="reader_settings">设置</string>
     <string name="reader_next_chapter">下一章</string>
+    <string name="reader_release_previous_chapter">松开进入上一章末尾</string>
+    <string name="reader_release_next_chapter">松开进入下一章</string>
     <string name="reader_return_to_origin">返回原进度</string>
+    <string name="reader_reset_artwork">还原图片</string>
+    <string name="reader_zoom_in_artwork">放大图片</string>
+    <string name="reader_zoom_out_artwork">缩小图片</string>
+    <string name="reader_pan_artwork_left">查看图片左侧</string>
+    <string name="reader_pan_artwork_right">查看图片右侧</string>
+    <string name="reader_pan_artwork_up">查看图片上方</string>
+    <string name="reader_pan_artwork_down">查看图片下方</string>
     <string name="reader_no_bookmarks">还没有保存的书签</string>
+    <string name="reader_no_contents">没有可显示的章节</string>
     <string name="reader_bookmark_legacy_chapter_start">旧版章节起点（降级定位）</string>
     <string name="reader_bookmark_exact_position">%1$s · 第 %2$d 字</string>
     <string name="reader_bookmark_degraded_progress">降级定位 · 本章 %1$d%%</string>
@@ -65,4 +77,9 @@
     <string name="reader_text_alignment_end">末端</string>
     <string name="reader_foreground_color">文字颜色</string>
     <string name="reader_background_color">背景颜色</string>
+    <string name="reader_setting_current_value">当前：%1$s</string>
+    <string name="reader_setting_enabled">已开启</string>
+    <string name="reader_setting_disabled">已关闭</string>
+    <string name="reader_option_selected">已选择</string>
+    <string name="reader_option_not_selected">未选择</string>
 </resources>

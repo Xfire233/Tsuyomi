@@ -11,14 +11,10 @@ import org.tsuyomi.shared.model.BookIdentity
  * protocol, because an old durable locator may predate revision support.
  */
 data class DocumentIdentity(
-    val sourceId: String,
-    val remoteBookId: String,
+    val book: BookIdentity,
     val contentId: String,
     val revision: String? = null,
 ) {
-    /** Stable identity of the parent book, without a database implementation key. */
-    val book: BookIdentity = BookIdentity(sourceId = sourceId, remoteBookId = remoteBookId)
-
     init {
         BookIdentity.requireRemoteId(contentId, "contentId")
         revision?.let { requireBounded(it, "revision", 256) }
@@ -26,9 +22,7 @@ data class DocumentIdentity(
 
     /** True only when both values name the same resolved content, irrespective of revision. */
     fun namesSameDocumentAs(other: DocumentIdentity): Boolean =
-        sourceId == other.sourceId &&
-            remoteBookId == other.remoteBookId &&
-            contentId == other.contentId
+        book == other.book && contentId == other.contentId
 
     /** True only when content identity and known revision are identical. */
     fun namesSameRevisionAs(other: DocumentIdentity): Boolean =
@@ -108,9 +102,17 @@ const val MAX_READER_BOOKMARKS_PER_BOOK = 20_000
  */
 fun ReaderLocator.bookmarkPositionKey(): String = buildString {
     append("v1|D|")
-    appendBookmarkKeyPart(document.sourceId)
-    append('|')
-    appendBookmarkKeyPart(document.remoteBookId)
+    when (val book = document.book) {
+        is BookIdentity.Remote -> {
+            appendBookmarkKeyPart(book.sourceId)
+            append('|')
+            appendBookmarkKeyPart(book.remoteBookId)
+        }
+        is BookIdentity.Local -> {
+            append("L|")
+            appendBookmarkKeyPart(book.publicationId)
+        }
+    }
     append('|')
     appendBookmarkKeyPart(document.contentId)
     append('|')

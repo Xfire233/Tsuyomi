@@ -35,7 +35,11 @@ data class RemoteLibraryMergeRequest(
     val expectedCapabilityFingerprint: String,
     val expectedGeneration: Long,
     val importedAt: Instant,
-)
+) {
+    init {
+        require(books.all { it.identity is BookIdentity.Remote }) { "Remote library merges cannot contain local publications" }
+    }
+}
 
 /** Durable identity and package lease for one user-authorized remote mutation (add, remove, move). */
 data class RemoteMutationRequest(
@@ -48,7 +52,11 @@ data class RemoteMutationRequest(
     val capabilitySetFingerprint: String,
     val registryGeneration: Long,
     val startedAt: Instant,
-)
+) {
+    init {
+        require(book.identity is BookIdentity.Remote) { "Remote mutations cannot contain local publications" }
+    }
+}
 
 data class RemoteMirrorReplaceRequest(
     val sourceId: String,
@@ -91,9 +99,29 @@ internal class RoomRemoteLibraryStore(
 
 
     suspend fun saveRemoteMirrorSnapshot(request: RemoteMirrorReplaceRequest) = database.withTransaction {
+        replaceRemoteMirrorSnapshot(request)
+    }
+
+    suspend fun saveRemoteMirrorSnapshotIfSourceCurrent(
+        request: RemoteMirrorReplaceRequest,
+        expectedVersion: String,
+        expectedGeneration: Long,
+        expectedCapabilityFingerprint: String,
+    ): Boolean = database.withTransaction {
+        val availability = dao.sourceAvailability(request.sourceId) ?: return@withTransaction false
+        val policy = dao.sourceRemotePolicy(request.sourceId) ?: return@withTransaction false
+        if (!availability.available || availability.verifiedVersion != expectedVersion ||
+            availability.generation != expectedGeneration ||
+            policy.capabilitySetFingerprint != expectedCapabilityFingerprint
+        ) return@withTransaction false
+        replaceRemoteMirrorSnapshot(request)
+        true
+    }
+
+    private suspend fun replaceRemoteMirrorSnapshot(request: RemoteMirrorReplaceRequest) {
         require(request.sourceId.isNotBlank() && request.sourceName.isNotBlank())
         require(request.books.map { it.book.identity }.distinct().size == request.books.size)
-        require(request.books.all { it.book.identity.sourceId == request.sourceId })
+        require(request.books.all { it.book.identity.requireRemoteIdentity().sourceId == request.sourceId })
         require(request.targets.all { it.sourceId == request.sourceId })
         val updatedAt = request.updatedAt.epochSecond
         dao.upsertRemoteMirrorBinding(
@@ -122,7 +150,7 @@ internal class RoomRemoteLibraryStore(
                 request.books.map {
                     RemoteMirrorItemEntity(
                         sourceId = request.sourceId,
-                        remoteBookId = it.book.identity.remoteBookId,
+                        remoteBookId = it.book.identity.requireRemoteIdentity().remoteBookId,
                         targetId = it.targetId,
                         updatedAtEpochSecond = updatedAt,
                     )
@@ -166,16 +194,17 @@ internal class RoomRemoteLibraryStore(
         )
     }
 
-    suspend fun updateRemoteMirrorBookTarget(identity: org.tsuyomi.shared.model.BookIdentity, targetId: String?, now: Instant): Boolean =
+    suspend fun updateRemoteMirrorBookTarget(identity: BookIdentity.Remote, targetId: String?, now: Instant): Boolean =
         dao.updateRemoteMirrorBookTarget(identity.sourceId, identity.remoteBookId, targetId, now.epochSecond) == 1
 
     suspend fun upsertRemoteMirrorBook(book: LibraryBook, targetId: String?, now: Instant) = database.withTransaction {
+        val identity = book.identity.requireRemoteIdentity()
         saveRemoteBook(book)
         dao.upsertRemoteMirrorItems(
             listOf(
                 RemoteMirrorItemEntity(
-                    sourceId = book.identity.sourceId,
-                    remoteBookId = book.identity.remoteBookId,
+                    sourceId = identity.sourceId,
+                    remoteBookId = identity.remoteBookId,
                     targetId = targetId,
                     updatedAtEpochSecond = now.epochSecond,
                 ),
@@ -183,7 +212,7 @@ internal class RoomRemoteLibraryStore(
         )
     }
 
-    suspend fun removeRemoteMirrorBook(identity: org.tsuyomi.shared.model.BookIdentity): Boolean =
+    suspend fun removeRemoteMirrorBook(identity: BookIdentity.Remote): Boolean =
         dao.deleteRemoteMirrorBook(identity.sourceId, identity.remoteBookId) == 1
 
     suspend fun remoteMirrorTargetCount(sourceId: String, targetId: String): Int =
@@ -193,7 +222,7 @@ internal class RoomRemoteLibraryStore(
         require(request.books.map { it.identity }.distinct().size == request.books.size) {
             "Duplicate remote library identity"
         }
-        require(request.books.all { it.identity.sourceId == request.sourceId }) { "Remote library source mismatch" }
+        require(request.books.all { it.identity.requireRemoteIdentity().sourceId == request.sourceId }) { "Remote library source mismatch" }
         suspend fun leaseValid(): Boolean {
             val availability = dao.sourceAvailability(request.sourceId) ?: return false
             val policy = dao.sourceRemotePolicy(request.sourceId) ?: return false
@@ -244,11 +273,12 @@ internal class RoomRemoteLibraryStore(
         retryingUnresolvedId: String? = null,
     ): String = database.withTransaction {
         val book = request.book
-        saveRemoteBook(book)
+        val identity = book.identity.requireRemoteIdentity()
         if (request.operation.equals("ADD", ignoreCase = true)) {
+            saveRemoteBook(book)
             insertOrPinLibraryEntry(book, request.startedAt)
         }
-        val active = dao.activeReconciliation(book.identity.sourceId, book.identity.remoteBookId)
+        val active = dao.activeReconciliation(identity.sourceId, identity.remoteBookId)
         if (retryingUnresolvedId == null) {
             check(active == null) { "Remote operation already active or unresolved for this book" }
         } else {
@@ -262,8 +292,8 @@ internal class RoomRemoteLibraryStore(
         dao.insertReconciliation(
             RemoteLibraryReconciliationEntity(
                 id = id,
-                sourceId = book.identity.sourceId,
-                remoteBookId = book.identity.remoteBookId,
+                sourceId = identity.sourceId,
+                remoteBookId = identity.remoteBookId,
                 packageDigest = request.packageDigest,
                 packageVersion = request.packageVersion,
                 capabilitySetFingerprint = request.capabilitySetFingerprint,
@@ -309,7 +339,7 @@ internal class RoomRemoteLibraryStore(
 
     suspend fun confirmRemoteMutation(
         id: String,
-        identity: BookIdentity,
+        identity: BookIdentity.Remote,
         operation: String,
         resolvesPriorUnresolved: Boolean,
         now: Instant,
@@ -336,7 +366,7 @@ internal class RoomRemoteLibraryStore(
     }
 
     suspend fun cancelUnresolvedMutations(
-        identity: BookIdentity,
+        identity: BookIdentity.Remote,
         operation: String,
         now: Instant,
     ): Boolean = database.withTransaction {
@@ -351,7 +381,7 @@ internal class RoomRemoteLibraryStore(
 
     suspend fun confirmRemoteAdd(
         id: String,
-        identity: BookIdentity,
+        identity: BookIdentity.Remote,
         resolvesPriorUnresolved: Boolean,
         now: Instant,
     ): Boolean = confirmRemoteMutation(id, identity, "ADD", resolvesPriorUnresolved, now)
@@ -365,7 +395,8 @@ internal class RoomRemoteLibraryStore(
     suspend fun bookReconciliation(sourceId: String, remoteBookId: String): RemoteReconciliationRecord? =
         (dao.activeReconciliation(sourceId, remoteBookId) ?: dao.latestReconciliation(sourceId, remoteBookId))?.toDomain()
     private suspend fun saveRemoteBook(incoming: LibraryBook) {
-        val existing = catalog.book(incoming.identity)
+        val identity = incoming.identity.requireRemoteIdentity()
+        val existing = catalog.book(identity)
         val merged = existing?.let { current ->
             incoming.copy(
                 author = incoming.author ?: current.author,
@@ -379,16 +410,19 @@ internal class RoomRemoteLibraryStore(
         catalog.saveBook(merged)
     }
 
-    private suspend fun insertOrPinLibraryEntry(book: LibraryBook, addedAt: Instant): Boolean =
-        dao.insertLibraryEntry(
+    private suspend fun insertOrPinLibraryEntry(book: LibraryBook, addedAt: Instant): Boolean {
+        val identity = book.identity.requireRemoteIdentity()
+        return dao.insertLibraryEntry(
             LibraryEntryEntity(
-                sourceId = book.identity.sourceId,
-                remoteBookId = book.identity.remoteBookId,
+                identityKey = identity.storageKey,
+                sourceId = identity.sourceId,
+                remoteBookId = identity.remoteBookId,
                 addedAtEpochSecond = addedAt.epochSecond,
                 addedAtNano = addedAt.nano,
                 rating = null,
             ),
-        ) != -1L || dao.pinLibraryEntry(book.identity.sourceId, book.identity.remoteBookId) != 0
+        ) != -1L || dao.pinLibraryEntryByIdentityKey(identity.storageKey) != 0
+    }
 
 }
 
@@ -415,3 +449,6 @@ internal fun RemoteLibraryReconciliationEntity.toDomain(): RemoteReconciliationR
     diagnosticId = diagnosticId,
     updatedAtEpochSecond = updatedAtEpochSecond,
 )
+
+private fun BookIdentity.requireRemoteIdentity(): BookIdentity.Remote =
+    this as? BookIdentity.Remote ?: throw IllegalArgumentException("Remote operations require a remote book")

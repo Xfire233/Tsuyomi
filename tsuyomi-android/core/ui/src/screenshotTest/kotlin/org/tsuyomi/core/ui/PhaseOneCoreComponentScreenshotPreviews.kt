@@ -120,7 +120,7 @@ fun ControlStatesScreenshot() {
     }
 }
 
-// Retained for IDE review; screenshot evidence resumes only when the EINK profile is unfrozen.
+@PreviewTest
 @Preview(name = "eink-full-window-no-scrim", device = ComponentEInk, locale = "zh-rCN")
 @Composable
 fun EInkDialogScreenshot() {

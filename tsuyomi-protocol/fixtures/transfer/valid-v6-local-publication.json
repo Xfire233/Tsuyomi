@@ -1,0 +1,45 @@
+{
+  "format": "tsuyomi-transfer",
+  "version": 6,
+  "createdAt": "2026-10-07T00:00:00Z",
+  "library": [
+    {
+      "identity": {
+        "origin": "local",
+        "publicationId": "f2b8ef64-9375-4fc1-b7c9-274b4beafed1"
+      },
+      "localPublication": {
+        "format": "epub",
+        "originalSha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "originalSizeBytes": 1234,
+        "coverResourceId": "4637570b-1109-48ba-8a1b-256e868ca14c"
+      },
+      "title": "本地出版物",
+      "authors": ["作者"],
+      "localTags": ["收藏"],
+      "localPin": true,
+      "updatedAt": "2026-10-07T00:00:00Z",
+      "progress": {
+        "chapterId": "spine-2",
+        "revision": "normalized-section-sha256",
+        "characterOffset": 12,
+        "updatedAt": "2026-10-07T00:00:00Z"
+      },
+      "bookmarks": [
+        {
+          "document": {
+            "book": {
+              "origin": "local",
+              "publicationId": "f2b8ef64-9375-4fc1-b7c9-274b4beafed1"
+            },
+            "contentId": "spine-2"
+          },
+          "blockId": "paragraph-7",
+          "characterOffset": 12,
+          "capturedAt": "2026-10-07T00:00:00Z"
+        }
+      ]
+    }
+  ],
+  "shelves": []
+}

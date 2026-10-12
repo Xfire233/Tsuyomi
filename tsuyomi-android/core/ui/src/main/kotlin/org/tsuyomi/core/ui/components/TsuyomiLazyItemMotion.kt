@@ -16,7 +16,7 @@ import org.tsuyomi.core.ui.theme.instantMotion
 @Composable
 fun Modifier.tsuyomiAnimateItem(scope: LazyItemScope): Modifier {
     val instant = LocalDisplayEnvironment.current.instantMotion
-    return if (LocalInspectionMode.current) this else with(scope) {
+    return if (instant || LocalInspectionMode.current) this else with(scope) {
         this@tsuyomiAnimateItem.animateItem(
             fadeInSpec = org.tsuyomi.core.ui.theme.policyMotionSpec(instant, TsuyomiMotion.SWITCH_DURATION_MS),
             placementSpec = org.tsuyomi.core.ui.theme.policyMotionSpec(instant, TsuyomiMotion.EXPAND_DURATION_MS),
@@ -29,7 +29,7 @@ fun Modifier.tsuyomiAnimateItem(scope: LazyItemScope): Modifier {
 @Composable
 fun Modifier.tsuyomiAnimateItem(scope: LazyGridItemScope): Modifier {
     val instant = LocalDisplayEnvironment.current.instantMotion
-    return if (LocalInspectionMode.current) this else with(scope) {
+    return if (instant || LocalInspectionMode.current) this else with(scope) {
         this@tsuyomiAnimateItem.animateItem(
             fadeInSpec = org.tsuyomi.core.ui.theme.policyMotionSpec(instant, TsuyomiMotion.SWITCH_DURATION_MS),
             placementSpec = org.tsuyomi.core.ui.theme.policyMotionSpec(instant, TsuyomiMotion.EXPAND_DURATION_MS),

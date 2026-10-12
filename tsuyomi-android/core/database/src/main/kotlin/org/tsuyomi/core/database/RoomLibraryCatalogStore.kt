@@ -9,9 +9,13 @@ import androidx.room.withTransaction
 import java.text.Normalizer
 import java.time.Instant
 import java.util.Locale
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.JsonNull
+import kotlinx.serialization.json.JsonObject
 import org.tsuyomi.core.database.room.BookEntity
 import org.tsuyomi.core.database.room.BookIdentityRow
 import org.tsuyomi.core.database.room.LibraryDao
@@ -22,6 +26,10 @@ import org.tsuyomi.shared.librarydomain.LibraryBook
 import org.tsuyomi.shared.librarydomain.LibraryEntry
 import org.tsuyomi.shared.librarydomain.ReadingProgress
 import org.tsuyomi.shared.librarydomain.RemoteReconciliationState
+import org.tsuyomi.shared.librarydomain.LocalPublicationFormat
+import org.tsuyomi.shared.librarydomain.LocalPublicationMetadata
+import org.tsuyomi.shared.librarydomain.LocalTextHeading
+import org.tsuyomi.shared.librarydomain.LocalTextParseOptions
 
 internal class RoomLibraryCatalogStore(
     private val database: TsuyomiDatabase,
@@ -30,29 +38,36 @@ internal class RoomLibraryCatalogStore(
     suspend fun saveBook(book: LibraryBook) {
         val entity = book.toEntity()
         if (dao.insertBook(entity) == -1L) {
-            dao.updateBookMetadata(
-                sourceId = entity.sourceId,
-                remoteBookId = entity.remoteBookId,
-                title = entity.title,
-                authorsJson = entity.authorsJson,
-                authorSortKey = entity.authorSortKey,
-                coverUrl = entity.coverUrl,
-                canonicalUrl = entity.canonicalUrl,
-                status = entity.status,
-                remoteTagsJson = entity.remoteTagsJson,
-                metadataUpdatedAtEpochSecond = entity.metadataUpdatedAtEpochSecond,
-                metadataUpdatedAtNano = entity.metadataUpdatedAtNano,
-            )
+            check(
+                dao.updateBookByIdentityKey(
+                    identityKey = entity.identityKey,
+                    title = entity.title,
+                    authorsJson = entity.authorsJson,
+                    authorSortKey = entity.authorSortKey,
+                    coverUrl = entity.coverUrl,
+                    canonicalUrl = entity.canonicalUrl,
+                    status = entity.status,
+                    remoteTagsJson = entity.remoteTagsJson,
+                    metadataUpdatedAtEpochSecond = entity.metadataUpdatedAtEpochSecond,
+                    metadataUpdatedAtNano = entity.metadataUpdatedAtNano,
+                    localFormat = entity.localFormat,
+                    localOriginalSha256 = entity.localOriginalSha256,
+                    localOriginalSizeBytes = entity.localOriginalSizeBytes,
+                    localOriginalAvailable = entity.localOriginalAvailable,
+                    localTxtOptionsJson = entity.localTxtOptionsJson,
+                    localCoverResourceId = entity.localCoverResourceId,
+                ) == 1,
+            ) { "Could not update book metadata" }
         }
     }
 
-    /** Retains metadata for local state without changing an existing entry's pin or presentation. */
     suspend fun ensureRetainedLibraryEntry(book: LibraryBook): Boolean = database.withTransaction {
         saveBook(book)
         dao.insertLibraryEntry(
             LibraryEntryEntity(
-                sourceId = book.identity.sourceId,
-                remoteBookId = book.identity.remoteBookId,
+                identityKey = book.identity.storageKey,
+                sourceId = (book.identity as? BookIdentity.Remote)?.sourceId,
+                remoteBookId = (book.identity as? BookIdentity.Remote)?.remoteBookId,
                 addedAtEpochSecond = book.addedAt.epochSecond,
                 addedAtNano = book.addedAt.nano,
                 rating = null,
@@ -62,22 +77,47 @@ internal class RoomLibraryCatalogStore(
     }
 
     suspend fun book(identity: BookIdentity): LibraryBook? =
-        dao.book(identity.sourceId, identity.remoteBookId)?.toDomain()
+        dao.bookByIdentityKey(identity.storageKey)?.toDomain()
 
-    suspend fun libraryEntries(): List<LibraryEntry> = entriesFor(
-        dao.libraryBooks().map { BookIdentityRow(it.sourceId, it.remoteBookId) },
-    )
+    suspend fun localPublications(): List<LibraryBook> = dao.localPublicationBooks().map(BookEntity::toDomain)
 
-    suspend fun readLaterEntries(): List<LibraryEntry> = entriesFor(
-        dao.readLaterBooks().map { BookIdentityRow(it.sourceId, it.remoteBookId) },
-    )
+    suspend fun setLocalOriginalAvailable(identity: BookIdentity.Local, available: Boolean): Boolean = database.withTransaction {
+        val current = dao.bookByIdentityKey(identity.storageKey) ?: return@withTransaction false
+        if (current.origin != "local") return@withTransaction false
+        dao.setLocalOriginalAvailable(identity.storageKey, available) == 1
+    }
+
+    /** A cover repair changes no unrelated metadata or reading state and cannot insert a deleted book. */
+    suspend fun compareAndSetLocalCoverResourceId(
+        identity: BookIdentity.Local,
+        format: LocalPublicationFormat,
+        originalSha256: String,
+        originalSizeBytes: Long,
+        expectedResourceId: String?,
+        resourceId: String,
+    ): Boolean = database.withTransaction {
+        BookIdentity.requireCanonicalUuid(resourceId, "resourceId")
+        expectedResourceId?.let { BookIdentity.requireCanonicalUuid(it, "expectedResourceId") }
+        val updated = dao.compareAndSetLocalCoverResourceId(identity.storageKey, format.name, originalSha256, originalSizeBytes, expectedResourceId, resourceId)
+        currentCoroutineContext().ensureActive()
+        updated == 1
+    }
+
+    suspend fun deleteLocalPublication(identity: BookIdentity.Local): Boolean = database.withTransaction {
+        val current = dao.bookByIdentityKey(identity.storageKey) ?: return@withTransaction false
+        if (current.origin != "local") return@withTransaction false
+        dao.deleteReaderBookmarksByIdentityKey(identity.storageKey)
+        dao.deleteLocalPublicationBook(identity.storageKey) == 1
+    }
+
+    suspend fun libraryEntries(): List<LibraryEntry> = dao.libraryBooks().mapNotNull { entryFor(it.toIdentity()) }
+
+    suspend fun readLaterEntries(): List<LibraryEntry> = dao.readLaterBooks().mapNotNull { entryFor(it.toIdentity()) }
 
     suspend fun readerHistoryEntries(): List<LibraryEntry> = dao.readerHistoryRows().mapNotNull { row ->
-        val identity = BookIdentity(row.sourceId, row.remoteBookId)
-        val fallbackProgress = if (row.explicitVisit) {
-            null
-        } else {
-            dao.progress(row.sourceId, row.remoteBookId)?.toDomainOrNull() ?: return@mapNotNull null
+        val identity = row.toIdentity()
+        val fallbackProgress = if (row.explicitVisit) null else {
+            dao.progressByIdentityKey(identity.storageKey)?.toDomainOrNull(identity) ?: return@mapNotNull null
         }
         entryFor(
             identity = identity,
@@ -87,52 +127,46 @@ internal class RoomLibraryCatalogStore(
     }
 
     suspend fun readerHistoryEntry(identity: BookIdentity): LibraryEntry? {
-        val visit = dao.readerHistory(identity.sourceId, identity.remoteBookId)
+        val visit = dao.readerHistoryByIdentityKey(identity.storageKey)
         val fallbackProgress = if (visit == null) {
-            dao.progress(identity.sourceId, identity.remoteBookId)?.toDomainOrNull() ?: return null
-        } else {
-            null
-        }
-        val visitedAt = visit?.let {
-            Instant.ofEpochSecond(it.lastVisitedAtEpochSecond, it.lastVisitedAtNano.toLong())
-        } ?: requireNotNull(fallbackProgress).updatedAt
+            dao.progressByIdentityKey(identity.storageKey)?.toDomainOrNull(identity) ?: return null
+        } else null
+        val visitedAt = visit?.let { Instant.ofEpochSecond(it.lastVisitedAtEpochSecond, it.lastVisitedAtNano.toLong()) }
+            ?: requireNotNull(fallbackProgress).updatedAt
         return entryFor(identity, visitedAt, fallbackProgress)
     }
 
-    suspend fun libraryEntry(identity: BookIdentity): LibraryEntry? = entriesFor(
-        listOf(BookIdentityRow(identity.sourceId, identity.remoteBookId)),
-    ).singleOrNull()
+    suspend fun libraryEntry(identity: BookIdentity): LibraryEntry? = entryFor(identity)
 
     suspend fun entriesFor(identities: List<BookIdentityRow>): List<LibraryEntry> =
-        identities.mapNotNull { entryFor(BookIdentity(it.sourceId, it.remoteBookId)) }
+        identities.mapNotNull { entryFor(it.toIdentity()) }
 
     private suspend fun entryFor(
         identity: BookIdentity,
         readerVisitedAt: Instant? = null,
         knownProgress: ReadingProgress? = null,
     ): LibraryEntry? {
-        val book = dao.book(identity.sourceId, identity.remoteBookId) ?: return null
-        val domainBook = book.toDomain()
-        val entry = dao.libraryEntry(identity.sourceId, identity.remoteBookId)
+        val stored = dao.bookByIdentityKey(identity.storageKey) ?: return null
+        val domainBook = stored.toDomain()
+        val entry = dao.libraryEntryByIdentityKey(identity.storageKey)
         if (entry == null && readerVisitedAt == null) return null
-        val availability = dao.sourceAvailability(identity.sourceId)?.available == true
-        val tags = dao.localTags(identity.sourceId, identity.remoteBookId).mapTo(linkedSetOf()) { it.displayTag }
-        val currentReconciliation = dao.activeReconciliation(identity.sourceId, identity.remoteBookId)
-            ?: dao.latestReconciliation(identity.sourceId, identity.remoteBookId)
-        val reconciliation = currentReconciliation?.state
-            ?.let { runCatching { RemoteReconciliationState.valueOf(it) }.getOrNull() }
-        val reconciliationOperation = currentReconciliation?.operation
+        val remote = identity as? BookIdentity.Remote
+        val availability = remote?.let { dao.sourceAvailability(it.sourceId)?.available == true } ?: false
+        val tags = dao.localTagsByIdentityKey(identity.storageKey).mapTo(linkedSetOf()) { it.displayTag }
+        val currentReconciliation = remote?.let {
+            dao.activeReconciliation(it.sourceId, it.remoteBookId) ?: dao.latestReconciliation(it.sourceId, it.remoteBookId)
+        }
+        val reconciliation = currentReconciliation?.state?.let { runCatching { RemoteReconciliationState.valueOf(it) }.getOrNull() }
         return LibraryEntry(
             book = domainBook,
-            libraryAddedAt = entry?.let { Instant.ofEpochSecond(it.addedAtEpochSecond, it.addedAtNano.toLong()) }
-                ?: domainBook.addedAt,
+            libraryAddedAt = entry?.let { Instant.ofEpochSecond(it.addedAtEpochSecond, it.addedAtNano.toLong()) } ?: domainBook.addedAt,
             rating = entry?.rating,
             readLater = entry?.readLater ?: false,
-            progress = knownProgress ?: dao.progress(identity.sourceId, identity.remoteBookId)?.toDomainOrNull(),
+            progress = knownProgress ?: dao.progressByIdentityKey(identity.storageKey)?.toDomainOrNull(identity),
             localTags = tags,
             sourceAvailable = availability,
             reconciliation = reconciliation,
-            reconciliationOperation = reconciliationOperation,
+            reconciliationOperation = currentReconciliation?.operation,
             readerVisitedAt = readerVisitedAt,
             localMembership = entry?.locallyPinned ?: false,
         )
@@ -140,77 +174,79 @@ internal class RoomLibraryCatalogStore(
 
     suspend fun addToLibrary(book: LibraryBook): Boolean = database.withTransaction {
         saveBook(book)
-        dao.insertLibraryEntry(
+        val identity = book.identity
+        val inserted = dao.insertLibraryEntry(
             LibraryEntryEntity(
-                sourceId = book.identity.sourceId,
-                remoteBookId = book.identity.remoteBookId,
+                identityKey = identity.storageKey,
+                sourceId = (identity as? BookIdentity.Remote)?.sourceId,
+                remoteBookId = (identity as? BookIdentity.Remote)?.remoteBookId,
                 addedAtEpochSecond = book.addedAt.epochSecond,
                 addedAtNano = book.addedAt.nano,
                 rating = null,
             ),
-        ) != -1L || dao.pinLibraryEntry(book.identity.sourceId, book.identity.remoteBookId) != 0
+        )
+        inserted != -1L || dao.pinLibraryEntryByIdentityKey(identity.storageKey) != 0
     }
 
     suspend fun removeFromLibrary(identity: BookIdentity): Boolean = database.withTransaction {
-        if (dao.unpinLibraryEntry(identity.sourceId, identity.remoteBookId) == 0) return@withTransaction false
-        dao.deleteManualMembershipsForLibraryEntry(identity.sourceId, identity.remoteBookId)
+        if (dao.unpinLibraryEntryByIdentityKey(identity.storageKey) == 0) return@withTransaction false
+        dao.deleteManualMembershipsByIdentityKey(identity.storageKey)
         true
     }
 
     suspend fun removeFromLibrary(identities: Set<BookIdentity>): Int = database.withTransaction {
         identities.count { identity ->
-            if (dao.unpinLibraryEntry(identity.sourceId, identity.remoteBookId) == 0) {
-                false
-            } else {
-                dao.deleteManualMembershipsForLibraryEntry(identity.sourceId, identity.remoteBookId)
+            if (dao.unpinLibraryEntryByIdentityKey(identity.storageKey) == 0) false else {
+                dao.deleteManualMembershipsByIdentityKey(identity.storageKey)
                 true
             }
         }
     }
 
     suspend fun reorderLibrary(identities: List<BookIdentity>) = database.withTransaction {
-        val current = dao.libraryBooks().map { BookIdentity(it.sourceId, it.remoteBookId) }
+        val current = dao.libraryBooks().map(BookEntity::toIdentity)
         require(identities.size == current.size && identities.toSet() == current.toSet()) {
             "Library reorder must contain every current entry exactly once"
         }
         identities.forEachIndexed { index, identity ->
-            check(dao.updateLibraryDisplayOrder(identity.sourceId, identity.remoteBookId, index) == 1)
+            check(dao.updateLibraryDisplayOrderByIdentityKey(identity.storageKey, index) == 1)
         }
     }
 
     suspend fun setRating(identity: BookIdentity, rating: Int?) {
         require(rating == null || rating in 1..5)
-        check(dao.updateRating(identity.sourceId, identity.remoteBookId, rating) == 1) { "Book is not in library" }
+        check(dao.updateRatingByIdentityKey(identity.storageKey, rating) == 1) { "Book is not in library" }
     }
 
     suspend fun setReadLater(identity: BookIdentity, readLater: Boolean) {
-        check(dao.updateReadLater(identity.sourceId, identity.remoteBookId, readLater) == 1) {
-            "Book is not in library"
-        }
+        check(dao.updateReadLaterByIdentityKey(identity.storageKey, readLater) == 1) { "Book is not in library" }
     }
 
     suspend fun setLocalTags(identity: BookIdentity, tags: Collection<String>) = database.withTransaction {
-        check(dao.libraryEntry(identity.sourceId, identity.remoteBookId) != null) { "Book is not in library" }
+        check(dao.libraryEntryByIdentityKey(identity.storageKey) != null) { "Book is not in library" }
         val normalized = tags.mapNotNull { raw ->
             val display = raw.trim().replace(Regex("\\s+"), " ").takeIf { it.isNotEmpty() } ?: return@mapNotNull null
-            val key = Normalizer.normalize(display, Normalizer.Form.NFKC).lowercase(Locale.ROOT)
-            key to display
+            Normalizer.normalize(display, Normalizer.Form.NFKC).lowercase(Locale.ROOT) to display
         }.distinctBy { it.first }
         require(normalized.size <= 64)
-        dao.deleteLocalTags(identity.sourceId, identity.remoteBookId)
-        dao.insertLocalTags(
-            normalized.map { (key, display) ->
-                LocalBookTagEntity(identity.sourceId, identity.remoteBookId, key, display)
-            },
-        )
+        dao.deleteLocalTagsByIdentityKey(identity.storageKey)
+        val remote = identity as? BookIdentity.Remote
+        dao.insertLocalTags(normalized.map { (key, display) ->
+            LocalBookTagEntity(identity.storageKey, remote?.sourceId, remote?.remoteBookId, key, display)
+        })
     }
 }
 
 private fun LibraryBook.toEntity(): BookEntity {
     val canonicalAuthors = canonicalStringSet(authors.ifEmpty { author?.let(::setOf).orEmpty() })
+    val remote = identity as? BookIdentity.Remote
+    val local = localPublication
     return BookEntity(
-        sourceId = identity.sourceId,
-        remoteBookId = identity.remoteBookId,
+        identityKey = identity.storageKey,
+        origin = if (remote != null) "remote" else "local",
+        sourceId = remote?.sourceId,
+        remoteBookId = remote?.remoteBookId,
+        publicationId = (identity as? BookIdentity.Local)?.publicationId,
         title = title,
         authorsJson = encodeStringSet(canonicalAuthors),
         authorSortKey = authorSortKey(canonicalAuthors),
@@ -224,13 +260,55 @@ private fun LibraryBook.toEntity(): BookEntity {
         addedAtNano = addedAt.nano,
         metadataUpdatedAtEpochSecond = metadataUpdatedAt.epochSecond,
         metadataUpdatedAtNano = metadataUpdatedAt.nano,
+        localFormat = local?.format?.name,
+        localOriginalSha256 = local?.originalSha256,
+        localOriginalSizeBytes = local?.originalSizeBytes,
+        localOriginalAvailable = local?.originalAvailable,
+        localTxtOptionsJson = local?.txtOptions?.toStorageJson(),
+        localCoverResourceId = local?.coverResourceId,
     )
 }
 
+internal fun BookEntity.toIdentity(): BookIdentity = when (origin) {
+    "remote" -> BookIdentity.Remote(requireNotNull(sourceId), requireNotNull(remoteBookId)).also { check(publicationId == null) }
+    "local" -> BookIdentity.Local(requireNotNull(publicationId)).also { check(sourceId == null && remoteBookId == null) }
+    else -> error("Invalid stored book origin")
+}.also { check(it.storageKey == identityKey) }
+
+internal fun BookIdentityRow.toIdentity(): BookIdentity = storedIdentity(identityKey, origin, sourceId, remoteBookId)
+
+internal fun org.tsuyomi.core.database.room.ReaderHistoryRow.toIdentity(): BookIdentity =
+    storedIdentity(identityKey, origin, sourceId, remoteBookId)
+
+private fun storedIdentity(identityKey: String, origin: String, sourceId: String?, remoteBookId: String?): BookIdentity =
+    when (origin) {
+        "remote" -> BookIdentity.Remote(requireNotNull(sourceId), requireNotNull(remoteBookId))
+        "local" -> BookIdentity.Local(identityKey.substringAfter(':')).also { check(sourceId == null && remoteBookId == null) }
+        else -> error("Invalid stored book origin")
+    }.also { check(it.storageKey == identityKey) }
+
 internal fun BookEntity.toDomain(): LibraryBook {
     val authors = decodeStringSet(authorsJson)
+    val identity = toIdentity()
+    val localPublication = if (identity is BookIdentity.Local) {
+        val format = LocalPublicationFormat.valueOf(requireNotNull(localFormat))
+        check((format == LocalPublicationFormat.TXT) == (localTxtOptionsJson != null))
+        LocalPublicationMetadata(
+            format = format,
+            originalSha256 = requireNotNull(localOriginalSha256),
+            originalSizeBytes = requireNotNull(localOriginalSizeBytes),
+            originalAvailable = requireNotNull(localOriginalAvailable),
+            coverResourceId = localCoverResourceId,
+            txtOptions = if (format == LocalPublicationFormat.TXT) {
+                requireNotNull(localTxtOptionsJson).parseTextOptions()
+            } else null,
+        )
+    } else {
+        check(localFormat == null && localOriginalSha256 == null && localOriginalSizeBytes == null && localOriginalAvailable == null && localTxtOptionsJson == null && localCoverResourceId == null)
+        null
+    }
     return LibraryBook(
-        identity = BookIdentity(sourceId, remoteBookId),
+        identity = identity,
         title = title,
         author = authors.firstOrNull(),
         authors = authors,
@@ -238,9 +316,46 @@ internal fun BookEntity.toDomain(): LibraryBook {
         canonicalUrl = canonicalUrl,
         status = status,
         remoteTags = decodeStringSet(remoteTagsJson),
+        localPublication = localPublication,
         addedAt = Instant.ofEpochSecond(addedAtEpochSecond, addedAtNano.toLong()),
         metadataUpdatedAt = Instant.ofEpochSecond(metadataUpdatedAtEpochSecond, metadataUpdatedAtNano.toLong()),
     )
+}
+
+private fun LocalTextParseOptions.toStorageJson(): String = JsonObject(
+    mapOf(
+        "charsetName" to (charsetName?.let(::JsonPrimitive) ?: JsonNull),
+        "headingSelections" to JsonArray(headingSelections.map { heading ->
+            JsonObject(
+                mapOf(
+                    "paragraphOrdinal" to JsonPrimitive(heading.paragraphOrdinal),
+                    "title" to JsonPrimitive(heading.title),
+                ),
+            )
+        }),
+        "paragraphsPerSection" to JsonPrimitive(paragraphsPerSection),
+    ),
+).toString()
+
+private fun String.parseTextOptions(): LocalTextParseOptions {
+    val root = storageJson.parseToJsonElement(this) as? JsonObject ?: error("Invalid TXT options")
+    require(root.keys == setOf("charsetName", "headingSelections", "paragraphsPerSection")) { "Invalid TXT options fields" }
+    val charsetElement = requireNotNull(root["charsetName"])
+    val charsetName = if (charsetElement == JsonNull) null else {
+        (charsetElement as? JsonPrimitive)?.takeIf { it.isString }?.content ?: error("Invalid TXT charset")
+    }
+    val headings = (root["headingSelections"] as? JsonArray ?: error("Invalid TXT headings" )).map { item ->
+        val heading = item as? JsonObject ?: error("Invalid TXT heading")
+        require(heading.keys == setOf("paragraphOrdinal", "title")) { "Invalid TXT heading fields" }
+        val ordinal = (heading["paragraphOrdinal"] as? JsonPrimitive)?.takeIf { !it.isString }
+            ?.content?.toIntOrNull() ?: error("Invalid TXT heading ordinal")
+        val title = (heading["title"] as? JsonPrimitive)?.takeIf { it.isString }?.content
+            ?: error("Invalid TXT heading title")
+        LocalTextHeading(ordinal, title)
+    }
+    val perSection = (root["paragraphsPerSection"] as? JsonPrimitive)?.takeIf { !it.isString }
+        ?.content?.toIntOrNull() ?: error("Invalid TXT section size")
+    return LocalTextParseOptions(charsetName, headings, perSection)
 }
 
 private val storageJson = Json

@@ -48,7 +48,7 @@ import org.tsuyomi.core.ui.components.TsuyomiButton
 import org.tsuyomi.core.ui.components.TsuyomiButtonStyle
 import org.tsuyomi.core.ui.components.TsuyomiCheckboxRow
 import org.tsuyomi.core.ui.components.TsuyomiTriStateCheckboxRow
-import org.tsuyomi.shared.sourcecontract.SourceChapter
+import org.tsuyomi.shared.sourcecontract.ReaderNavigationTarget
 
 @Composable
 internal fun DetailVolumeHeader(
@@ -163,7 +163,7 @@ internal fun DetailModuleHeader(icon: ImageVector, title: String) {
 }
 
 @Composable
-internal fun DetailChapterRow(item: DetailChapterItem, onSelectChapter: (SourceChapter) -> Unit) {
+internal fun DetailChapterRow(item: DetailChapterItem, onSelectChapter: (ReaderNavigationTarget) -> Unit) {
     val status = buildList {
         if (item.updated) add(stringResource(R.string.book_chapter_updated))
         item.read?.let { add(stringResource(if (it) R.string.book_chapter_read else R.string.book_chapter_unread)) }
@@ -177,7 +177,7 @@ internal fun DetailChapterRow(item: DetailChapterItem, onSelectChapter: (SourceC
         Row(
             modifier = Modifier
                 .clickable(role = Role.Button) { onSelectChapter(item.chapter) }
-                .testTag("detail-chapter-${item.chapter.chapterId}")
+                .testTag("detail-chapter-${item.chapter.contentId}")
                 .semantics(mergeDescendants = true) {
                     if (status.isNotEmpty()) stateDescription = status
                 }
@@ -302,15 +302,15 @@ internal fun DetailCacheChapterRow(
     cacheState: DetailCacheState,
     onCacheAction: (DetailCacheAction) -> Unit,
 ) {
-    val phase = cacheState.chapters[item.chapter.chapterId]
+    val phase = cacheState.chapters[item.chapter.contentId]
     Box(modifier = Modifier.fillMaxWidth(), contentAlignment = Alignment.CenterEnd) {
         TsuyomiCheckboxRow(
             label = item.chapter.title,
-            checked = item.chapter.chapterId in cacheState.selectedChapterIds,
-            onCheckedChange = { onCacheAction(DetailCacheAction.Toggle(item.chapter.chapterId)) },
+            checked = item.chapter.contentId in cacheState.selectedChapterIds,
+            onCheckedChange = { onCacheAction(DetailCacheAction.Toggle(item.chapter.contentId)) },
             modifier = Modifier
                 .padding(end = 48.dp)
-                .testTag("detail-cache-chapter-${item.chapter.chapterId}"),
+                .testTag("detail-cache-chapter-${item.chapter.contentId}"),
             enabled = !cacheState.working && phase != DetailChapterCachePhase.CACHED,
         )
         when (phase) {

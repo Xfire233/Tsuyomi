@@ -79,6 +79,16 @@ def load_review_policy(repo_root: Path) -> tuple[dict, str]:
         raise SystemExit("Review policy standaloneFixtureReview must be false")
     if routine_review.get("shareOnlineCandidateWithHuman") is not True:
         raise SystemExit("Review policy shareOnlineCandidateWithHuman must be true")
+    eink_verification = data.get("einkVerification")
+    if not isinstance(eink_verification, dict) or (
+        eink_verification.get("selection") != "impact-based"
+        or eink_verification.get("minorUiChanges") != "no-separate-review"
+        or eink_verification.get("lowImpactChanges") != "no-separate-review"
+        or eink_verification.get("whenNeeded") != "minimum-affected-scope"
+        or not isinstance(eink_verification.get("fullRestorationMode"), str)
+        or not eink_verification["fullRestorationMode"]
+    ):
+        raise SystemExit("Review policy must select impact-based minimum E-ink verification")
     node_execution = data.get("nodeExecution")
     if not isinstance(node_execution, dict):
         raise SystemExit("Review policy must declare nodeExecution")
@@ -195,11 +205,13 @@ def parse_catalog(repo_root: Path) -> tuple[int, list[str]]:
     nodes = data.get("nodes")
     if not isinstance(nodes, list):
         raise SystemExit("Review Graph catalog must contain a node list")
-    node_ids = [node.get("id") for node in nodes if isinstance(node, dict)]
-    if len(node_ids) != 28 or len(set(node_ids)) != 28 or not all(
-        isinstance(node_id, str) and re.fullmatch(r"[LBMSX]\d{2}", node_id)
-        for node_id in node_ids
-    ):
+    node_ids: list[str] = []
+    for node in nodes:
+        node_id = node.get("id") if isinstance(node, dict) else None
+        if not isinstance(node_id, str) or not re.fullmatch(r"[LBMSX]\d{2}", node_id):
+            raise SystemExit("Review Graph catalog must contain 28 unique valid node IDs")
+        node_ids.append(node_id)
+    if len(node_ids) != 28 or len(set(node_ids)) != 28:
         raise SystemExit("Review Graph catalog must contain 28 unique valid node IDs")
     return data["version"], sorted(node_ids)
 
@@ -611,6 +623,8 @@ def print_summary(repo_root: Path, output_path: Path, report: dict) -> None:
         "currentStageNodes": summary["currentStageNodes"],
         "deferredNodes": summary["deferredNodes"],
         "requiresDevicePass": summary["requiresDevicePass"],
+        "requiresDeviceProfiles": report["summary"]["requiresDeviceProfiles"],
+        "conditionalDeviceProfiles": report["summary"]["conditionalDeviceProfiles"],
     }, ensure_ascii=False))
 
 

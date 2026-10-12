@@ -3,6 +3,10 @@
 <resources>
     <string name="browse_topbar_title">浏览</string>
     <string name="source_home_show_menus">显示菜单</string>
+    <string name="source_home_expand_filters">展开筛选</string>
+    <string name="source_home_collapse_filters">收起筛选</string>
+    <string name="source_home_filters_expanded">筛选已展开</string>
+    <string name="source_home_filters_collapsed">筛选已收起</string>
     <string name="browse_topbar_installed_count">已安装 %1$d</string>
     <string name="browse_topbar_search">聚合搜索</string>
     <string name="browse_topbar_import">导入源</string>
@@ -16,7 +20,6 @@
     <string name="browse_source_capabilities_remote_library">网站收藏读取</string>
     <string name="browse_source_capabilities_verification">登录验证</string>
     <string name="browse_source_search_action">搜索此来源</string>
-    <string name="browse_source_verification_action">登录验证</string>
     <string name="browse_source_enter_action">进入来源</string>
     <string name="browse_source_more_actions">更多 %1$s 操作</string>
     <string name="browse_source_details_title">来源信息</string>
@@ -92,16 +95,8 @@
     <string name="browse_install_publisher">签名发布者指纹</string>
     <string name="browse_install_added_capability">新增：%1$s</string>
     <string name="browse_install_limit_increase">上限提高：%1$s</string>
-    <string name="browse_import_another_action">导入其他内容源包</string>
-    <string name="browse_open_source_action">进入内容源</string>
     <string name="browse_preparing_title">正在验证内容源包</string>
     <string name="browse_preparing_message">正在检查 %1$s 的完整性、兼容性与权限。</string>
-    <string name="browse_approval_title">安装“%1$s”</string>
-    <string name="browse_approval_identity">来源：%1$s · 版本：%2$s</string>
-    <string name="browse_approval_publisher">签名发布者指纹：%1$s</string>
-    <string name="browse_approval_capabilities">新增权限</string>
-    <string name="browse_approval_resource_limits">资源上限放宽</string>
-    <string name="browse_approval_no_new_grants">没有新增权限或资源上限。</string>
     <string name="browse_approval_limit_execution_wall_time">最大执行时间：%1$d 毫秒 → %2$d 毫秒</string>
     <string name="browse_approval_limit_memory">最大内存：%1$d 字节 → %2$d 字节</string>
     <string name="browse_approval_limit_storage">存储配额：%1$d 字节 → %2$d 字节</string>
@@ -121,15 +116,10 @@
     <string name="browse_publisher_key_id">密钥 ID</string>
     <string name="browse_publisher_key_input_label">原始 Ed25519 公钥（Base64）</string>
     <string name="browse_publisher_key_verify_action">验证发布者公钥</string>
-    <string name="browse_installed_title">“%1$s”已安装</string>
     <string name="browse_installed_unsigned_version">%1$s · 本地未签名</string>
-    <string name="browse_installed_unsigned_message">当前活动版本：%1$s（本地未签名）</string>
-    <string name="browse_installed_message">当前活动版本：%1$s</string>
-    <string name="browse_install_failed_title">无法安装内容源包</string>
     <string name="browse_try_again_action">重新选择文件</string>
     <string name="browse_retry_download_action">重试下载</string>
     <string name="browse_return_to_catalog_action">返回目录</string>
-    <string name="browse_dismiss_action">返回</string>
     <string name="browse_failure_file_access">无法读取所选文件。</string>
     <string name="browse_failure_verification">包未通过完整性或兼容性检查；签名包也可能验签失败。</string>
     <string name="browse_failure_install">安装未完成；已保留当前内容源版本。</string>
@@ -153,8 +143,6 @@
     <string name="source_home_open_verification">前往登录验证</string>
     <string name="source_home_retry">重新加载</string>
     <string name="source_home_use_offline_cache">使用已缓存内容</string>
-    <string name="source_home_refresh">刷新</string>
-    <string name="source_home_load_more">加载下一页</string>
     <string name="source_home_loading_more">正在加载下一页</string>
     <string name="source_home_top">顶部</string>
     <string name="source_home_end">末尾</string>
@@ -168,4 +156,5 @@
     <string name="source_home_inline_verification">登录状态已失效，需要完成验证后才能更新；现有内容仍可继续浏览。</string>
     <string name="source_home_append_failure">续页失败。现有内容仍可继续浏览。</string>
     <string name="source_home_retry_append">重试续页</string>
+    <string name="source_home_cursor_page">目录数据页 %1$d</string>
 </resources>

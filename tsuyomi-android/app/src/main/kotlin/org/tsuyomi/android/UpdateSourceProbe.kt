@@ -7,7 +7,6 @@ package org.tsuyomi.android
 
 import android.content.Context
 import java.io.File
-import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicReference
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
@@ -21,6 +20,7 @@ import org.tsuyomi.core.library.UpdateCoordinator
 import org.tsuyomi.core.network.DirectActionTokenRegistry
 import org.tsuyomi.shared.librarydomain.UpdateCandidate
 import org.tsuyomi.shared.librarydomain.UpdateProbe
+import org.tsuyomi.shared.librarydomain.UpdateProbeResult
 import org.tsuyomi.shared.model.BookIdentity
 import org.tsuyomi.shared.sourcecontract.SourceErrorCode
 import org.tsuyomi.shared.sourcecontract.SourceException
@@ -36,8 +36,8 @@ import org.tsuyomi.source.extensionmanager.VerifiedHxpPackage
 
 /**
  * Background-safe source owner. It never borrows an Activity-owned source session: every run reads
- * the active signed archive, imports only its persisted partitioned credentials through the shared
- * gateway factory, and captures a lease that the coordinator rechecks before durable commits.
+ * the active signed archive, while the probe captures a current lease that the coordinator rechecks
+ * before durable commits.
  */
 internal class UpdateSourceRuntime(
     context: Context,
@@ -59,31 +59,27 @@ internal class UpdateSourceRuntime(
         stagingDirectory = File(applicationContext.cacheDir, "hxp-update-staging"),
         packageExecutionTrust = application.packageTrust,
     )
-    private val capturedLeases = ConcurrentHashMap<String, UpdateSourceLease>()
 
     /** Includes only local library books and books in enabled (not frozen) mirror bindings. */
     suspend fun candidates(): List<UpdateCandidate> {
-        val scoped = LinkedHashMap<BookIdentity, String>()
+        val scoped = LinkedHashMap<BookIdentity.Remote, String>()
         libraryRepository.libraryEntries().forEach { entry ->
-            scoped.putIfAbsent(entry.book.identity, entry.book.title)
+            (entry.book.identity as? BookIdentity.Remote)?.let { scoped.putIfAbsent(it, entry.book.title) }
         }
         for (binding in libraryRepository.remoteMirrorBindings()) {
             if (binding.frozen) continue
             libraryRepository.remoteMirrorSnapshot(binding.sourceId)?.books?.forEach { mirrorBook ->
-                scoped.putIfAbsent(mirrorBook.book.identity, mirrorBook.book.title)
+                (mirrorBook.book.identity as? BookIdentity.Remote)?.let { scoped.putIfAbsent(it, mirrorBook.book.title) }
             }
         }
 
         val sourceStatuses = LinkedHashMap<String, UpdateSourceStatus>()
-        for (sourceId in scoped.keys.asSequence().map(BookIdentity::sourceId).distinct()) {
+        for (sourceId in scoped.keys.asSequence().map(BookIdentity.Remote::sourceId).distinct()) {
             sourceStatuses[sourceId] = sourceStatus(sourceId)
         }
         return scoped.map { (identity, title) ->
             when (val status = requireNotNull(sourceStatuses[identity.sourceId])) {
-                is UpdateSourceStatus.Ready -> {
-                    capturedLeases[identity.sourceId] = status.source.lease
-                    UpdateCandidate(identity, title)
-                }
+                is UpdateSourceStatus.Ready -> UpdateCandidate(identity, title)
                 is UpdateSourceStatus.Unavailable -> UpdateCandidate(
                     identity = identity,
                     title = title,
@@ -99,9 +95,8 @@ internal class UpdateSourceRuntime(
         is UpdateSourceStatus.Unavailable -> null
     }
 
-    fun capturedLease(sourceId: String): UpdateSourceLease? = capturedLeases[sourceId]
 
-    private suspend fun sourceStatus(sourceId: String): UpdateSourceStatus {
+    internal suspend fun sourceStatus(sourceId: String): UpdateSourceStatus {
         val packageInfo = readVerifiedPackage(sourceId) ?: return UpdateSourceStatus.Unavailable("source-not-installed")
         val availability = libraryRepository.sourceAvailability(sourceId)
             ?: return UpdateSourceStatus.Unavailable("source-unavailable")
@@ -111,6 +106,8 @@ internal class UpdateSourceRuntime(
         }
         val credentialRevision = try {
             SourceGatewayFactory.mediaCredentialRevision(applicationContext, packageInfo)
+        } catch (cancelled: CancellationException) {
+            throw cancelled
         } catch (_: Throwable) {
             return UpdateSourceStatus.Unavailable("source-credentials-unavailable")
         }
@@ -158,7 +155,7 @@ internal data class UpdateSource(
     val lease: UpdateSourceLease,
 )
 
-private sealed interface UpdateSourceStatus {
+internal sealed interface UpdateSourceStatus {
     data class Ready(val source: UpdateSource) : UpdateSourceStatus
     data class Unavailable(val reason: String) : UpdateSourceStatus
 }
@@ -169,12 +166,13 @@ internal class UpdateSourceProbe(
     private val runtime: UpdateSourceRuntime,
 ) : UpdateProbe {
     private val applicationContext = context.applicationContext
-    private val checkedLease = AtomicReference<Pair<BookIdentity, UpdateSourceLease>?>(null)
+    private val checkedLease = AtomicReference<Pair<BookIdentity.Remote, UpdateSourceLease>?>(null)
 
-    override suspend fun check(candidate: UpdateCandidate, previousAnchor: String?): SourceUpdateProbeResult {
-        val source = runtime.currentSource(candidate.identity.sourceId)
-        if (source == null) {
-            return unavailable(candidate, previousAnchor, runtime.capturedLease(candidate.identity.sourceId), "source-lease-unavailable")
+    override suspend fun check(candidate: UpdateCandidate, previousAnchor: String?): UpdateProbeResult {
+        checkedLease.set(null)
+        val source = when (val status = runtime.sourceStatus(candidate.identity.sourceId)) {
+            is UpdateSourceStatus.Ready -> status.source
+            is UpdateSourceStatus.Unavailable -> return UpdateProbeResult.Unavailable(candidate.identity, status.reason)
         }
         checkedLease.set(candidate.identity to source.lease)
         return try {
@@ -195,7 +193,7 @@ internal class UpdateSourceProbe(
                         ) {
                             unavailable(candidate, previousAnchor, source.lease, "source-evidence-mismatch")
                         } else {
-                            result
+                            UpdateProbeResult.Checked(result)
                         }
                     }
                 }
@@ -212,11 +210,14 @@ internal class UpdateSourceProbe(
                 -> SourceUpdateOutcome.UNAVAILABLE
                 else -> SourceUpdateOutcome.FAILED
             }
-            terminal(candidate, previousAnchor, source.lease, outcome, failure.code.reason())
+            UpdateProbeResult.Checked(terminal(candidate, previousAnchor, source.lease, outcome, failure.code.reason()))
         } catch (_: Throwable) {
-            terminal(candidate, previousAnchor, source.lease, SourceUpdateOutcome.FAILED, "source-check-failed")
+            UpdateProbeResult.Checked(
+                terminal(candidate, previousAnchor, source.lease, SourceUpdateOutcome.FAILED, "source-check-failed"),
+            )
         }
     }
+
 
     override suspend fun isStillValid(candidate: UpdateCandidate): Boolean {
         val (identity, checked) = checkedLease.get() ?: return false
@@ -226,12 +227,11 @@ internal class UpdateSourceProbe(
     private fun unavailable(
         candidate: UpdateCandidate,
         previousAnchor: String?,
-        lease: UpdateSourceLease?,
+        lease: UpdateSourceLease,
         reason: String,
-    ): SourceUpdateProbeResult {
-        val evidence = requireNotNull(lease) { "Eligible update candidate lost its captured source lease" }
-        return terminal(candidate, previousAnchor, evidence, SourceUpdateOutcome.UNAVAILABLE, reason)
-    }
+    ): UpdateProbeResult.Checked = UpdateProbeResult.Checked(
+        terminal(candidate, previousAnchor, lease, SourceUpdateOutcome.UNAVAILABLE, reason),
+    )
 
     private fun terminal(
         candidate: UpdateCandidate,

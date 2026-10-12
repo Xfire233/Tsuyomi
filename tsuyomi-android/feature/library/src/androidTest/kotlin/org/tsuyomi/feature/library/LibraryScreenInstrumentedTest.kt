@@ -27,14 +27,21 @@ import androidx.compose.ui.test.then
 import androidx.compose.ui.unit.DpSize
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.test.assertIsDisplayed
-import androidx.compose.ui.test.assertIsSelected
 import androidx.compose.ui.test.isDisplayed
+import androidx.compose.ui.test.assertIsSelected
+import androidx.compose.ui.test.assertIsEnabled
+import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performTouchInput
 import androidx.compose.ui.test.swipe
+import androidx.compose.ui.test.longClick
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.testTag
+import androidx.test.platform.app.InstrumentationRegistry
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import java.time.Instant
 import org.junit.Assert.assertEquals
@@ -52,6 +59,8 @@ import org.tsuyomi.core.preferences.DisplayPreference
 import org.tsuyomi.core.preferences.DisplayPreferences
 import org.tsuyomi.core.ui.theme.TsuyomiTheme
 import org.tsuyomi.core.ui.components.CoverCardPresentationProvider
+import org.tsuyomi.shared.librarydomain.LocalPublicationFormat
+import org.tsuyomi.shared.librarydomain.LocalPublicationMetadata
 import org.tsuyomi.shared.librarydomain.LibraryBook
 import org.tsuyomi.shared.librarydomain.LibraryEntry
 import org.tsuyomi.shared.model.BookIdentity
@@ -61,6 +70,181 @@ import org.tsuyomi.shared.model.CoverCardPresentation
 class LibraryScreenInstrumentedTest {
     @get:Rule
     val composeRule = createComposeRule()
+
+    @OptIn(ExperimentalTestApi::class)
+    @Test
+    fun einkLocalSearchJumpsToTrueEndpointsWithoutSubmittingTheQueryDraft() {
+        val entries = (1..40).map { entry("search-$it", "搜索书籍${it.toString().padStart(2, '0')}") }
+        var openedBook: BookIdentity? = null
+        var submissions = 0
+        composeRule.setContent {
+            DeviceConfigurationOverride(DeviceConfigurationOverride.ForcedSize(DpSize(360.dp, 480.dp))) {
+                DisplayEnvironmentProvider(einkEnvironment) {
+                    TsuyomiTheme(einkEnvironment) {
+                        LibrarySearchScreen(
+                            query = "未提交草稿",
+                            searchQuery = "搜索书籍",
+                            books = entries,
+                            collections = emptyList(),
+                            preferredCollectionId = null,
+                            loading = false,
+                            failure = null,
+                            onQueryChange = {},
+                            onSearch = { submissions++ },
+                            onRetry = {},
+                            onOpenCollection = {},
+                            onOpenBook = { openedBook = it.book.identity },
+                        )
+                    }
+                }
+            }
+        }
+        val contentPager = hasAnyAncestor(hasTestTag("library-search-eink-pagination"))
+        composeRule.waitUntil { composeRule.onNode(hasText("末页") and contentPager).isDisplayed() }
+        val first = composeRule.onNode(hasText("首页") and contentPager)
+        val last = composeRule.onNode(hasText("末页") and contentPager)
+        first.assertIsNotEnabled()
+        last.assertIsEnabled().performClick()
+        composeRule.onNodeWithText(entries.last().book.title).assertIsDisplayed().performClick()
+        composeRule.runOnIdle { assertEquals(entries.last().book.identity, openedBook) }
+        last.assertIsNotEnabled()
+        composeRule.onNode(hasText("下一页") and contentPager).assertIsNotEnabled()
+        first.assertIsEnabled().performClick()
+        composeRule.onNodeWithText(entries.first().book.title).assertIsDisplayed().performClick()
+        composeRule.runOnIdle { assertEquals(entries.first().book.identity, openedBook); assertEquals(0, submissions) }
+        first.assertIsNotEnabled()
+        composeRule.onNode(hasText("上一页") and contentPager).assertIsNotEnabled()
+        composeRule.onNodeWithText("未提交草稿").assertIsDisplayed()
+    }
+
+    @OptIn(ExperimentalTestApi::class)
+    @Test
+    fun einkPagePlanProbesNeverActivateUnplacedLibraryCovers() {
+        val entries = (1..40).map { entry("cover-probe-$it", "测量封面$it") }
+        val activeCovers = mutableSetOf<BookIdentity>()
+        val activatedCovers = mutableSetOf<BookIdentity>()
+        composeRule.setContent {
+            DeviceConfigurationOverride(DeviceConfigurationOverride.ForcedSize(DpSize(360.dp, 600.dp))) {
+                DisplayEnvironmentProvider(einkEnvironment) {
+                    TsuyomiTheme(einkEnvironment) {
+                        LibraryScreen(
+                            state = state(SystemLibraryFilter.ALL, entries).copy(isRootProjection = false, layout = LibraryLayout.LIST),
+                            collections = emptyList(),
+                            showNavigationNodes = false,
+                            onSelectTab = {},
+                            onOpenCollection = {},
+                            onOpenBook = {},
+                            onRetry = {},
+                            onCoverVisibility = { entry, visible ->
+                                if (visible) {
+                                    activeCovers += entry.book.identity
+                                    activatedCovers += entry.book.identity
+                                } else activeCovers -= entry.book.identity
+                            },
+                        )
+                    }
+                }
+            }
+        }
+        val controls = hasAnyAncestor(hasTestTag("library-eink-pagination"))
+        composeRule.waitUntil { composeRule.onNode(hasText("末页") and controls).isDisplayed() }
+        fun placedIdentities() = entries.filter {
+            composeRule.onNodeWithTag(libraryBookTestTag(it.book.identity)).isDisplayed()
+        }.map { it.book.identity }.toSet()
+        val firstPage = placedIdentities()
+        assertTrue(firstPage.isNotEmpty() && firstPage.size < entries.size)
+        composeRule.runOnIdle {
+            assertEquals(firstPage, activeCovers)
+            assertEquals("Unplaced measurement probes must never announce visible covers", firstPage, activatedCovers)
+        }
+        composeRule.onNode(hasText("末页") and controls).performClick()
+        val lastPage = placedIdentities()
+        assertTrue(entries.last().book.identity in lastPage)
+        composeRule.runOnIdle {
+            assertEquals(lastPage, activeCovers)
+            assertEquals(firstPage + lastPage, activatedCovers)
+        }
+        composeRule.onNode(hasText("首页") and controls).performClick()
+        composeRule.runOnIdle { assertEquals(firstPage, activeCovers); assertEquals(firstPage + lastPage, activatedCovers) }
+    }
+
+    @Test
+    fun einkBookLongPressAndSemanticLongClickSelectExactMembersInEveryLayout() {
+        val first = entry("select-first", "第一本选择书")
+        val second = entry("select-second", "第二本选择书")
+        var library by mutableStateOf(state(SystemLibraryFilter.ALL, listOf(first, second)))
+        var opens = 0
+        composeRule.setContent {
+            DisplayEnvironmentProvider(einkEnvironment) {
+                TsuyomiTheme(einkEnvironment) {
+                    LibraryScreen(
+                        state = library, collections = emptyList(), showNavigationNodes = false,
+                        onSelectTab = {}, onOpenCollection = {}, onOpenBook = { opens++ }, onRetry = {},
+                        onLongPressBook = { library = library.copy(selectionKind = LibrarySelectionKind.BOOK, selectedBookIds = setOf(it)) },
+                        onToggleBookSelection = { identity ->
+                            library = library.copy(selectedBookIds = if (identity in library.selectedBookIds)
+                                library.selectedBookIds - identity else library.selectedBookIds + identity)
+                        },
+                    )
+                }
+            }
+        }
+        for (layout in LibraryLayout.entries) {
+            composeRule.runOnIdle { library = library.copy(layout = layout, selectionKind = null, selectedBookIds = emptySet()) }
+            composeRule.onNodeWithTag(libraryBookTestTag(first.book.identity)).performTouchInput { longClick() }
+            composeRule.runOnIdle {
+                assertEquals(LibrarySelectionKind.BOOK, library.selectionKind)
+                assertEquals(setOf(first.book.identity), library.selectedBookIds)
+                assertEquals(0, opens)
+            }
+            composeRule.onNodeWithTag(libraryBookTestTag(second.book.identity)).performClick()
+            composeRule.runOnIdle { assertEquals(setOf(first.book.identity, second.book.identity), library.selectedBookIds) }
+            composeRule.onNodeWithTag(libraryBookTestTag(first.book.identity)).performClick()
+            composeRule.runOnIdle { assertEquals(setOf(second.book.identity), library.selectedBookIds) }
+            composeRule.onNodeWithContentDescription("选择${first.book.title}").assertDoesNotExist()
+            composeRule.runOnIdle { library = library.copy(selectionKind = null, selectedBookIds = emptySet()) }
+            composeRule.onNodeWithTag(libraryBookTestTag(second.book.identity))
+                .performSemanticsAction(SemanticsActions.OnLongClick) { it() }
+            composeRule.runOnIdle { assertEquals(setOf(second.book.identity), library.selectedBookIds) }
+        }
+    }
+
+    @Test
+    fun einkImportCentersIdleAndCompletedPrincipalActionAndKeepsPreviewActionsAfterContent() {
+        var importState by mutableStateOf(LocalBookImportUiState())
+        val actions = mutableListOf<LocalBookImportAction>()
+        val context = InstrumentationRegistry.getInstrumentation().targetContext
+        composeRule.setContent {
+            DisplayEnvironmentProvider(einkEnvironment) {
+                TsuyomiTheme(einkEnvironment) {
+                    LocalBookImportScreen(importState, { actions += it }, Modifier.fillMaxSize().testTag("import-body"))
+                }
+            }
+        }
+        val choose = composeRule.onNodeWithText(context.getString(R.string.local_book_choose_files))
+        repeat(2) { iteration ->
+            if (iteration == 1) composeRule.runOnIdle {
+                importState = LocalBookImportUiState(results = listOf(LocalBookImportResult("result", "book.epub", "完成", "publication")))
+            }
+            val body = composeRule.onNodeWithTag("import-body").fetchSemanticsNode().boundsInRoot
+            val button = choose.fetchSemanticsNode().boundsInRoot
+            assertTrue(kotlin.math.abs(body.center.x - button.center.x) <= 1f)
+            assertTrue(kotlin.math.abs(body.center.y - button.center.y) <= 1f)
+            choose.performClick()
+        }
+        composeRule.runOnIdle {
+            assertEquals(listOf(LocalBookImportAction.ChooseFiles, LocalBookImportAction.ChooseFiles), actions)
+            importState = importState.copy(fileName = "preview.epub", review = LocalBookImportReview(title = "预览书籍", format = "EPUB", ready = true))
+        }
+        val preview = composeRule.onNodeWithText("预览书籍").assertIsDisplayed().fetchSemanticsNode().boundsInRoot
+        val confirm = composeRule.onNodeWithText(context.getString(R.string.local_book_confirm_import)).assertIsEnabled()
+        val cancel = composeRule.onNodeWithText(context.getString(R.string.local_book_cancel_current)).assertIsEnabled()
+        assertTrue(confirm.fetchSemanticsNode().boundsInRoot.top >= preview.bottom)
+        assertTrue(cancel.fetchSemanticsNode().boundsInRoot.top >= preview.bottom)
+        confirm.performClick()
+        cancel.performClick()
+        composeRule.runOnIdle { assertEquals(listOf(LocalBookImportAction.Confirm, LocalBookImportAction.Cancel), actions.takeLast(2)) }
+    }
 
     @Test
     fun primaryPagerTapAndSwipeSelectTheSameLibraryContext() {
@@ -117,6 +301,160 @@ class LibraryScreenInstrumentedTest {
         assertEquals(SystemLibraryFilter.READ_LATER, selectedTab)
     }
 
+
+    @Test
+    fun einkLibraryUsesDiscreteControlsForEveryProjectionAndKeepsLocalBooksAvailable() {
+        var selectedTab by mutableStateOf(SystemLibraryFilter.ALL)
+        val local = localEntry("00000000-0000-4000-8000-000000000001", "本地出版物")
+        val states = mapOf(
+            SystemLibraryFilter.ALL to state(SystemLibraryFilter.ALL, listOf(entry("shelf", "书架页书籍"))),
+            SystemLibraryFilter.CONTINUE to state(SystemLibraryFilter.CONTINUE, listOf(local.copy(readerVisitedAt = Instant.EPOCH))),
+            SystemLibraryFilter.READ_LATER to state(SystemLibraryFilter.READ_LATER, listOf(local.copy(readLater = true))),
+        )
+
+        composeRule.setContent {
+            DisplayEnvironmentProvider(einkEnvironment) {
+                TsuyomiTheme(einkEnvironment) {
+                    LibraryScreen(
+                        state = states.getValue(selectedTab),
+                        primaryTabStates = states,
+                        collections = emptyList(),
+                        showNavigationNodes = true,
+                        onSelectTab = { selectedTab = it },
+                        onOpenCollection = {},
+                        onOpenBook = {},
+                        onRetry = {},
+                    )
+                }
+            }
+        }
+
+        composeRule.onNodeWithTag("library-primary-pager").assertDoesNotExist()
+        composeRule.onNodeWithTag("library-primary-tabs").assertIsDisplayed()
+        composeRule.onNodeWithTag("tsuyomi-tab-CONTINUE").performClick()
+        composeRule.waitUntil(5_000) { selectedTab == SystemLibraryFilter.CONTINUE }
+        composeRule.onNodeWithText("本地出版物").assertIsDisplayed()
+        composeRule.onNodeWithTag(libraryBookTestTag(local.book.identity)).assertIsDisplayed()
+
+        composeRule.onNodeWithTag("tsuyomi-tab-READ_LATER").performClick()
+        composeRule.waitUntil(5_000) { selectedTab == SystemLibraryFilter.READ_LATER }
+        composeRule.onNodeWithText("本地出版物").assertIsDisplayed()
+        composeRule.onNodeWithTag("tsuyomi-tab-READ_LATER").assertIsSelected()
+
+        composeRule.onNodeWithTag("tsuyomi-tab-ALL").performClick()
+        composeRule.waitUntil(5_000) { selectedTab == SystemLibraryFilter.ALL }
+        composeRule.onNodeWithText("书架页书籍").assertIsDisplayed()
+        composeRule.onNodeWithTag("library-eink-pagination").assertDoesNotExist()
+    }
+
+    @OptIn(ExperimentalTestApi::class)
+    @Test
+    fun einkLibraryPagesTheCurrentProjectionWithExplicitBoundedControls() {
+        val entries = (1..40).map { entry("page-$it", "分页书籍$it") }
+        val states = mapOf(
+            SystemLibraryFilter.ALL to state(SystemLibraryFilter.ALL, entries).copy(layout = LibraryLayout.LIST),
+            SystemLibraryFilter.CONTINUE to state(SystemLibraryFilter.CONTINUE, emptyList()),
+            SystemLibraryFilter.READ_LATER to state(SystemLibraryFilter.READ_LATER, emptyList()),
+        )
+
+        composeRule.setContent {
+            DeviceConfigurationOverride(DeviceConfigurationOverride.ForcedSize(DpSize(360.dp, 480.dp))
+                .then(DeviceConfigurationOverride.FontScale(2f))) {
+                DisplayEnvironmentProvider(einkEnvironment) {
+                    TsuyomiTheme(einkEnvironment) {
+                        LibraryScreen(
+                            state = states.getValue(SystemLibraryFilter.ALL),
+                            primaryTabStates = states,
+                            collections = emptyList(),
+                            showNavigationNodes = true,
+                            onSelectTab = {},
+                            onOpenCollection = {},
+                            onOpenBook = {},
+                            onRetry = {},
+                        )
+                    }
+                }
+            }
+        }
+
+        composeRule.onNodeWithTag("library-eink-pagination").assertIsDisplayed()
+        val contentPager = hasAnyAncestor(hasTestTag("library-eink-pagination"))
+        composeRule.onNode(hasText("上一页") and contentPager).assertIsNotEnabled()
+        val first = composeRule.onNode(hasText("首页") and contentPager)
+        val last = composeRule.onNode(hasText("末页") and contentPager)
+        first.assertIsNotEnabled()
+        last.assertIsEnabled().performClick()
+        composeRule.onNodeWithTag(libraryBookTestTag(entries.last().book.identity)).assertIsDisplayed()
+        last.assertIsNotEnabled()
+        composeRule.onNode(hasText("下一页") and contentPager).assertIsNotEnabled()
+        first.assertIsEnabled().performClick()
+        composeRule.onNodeWithTag(libraryBookTestTag(entries.first().book.identity)).assertIsDisplayed()
+        first.assertIsNotEnabled()
+        composeRule.onNode(hasText("上一页") and contentPager).assertIsNotEnabled()
+        composeRule.onNode(hasText("下一页") and contentPager).assertIsEnabled().performClick()
+        composeRule.onNode(hasText("上一页") and contentPager).assertIsEnabled().performClick()
+        val visited = mutableSetOf<BookIdentity>()
+        fun collectVisibleEntries() {
+            entries.forEach { entry ->
+                val tag = libraryBookTestTag(entry.book.identity)
+                if (composeRule.onNode(hasTestTag(tag)).isDisplayed()) {
+                    visited += entry.book.identity
+                }
+            }
+        }
+        var pageTransitions = 0
+        while (true) {
+            collectVisibleEntries()
+            val next = composeRule.onNode(hasText("下一页") and contentPager)
+            if (next.fetchSemanticsNode().config.contains(SemanticsProperties.Disabled)) break
+            next.performClick()
+            pageTransitions++
+            assertTrue("Pager did not advance within the finite result set", pageTransitions < entries.size)
+        }
+        assertTrue("Expected the finite fixture to span multiple pages", pageTransitions > 1)
+        assertEquals(entries.map { it.book.identity }.toSet(), visited)
+        composeRule.onNode(hasText("上一页") and contentPager).assertIsEnabled().performClick()
+        composeRule.onNode(hasText("下一页") and contentPager).assertIsEnabled()
+    }
+
+
+    @OptIn(ExperimentalTestApi::class)
+    @Test
+    fun einkCollectionPageSurvivesProfileChangesWithoutChangingTheOpenedBook() {
+        var environment by mutableStateOf(einkEnvironment)
+        val entries = (1..25).map { entry("collection-$it", "集合书籍$it") }
+        val collectionState = state(SystemLibraryFilter.ALL, entries).copy(isRootProjection = false, layout = LibraryLayout.LIST)
+        var openedBook: BookIdentity? = null
+        composeRule.setContent {
+            DeviceConfigurationOverride(DeviceConfigurationOverride.ForcedSize(DpSize(360.dp, 480.dp))) {
+                DisplayEnvironmentProvider(environment) {
+                    TsuyomiTheme(environment) {
+                        LibraryScreen(
+                            state = collectionState,
+                            collections = emptyList(),
+                            currentCollectionId = "collection",
+                            showNavigationNodes = false,
+                            onOpenCollection = {},
+                            onOpenBook = { openedBook = it.book.identity },
+                            onRetry = {},
+                        )
+                    }
+                }
+            }
+        }
+        val target = composeRule.onNodeWithTag(libraryBookTestTag(entries[14].book.identity))
+        var pages = 0
+        while (!target.isDisplayed()) {
+            composeRule.onNodeWithText("下一页").assertIsEnabled().performClick()
+            assertTrue("Collection book was unreachable", ++pages < entries.size * 3)
+        }
+        composeRule.runOnIdle { environment = standardEnvironment }
+        composeRule.waitForIdle()
+        composeRule.runOnIdle { environment = einkEnvironment }
+        composeRule.waitForIdle()
+        target.assertIsDisplayed().performClick()
+        assertEquals(entries[14].book.identity, openedBook)
+    }
 
     @Test
     fun primaryPagerShortCommitReturnFlingAndReversalSettleWithAlignedSelection() {
@@ -268,7 +606,7 @@ class LibraryScreenInstrumentedTest {
             }
         }
 
-        val book = composeRule.onNodeWithTag("library-book-${shelfBook.book.identity.sourceId}-${shelfBook.book.identity.remoteBookId}")
+        val book = composeRule.onNodeWithTag(libraryBookTestTag(shelfBook.book.identity))
         book.performTouchInput {
             down(center)
             advanceEventTime(1_000)
@@ -307,7 +645,7 @@ class LibraryScreenInstrumentedTest {
     fun wideGridUpdateMenuRetainsItsFullHitTargetWithoutCollidingWithTheCount() {
         val book = entry("wide-updated", "操作边界验证")
         val update = org.tsuyomi.shared.librarydomain.UnresolvedUpdate(
-            identity = book.book.identity,
+            identity = book.book.identity as BookIdentity.Remote,
             title = book.book.title,
             anchor = "anchor",
             chapters = emptyList(),
@@ -349,9 +687,10 @@ class LibraryScreenInstrumentedTest {
         }
         for (scale in listOf(1f, 2f)) {
             composeRule.runOnIdle { fontScale = scale }
-            val action = composeRule.onNodeWithTag("library-update-actions-${book.book.identity.sourceId}-${book.book.identity.remoteBookId}")
+            val remoteIdentity = book.book.identity as BookIdentity.Remote
+            val action = composeRule.onNodeWithTag("library-update-actions-${remoteIdentity.sourceId}-${remoteIdentity.remoteBookId}")
             val target = action.fetchSemanticsNode().boundsInRoot
-            val card = composeRule.onNodeWithTag("library-book-${book.book.identity.sourceId}-${book.book.identity.remoteBookId}")
+            val card = composeRule.onNodeWithTag(libraryBookTestTag(book.book.identity))
                 .fetchSemanticsNode().boundsInRoot
             assertTrue("Update target width ${target.width} is below $minimumTargetPx", target.width >= minimumTargetPx - 1f)
             assertTrue("Update target height ${target.height} is below $minimumTargetPx", target.height >= minimumTargetPx - 1f)
@@ -363,7 +702,7 @@ class LibraryScreenInstrumentedTest {
             action.performTouchInput { click(Offset(width - 1f, centerY)) }
             composeRule.onNodeWithText("忽略当前更新").assertIsDisplayed()
             androidx.test.espresso.Espresso.pressBack()
-            composeRule.onNodeWithTag("library-book-${book.book.identity.sourceId}-${book.book.identity.remoteBookId}")
+            composeRule.onNodeWithTag(libraryBookTestTag(book.book.identity))
                 .performSemanticsAction(SemanticsActions.OnLongClick) { it() }
             val selected = composeRule.onNodeWithContentDescription("已选择", useUnmergedTree = true)
                 .fetchSemanticsNode().boundsInRoot
@@ -400,7 +739,7 @@ class LibraryScreenInstrumentedTest {
                 }
             }
         }
-        val card = composeRule.onNodeWithTag("library-book-${book.book.identity.sourceId}-${book.book.identity.remoteBookId}")
+        val card = composeRule.onNodeWithTag(libraryBookTestTag(book.book.identity))
         card.performTouchInput {
             down(center)
             advanceEventTime(1_000)
@@ -439,11 +778,10 @@ class LibraryScreenInstrumentedTest {
         var layout by mutableStateOf(LibraryLayout.GRID)
         val locatorOnly = entry("locator-only", "缺少全书比例").copy(
             progress = org.tsuyomi.shared.librarydomain.ReadingProgress(
-                identity = BookIdentity("fixture.library.pager", "locator-only"),
+                identity = BookIdentity.Remote("fixture.library.pager", "locator-only"),
                 locator = org.tsuyomi.shared.locator.ReaderLocator(
                     document = org.tsuyomi.shared.locator.DocumentIdentity(
-                        "fixture.library.pager",
-                        "locator-only",
+                        BookIdentity.Remote("fixture.library.pager", "locator-only"),
                         "chapter-2",
                     ),
                     blockId = "paragraph-4",
@@ -611,6 +949,26 @@ class LibraryScreenInstrumentedTest {
         }
     }
 
+    private fun localEntry(id: String, title: String): LibraryEntry = LibraryEntry(
+        book = LibraryBook(
+            identity = BookIdentity.Local(id),
+            title = title,
+            addedAt = Instant.EPOCH,
+            metadataUpdatedAt = Instant.EPOCH,
+            localPublication = LocalPublicationMetadata(
+                format = LocalPublicationFormat.EPUB,
+                originalSha256 = "a".repeat(64),
+                originalSizeBytes = 1,
+                originalAvailable = true,
+            ),
+        ),
+        libraryAddedAt = Instant.EPOCH,
+        rating = null,
+        localTags = emptySet(),
+        sourceAvailable = false,
+        reconciliation = null,
+    )
+
     private fun state(filter: SystemLibraryFilter, entries: List<LibraryEntry>) = LibraryUiState(
         entries = entries,
         loading = false,
@@ -626,7 +984,7 @@ class LibraryScreenInstrumentedTest {
         readerVisited: Boolean = progress != null,
     ): LibraryEntry = LibraryEntry(
         book = LibraryBook(
-            identity = BookIdentity("fixture.library.pager", id),
+            identity = BookIdentity.Remote("fixture.library.pager", id),
             title = title,
             addedAt = Instant.EPOCH,
             metadataUpdatedAt = Instant.EPOCH,
@@ -639,9 +997,9 @@ class LibraryScreenInstrumentedTest {
         readLater = readLater,
         progress = progress?.let {
             org.tsuyomi.shared.librarydomain.ReadingProgress(
-                identity = BookIdentity("fixture.library.pager", id),
+                identity = BookIdentity.Remote("fixture.library.pager", id),
                 locator = org.tsuyomi.shared.locator.ReaderLocator(
-                    document = org.tsuyomi.shared.locator.DocumentIdentity("fixture.library.pager", id, "chapter-1"),
+                    document = org.tsuyomi.shared.locator.DocumentIdentity(BookIdentity.Remote("fixture.library.pager", id), "chapter-1"),
                     bookProgress = it,
                     capturedAt = Instant.EPOCH,
                 ),
@@ -649,6 +1007,12 @@ class LibraryScreenInstrumentedTest {
         },
         readerVisitedAt = Instant.EPOCH.takeIf { readerVisited },
     )
+
+        val einkEnvironment = environment.copy(
+            preferences = DisplayPreferences(DisplayPreference.EINK, ColorSchemePreference.LIGHT),
+            effectiveProfile = DisplayProfile.EINK,
+            decisionReason = DisplayDecisionReason.MANUAL_EINK,
+        )
 
     private companion object {
         val environment = DisplayEnvironment(

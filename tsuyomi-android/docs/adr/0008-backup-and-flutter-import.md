@@ -35,6 +35,22 @@ The installed private Beta has already introduced Room11 chapter bookmarks and t
 
 `tsuyomi-transfer` v5 therefore replaces v4's `bookmarkedChapterIds` field with a required `bookmarks` list of validated `ReaderLocator` records. Every record carries its exact `DocumentIdentity`, optional semantic anchor/fallback fields, and capture timestamp; its stable bookmark identity is the exact document plus strongest available semantic position, not the timestamp. A v5 record's document must belong to its enclosing book and no two records may name the same bookmark position. v1–v4 remain input-only, closed schemas; specifically, v4 chapter IDs become degraded chapter-start locators at the epoch timestamp.
 
+### 0.5.0 optional original-containing archive — accepted 2026-10-06
+
+The maintainer selected JSON plus optional original-containing archive, superseding the plan's metadata-only recommendation. Lightweight JSON explicitly excludes originals; restoration without bytes produces missing/re-associable publications, not a complete offline library. Transfer v5 stays immutable 32 MiB metadata-only; local-origin metadata needs a separately versioned successor and compatible migration, not widening v5.
+
+Explicit optional archive includes application-owned local originals and durable metadata/progress/bookmarks. The separate versioned contract binds manifest entries to portable publication IDs and verified size/digests; supports independent identical-byte copies without merging state; validates paths/resources/aggregate quotas before admission; defines missing/corrupt entries, conflicts, cancellation and staged recovery. Same ID with different bytes is a conflict, never overwrite. Exclude provider paths, native handles, derived cache/layout, credentials, browser state and source-install authority. Existing native credential-backup opt-in/encryption is not authorized by this archive choice.
+
+Acceptance uses JSON and archive independently: clean-install JSON restore truthfully reports missing originals and verified reassociation; archive restore opens correct preserved content/semantic progress/bookmarks offline. Duplicate identity, malformed/path-escaping/over-budget archives and interrupted restore cannot erase existing books.
+
+### Implemented successors — 2026-10-07
+
+The lightweight exporter emits [`tsuyomi-transfer` v6](../../../tsuyomi-protocol/schemas/tsuyomi-transfer-v6.schema.json); v1–v5 remain closed inputs. Explicit local identity, original size/digest, TXT normalization and known progress document revision travel with metadata, not bytes or `originalAvailable`. Newly restored records remain missing until verified bytes are associated; conflicting metadata never replaces an existing original/reassociation descriptor or its availability.
+
+Original archive v1 is a closed ZIP containing `manifest.bin`, the exact v6 `transfer.json` and selected `originals/<publication UUID>.bin` entries. The manifest uses big-endian integers and length-prefixed ASCII strings: magic `0x54595041` (`TYPA`), version `1`, transfer path/byte length/SHA-256, original count, then UUID/uppercase format/byte length/SHA-256/exact entry path per original. All fields are ASCII; a string length is an unsigned 16-bit byte count. Integer lengths are signed 64-bit; magic/version/count are signed 32-bit. Unknown versions, trailing manifest bytes, duplicate/extra/missing entries, unsafe paths, unsupported compression and mismatched digests reject the archive before admission.
+
+Bounds: 512 total ZIP entries (at most 510 originals), 32 MiB per original and transfer JSON, 256 KiB manifest, 512 MiB total expanded content, 513 MiB archive file, compression ratio at most 200. Export stores originals without compression; import verifies every selected byte fingerprint and stages recoverable file/Room admission. Identical bytes under distinct publication IDs stay independent; an existing ID with different bytes is a conflict and never overwritten. Credentials, provider paths, resource permission and cache/layout state are excluded.
+
 ## Rejected alternatives
 
 - One universal backup containing all state: rejected because portability and complete recovery have incompatible secrecy requirements.

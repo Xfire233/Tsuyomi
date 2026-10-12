@@ -22,6 +22,14 @@ Android host code, platform-neutral protocol code and their documentation use Ap
 
 Behavior, data formats, and user workflows may be migrated from the Flutter reference application. Its package identity, release signing identity, private runtime data, and branding are not inherited.
 
+### 0.5.0 local-reader dependency policy — accepted 2026-10-06
+
+The maintainer selected permissive-first dependencies with a compliant LGPL fallback for the local EPUB/TXT/MOBI/AZW3 plan. Tsuyomi-owned host/protocol code and documentation stay Apache-2.0; prioritize reviewed MIT/BSD/Apache-compatible parser candidates, including the MIT lingo-reader/Foliate-js lead, before accepting a LGPL alternative such as libmobi. This is a policy choice, not dependency adoption or a claim of Android compatibility.
+
+An LGPL fallback retains the exact upstream grant, library/modification sources, notices and applicable recombination/relinking and installation information. Prove that the supplied application/build materials permit a modified-library rebuild; neither a `.so` nor a source-repository URL alone supplies that proof. Do not infer a requirement to disclose the protected project signing key.
+
+This choice does not authorize incorporating GPL/AGPL engine/application code, a commercial procurement, external-reader substitution, license-exception invention or changing all monorepo SPDX labels. Those alternatives were evaluated, not selected. Existing independent AGPL source-extension and Host API boundaries remain unchanged.
+
 ## Rejected alternatives
 
 - Continue publishing under the Hikari Novel Plus identity: rejected because it couples release lineage and user expectations to the Flutter fork.

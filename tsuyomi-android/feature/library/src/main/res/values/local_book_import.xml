@@ -1,0 +1,20 @@
+<!-- SPDX-FileCopyrightText: 2026 Tsuyomi Contributors -->
+<!-- SPDX-License-Identifier: Apache-2.0 -->
+<resources>
+    <string name="local_book_import">导入本地书籍</string>
+    <string name="local_book_choose_files">选择书籍文件</string>
+    <string name="local_book_cancel_current">取消当前导入</string>
+    <string name="local_book_duplicate_scope">已有相同原书。关联已有书会保留原进度与书签；独立副本使用独立阅读状态。</string>
+    <string name="local_book_missing_match">%1$s（重新关联原书）</string>
+    <string name="local_book_independent_copy">导入为独立副本</string>
+    <string name="local_book_encoding">编码</string>
+    <string name="local_book_choose_encoding">请选择编码并检查预览</string>
+    <string name="local_book_heading_paragraph">第 %1$d 段作为章节起点</string>
+    <string name="local_book_heading_title">章节标题</string>
+    <string name="local_book_heading_ordinal">段落序号（从 0 开始）</string>
+    <string name="local_book_add_heading">添加章节起点</string>
+    <string name="local_book_segment_paragraphs">无目录时每节段落数</string>
+    <string name="local_book_segment_scope">1–4096；未选章节起点时按固定段落分节。</string>
+    <string name="local_book_confirm_import">确认导入</string>
+    <string name="local_book_open_detail">查看书籍</string>
+</resources>

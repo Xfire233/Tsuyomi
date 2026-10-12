@@ -104,7 +104,7 @@ object ImportPlanCodec {
             browsingHistory = root.array("browsingHistory").orEmpty().map { element ->
                 val row = element as? JsonObject ?: error("invalid-browsing-history")
                 require(row.keys == setOf("sourceId", "remoteBookId", "lastViewedAt"))
-                SourceBrowsingHistory(BookIdentity(requireNotNull(row.string("sourceId")), requireNotNull(row.string("remoteBookId"))), Instant.parse(requireNotNull(row.string("lastViewedAt"))))
+                SourceBrowsingHistory(BookIdentity.Remote(requireNotNull(row.string("sourceId")), requireNotNull(row.string("remoteBookId"))), Instant.parse(requireNotNull(row.string("lastViewedAt"))))
             },
             warnings = root.array("warnings").orEmpty().map { element ->
                 val row = element as? JsonObject ?: error("invalid-warning")

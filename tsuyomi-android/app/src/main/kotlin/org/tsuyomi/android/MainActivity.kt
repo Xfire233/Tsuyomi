@@ -8,6 +8,7 @@ package org.tsuyomi.android
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
+import androidx.activity.viewModels
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.background
 import androidx.compose.foundation.isSystemInDarkTheme
@@ -42,22 +43,29 @@ import androidx.compose.ui.semantics.error
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.liveRegion
 import androidx.core.view.WindowCompat
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import java.time.Instant
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.CoroutineStart
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.collect
 import org.tsuyomi.shared.librarydomain.LibraryEntry
 import org.tsuyomi.core.display.DisplayController
-import org.tsuyomi.core.display.DisplayProfile
 import org.tsuyomi.core.display.DisplayEnvironment
 import org.tsuyomi.core.display.DisplayEnvironmentProvider
 import org.tsuyomi.core.display.DisplayEnvironmentResolver
 import org.tsuyomi.core.display.displayRedrawLayer
+import org.tsuyomi.core.display.displayGrayscaleLayer
 import org.tsuyomi.core.ui.components.TsuyomiNavigation
 import org.tsuyomi.core.ui.components.TsuyomiTopBar
 import org.tsuyomi.core.ui.components.TsuyomiTopBarAction
@@ -75,10 +83,14 @@ import org.tsuyomi.feature.library.SystemLibraryFilter
 import org.tsuyomi.feature.library.projectedEntries
 import org.tsuyomi.feature.library.libraryNodeRouteTitle
 import org.tsuyomi.core.ui.theme.rememberSystemReducedMotion
+import org.tsuyomi.core.ui.components.TsuyomiInstantEnter
+import org.tsuyomi.core.ui.components.TsuyomiInstantExit
+import org.tsuyomi.core.ui.components.TsuyomiNavigationEnter
+import org.tsuyomi.core.ui.components.TsuyomiNavigationExit
+import org.tsuyomi.core.ui.theme.instantMotion
 import org.tsuyomi.feature.backup.TransferScreen
 import org.tsuyomi.feature.book.BookDetailScreen
 import org.tsuyomi.feature.book.BookDetailTopBar
-import org.tsuyomi.feature.book.BookDirectoryScreen
 import org.tsuyomi.feature.browse.BrowseScreen
 import org.tsuyomi.feature.browse.BrowseTopBar
 import org.tsuyomi.feature.settings.FeatureIntroductionDialog
@@ -94,10 +106,13 @@ import org.tsuyomi.shared.librarydomain.UpdateSnapshot
 
 class MainActivity : ComponentActivity() {
     private var updateNavigationSignal by mutableIntStateOf(0)
+    private val publicationImports by viewModels<PublicationImportCoordinator> {
+        PublicationOwnerFactory(application as TsuyomiApplication)
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        handleIntent(intent)
+        if (savedInstanceState == null) handleIntent(intent)
         WindowCompat.setDecorFitsSystemWindows(window, false)
         setContent {
             TsuyomiApplicationRoot(
@@ -115,6 +130,7 @@ class MainActivity : ComponentActivity() {
 
     private fun handleIntent(intent: android.content.Intent?) {
         if (intent?.action == UpdateNotificationOpenAction) updateNavigationSignal++
+        publicationImports.enqueue(publicationIntentUris(intent))
     }
 }
 
@@ -139,9 +155,7 @@ internal fun TsuyomiApp(
     )
     val introductionPreferences: org.tsuyomi.core.preferences.FeatureIntroductionPreferences? by
         application.featureIntroductionPreferencesRepository.preferences.collectAsStateWithLifecycle(initialValue = null)
-    val transferCoordinator = remember {
-        TransferCoordinator(context.applicationContext, application.transferRepository, application.readerPreferencesRepository)
-    }
+    val transferCoordinator = remember(application) { application.transferCoordinator }
     LaunchedEffect(transferCoordinator) { transferCoordinator.recoverPendingImport() }
     if (!transferCoordinator.recoveryReady) {
         TransferScreen(
@@ -169,6 +183,32 @@ internal fun TsuyomiApp(
     }
 
     val navController = rememberNavController()
+    val instantNavigation = environment.instantMotion || rememberSystemReducedMotion()
+    val publicationFactory = remember(application) { PublicationOwnerFactory(application) }
+    val publicationImports: PublicationImportCoordinator = viewModel(factory = publicationFactory)
+    val localBook: LocalBookFlow = viewModel(factory = publicationFactory)
+    val activityLifecycle = LocalLifecycleOwner.current.lifecycle
+    var localRouteResume by remember { mutableIntStateOf(0) }
+    DisposableEffect(activityLifecycle, localBook) {
+        val observer = LifecycleEventObserver { _, event ->
+            when (event) {
+                Lifecycle.Event.ON_STOP -> scope.launch(start = CoroutineStart.UNDISPATCHED) { localBook.close(retainRoute = true) }
+                Lifecycle.Event.ON_START -> localRouteResume++
+                else -> Unit
+            }
+        }
+        activityLifecycle.addObserver(observer)
+        onDispose { activityLifecycle.removeObserver(observer) }
+    }
+    val importRequest = publicationImports.navigationRequest
+    LaunchedEffect(importRequest) {
+        if (importRequest > 0L) {
+            withContext(Dispatchers.Main.immediate) {
+                navController.navigate(Routes.LocalBookImport) { launchSingleTop = true }
+                publicationImports.consumeNavigation(importRequest)
+            }
+        }
+    }
     fun requestManualUpdate() {
         application.updateScheduler.enqueueManual()
     }
@@ -177,14 +217,37 @@ internal fun TsuyomiApp(
     }
     LaunchedEffect(updateNavigationSignal) {
         if (updateNavigationSignal > 0) {
-            libraryFlow.selectTab(SystemLibraryFilter.ALL)
-            libraryFlow.setUpdateFilter(org.tsuyomi.feature.library.LibraryUpdateFilter.UPDATES_ONLY)
-            navController.navigate(Routes.Library) { launchSingleTop = true }
+            withContext(Dispatchers.Main.immediate) {
+                libraryFlow.selectTab(SystemLibraryFilter.ALL)
+                libraryFlow.setUpdateFilter(org.tsuyomi.feature.library.LibraryUpdateFilter.UPDATES_ONLY)
+                navController.navigate(Routes.Library) { launchSingleTop = true }
+            }
         }
     }
     val currentEntry by navController.currentBackStackEntryAsState()
     val observedRoute = currentEntry?.destination?.route
     val currentRoute = observedRoute ?: navController.currentDestination?.route ?: Routes.Library
+    val localPublicationId = currentEntry?.let { entry ->
+        remember(entry) {
+            entry.savedStateHandle.getStateFlow<String?>(LocalPublicationKey, null)
+        }.collectAsStateWithLifecycle().value
+    }
+    LaunchedEffect(currentEntry, localPublicationId, localBook.routeInvalidationGeneration, localRouteResume) {
+        if (!activityLifecycle.currentState.isAtLeast(Lifecycle.State.STARTED)) {
+            localBook.close(retainRoute = true)
+            return@LaunchedEffect
+        }
+        // Revalidate saved root histories before their local Detail/Reader can become visible.
+        val entry = currentEntry ?: return@LaunchedEffect
+        if (localPublicationId != null) {
+            if (!localBook.admitRoute(entry.id, localPublicationId)) {
+                withContext(Dispatchers.Main.immediate) {
+                    publicationImports.removeDeletedBookActions(localPublicationId)
+                    navController.pruneLocalBookRoutes(localPublicationId)
+                }
+            }
+        } else localBook.close()
+    }
     val bookPickerOwner = remember(currentEntry) {
         if (currentRoute == Routes.CollectionBookPicker) {
             navController.previousBackStackEntry?.let { collectionRuleDraftOwner(it, context) }
@@ -249,7 +312,8 @@ internal fun TsuyomiApp(
     }
     val coverRepository = coverCache.repository
     val coverCredentialRevision = coverCache.credentialRevision
-    LaunchedEffect(coverRepository, coverCache.sourceId, coverCache.packageRevision, coverCredentialRevision) {
+    LaunchedEffect(coverRepository, coverCache.sourceId, coverCache.packageRevision, coverCredentialRevision,
+        publicationImports.catalogGeneration, localBook.catalogGeneration) {
         sourceOwner.flow.configureCoverRepository(coverCache)
         libraryFlow.configureCoverRepository(
             repository = coverRepository,
@@ -257,9 +321,11 @@ internal fun TsuyomiApp(
             packageRevision = coverCache.packageRevision,
             credentialRevision = coverCredentialRevision,
             scope = scope,
+            localPublications = application.localPublications,
+            publicationGeneration = publicationImports.catalogGeneration + localBook.catalogGeneration,
         )
     }
-    LaunchedEffect(activeSourcePackage?.packageSha256) {
+    LaunchedEffect(activeSourcePackage?.packageSha256, publicationImports.catalogGeneration, localBook.catalogGeneration) {
         reloadLibrary()
     }
     BackHandler(
@@ -371,6 +437,7 @@ internal fun TsuyomiApp(
             } },
             onTags = { navController.navigate(Routes.LibraryTags) },
             onCreateCollection = { navController.navigate(Routes.NewCollection) },
+            onImportLocalBook = publicationImports::show,
             collectionPage = chromeRoute == Routes.LibraryCollection,
             smartCollection = chromeRoute == Routes.LibraryCollection && libraryFlow.collections.any {
                 it.collectionId == chromeEntry.arguments?.getString("collectionId") &&
@@ -484,17 +551,17 @@ internal fun TsuyomiApp(
         Surface(
             modifier = Modifier
                 .fillMaxSize()
-                .displayRedrawLayer(),
+                .displayRedrawLayer()
+                .displayGrayscaleLayer(),
             color = MaterialTheme.colorScheme.background,
         ) {
             CompositionLocalProvider(
                 LocalDestinationScaffold provides DestinationScaffold(
                     windowSize = windowSize,
+                    instantNavigation = instantNavigation,
                     topBar = { chromeRoute, chromeEntry ->
-                    val routeOwnsChrome = environment.effectiveProfile == DisplayProfile.STANDARD &&
-                        destinationOwnsChrome(chromeRoute)
-                    if (routeOwnsChrome || chromeRoute in setOf(Routes.Library, Routes.LibraryCollection) ||
-                        (chromeRoute == Routes.Detail && environment.effectiveProfile == DisplayProfile.STANDARD)) {
+                    val routeOwnsAppBar = destinationOwnsAppBar(chromeRoute)
+                    if (routeOwnsAppBar || chromeRoute in setOf(Routes.Library, Routes.LibraryCollection)) {
                         // These destinations own their chrome and content in one NavHost layer.
                     } else if (chromeRoute == Routes.LibraryTags) {
                         LibraryTagsTopBar(
@@ -509,20 +576,14 @@ internal fun TsuyomiApp(
                         Routes.CollectionBookPicker,
                     )) {
                         libraryChrome(chromeRoute, chromeEntry, null)
-                    } else if (
-                        chromeRoute == Routes.Browse &&
-                        environment.effectiveProfile == DisplayProfile.STANDARD
-                    ) {
+                    } else if (chromeRoute == Routes.Browse) {
                         BrowseTopBar(
                             installedSourceCount = sourceOwner.installer.installedPackages.size,
                             onSearch = { navController.navigate(Routes.Search) },
                             onImport = sourceOwner::requestImport,
                             onRefreshSources = { scope.launch { sourceOwner.refreshInstalledSources() } },
                         )
-                    } else if (
-                        chromeRoute == Routes.SourceHome &&
-                        environment.effectiveProfile == DisplayProfile.STANDARD
-                    ) {
+                    } else if (chromeRoute == Routes.SourceHome) {
                         TsuyomiTopBar(
                             title = sourceHomeContent?.title?.takeIf(String::isNotBlank)
                                 ?: sourceHomeSourceName.ifBlank { stringResource(R.string.title_source_home_standard_fallback) },
@@ -548,7 +609,7 @@ internal fun TsuyomiApp(
                                             },
                                             selected = source.manifest.sourceId == activeSourcePackage?.manifest?.sourceId,
                                             onClick = {
-                                                scope.launch {
+                                                scope.launch(Dispatchers.Main.immediate) {
                                                     sourceSwitchUnavailable = sourceOwner.switchSourceHome(
                                                         source.manifest.sourceId.value,
                                                     ) == SourceHomeSwitchResult.UNAVAILABLE
@@ -561,20 +622,22 @@ internal fun TsuyomiApp(
                             onNavigateUp = {
                                 if (!sourceOwner.navigateBackFromHomeFeature()) navController.navigateUp()
                             },
-                            actions = listOf(
-                                TsuyomiTopBarAction(
-                                    icon = TsuyomiIcons.Search,
-                                    label = stringResource(R.string.title_source_home_search),
-                                    onClick = { scope.launch { sourceOwner.openInstalledSource() } },
-                                ),
-                            ),
+                            actions = buildList {
+                                add(
+                                    TsuyomiTopBarAction(
+                                        icon = TsuyomiIcons.Search,
+                                        label = stringResource(R.string.title_source_home_search),
+                                        onClick = { scope.launch(Dispatchers.Main.immediate) { sourceOwner.openInstalledSource() } },
+                                    ),
+                                )
+                            },
                             overflow = buildList {
                                 if (sourceOwner.remoteLibraryAvailable) {
                                     add(
                                         TsuyomiOverflowAction(
                                             label = stringResource(R.string.title_source_home_remote_library),
                                             icon = TsuyomiIcons.Bookmark,
-                                            onClick = { scope.launch { sourceOwner.openRemoteLibrary() } },
+                                            onClick = { scope.launch(Dispatchers.Main.immediate) { sourceOwner.openRemoteLibrary() } },
                                         ),
                                     )
                                 }
@@ -596,10 +659,7 @@ internal fun TsuyomiApp(
                                 )
                             },
                         )
-                    } else if (
-                        chromeRoute == Routes.Search &&
-                        environment.effectiveProfile == DisplayProfile.STANDARD
-                    ) {
+                    } else if (chromeRoute == Routes.Search) {
                         val routeSearchLayout by chromeEntry.savedStateHandle
                             .getStateFlow(SourceSearchRouteOwner.LayoutKey, SearchLayout.LIST)
                             .collectAsStateWithLifecycle()
@@ -624,9 +684,7 @@ internal fun TsuyomiApp(
                     }
                 },
                     navigation = { chromeRoute, chromeEntry, layout ->
-                    val routeOwnsChrome = environment.effectiveProfile == DisplayProfile.STANDARD &&
-                        destinationOwnsChrome(chromeRoute)
-                    if (!routeOwnsChrome && chromeRoute != Routes.CollectionBookPicker) {
+                    if (destinationShowsPrimaryNavigation(chromeRoute, layout)) {
                         TsuyomiNavigation(
                             layout = layout,
                             items = appNavigationItems,
@@ -634,7 +692,7 @@ internal fun TsuyomiApp(
                                 ?: rootRouteFor(chromeRoute),
                             onSelect = { item ->
                                 if (item.route == Routes.Library) {
-                                    scope.launch {
+                                    scope.launch(Dispatchers.Main.immediate) {
                                         libraryFlow.selectTab(SystemLibraryFilter.ALL)
                                         navController.selectRoot(item.route)
                                     }
@@ -651,14 +709,28 @@ internal fun TsuyomiApp(
                     navController = navController,
                     startDestination = Routes.Library,
                     modifier = Modifier.fillMaxSize(),
+                    enterTransition = {
+                        if (instantNavigation) TsuyomiInstantEnter else TsuyomiNavigationEnter
+                    },
+                    exitTransition = {
+                        if (instantNavigation) TsuyomiInstantExit else TsuyomiNavigationExit
+                    },
                 ) {
                     libraryRoutes(
                         navController = navController,
                         controller = libraryFlow,
                         chrome = libraryChrome,
                         coverState = { entry -> libraryFlow.coverState(entry) },
-                        openBookDetail = sourceOwner::openLibraryDetail,
-                        resumeReading = sourceOwner::resumeReading,
+                        openBookDetail = { entry ->
+                            val local = entry.book.identity as? org.tsuyomi.shared.model.BookIdentity.Local
+                            if (local != null) { navController.openLocalBook(local.publicationId); true }
+                            else sourceOwner.openLibraryDetail(entry)
+                        },
+                        resumeReading = { entry ->
+                            val local = entry.book.identity as? org.tsuyomi.shared.model.BookIdentity.Local
+                            if (local != null) { navController.openLocalBook(local.publicationId, reader = true); true }
+                            else sourceOwner.resumeReading(entry)
+                        },
                         onCoverVisibility = libraryFlow::setCoverVisible,
                         openRemoteDestination = sourceOwner::openRemoteDestination,
                         onManualUpdate = { application.updateScheduler.enqueueManual() },
@@ -675,6 +747,8 @@ internal fun TsuyomiApp(
                         owner = sourceOwner,
                         libraryFlow = libraryFlow,
                         readerPreferences = readerPreferences,
+                        localBook = localBook,
+                        publicationImports = publicationImports,
                         onReaderPreferencesChanged = { updated ->
                             scope.launch { application.readerPreferencesRepository.update(updated) }
                         },
@@ -692,6 +766,9 @@ internal fun TsuyomiApp(
                         dependencies = settingsDependencies,
                         onImportConfirmed = { reloadLibrary() },
                     )
+                    appDestination(Routes.LocalBookImport) {
+                        PublicationImportRoute(publicationImports, navController)
+                    }
                 }
             }
         }

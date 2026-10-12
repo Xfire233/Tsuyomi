@@ -1,0 +1,248 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://protocol.tsuyomi.dev/schema/tsuyomi-transfer-v6.schema.json",
+  "title": "Tsuyomi Transfer v6",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["format", "version", "createdAt", "library", "shelves"],
+  "properties": {
+    "format": { "const": "tsuyomi-transfer" },
+    "version": { "const": 6 },
+    "createdAt": { "$ref": "#/$defs/timestamp" },
+    "library": {
+      "type": "array",
+      "maxItems": 100000,
+      "items": { "$ref": "#/$defs/book" }
+    },
+    "shelves": {
+      "type": "array",
+      "maxItems": 5000,
+      "items": { "$ref": "#/$defs/shelf" }
+    },
+    "preferences": { "$ref": "#/$defs/preferences" }
+  },
+  "$defs": {
+    "timestamp": { "type": "string", "format": "date-time" },
+    "sourceId": { "type": "string", "pattern": "^[a-z0-9](?:[a-z0-9.-]{0,126}[a-z0-9])?$" },
+    "remoteId": { "type": "string", "minLength": 1, "maxLength": 1024 },
+    "chapterId": { "type": "string", "minLength": 1, "maxLength": 512, "pattern": "\\S" },
+    "publicationId": { "type": "string", "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$" },
+    "identity": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["origin", "sourceId", "remoteBookId"],
+          "properties": {
+            "origin": { "const": "remote" },
+            "sourceId": { "$ref": "#/$defs/sourceId" },
+            "remoteBookId": { "$ref": "#/$defs/remoteId" }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["origin", "publicationId"],
+          "properties": {
+            "origin": { "const": "local" },
+            "publicationId": { "$ref": "#/$defs/publicationId" }
+          }
+        }
+      ]
+    },
+    "locatorDocument": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["book", "contentId"],
+      "properties": {
+        "book": { "$ref": "#/$defs/identity" },
+        "contentId": { "$ref": "#/$defs/remoteId" },
+        "revision": { "type": "string", "minLength": 1, "maxLength": 256 }
+      }
+    },
+    "readerLocator": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["document", "capturedAt"],
+      "properties": {
+        "document": { "$ref": "#/$defs/locatorDocument" },
+        "blockId": { "type": "string", "minLength": 1, "maxLength": 1024 },
+        "textAnchorDigest": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+        "characterOffset": { "type": "integer", "minimum": 0 },
+        "chapterProgress": { "type": "number", "minimum": 0, "maximum": 1 },
+        "bookProgress": { "type": "number", "minimum": 0, "maximum": 1 },
+        "capturedAt": { "$ref": "#/$defs/timestamp" }
+      },
+      "anyOf": [
+        { "properties": { "blockId": {}, "characterOffset": {} }, "required": ["blockId", "characterOffset"] },
+        { "properties": { "blockId": {}, "textAnchorDigest": {} }, "required": ["blockId", "textAnchorDigest"] },
+        { "properties": { "chapterProgress": {} }, "required": ["chapterProgress"] },
+        { "properties": { "bookProgress": {} }, "required": ["bookProgress"] }
+      ]
+    },
+    "localPublication": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["format", "originalSha256", "originalSizeBytes"],
+      "properties": {
+        "format": { "enum": ["epub", "txt", "mobi", "azw3"] },
+        "originalSha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+        "originalSizeBytes": { "type": "integer", "minimum": 1 },
+        "coverResourceId": { "$ref": "#/$defs/publicationId" },
+        "txtOptions": { "$ref": "#/$defs/txtOptions" }
+      },
+      "allOf": [
+        {
+          "if": { "properties": { "format": { "const": "txt" } }, "required": ["format"] },
+          "then": { "properties": { "txtOptions": true }, "required": ["txtOptions"] },
+          "else": { "properties": { "txtOptions": false } }
+        }
+      ]
+    },
+    "txtOptions": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["charsetName", "headingSelections", "paragraphsPerSection"],
+      "properties": {
+        "charsetName": {
+          "oneOf": [
+            { "type": "string", "enum": ["UTF-8", "UTF-16LE", "UTF-16BE", "UTF-32LE", "UTF-32BE", "GB18030", "Big5"] },
+            { "type": "null" }
+          ]
+        },
+        "headingSelections": {
+          "type": "array",
+          "maxItems": 20000,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["paragraphOrdinal", "title"],
+            "properties": {
+              "paragraphOrdinal": { "type": "integer", "minimum": 0, "maximum": 20000 },
+              "title": { "type": "string", "minLength": 1, "maxLength": 512, "pattern": "\\S" }
+            }
+          }
+        },
+        "paragraphsPerSection": { "type": "integer", "minimum": 1, "maximum": 4096, "default": 128 }
+      }
+    },
+    "book": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["identity", "title", "localPin", "updatedAt", "bookmarks"],
+      "properties": {
+        "identity": { "$ref": "#/$defs/identity" },
+        "localPublication": { "$ref": "#/$defs/localPublication" },
+        "title": { "type": "string", "minLength": 1, "maxLength": 4096 },
+        "authors": { "type": "array", "maxItems": 32, "uniqueItems": true, "items": { "type": "string", "minLength": 1, "maxLength": 1024 } },
+        "canonicalUrl": { "type": "string", "format": "uri" },
+        "coverUrl": { "type": "string", "format": "uri" },
+        "status": { "enum": ["unknown", "ongoing", "completed", "hiatus", "cancelled"] },
+        "remoteTags": { "type": "array", "maxItems": 128, "uniqueItems": true, "items": { "type": "string", "minLength": 1, "maxLength": 256 } },
+        "localTags": { "type": "array", "maxItems": 64, "uniqueItems": true, "items": { "type": "string", "minLength": 1, "maxLength": 64 } },
+        "shelfIds": { "type": "array", "maxItems": 512, "uniqueItems": true, "items": { "type": "string", "minLength": 1, "maxLength": 128 } },
+        "rating": { "type": "number", "minimum": 0, "maximum": 5 },
+        "readLater": { "type": "boolean" },
+        "localPin": { "type": "boolean" },
+        "addedAt": { "$ref": "#/$defs/timestamp" },
+        "updatedAt": { "$ref": "#/$defs/timestamp" },
+        "progress": { "$ref": "#/$defs/progress" },
+        "completedChapterIds": {
+          "type": "array",
+          "maxItems": 20000,
+          "uniqueItems": true,
+          "items": { "$ref": "#/$defs/chapterId" }
+        },
+        "bookmarks": {
+          "type": "array",
+          "maxItems": 20000,
+          "items": { "$ref": "#/$defs/readerLocator" }
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": { "localPin": { "const": false } },
+            "required": ["localPin"]
+          },
+          "then": {
+            "properties": { "shelfIds": { "type": "array", "maxItems": 0 } }
+          }
+        },
+        {
+          "if": {
+            "properties": { "identity": { "type": "object", "properties": { "origin": { "const": "local" } }, "required": ["origin"] } },
+            "required": ["identity"]
+          },
+          "then": {
+            "required": ["localPublication"],
+            "properties": { "localPublication": true, "canonicalUrl": false, "coverUrl": false }
+          },
+          "else": { "properties": { "localPublication": false } }
+        }
+      ]
+    },
+    "progress": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["updatedAt"],
+      "properties": {
+        "chapterId": { "$ref": "#/$defs/remoteId" },
+        "revision": { "type": "string", "minLength": 1, "maxLength": 256 },
+        "textAnchor": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+        "characterOffset": { "type": "integer", "minimum": 0 },
+        "chapterProgress": { "type": "number", "minimum": 0, "maximum": 1 },
+        "bookProgress": { "type": "number", "minimum": 0, "maximum": 1 },
+        "updatedAt": { "$ref": "#/$defs/timestamp" }
+      },
+      "anyOf": [
+        { "properties": { "textAnchor": true }, "required": ["textAnchor"] },
+        { "properties": { "characterOffset": true }, "required": ["characterOffset"] },
+        { "properties": { "chapterProgress": true }, "required": ["chapterProgress"] },
+        { "properties": { "bookProgress": true }, "required": ["bookProgress"] }
+      ]
+    },
+    "shelf": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "name"],
+      "properties": {
+        "id": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "name": { "type": "string", "minLength": 1, "maxLength": 256 },
+        "parentId": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "position": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "preferences": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "reader": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "flow": { "enum": ["scroll", "paged", "dual"] },
+            "fontScale": { "type": "number", "minimum": 0.5, "maximum": 3 },
+            "lineHeight": { "type": "number", "minimum": 0.8, "maximum": 3 },
+            "theme": { "enum": ["paper", "warmGray", "nightInk", "black", "inkGreen"] },
+            "horizontalMargin": { "type": "number", "minimum": 12, "maximum": 40 },
+            "paragraphSpacing": { "type": "number", "minimum": 0, "maximum": 32 },
+            "lockPortrait": { "type": "boolean" },
+            "progressVisible": { "type": "boolean" },
+            "immersive": { "type": "boolean" },
+            "keepAwake": { "type": "boolean" },
+            "volumePaging": { "type": "boolean" },
+            "fontFamily": { "enum": ["system", "sans", "serif", "monospace"] },
+            "fontWeight": { "enum": [400, 500] },
+            "letterSpacing": { "type": "number", "minimum": -0.05, "maximum": 0.2 },
+            "firstLineIndent": { "type": "number", "minimum": 0, "maximum": 4 },
+            "verticalMargin": { "type": "number", "minimum": 0, "maximum": 64 },
+            "textAlignment": { "enum": ["start", "justify", "center", "end"] },
+            "foregroundColor": { "type": "string", "pattern": "^#[0-9A-F]{6}$" },
+            "backgroundColor": { "type": "string", "pattern": "^#[0-9A-F]{6}$" }
+          }
+        }
+      }
+    }
+  }
+}

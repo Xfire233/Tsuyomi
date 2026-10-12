@@ -63,6 +63,17 @@ jobs:
         run: >-
           ./gradlew --no-daemon --console=plain --dependency-verification strict
           ${{ steps.plan.outputs.build_tasks }}
+      - name: Preserve screenshot validation reports
+        if: always() && steps.plan.outputs.build_tasks != ''
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: android-screenshot-validation
+          path: |
+            tsuyomi-android/**/build/reports/screenshotTest/
+            tsuyomi-android/**/build/outputs/screenshotTest-results/
+            tsuyomi-android/**/build/test-results/validateDebugScreenshotTest/
+          retention-days: 7
+          if-no-files-found: warn
 
   android-api29-instrumentation:
     runs-on: ubuntu-latest
@@ -105,9 +116,9 @@ jobs:
         if: steps.plan.outputs.device_needed == 'true'
         env:
           CI_BASE: ${{ github.event.pull_request.base.sha }}
-        run: >-
-          python ../tools/android_api29.py --repo-root "$GITHUB_WORKSPACE"
-          --mode ci --base "$CI_BASE" --head "$GITHUB_SHA"
+        run: |
+          python ../tools/android_api29.py --repo-root "$GITHUB_WORKSPACE" \
+            --mode ci --base "$CI_BASE" --head "$GITHUB_SHA"
       - name: Preserve API 29 diagnostics
         if: always() && steps.plan.outputs.device_needed == 'true'
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02

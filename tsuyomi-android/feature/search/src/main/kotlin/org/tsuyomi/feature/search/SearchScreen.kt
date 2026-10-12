@@ -38,6 +38,10 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import org.tsuyomi.core.display.DisplayProfile
 import org.tsuyomi.core.display.LocalDisplayEnvironment
+import org.tsuyomi.core.ui.components.TsuyomiMeasuredPager
+import org.tsuyomi.core.ui.components.LocalTsuyomiPagerItemVisible
+import org.tsuyomi.core.ui.components.TsuyomiMeasuredPagerState
+import org.tsuyomi.core.ui.components.rememberTsuyomiMeasuredPagerState
 import org.tsuyomi.core.media.api.CoverUiState
 import org.tsuyomi.core.media.api.FallbackSpec
 import org.tsuyomi.core.ui.components.CoverImage
@@ -72,6 +76,7 @@ enum class SearchLayout {
 
     fun next(): SearchLayout = entries[(ordinal + 1) % entries.size]
 }
+
 
 @Composable
 fun SearchTopBar(
@@ -116,20 +121,12 @@ fun SearchScreen(
     },
     onCoverVisibility: (SourceBookSummary, Boolean) -> Unit = { _, _ -> },
 ) {
-    if (LocalDisplayEnvironment.current.effectiveProfile == DisplayProfile.EINK) {
-        FrozenEInkSearchScreen(
-            query = query,
-            state = state,
-            onQueryChange = onQueryChange,
-            onSearch = onSearch,
-            onSelectBook = onSelectBook,
-            onRetry = onRetry,
-            onUseOfflineCache = onUseOfflineCache,
-            onOpenVerification = onOpenVerification,
-            modifier = modifier,
-        )
-        return
-    }
+    val isEink = LocalDisplayEnvironment.current.effectiveProfile == DisplayProfile.EINK
+    val measuredPagerState = rememberTsuyomiMeasuredPagerState(
+        initialAnchorKey = (state as? SearchResultState.Results)?.items?.firstOrNull()?.let {
+            bookKey(it)
+        },
+    )
 
     Column(modifier.fillMaxSize()) {
         TsuyomiTextField(
@@ -175,6 +172,16 @@ fun SearchScreen(
                     message = stringResource(R.string.search_empty_message),
                     modifier = Modifier.weight(1f),
                 )
+            } else if (isEink) {
+                SearchPagedResults(
+                    items = state.items,
+                    pagerState = measuredPagerState,
+                    layout = layout,
+                    onSelectBook = onSelectBook,
+                    coverState = coverState,
+                    onCoverVisibility = onCoverVisibility,
+                    modifier = Modifier.weight(1f),
+                )
             } else {
                 SearchResults(
                     books = state.items,
@@ -194,6 +201,45 @@ fun SearchScreen(
             )
         }
     }
+}
+
+
+@Composable
+private fun SearchPagedResults(
+    items: List<SourceBookSummary>, pagerState: TsuyomiMeasuredPagerState, layout: SearchLayout,
+    onSelectBook: (SourceBookSummary) -> Unit, coverState: @Composable (SourceBookSummary) -> CoverUiState,
+    onCoverVisibility: (SourceBookSummary, Boolean) -> Unit, modifier: Modifier,
+) {
+    val grid = layout == SearchLayout.GRID
+    val spacing = if (grid) TsuyomiSpacing.Md else 0.dp
+    TsuyomiMeasuredPager(
+        itemCount = items.size,
+        itemKey = { bookKey(items[it]) },
+        state = pagerState,
+        columns = if (grid) 3 else 1,
+        horizontalSpacing = spacing,
+        verticalSpacing = spacing,
+        modifier = modifier.fillMaxSize().testTag("search-eink-results-viewport")
+            .then(if (grid) Modifier.padding(TsuyomiSpacing.Md) else Modifier),
+        itemContent = { index ->
+            val book = items[index]
+            when (layout) {
+                SearchLayout.GRID -> {
+                    SearchCoverVisibility(book, onCoverVisibility)
+                    SearchGridCard(book, onSelectBook, coverState(book))
+                }
+                SearchLayout.LIST -> Column(Modifier.fillMaxWidth()) {
+                    SearchCoverVisibility(book, onCoverVisibility)
+                    SearchListRow(book, onSelectBook, coverState(book))
+                    HorizontalDivider()
+                }
+                SearchLayout.COMPACT -> Column(Modifier.fillMaxWidth()) {
+                    SearchCompactRow(book, onSelectBook)
+                    HorizontalDivider()
+                }
+            }
+        },
+    )
 }
 
 @Composable
@@ -234,19 +280,24 @@ private fun SearchResults(
     }
 }
 
+
+
+
 @Composable
 private fun SearchCoverVisibility(
     book: SourceBookSummary,
     onCoverVisibility: (SourceBookSummary, Boolean) -> Unit,
 ) {
-    DisposableEffect(book.identity, book.coverUrl, book.canonicalUrl) {
-        onCoverVisibility(book, true)
-        onDispose { onCoverVisibility(book, false) }
+    val visible = LocalTsuyomiPagerItemVisible.current
+    DisposableEffect(book.identity, book.coverUrl, book.canonicalUrl, visible) {
+        if (visible) onCoverVisibility(book, true)
+        onDispose { if (visible) onCoverVisibility(book, false) }
     }
 }
 
 private fun bookKey(book: SourceBookSummary): String =
     "${book.identity.sourceId}:${book.identity.remoteBookId}"
+
 
 @Composable
 private fun SearchListRow(
@@ -388,80 +439,6 @@ private fun SearchFailure(
     }
 }
 
-@Composable
-private fun FrozenEInkSearchScreen(
-    query: String,
-    state: SearchResultState,
-    onQueryChange: (String) -> Unit,
-    onSearch: () -> Unit,
-    onSelectBook: (SourceBookSummary) -> Unit,
-    onRetry: () -> Unit,
-    onUseOfflineCache: () -> Unit,
-    onOpenVerification: () -> Unit,
-    modifier: Modifier,
-) {
-    Column(modifier.fillMaxSize()) {
-        Row(
-            modifier = Modifier.fillMaxWidth().padding(16.dp),
-            horizontalArrangement = Arrangement.spacedBy(12.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            TsuyomiTextField(
-                value = query,
-                onValueChange = onQueryChange,
-                label = stringResource(R.string.search_eink_query_label),
-                singleLine = true,
-                keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
-                keyboardActions = KeyboardActions(onSearch = { onSearch() }),
-                modifier = Modifier.weight(1f),
-            )
-            TsuyomiButton(
-                text = stringResource(R.string.search_action),
-                onClick = onSearch,
-                enabled = query.isNotBlank(),
-            )
-        }
-        when (state) {
-            SearchResultState.Idle -> StateView(
-                kind = TsuyomiStateKind.EMPTY,
-                title = stringResource(R.string.search_eink_idle_title),
-                message = stringResource(R.string.search_eink_idle_message),
-            )
-            SearchResultState.Loading -> StateView(
-                kind = TsuyomiStateKind.LOADING,
-                title = stringResource(R.string.search_loading_title),
-            )
-            is SearchResultState.Results -> if (state.items.isEmpty()) {
-                StateView(
-                    kind = TsuyomiStateKind.EMPTY,
-                    title = stringResource(R.string.search_empty_title, query.trim()),
-                    message = stringResource(R.string.search_empty_message),
-                )
-            } else {
-                LazyColumn(Modifier.fillMaxSize()) {
-                    listItems(state.items, key = ::bookKey) { book ->
-                        Column(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .clickable { onSelectBook(book) }
-                                .padding(horizontal = 20.dp, vertical = 16.dp),
-                        ) {
-                            Text(book.title)
-                            book.author?.let { Text(stringResource(R.string.search_author, it)) }
-                        }
-                        HorizontalDivider()
-                    }
-                }
-            }
-            is SearchResultState.Failure -> SearchFailure(
-                state = state,
-                onRetry = onRetry,
-                onUseOfflineCache = onUseOfflineCache,
-                onOpenVerification = onOpenVerification,
-            )
-        }
-    }
-}
 
 private fun errorMessage(code: SourceErrorCode): Int = when (code) {
     SourceErrorCode.NETWORK_TIMEOUT -> R.string.search_error_timeout

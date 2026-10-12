@@ -33,7 +33,6 @@ class AppNavigationTest {
             Routes.Browse,
             Routes.Search,
             Routes.Detail,
-            Routes.Directory,
             Routes.Reader,
             Routes.Verification,
             Routes.RemoteLibrary,
@@ -48,7 +47,6 @@ class AppNavigationTest {
         mapOf(
             Routes.Search to SourceRestorationTarget.SEARCH,
             Routes.Detail to SourceRestorationTarget.DETAIL,
-            Routes.Directory to SourceRestorationTarget.DIRECTORY,
             Routes.Reader to SourceRestorationTarget.READER,
             Routes.RemoteLibrary to SourceRestorationTarget.SEARCH,
         ).forEach { (route, expectedTarget) ->

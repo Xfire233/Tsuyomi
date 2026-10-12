@@ -13,7 +13,7 @@ class SourceHomeContractsTest {
     @Test
     fun versionedPageAcceptsOnlyDeclaredFilterSelections() {
         val summary = SourceBookSummary(
-            identity = BookIdentity("org.tsuyomi.wenku8", "1234"),
+            identity = BookIdentity.Remote("org.tsuyomi.wenku8", "1234"),
             title = "雾港纪事",
             author = "林川",
             coverUrl = "https://pic.wenku8.com/cover.jpg",
@@ -61,7 +61,7 @@ class SourceHomeContractsTest {
     @Test
     fun detailAcceptsOnlyValidIsoCalendarUpdateDates() {
         val summary = SourceBookSummary(
-            identity = BookIdentity("org.tsuyomi.wenku8", "1234"),
+            identity = BookIdentity.Remote("org.tsuyomi.wenku8", "1234"),
             title = "雾港纪事",
             author = "林川",
             coverUrl = null,

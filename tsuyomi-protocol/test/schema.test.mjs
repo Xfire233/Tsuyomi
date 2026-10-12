@@ -40,7 +40,22 @@ for (const { label, schemaPath, fixturePath } of [
     schemaPath: '../schemas/tsuyomi-transfer-v5.schema.json',
     fixturePath: '../fixtures/transfer/valid-v5-semantic-bookmarks.json',
   },
+  {
+    label: 'tsuyomi-transfer v6 local publication metadata',
+    schemaPath: '../schemas/tsuyomi-transfer-v6.schema.json',
+    fixturePath: '../fixtures/transfer/valid-v6-local-publication.json',
+  },
+  {
+    label: 'tsuyomi-transfer v6 deterministic TXT options and cover identity',
+    schemaPath: '../schemas/tsuyomi-transfer-v6.schema.json',
+    fixturePath: '../fixtures/transfer/valid-v6-local-txt.json',
+  },
 
+  {
+    label: 'tsuyomi Reader document v2',
+    schemaPath: '../schemas/reader-document-v2.schema.json',
+    fixturePath: '../fixtures/reader/valid-reader-document-v2.json',
+  },
   {
     label: 'hxp manifest v1',
     schemaPath: '../schemas/hxp-manifest-v1.schema.json',
@@ -136,6 +151,84 @@ test('tsuyomi-transfer v5 stays closed to v4 chapter bookmarks while semantic fi
     'invalid-v5-duplicate-bookmark-position.json',
   ]) {
     assert.equal(validate(await loadJson(`../fixtures/transfer/${fixture}`)), true, fixture);
+  }
+});
+
+test('tsuyomi-transfer v6 requires portable local metadata and excludes private original handles', async () => {
+  const ajv = createAjv();
+  const validate = ajv.compile(await loadJson('../schemas/tsuyomi-transfer-v6.schema.json'));
+  const valid = await loadJson('../fixtures/transfer/valid-v6-local-publication.json');
+  assert.equal(validate(valid), true, ajv.errorsText(validate.errors));
+  for (const revision of [null, 42, '', 'a'.repeat(257)]) {
+    const invalid = structuredClone(valid);
+    invalid.library[0].progress.revision = revision;
+    assert.equal(validate(invalid), false);
+  }
+
+  for (const fixture of [
+    'invalid-v6-private-original-handle.json',
+    'invalid-v6-local-uuid.json',
+  ]) {
+    assert.equal(validate(await loadJson(`../fixtures/transfer/${fixture}`)), false, fixture);
+  }
+
+  const missingMetadata = structuredClone(valid);
+  delete missingMetadata.library[0].localPublication;
+  assert.equal(validate(missingMetadata), false);
+  const remoteWithLocalMetadata = structuredClone(valid);
+  remoteWithLocalMetadata.library[0].identity = {
+    origin: 'remote',
+    sourceId: 'org.tsuyomi.example',
+    remoteBookId: 'remote-1',
+  };
+  assert.equal(validate(remoteWithLocalMetadata), false);
+});
+
+test('transfer v6 requires canonical TXT options exactly for TXT and only opaque cover UUIDs', async () => {
+  const ajv = createAjv();
+  const validate = ajv.compile(await loadJson('../schemas/tsuyomi-transfer-v6.schema.json'));
+  const fixture = await loadJson('../fixtures/transfer/valid-v6-local-txt.json');
+  const txtIndex = fixture.library.findIndex((book) => book.localPublication?.format === 'txt');
+  const publication = fixture.library[txtIndex].localPublication;
+  for (const charsetName of [null, 'UTF-8', 'UTF-16LE', 'UTF-16BE', 'UTF-32LE', 'UTF-32BE', 'GB18030', 'Big5']) {
+    publication.txtOptions.charsetName = charsetName;
+    assert.equal(validate(fixture), true, ajv.errorsText(validate.errors));
+  }
+  for (const alter of [
+    (value) => { delete value.txtOptions; },
+    (value) => { value.format = 'epub'; },
+    (value) => { value.originalAvailable = true; },
+    (value) => { value.providerUri = 'content://fixture/book'; },
+    (value) => { value.coverResourceId = 'content://fixture/cover'; },
+    (value) => { value.coverResourceId = '/private/cover.png'; },
+    (value) => { value.coverResourceId = '4637570B-1109-48BA-8A1B-256E868CA14C'; },
+    (value) => { value.coverResourceId = null; },
+  ]) {
+    const document = structuredClone(fixture);
+    alter(document.library[txtIndex].localPublication);
+    assert.equal(validate(document), false);
+  }
+  const noCover = structuredClone(fixture);
+  delete noCover.library[txtIndex].localPublication.coverResourceId;
+  assert.equal(validate(noCover), true, ajv.errorsText(validate.errors));
+  const url = structuredClone(fixture);
+  url.library[txtIndex].coverUrl = 'https://fixture.test/cover';
+  assert.equal(validate(url), false);
+});
+
+test('all legacy transfer schemas remain closed to origin, local metadata, options and cover identity', async () => {
+  const fixtures = ['valid-minimal.json', 'valid-v2.json', 'valid-v3-retained-unpinned.json', 'valid-v4-reader-bookmarks.json', 'valid-v5-semantic-bookmarks.json'];
+  const ajv = createAjv();
+  for (const [index, name] of fixtures.entries()) {
+    const validate = ajv.compile(await loadJson(`../schemas/tsuyomi-transfer-v${index + 1}.schema.json`));
+    const legacy = await loadJson(`../fixtures/transfer/${name}`);
+    assert.equal(validate(legacy), true, ajv.errorsText(validate.errors));
+    const origin = structuredClone(legacy);
+    origin.library[0].identity.origin = 'remote';
+    assert.equal(validate(origin), false);
+    const local = structuredClone(legacy);
+    local.library[0].localPublication = { format: 'txt', originalSha256: 'a'.repeat(64), originalSizeBytes: 1, coverResourceId: '4637570b-1109-48ba-8a1b-256e868ca14c', txtOptions: { charsetName: null, headingSelections: [], paragraphsPerSection: 128 } };
+    assert.equal(validate(local), false);
   }
 });
 

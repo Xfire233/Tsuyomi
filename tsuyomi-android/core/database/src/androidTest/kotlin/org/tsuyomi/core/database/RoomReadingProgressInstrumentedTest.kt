@@ -29,6 +29,8 @@ import org.tsuyomi.shared.locator.DocumentIdentity
 import org.tsuyomi.shared.locator.ReaderLocator
 import org.tsuyomi.shared.locator.bookmarkPositionKey
 import org.tsuyomi.shared.model.BookIdentity
+import org.tsuyomi.shared.librarydomain.LocalPublicationFormat
+import org.tsuyomi.shared.librarydomain.LocalPublicationMetadata
 
 @RunWith(AndroidJUnit4::class)
 class RoomReadingProgressInstrumentedTest {
@@ -40,7 +42,7 @@ class RoomReadingProgressInstrumentedTest {
     fun closeDatabase() = fixture.close()
     @Test
     fun newerSemanticProgressWinsEvenWhenItMovesBackwardsAndTimestampTiesKeepExisting() = runBlocking {
-        val identity = BookIdentity("fixture.source", "book-42")
+        val identity = BookIdentity.Remote("fixture.source", "book-42")
         repository.saveBook(LibraryBook(identity, "First title", Instant.EPOCH, Instant.EPOCH))
         val firstAt = Instant.parse("2026-08-08T00:00:00Z")
         val laterAt = firstAt.plusSeconds(1)
@@ -63,7 +65,7 @@ class RoomReadingProgressInstrumentedTest {
 
     @Test
     fun concurrentProgressWritesKeepTheStrictlyNewerCapture() = runBlocking {
-        val identity = BookIdentity("fixture.source", "concurrent-progress")
+        val identity = BookIdentity.Remote("fixture.source", "concurrent-progress")
         repository.saveBook(LibraryBook(identity, "First title", Instant.EPOCH, Instant.EPOCH))
         val earlier = progress(
             identity,
@@ -92,10 +94,10 @@ class RoomReadingProgressInstrumentedTest {
     }
     @Test
     fun readerHistory_is_unpinned_deduplicated_completed_and_excludes_metadata_only() = runBlocking {
-        val reopened = BookIdentity("fixture.reader.history", "reopened")
-        val completed = BookIdentity("fixture.reader.history", "completed")
-        val legacyProgress = BookIdentity("fixture.reader.history", "legacy-progress")
-        val metadataOnly = BookIdentity("fixture.reader.history", "metadata-only")
+        val reopened = BookIdentity.Remote("fixture.reader.history", "reopened")
+        val completed = BookIdentity.Remote("fixture.reader.history", "completed")
+        val legacyProgress = BookIdentity.Remote("fixture.reader.history", "legacy-progress")
+        val metadataOnly = BookIdentity.Remote("fixture.reader.history", "metadata-only")
         val firstVisit = Instant.parse("2026-09-14T01:00:00Z")
         val completedVisit = firstVisit.plusSeconds(10)
         val latestVisit = firstVisit.plusSeconds(20)
@@ -127,7 +129,7 @@ class RoomReadingProgressInstrumentedTest {
     fun readerHistory_survives_database_recreation_without_pinning() = runBlocking {
         val context = InstrumentationRegistry.getInstrumentation().targetContext
         val databaseName = "reader-history-${UUID.randomUUID()}"
-        val identity = BookIdentity("fixture.reader.history", "recreated")
+        val identity = BookIdentity.Remote("fixture.reader.history", "recreated")
         val visitedAt = Instant.parse("2026-09-14T02:00:00Z")
         context.deleteDatabase(databaseName)
         var first: TsuyomiDatabase? = null
@@ -162,12 +164,13 @@ class RoomReadingProgressInstrumentedTest {
 
     @Test
     fun importReplacesInvalidProgressAndDisablesEveryRemoteAddPolicy() = runBlocking {
-        val identity = BookIdentity("fixture.source", "import-progress")
+        val identity = BookIdentity.Remote("fixture.source", "import-progress")
         val invalidTimestamp = Instant.parse("2099-01-01T00:00:00Z")
         val importedAt = Instant.parse("2026-08-09T00:00:00Z")
         repository.saveBook(LibraryBook(identity, "Old", Instant.EPOCH, Instant.EPOCH))
         database.libraryDao().insertProgressIfAbsent(
             ReadingProgressEntity(
+                identity.storageKey,
                 identity.sourceId,
                 identity.remoteBookId,
                 "invalid-chapter",
@@ -218,7 +221,7 @@ class RoomReadingProgressInstrumentedTest {
 
     @Test
     fun completedChaptersPersistAsAnExactNonSequentialSet() = runBlocking {
-        val identity = BookIdentity("fixture.source", "non-sequential")
+        val identity = BookIdentity.Remote("fixture.source", "non-sequential")
         repository.addToLibrary(LibraryBook(identity, "章节状态", Instant.EPOCH, Instant.EPOCH))
 
         assertEquals(true, repository.markChapterCompleted(identity, "chapter-2", Instant.ofEpochSecond(20)))
@@ -234,8 +237,8 @@ class RoomReadingProgressInstrumentedTest {
 
     @Test
     fun bookmarks_keep_positions_distinct_ignore_recapture_and_survive_unpin_without_progress_side_effects() = runBlocking {
-        val primary = BookIdentity("fixture.source", "bookmark-book")
-        val sameChapterElsewhere = BookIdentity("other.source", "bookmark-book")
+        val primary = BookIdentity.Remote("fixture.source", "bookmark-book")
+        val sameChapterElsewhere = BookIdentity.Remote("other.source", "bookmark-book")
         repository.addToLibrary(LibraryBook(primary, "书签状态", Instant.EPOCH, Instant.EPOCH))
         repository.saveBook(LibraryBook(sameChapterElsewhere, "另一来源", Instant.EPOCH, Instant.EPOCH))
         val first = bookmark(primary, "chapter-2", offset = 12, capturedAt = Instant.EPOCH)
@@ -273,7 +276,7 @@ class RoomReadingProgressInstrumentedTest {
 
     @Test
     fun bookmark_capacity_rolls_back_an_overflowing_union_but_allows_recapture_deduplication_and_removal() = runBlocking {
-        val identity = BookIdentity("fixture.source", "bookmark-capacity")
+        val identity = BookIdentity.Remote("fixture.source", "bookmark-capacity")
         repository.saveBook(LibraryBook(identity, "书签容量", Instant.EPOCH, Instant.EPOCH))
         val initial = (1..20_000).map { index ->
             bookmark(identity, "chapter-$index", offset = index, capturedAt = Instant.EPOCH)
@@ -293,8 +296,44 @@ class RoomReadingProgressInstrumentedTest {
         assertEquals(20_000, repository.bookmarks(identity).size)
     }
 
+    @Test fun local_bookmark_writes_reject_removed_metadata_without_leaving_orphans() = runBlocking {
+        val identity = BookIdentity.Local(UUID.randomUUID().toString())
+        repository.addToLibrary(LibraryBook(identity, "独立本地书签", Instant.EPOCH, Instant.EPOCH,
+            localPublication = LocalPublicationMetadata(LocalPublicationFormat.EPUB, "a".repeat(64), 128, false)))
+        val locator = bookmark(identity, "body.xhtml", 12, Instant.EPOCH)
+            .copy(document = DocumentIdentity(identity, "body.xhtml", revision = "b".repeat(64)))
+        repository.addBookmarks(identity, listOf(locator))
+        assertEquals(listOf(locator), repository.bookmarks(identity))
+        assertTrue(repository.deleteLocalPublication(identity))
+        assertTrue(runCatching { repository.toggleBookmark(locator) }.exceptionOrNull() is IllegalStateException)
+        assertTrue(runCatching { repository.addBookmarks(identity, listOf(locator)) }.exceptionOrNull() is IllegalStateException)
+        assertTrue(repository.bookmarks(identity).isEmpty())
+        assertEquals(null, repository.book(identity))
+    }
+
+    @Test fun local_cover_compare_and_set_requires_exact_original_and_current_nullable_cover() = runBlocking {
+        val identity = BookIdentity.Local(UUID.randomUUID().toString())
+        val metadata = LocalPublicationMetadata(LocalPublicationFormat.MOBI, "a".repeat(64), 128, true)
+        val initial = LibraryBook(identity, "精确封面修复", Instant.EPOCH, Instant.EPOCH, localPublication = metadata)
+        repository.addToLibrary(initial)
+        val first = UUID.randomUUID().toString()
+        val replacement = UUID.randomUUID().toString()
+        assertFalse(repository.compareAndSetLocalCoverResourceId(identity, LocalPublicationFormat.EPUB, metadata.originalSha256, 128, null, first))
+        assertFalse(repository.compareAndSetLocalCoverResourceId(identity, metadata.format, "b".repeat(64), 128, null, first))
+        assertFalse(repository.compareAndSetLocalCoverResourceId(identity, metadata.format, metadata.originalSha256, 129, null, first))
+        assertTrue(repository.compareAndSetLocalCoverResourceId(identity, metadata.format, metadata.originalSha256, 128, null, first))
+        assertFalse(repository.compareAndSetLocalCoverResourceId(identity, metadata.format, metadata.originalSha256, 128, null, replacement))
+        assertTrue(repository.compareAndSetLocalCoverResourceId(identity, metadata.format, metadata.originalSha256, 128, first, replacement))
+        assertEquals(initial.copy(localPublication = metadata.copy(coverResourceId = replacement)), repository.book(identity))
+        assertTrue(repository.setLocalOriginalAvailable(identity, false))
+        assertFalse(repository.compareAndSetLocalCoverResourceId(identity, metadata.format, metadata.originalSha256, 128, replacement, first))
+        assertTrue(repository.deleteLocalPublication(identity))
+        assertFalse(repository.compareAndSetLocalCoverResourceId(identity, metadata.format, metadata.originalSha256, 128, replacement, first))
+        assertEquals(null, repository.book(identity))
+    }
+
     private fun bookmark(identity: BookIdentity, chapterId: String, offset: Int, capturedAt: Instant): ReaderLocator = ReaderLocator(
-        document = DocumentIdentity(identity.sourceId, identity.remoteBookId, chapterId),
+        document = DocumentIdentity(identity, chapterId),
         blockId = "block-1",
         textAnchorDigest = "a".repeat(64),
         characterOffset = offset,

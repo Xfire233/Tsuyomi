@@ -7,7 +7,6 @@ package org.tsuyomi.core.ui.components
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.material3.AssistChip
-import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
@@ -23,6 +22,8 @@ import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import org.tsuyomi.core.ui.icons.TsuyomiIcons
+import org.tsuyomi.core.display.DisplayProfile
+import org.tsuyomi.core.display.LocalDisplayEnvironment
 
 @Immutable
 data class TsuyomiChoiceOption(
@@ -41,7 +42,15 @@ fun TsuyomiChoiceMenu(
 ) {
     var expanded by remember { mutableStateOf(false) }
     val selected = options.firstOrNull { it.key == selectedKey } ?: options.firstOrNull()
+    val eInk = LocalDisplayEnvironment.current.effectiveProfile == DisplayProfile.EINK
     Box(modifier) {
+        if (eInk) {
+            TsuyomiActionChip(
+                text = listOfNotNull(label.takeIf(String::isNotBlank), selected?.label).joinToString(" · "),
+                stateDescription = selected?.label.orEmpty(),
+                onClick = { expanded = true },
+            )
+        } else {
         AssistChip(
             onClick = { expanded = true },
             modifier = Modifier
@@ -58,19 +67,33 @@ fun TsuyomiChoiceMenu(
                 Icon(TsuyomiIcons.Disclosure, contentDescription = null)
             },
         )
-        DropdownMenu(
+        }
+        TsuyomiDropdownMenu(
             expanded = expanded,
             onDismissRequest = { expanded = false },
-        ) {
-            options.forEach { option ->
-                DropdownMenuItem(
-                    text = { Text(option.label, maxLines = 1, overflow = TextOverflow.Ellipsis) },
-                    onClick = {
-                        expanded = false
-                        if (option.key != selectedKey) onSelect(option.key)
-                    },
-                )
-            }
-        }
+            itemCount = options.size,
+            itemKey = { options[it].key },
+            itemContent = { index ->
+                val option = options[index]
+                if (eInk) {
+                    TsuyomiMenuItem(
+                        label = option.label,
+                        selected = option.key == selectedKey,
+                        onClick = {
+                            expanded = false
+                            if (option.key != selectedKey) onSelect(option.key)
+                        },
+                    )
+                } else {
+                    DropdownMenuItem(
+                        text = { Text(option.label, maxLines = 1, overflow = TextOverflow.Ellipsis) },
+                        onClick = {
+                            expanded = false
+                            if (option.key != selectedKey) onSelect(option.key)
+                        },
+                    )
+                }
+            },
+        )
     }
 }

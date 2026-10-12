@@ -34,6 +34,7 @@ import org.tsuyomi.core.database.room.UpdateUndoEntity
 import org.tsuyomi.shared.librarydomain.UpdateCadence
 import org.tsuyomi.shared.librarydomain.UpdateCandidate
 import org.tsuyomi.shared.librarydomain.UpdatePolicy
+import org.tsuyomi.shared.librarydomain.UpdateProbeResult
 import org.tsuyomi.shared.librarydomain.UnresolvedUpdate
 import org.tsuyomi.shared.librarydomain.UpdateSessionItemSummary
 import org.tsuyomi.shared.librarydomain.UpdateSessionLease
@@ -75,7 +76,7 @@ class RoomUpdateStore(
         PersistentState(
             session = session?.toSummary(),
             policy = policy?.toDomain() ?: UpdatePolicy(),
-            excludedBooks = bookExclusions.mapTo(linkedSetOf<BookIdentity>()) { BookIdentity(it.sourceId, it.remoteBookId) },
+            excludedBooks = bookExclusions.mapTo(linkedSetOf<BookIdentity.Remote>()) { BookIdentity.Remote(it.sourceId, it.remoteBookId) },
             excludedSources = sourceExclusions.mapTo(linkedSetOf<String>()) { it.sourceId },
         )
     }
@@ -129,7 +130,7 @@ class RoomUpdateStore(
         itemLimit.value = INITIAL_ITEM_PAGE_SIZE
         val ownerToken = UUID.randomUUID().toString()
 
-        val captured = LinkedHashMap<BookIdentity, UpdateCandidate>()
+        val captured = LinkedHashMap<BookIdentity.Remote, UpdateCandidate>()
         candidates.forEach { candidate -> captured.putIfAbsent(candidate.identity, candidate) }
         dao.insertSession(
             UpdateSessionEntity(
@@ -179,7 +180,7 @@ class RoomUpdateStore(
         claimQueuedSessionLocked(leaseExpiresAt)
     }
 
-    override suspend fun previousAnchor(identity: BookIdentity): String? =
+    override suspend fun previousAnchor(identity: BookIdentity.Remote): String? =
         dao.baseline(identity.sourceId, identity.remoteBookId)?.anchor
 
     override suspend fun renewLease(lease: UpdateSessionLease, now: Long, leaseExpiresAt: Long): Boolean {
@@ -208,7 +209,7 @@ class RoomUpdateStore(
     override suspend fun pendingCandidates(lease: UpdateSessionLease, limit: Int): List<UpdateCandidate> {
         require(limit in 1..MAX_CANDIDATE_PAGE_SIZE) { "Invalid update candidate page size" }
         return dao.pendingItems(lease.id, limit).map {
-            UpdateCandidate(BookIdentity(it.sourceId, it.remoteBookId), it.capturedTitle)
+            UpdateCandidate(BookIdentity.Remote(it.sourceId, it.remoteBookId), it.capturedTitle)
         }
     }
 
@@ -322,6 +323,39 @@ class RoomUpdateStore(
         true
     }
 
+    override suspend fun recordUnavailable(
+        lease: UpdateSessionLease,
+        candidate: UpdateCandidate,
+        result: UpdateProbeResult.Unavailable,
+        now: Long,
+    ): Boolean = database.withTransaction {
+        if (!isActive(lease, now) || !isPending(lease, candidate)) return@withTransaction false
+        val rejection = ineligibilityReason(candidate)
+        if (rejection != null) {
+            val changed = dao.finishPendingItem(
+                lease.id,
+                candidate.identity.sourceId,
+                candidate.identity.remoteBookId,
+                ITEM_SKIPPED,
+                rejection,
+                null,
+            ) == 1
+            if (changed) refreshSession(lease, now)
+            return@withTransaction false
+        }
+        val identityMatches = result.identity == candidate.identity
+        val changed = dao.finishPendingItem(
+            lease.id,
+            candidate.identity.sourceId,
+            candidate.identity.remoteBookId,
+            if (identityMatches) SourceUpdateOutcome.UNAVAILABLE.name else ITEM_FAILED,
+            if (identityMatches) result.reason else INVALID_PROBE_RESULT,
+            null,
+        ) == 1
+        if (changed) refreshSession(lease, now)
+        changed && identityMatches
+    }
+
     override suspend fun recordFailure(
         lease: UpdateSessionLease,
         candidate: UpdateCandidate,
@@ -376,7 +410,7 @@ class RoomUpdateStore(
         cancelById(active, now)
     }
 
-    override suspend fun ignore(identity: BookIdentity, anchor: String): UpdateUndo? = database.withTransaction {
+    override suspend fun ignore(identity: BookIdentity.Remote, anchor: String): UpdateUndo? = database.withTransaction {
         val now = clock()
         dao.deleteExpiredUndos(now)
         val update = dao.unresolved(identity.sourceId, identity.remoteBookId) ?: return@withTransaction null
@@ -416,7 +450,7 @@ class RoomUpdateStore(
         restored
     }
 
-    override suspend fun reconcileCompleted(identity: BookIdentity, chapterIds: Set<String>) {
+    override suspend fun reconcileCompleted(identity: BookIdentity.Remote, chapterIds: Set<String>) {
         if (chapterIds.isEmpty()) return
         database.withTransaction {
             val update = dao.unresolved(identity.sourceId, identity.remoteBookId) ?: return@withTransaction
@@ -433,7 +467,7 @@ class RoomUpdateStore(
         dao.upsertPolicy(policy.toEntity())
     }
 
-    override suspend fun excludeBook(identity: BookIdentity, excluded: Boolean) {
+    override suspend fun excludeBook(identity: BookIdentity.Remote, excluded: Boolean) {
         if (excluded) {
             dao.insertBookExclusion(UpdateBookExclusionEntity(identity.sourceId, identity.remoteBookId))
         } else {
@@ -481,7 +515,7 @@ class RoomUpdateStore(
     private suspend fun isPending(lease: UpdateSessionLease, candidate: UpdateCandidate): Boolean =
         dao.pendingItemCount(lease.id, candidate.identity.sourceId, candidate.identity.remoteBookId) == 1
 
-    private suspend fun isExcluded(identity: BookIdentity): Boolean =
+    private suspend fun isExcluded(identity: BookIdentity.Remote): Boolean =
         dao.bookExclusionCount(identity.sourceId, identity.remoteBookId) != 0 ||
             dao.sourceExclusionCount(identity.sourceId) != 0
 
@@ -519,7 +553,7 @@ class RoomUpdateStore(
 
     private fun isAdmissible(
         result: SourceUpdateProbeResult,
-        identity: BookIdentity,
+        identity: BookIdentity.Remote,
         expectedPreviousAnchor: String?,
     ): Boolean {
         if (result.identity != identity || result.previousAnchor != expectedPreviousAnchor) return false
@@ -553,7 +587,7 @@ class RoomUpdateStore(
 
     private fun UpdateSessionItemEntity.toSummaryOrNull(): UpdateSessionItemSummary? = runCatching {
         UpdateSessionItemSummary(
-            identity = BookIdentity(sourceId, remoteBookId),
+            identity = BookIdentity.Remote(sourceId, remoteBookId),
             title = capturedTitle,
             state = state,
             reason = reason,
@@ -585,7 +619,7 @@ class RoomUpdateStore(
 
     private fun UnresolvedUpdateEntity.toDomainOrNull(): UnresolvedUpdate? = runCatching {
         UnresolvedUpdate(
-            identity = BookIdentity(sourceId, remoteBookId),
+            identity = BookIdentity.Remote(sourceId, remoteBookId),
             title = title,
             anchor = anchor,
             chapters = decodeChapters(chaptersJson),
@@ -618,7 +652,7 @@ class RoomUpdateStore(
     private data class PersistentState(
         val session: UpdateSessionSummary?,
         val policy: UpdatePolicy,
-        val excludedBooks: Set<BookIdentity>,
+        val excludedBooks: Set<BookIdentity.Remote>,
         val excludedSources: Set<String>,
     )
 

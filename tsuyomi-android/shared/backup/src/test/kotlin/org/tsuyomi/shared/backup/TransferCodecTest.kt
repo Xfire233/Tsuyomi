@@ -12,6 +12,9 @@ import kotlin.test.assertFailsWith
 import kotlin.test.assertIs
 import kotlin.test.assertTrue
 import org.tsuyomi.shared.locator.DocumentIdentity
+import org.tsuyomi.shared.librarydomain.LocalPublicationFormat
+import org.tsuyomi.shared.librarydomain.LocalTextHeading
+import org.tsuyomi.shared.librarydomain.LocalTextParseOptions
 import org.tsuyomi.shared.locator.LocatorPrecision
 import org.tsuyomi.shared.locator.ReaderLocator
 import org.tsuyomi.shared.locator.bookmarkPositionKey
@@ -21,24 +24,24 @@ class TransferCodecTest {
     @Test
     fun deterministic_export_orders_books_sets_and_shelves() {
         val instant = Instant.parse("2026-08-08T00:00:00Z")
-        val first = TransferBook(BookIdentity("org.tsuyomi.wenku8", "1"), "一", setOf("乙", "甲"), updatedAt = instant)
-        val second = TransferBook(BookIdentity("org.tsuyomi.wenku8", "2"), "二", updatedAt = instant)
+        val first = TransferBook(BookIdentity.Remote("org.tsuyomi.wenku8", "1"), "一", setOf("乙", "甲"), updatedAt = instant)
+        val second = TransferBook(BookIdentity.Remote("org.tsuyomi.wenku8", "2"), "二", updatedAt = instant)
         val snapshot = TransferSnapshot(instant, listOf(second, first), listOf(TransferShelf("b", "B", position = 2), TransferShelf("a", "A", position = 1)))
 
         assertContentEquals(TransferCodec.encode(snapshot), TransferCodec.encode(snapshot.copy(library = listOf(first, second))))
         val parsed = assertIs<ImportParseResult.Ready>(TransferCodec.parse(TransferCodec.encode(snapshot)))
-        assertEquals(listOf("1", "2"), parsed.plan.books.map { it.identity.remoteBookId })
+        assertEquals(listOf("1", "2"), parsed.plan.books.map { assertIs<BookIdentity.Remote>(it.identity).remoteBookId })
         assertEquals(listOf("a", "b"), parsed.plan.shelves.map { it.id })
     }
 
     @Test
-    fun exporter_emits_v5_and_all_legacy_inputs_remain_closed_and_pinned() {
+    fun exporter_emits_v6_and_all_legacy_inputs_remain_closed_and_pinned() {
         val instant = Instant.parse("2026-08-08T00:00:00Z")
         val encoded = TransferCodec.encode(TransferSnapshot(instant, emptyList(), emptyList())).decodeToString()
         val pinned = TransferCodec.encode(
-            TransferSnapshot(instant, listOf(TransferBook(BookIdentity("org.tsuyomi.wenku8", "pinned"), "Pinned", updatedAt = instant)), emptyList()),
+            TransferSnapshot(instant, listOf(TransferBook(BookIdentity.Remote("org.tsuyomi.wenku8", "pinned"), "Pinned", updatedAt = instant)), emptyList()),
         ).decodeToString()
-        assertTrue("\"version\":5" in encoded)
+        assertTrue("\"version\":6" in encoded)
         assertTrue("\"localPin\":true" in pinned)
         assertTrue("\"bookmarks\":[]" in pinned)
 
@@ -50,6 +53,7 @@ class TransferCodecTest {
         val v4 = """{"format":"tsuyomi-transfer","version":4,"createdAt":"2026-08-08T00:00:00Z","library":[{"identity":{"sourceId":"org.tsuyomi.wenku8","remoteBookId":"4"},"title":"D","updatedAt":"2026-08-08T00:00:00Z","completedChapterIds":[],"localPin":true,"bookmarkedChapterIds":["chapter-4"]}],"shelves":[]}""".encodeToByteArray()
         val widenedV4 = """{"format":"tsuyomi-transfer","version":4,"createdAt":"2026-08-08T00:00:00Z","library":[{"identity":{"sourceId":"org.tsuyomi.wenku8","remoteBookId":"4"},"title":"D","updatedAt":"2026-08-08T00:00:00Z","completedChapterIds":[],"localPin":true,"bookmarkedChapterIds":[],"bookmarks":[]}],"shelves":[]}""".encodeToByteArray()
         val dualV3 = """{"format":"tsuyomi-transfer","version":3,"createdAt":"2026-08-08T00:00:00Z","library":[],"shelves":[],"preferences":{"reader":{"flow":"dual"}}}""".encodeToByteArray()
+        val v5 = """{"format":"tsuyomi-transfer","version":5,"createdAt":"2026-08-08T00:00:00Z","library":[{"identity":{"sourceId":"org.tsuyomi.wenku8","remoteBookId":"5"},"title":"E","updatedAt":"2026-08-08T00:00:00Z","localPin":false,"bookmarks":[{"document":{"sourceId":"org.tsuyomi.wenku8","remoteBookId":"5","contentId":"chapter-5","revision":"rev-1"},"blockId":"block-1","textAnchorDigest":"${"a".repeat(64)}","characterOffset":42,"capturedAt":"2026-08-08T00:00:00Z"}]}],"shelves":[]}""".encodeToByteArray()
 
         assertEquals("invalid-book", assertIs<ImportParseResult.Fatal>(TransferCodec.parse(widenedV1)).safeCode)
         assertTrue(assertIs<ImportParseResult.Ready>(TransferCodec.parse(v1)).plan.books.single().localPin)
@@ -62,14 +66,26 @@ class TransferCodecTest {
         assertEquals("invalid-book", assertIs<ImportParseResult.Fatal>(TransferCodec.parse(widenedV3)).safeCode)
         assertEquals("invalid-book", assertIs<ImportParseResult.Fatal>(TransferCodec.parse(widenedV4)).safeCode)
         assertEquals("invalid-reader-preferences", assertIs<ImportParseResult.Fatal>(TransferCodec.parse(dualV3)).safeCode)
+        val semanticV5 = assertIs<ImportParseResult.Ready>(TransferCodec.parse(v5)).plan.books.single()
+        assertEquals(BookIdentity.Remote("org.tsuyomi.wenku8", "5"), semanticV5.identity)
+        assertEquals(false, semanticV5.localPin)
+        assertEquals(DocumentIdentity(semanticV5.identity, "chapter-5", "rev-1"), semanticV5.bookmarks.single().document)
+        assertEquals(LocatorPrecision.EXACT, semanticV5.bookmarks.single().precision)
+        assertEquals(null, semanticV5.localPublication)
+        listOf(v1, v2, v3, v4, v5).forEach { legacy ->
+            val origin = legacy.decodeToString().replace("\"identity\":{", "\"identity\":{\"origin\":\"remote\",")
+            assertEquals("invalid-book", assertIs<ImportParseResult.Fatal>(TransferCodec.parse(origin.encodeToByteArray())).safeCode)
+            val localMetadata = legacy.decodeToString().replace("\"title\":", "\"localPublication\":{},\"title\":")
+            assertEquals("invalid-book", assertIs<ImportParseResult.Fatal>(TransferCodec.parse(localMetadata.encodeToByteArray())).safeCode)
+        }
     }
 
     @Test
-    fun v5_preserves_explicit_unpinned_state_and_rejects_unpinned_shelf_memberships() {
+    fun current_transfer_preserves_explicit_unpinned_state_and_rejects_unpinned_shelf_memberships() {
         val instant = Instant.parse("2026-08-08T00:00:00Z")
         val snapshot = TransferSnapshot(
             instant,
-            listOf(TransferBook(BookIdentity("org.tsuyomi.wenku8", "unpinned"), "保留元数据", localPin = false, updatedAt = instant)),
+            listOf(TransferBook(BookIdentity.Remote("org.tsuyomi.wenku8", "unpinned"), "保留元数据", localPin = false, updatedAt = instant)),
             emptyList(),
         )
         val encoded = TransferCodec.encode(snapshot).decodeToString()
@@ -110,7 +126,7 @@ class TransferCodecTest {
     }
 
     @Test
-    fun complete_v5_reader_preferences_round_trip_without_breaking_legacy_absence() {
+    fun current_reader_preferences_round_trip_without_breaking_legacy_absence() {
         val instant = Instant.parse("2026-08-08T00:00:00Z")
         val preferences = PortableReaderPreferences(
             flow = "dual",
@@ -162,11 +178,11 @@ class TransferCodecTest {
     }
 
     @Test
-    fun v5_round_trips_exact_locator_bookmarks_and_rejects_invalid_locator_records() {
+    fun current_transfer_round_trips_exact_locator_bookmarks_and_rejects_invalid_locator_records() {
         val instant = Instant.parse("2026-08-08T00:00:00Z")
-        val identity = BookIdentity("org.tsuyomi.wenku8", "semantic")
+        val identity = BookIdentity.Remote("org.tsuyomi.wenku8", "semantic")
         val first = ReaderLocator(
-            document = DocumentIdentity(identity.sourceId, identity.remoteBookId, "chapter-7", "rev-1"),
+            document = DocumentIdentity(identity, "chapter-7", "rev-1"),
             blockId = "block-3",
             textAnchorDigest = "a".repeat(64),
             characterOffset = 12,
@@ -183,8 +199,8 @@ class TransferCodecTest {
         val missingBookmarks = encoded.decodeToString().replace("\"bookmarks\":[", "\"invalidBookmarks\":[").encodeToByteArray()
         assertEquals("invalid-book", assertIs<ImportParseResult.Fatal>(TransferCodec.parse(missingBookmarks)).safeCode)
         val mismatchedDocument = encoded.decodeToString().replace(
-            "\"sourceId\":\"org.tsuyomi.wenku8\",\"remoteBookId\":\"semantic\",\"contentId\"",
-            "\"sourceId\":\"other.source\",\"remoteBookId\":\"semantic\",\"contentId\"",
+            "\"book\":{\"origin\":\"remote\",\"sourceId\":\"org.tsuyomi.wenku8\",\"remoteBookId\":\"semantic\"}",
+            "\"book\":{\"origin\":\"remote\",\"sourceId\":\"other.source\",\"remoteBookId\":\"semantic\"}",
         ).encodeToByteArray()
         val numericCapture = encoded.decodeToString().replace("\"capturedAt\":\"$instant\"", "\"capturedAt\":1").encodeToByteArray()
         assertEquals("invalid-book", assertIs<ImportParseResult.Fatal>(TransferCodec.parse(mismatchedDocument)).safeCode)
@@ -195,13 +211,108 @@ class TransferCodecTest {
     }
 
     @Test
+    fun v6_round_trips_local_identity_metadata_and_semantic_bookmarks_without_private_handles() {
+        val instant = Instant.parse("2026-08-08T00:00:00Z")
+        val identity = BookIdentity.Local("f2b8ef64-9375-4fc1-b7c9-274b4beafed1")
+        val publication = TransferLocalPublicationMetadata(
+            format = LocalPublicationFormat.EPUB,
+            originalSha256 = "a".repeat(64),
+            originalSizeBytes = 1234,
+            coverResourceId = "4637570b-1109-48ba-8a1b-256e868ca14c",
+        )
+        val bookmark = ReaderLocator(
+            document = DocumentIdentity(identity, "spine-3"),
+            blockId = "paragraph-7",
+            characterOffset = 12,
+            capturedAt = instant,
+        )
+        val progress = TransferProgress(chapterId = "spine-3", characterOffset = 12, updatedAt = instant, revision = "normalized-section-sha256")
+        val snapshot = TransferSnapshot(
+            instant,
+            listOf(TransferBook(identity, "本地书", updatedAt = instant, progress = progress, bookmarks = listOf(bookmark), localPublication = publication)),
+            emptyList(),
+        )
+
+        val encoded = TransferCodec.encode(snapshot).decodeToString()
+        val restored = assertIs<ImportParseResult.Ready>(TransferCodec.parse(encoded.encodeToByteArray())).plan.books.single()
+
+        assertTrue("\"origin\":\"local\"" in encoded)
+        assertTrue("\"publicationId\":\"${identity.publicationId}\"" in encoded)
+        assertTrue("\"localPublication\"" in encoded)
+        assertTrue("\"originalAvailable\"" !in encoded)
+        assertTrue("content://" !in encoded)
+        assertTrue("providerUri" !in encoded && "filePath" !in encoded && "grant" !in encoded)
+        assertEquals(identity, restored.identity)
+        assertEquals(publication, restored.localPublication)
+        assertEquals(bookmark, restored.bookmarks.single())
+        assertEquals(progress, restored.progress)
+        for (invalidRevision in listOf("null", "42", "\"\"", "\"${"a".repeat(257)}\"")) {
+            val invalid = encoded.replace("\"revision\":\"${progress.revision}\"", "\"revision\":$invalidRevision")
+            assertEquals("invalid-book", assertIs<ImportParseResult.Fatal>(TransferCodec.parse(invalid.encodeToByteArray())).safeCode)
+        }
+        assertFailsWith<IllegalArgumentException> {
+            TransferBook(identity, "缺少原书指纹", updatedAt = instant)
+        }
+        assertFailsWith<IllegalArgumentException> {
+            TransferLocalPublicationMetadata(LocalPublicationFormat.TXT, "A".repeat(64), 1)
+        }
+    }
+
+    @Test
+    fun txt_v6_round_trips_canonical_options_cover_and_recovery_plan_deterministically() {
+        val instant = Instant.parse("2026-10-07T00:00:00Z")
+        val identity = BookIdentity.Local("f2b8ef64-9375-4fc1-b7c9-274b4beafed1")
+        val options = LocalTextParseOptions("GB18030", listOf(LocalTextHeading(0, "序章"), LocalTextHeading(42, "第二节 😀")), 256)
+        val metadata = TransferLocalPublicationMetadata(LocalPublicationFormat.TXT, "a".repeat(64), 4096, options, "4637570b-1109-48ba-8a1b-256e868ca14c")
+        val local = TransferBook(identity, "TXT", updatedAt = instant, localPublication = metadata)
+        val remote = TransferBook(BookIdentity.Remote("fixture.source", "remote"), "Remote", updatedAt = instant)
+        val snapshot = TransferSnapshot(instant, listOf(local, remote), emptyList())
+        val encoded = TransferCodec.encode(snapshot)
+        assertContentEquals(encoded, TransferCodec.encode(snapshot.copy(library = listOf(remote, local))))
+        assertContentEquals(encoded, TransferCodec.encodeBounded(snapshot))
+        val parsed = assertIs<ImportParseResult.Ready>(TransferCodec.parse(encoded))
+        assertEquals(metadata, parsed.plan.books.single { it.identity == identity }.localPublication)
+        assertContentEquals(encoded, TransferCodec.encode(TransferSnapshot(instant, parsed.plan.books, parsed.plan.shelves)))
+        assertEquals(parsed.plan, ImportPlanCodec.decode(ImportPlanCodec.encode(parsed.plan)).getOrThrow())
+        val automatic = local.copy(localPublication = metadata.copy(txtOptions = LocalTextParseOptions()))
+        assertEquals(automatic.localPublication, assertIs<ImportParseResult.Ready>(TransferCodec.parse(TransferCodec.encode(snapshot.copy(library = listOf(automatic))))).plan.books.single().localPublication)
+    }
+
+    @Test
+    fun txt_v6_rejects_noncanonical_options_and_nonportable_cover_or_original_fields() {
+        val options = """{"charsetName":null,"headingSelections":[{"paragraphOrdinal":0,"title":"序章"},{"paragraphOrdinal":42,"title":"第二节"}],"paragraphsPerSection":256}"""
+        val valid = """{"format":"tsuyomi-transfer","version":6,"createdAt":"2026-10-07T00:00:00Z","library":[{"identity":{"origin":"local","publicationId":"f2b8ef64-9375-4fc1-b7c9-274b4beafed1"},"localPublication":{"format":"txt","originalSha256":"${"a".repeat(64)}","originalSizeBytes":4096,"txtOptions":$options},"title":"TXT","localPin":false,"updatedAt":"2026-10-07T00:00:00Z","bookmarks":[]}],"shelves":[]}"""
+        assertIs<ImportParseResult.Ready>(TransferCodec.parse(valid.encodeToByteArray()))
+        val invalid = listOf(
+            valid.replace("\"txtOptions\"", "\"missingOptions\""),
+            valid.replace("\"format\":\"txt\"", "\"format\":\"epub\""),
+            valid.replace("\"charsetName\":null", "\"charsetName\":\"utf-8\""),
+            valid.replace("\"paragraphOrdinal\":42", "\"paragraphOrdinal\":0"),
+            valid.replace("\"paragraphOrdinal\":0", "\"paragraphOrdinal\":43"),
+            valid.replace("\"paragraphOrdinal\":42", "\"paragraphOrdinal\":\"42\""),
+            valid.replace("\"paragraphsPerSection\":256", "\"paragraphsPerSection\":0"),
+            valid.replace("\"paragraphsPerSection\":256", "\"paragraphsPerSection\":4097"),
+            valid.replace("\"paragraphsPerSection\":256", "\"paragraphsPerSection\":\"256\""),
+            valid.replace("\"title\":\"序章\"", "\"title\":\" \""),
+            valid.replace("\"charsetName\":null", "\"charsetName\":null,\"permission\":true"),
+        ) + listOf(
+            "\"originalAvailable\":true", "\"providerUri\":\"content://provider/book\"",
+            "\"filePath\":\"/private/book.txt\"", "\"coverResourceId\":\"content://provider/cover\"",
+            "\"coverResourceId\":null", "\"coverResourceId\":\"4637570B-1109-48BA-8A1B-256E868CA14C\"",
+        ).map { field -> valid.replace("\"originalSizeBytes\":4096", "\"originalSizeBytes\":4096,$field") }
+        invalid.forEach { bytes -> assertEquals("invalid-book", assertIs<ImportParseResult.Fatal>(TransferCodec.parse(bytes.encodeToByteArray())).safeCode) }
+        assertFailsWith<IllegalArgumentException> { TransferLocalPublicationMetadata(LocalPublicationFormat.TXT, "a".repeat(64), 1) }
+        assertFailsWith<IllegalArgumentException> { TransferLocalPublicationMetadata(LocalPublicationFormat.EPUB, "a".repeat(64), 1, LocalTextParseOptions()) }
+    }
+
+    @Test
     fun read_later_round_trips_and_defaults_false_when_absent() {
         val instant = Instant.parse("2026-08-08T00:00:00Z")
         val marked = TransferSnapshot(
             instant,
             listOf(
                 TransferBook(
-                    BookIdentity("org.tsuyomi.wenku8", "later"),
+                    BookIdentity.Remote("org.tsuyomi.wenku8", "later"),
                     "稍后再读",
                     readLater = true,
                     updatedAt = instant,
@@ -224,7 +335,7 @@ class TransferCodecTest {
             instant,
             listOf(
                 TransferBook(
-                    identity = BookIdentity("org.tsuyomi.wenku8", "completed"),
+                    identity = BookIdentity.Remote("org.tsuyomi.wenku8", "completed"),
                     title = "章节完成状态",
                     updatedAt = instant,
                     completedChapterIds = setOf("chapter-5", "chapter-2"),
@@ -281,7 +392,7 @@ class TransferCodecTest {
     fun hikari_import_redacts_credentials_and_maps_all_supported_identities() {
         val bytes = """{"format":"hikari_novel_backup","schemaVersion":1,"createdAt":"2026-08-08T00:00:00Z","payload":{"auth":{"cookies":{"session":"secret"}},"bookshelf":{"folders":[{"id":"fav","name":"收藏"}],"items":[{"aid":"123","title":"文库"},{"aid":"esj:456","title":"ESJ"},{"aid":"yamibo:789","title":"百合会"}]},"readingData":{"readHistory":[{"aid":"123","cid":"9","location":12,"progress":0.5}]},"readerSettings":{"flow":"paged","fontScale":1.2}}}""".encodeToByteArray()
         val result = assertIs<ImportParseResult.Ready>(TransferCodec.parse(bytes))
-        assertEquals(setOf("org.tsuyomi.wenku8", "org.tsuyomi.esjzone", "org.tsuyomi.yamibo"), result.plan.books.mapTo(hashSetOf()) { it.identity.sourceId })
+        assertEquals(setOf("org.tsuyomi.wenku8", "org.tsuyomi.esjzone", "org.tsuyomi.yamibo"), result.plan.books.mapTo(hashSetOf()) { assertIs<BookIdentity.Remote>(it.identity).sourceId })
         assertTrue(result.plan.warnings.any { it.safeCode == "credential-field-skipped" && it.fieldName == "payload.auth.cookies" })
         assertTrue(result.plan.warnings.none { it.toString().contains("secret") })
         assertEquals("paged", result.plan.readerPreferences?.flow)
@@ -316,12 +427,12 @@ class TransferCodecTest {
         val plan = ImportPlan(
             kind = ImportKind.HIKARI_BACKUP,
             sourceCreatedAt = instant,
-            books = listOf(TransferBook(BookIdentity("org.tsuyomi.wenku8", "1"), "书", updatedAt = instant)),
+            books = listOf(TransferBook(BookIdentity.Remote("org.tsuyomi.wenku8", "1"), "书", updatedAt = instant)),
             shelves = listOf(TransferShelf("fav", "收藏")),
             readerPreferences = PortableReaderPreferences(flow = "paged"),
             forceManualEInk = true,
             searchHistory = listOf(SourceSearchHistory("org.tsuyomi.wenku8", "雾港", instant)),
-            browsingHistory = listOf(SourceBrowsingHistory(BookIdentity("org.tsuyomi.wenku8", "1"), instant)),
+            browsingHistory = listOf(SourceBrowsingHistory(BookIdentity.Remote("org.tsuyomi.wenku8", "1"), instant)),
             warnings = listOf(ImportWarning(0, "credential-field-skipped", fieldName = "payload.auth.cookies")),
             smartCollections = listOf(ImportedSmartCollection("smart", "智能", "{\"version\":1}")),
             subscriptionDrafts = listOf(ImportedSubscriptionDraft("draft", "草稿", "disabled", "[]", "{}")),
@@ -354,7 +465,7 @@ class TransferCodecTest {
     fun bounded_export_matches_canonical_bytes_and_stops_at_limit_plus_one() {
         val snapshot = TransferSnapshot(
             Instant.parse("2026-08-08T00:00:00Z"),
-            listOf(TransferBook(BookIdentity("org.tsuyomi.wenku8", "1"), "足够长的标题", updatedAt = Instant.EPOCH)),
+            listOf(TransferBook(BookIdentity.Remote("org.tsuyomi.wenku8", "1"), "足够长的标题", updatedAt = Instant.EPOCH)),
             emptyList(),
         )
         val canonical = TransferCodec.encode(snapshot)
@@ -455,7 +566,7 @@ class TransferCodecTest {
             ),
         ).plan
 
-        assertEquals(listOf("1"), plan.books.map { it.identity.remoteBookId })
+        assertEquals(listOf("1"), plan.books.map { assertIs<BookIdentity.Remote>(it.identity).remoteBookId })
         assertEquals(64, plan.books.single().localTags.size)
         assertTrue(plan.warnings.any { it.safeCode == "invalid-book-record" })
         assertTrue(plan.warnings.any { it.safeCode == "invalid-tag-list" })
@@ -472,7 +583,7 @@ class TransferCodecTest {
 
         val plan = assertIs<ImportParseResult.Ready>(TransferCodec.parse(bytes)).plan
 
-        assertEquals(listOf("2", unicodeAid), plan.books.map { it.identity.remoteBookId })
+        assertEquals(listOf("2", unicodeAid), plan.books.map { assertIs<BookIdentity.Remote>(it.identity).remoteBookId })
         val portableBook = plan.books.first()
         assertEquals(null, portableBook.canonicalUrl)
         assertEquals(null, portableBook.coverUrl)

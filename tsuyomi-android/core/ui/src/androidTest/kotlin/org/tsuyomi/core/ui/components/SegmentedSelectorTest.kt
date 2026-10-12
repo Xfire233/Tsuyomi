@@ -5,6 +5,18 @@
 package org.tsuyomi.core.ui.components
 
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.size
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.semantics.SemanticsProperties
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.test.SemanticsMatcher
+import androidx.compose.ui.test.assertIsNotEnabled
+import androidx.compose.ui.test.onNodeWithTag
+import androidx.compose.ui.test.junit4.StateRestorationTester
+import androidx.compose.ui.unit.Density
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.lazy.LazyColumn
@@ -25,6 +37,7 @@ import androidx.compose.ui.test.performScrollTo
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.compose.ui.unit.dp
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -128,5 +141,71 @@ class SegmentedSelectorTest {
         composeRule.onNodeWithText("关闭").assertIsSelected().assertIsDisplayed()
         composeRule.onNodeWithText("标准频率").performClick()
         composeRule.onNodeWithText("每周").assertIsDisplayed()
+    }
+
+    @Test
+    fun eInkTabsStayIntrinsicReachEveryOptionAndRestoreSelectionAtDoubleFont() {
+        val environment = DisplayEnvironment(
+            preferences = DisplayPreferences(displayPreference = DisplayPreference.STANDARD),
+            effectiveProfile = DisplayProfile.EINK,
+            decisionReason = DisplayDecisionReason.MANUAL_STANDARD,
+            detectedDeviceLabel = null,
+            dynamicColorEligible = false,
+            dynamicColorEffective = false,
+            effectiveDarkTheme = false,
+            motionPolicy = MotionPolicy.STANDARD,
+            redrawEpoch = 0L,
+        )
+        val restoration = StateRestorationTester(composeRule)
+        val options = List(12) { TsuyomiTabOption("option-$it", "项目$it") }
+        var selected by mutableStateOf(options.first().key)
+        var density = 0f
+        restoration.setContent {
+            DisplayEnvironmentProvider(environment) {
+                CompositionLocalProvider(LocalDensity provides Density(LocalDensity.current.density, 2f)) {
+                    TsuyomiTheme(environment) {
+                        density = LocalDensity.current.density
+                        Box(Modifier.size(280.dp, 240.dp).testTag("tab-host")) {
+                            TsuyomiTabRow(options, selected, { selected = it })
+                        }
+                    }
+                }
+            }
+        }
+        composeRule.onNodeWithText("上一页").assertIsNotEnabled()
+        val observed = linkedSetOf<String>()
+        var transitions = 0
+        while (true) {
+            val host = composeRule.onNodeWithTag("tab-host").fetchSemanticsNode().boundsInRoot
+            val controlsTop = composeRule.onNodeWithText("第", substring = true).fetchSemanticsNode().boundsInRoot.top
+            val tabs = composeRule.onAllNodes(SemanticsMatcher.expectValue(SemanticsProperties.Role, Role.Tab)).fetchSemanticsNodes()
+                .filter { tab ->
+                    runCatching {
+                        composeRule.onNodeWithText(tab.config[SemanticsProperties.Text].last().text).assertIsDisplayed()
+                    }.isSuccess
+                }
+            assertTrue(tabs.isNotEmpty())
+            for (tab in tabs) {
+                val bounds = tab.boundsInRoot
+                assertTrue(bounds.width >= 48.dp.value * density && bounds.width < host.width / 2)
+                assertTrue(bounds.height >= 48.dp.value * density)
+                assertTrue(bounds.left >= host.left && bounds.right <= host.right && bounds.bottom <= controlsTop)
+                observed += tab.config[SemanticsProperties.Text].map { it.text }
+            }
+            val lastLabel = tabs.last().config[SemanticsProperties.Text].last().text
+            composeRule.onNodeWithText(lastLabel).performClick().assertIsSelected().assertIsDisplayed()
+            val next = composeRule.onNodeWithText("下一页")
+            if (next.fetchSemanticsNode().config.contains(SemanticsProperties.Disabled)) break
+            next.performClick()
+            assertTrue("Tabs did not reach their measured endpoint", ++transitions <= 12)
+        }
+        assertEquals(options.map { it.label }.toSet(), observed)
+        composeRule.onNodeWithText(options.last().label).assertIsSelected().assertIsDisplayed()
+        restoration.emulateSavedInstanceStateRestore()
+        composeRule.onNodeWithText(options.last().label).assertIsSelected().assertIsDisplayed()
+        composeRule.onNodeWithText("下一页").assertIsNotEnabled()
+        composeRule.onNodeWithText("上一页").performClick()
+        composeRule.onNodeWithText("下一页").performClick()
+        composeRule.onNodeWithText(options.last().label).assertIsSelected().assertIsDisplayed()
     }
 }

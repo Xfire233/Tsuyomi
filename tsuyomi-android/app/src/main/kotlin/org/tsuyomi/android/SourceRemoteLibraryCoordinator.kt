@@ -49,7 +49,20 @@ internal class SourceRemoteLibraryCoordinator(
 ) {
     private val credentialStore = VerifiedBrowserSessionStore(context)
     private val remoteAddMutex = Mutex()
-    private var selectedIdentity: BookIdentity? = null
+    private val remoteRefreshMutex = Mutex()
+    private var selectedIdentity: BookIdentity.Remote? = null
+    private data class CapturedRemoteClient(
+        val active: ActiveSourceSession,
+        val packageInfo: VerifiedHxpPackage,
+        val client: SourceFlowSession,
+        val sourceId: String,
+        val lease: RemoteExecutionLease,
+    )
+
+    private sealed interface RemoteClientCapture {
+        data class Ready(val session: CapturedRemoteClient) : RemoteClientCapture
+        data class Failure(val safeCode: String) : RemoteClientCapture
+    }
 
     var selectedLibraryEntry: LibraryEntry? by mutableStateOf(null)
         private set
@@ -77,7 +90,7 @@ internal class SourceRemoteLibraryCoordinator(
         selectedBookMoveWritesRemote = false
     }
 
-    fun beginSelection(identity: BookIdentity) {
+    fun beginSelection(identity: BookIdentity.Remote) {
         selectedIdentity = identity
         selectedLibraryEntry = null
         selectedBookInLibrary = false
@@ -122,44 +135,73 @@ internal class SourceRemoteLibraryCoordinator(
         aggregateLimitBytes: Long = MAX_REMOTE_LIBRARY_AGGREGATE_BYTES,
     ): RemoteLibraryPullResult {
         require(aggregateLimitBytes in 1..MAX_REMOTE_LIBRARY_AGGREGATE_BYTES)
-        val active = sessionOwner.active()
-            ?: return RemoteLibraryPullResult.Failure("source-not-open")
-        if (active.packageInfo.packageSha256 != packageInfo.packageSha256) {
-            return RemoteLibraryPullResult.Failure("source-changed")
+        return when (val captured = captureRemoteClient(packageInfo)) {
+            is RemoteClientCapture.Failure -> RemoteLibraryPullResult.Failure(captured.safeCode)
+            is RemoteClientCapture.Ready -> pullCaptured(captured.session, aggregateLimitBytes)
         }
-        val sourceId = packageInfo.manifest.sourceId.value
-        val availability = library.sourceAvailability(sourceId)
-            ?: return RemoteLibraryPullResult.Failure("source-unavailable")
-        val policy = library.sourceRemotePolicy(sourceId)
-            ?: return RemoteLibraryPullResult.Failure("remote-policy-missing")
-        if (!availability.available || availability.verifiedVersion != packageInfo.manifest.version.original ||
-            packageInfo.manifest.capabilities.remoteLibrary.policies[RemoteOperation.READ] == null
-        ) return RemoteLibraryPullResult.Failure("remote-read-not-granted")
-        val lease = RemoteExecutionLease(
-            packageInfo.packageSha256,
-            packageInfo.manifest.version.original,
-            policy.capabilitySetFingerprint,
-            availability.generation,
-            active.ownerGeneration,
-        )
+    }
+
+    suspend fun refreshRemoteLibrarySnapshot(
+        packageInfo: VerifiedHxpPackage,
+    ): RemoteLibrarySnapshotRefreshResult = remoteRefreshMutex.withLock refreshLock@ {
+        remoteAddMutex.withLock snapshotLock@ {
+            when (val captured = captureRemoteClient(packageInfo)) {
+                is RemoteClientCapture.Failure -> return@snapshotLock RemoteLibrarySnapshotRefreshResult.Failure(captured.safeCode)
+                is RemoteClientCapture.Ready -> {
+                    val session = captured.session
+                    val pull = pullCaptured(session, MAX_REMOTE_LIBRARY_AGGREGATE_BYTES)
+                    if (pull !is RemoteLibraryPullResult.Success) return@snapshotLock pull.toSnapshotRefreshResult()
+                    if (!remoteClientLeaseStillValid(session)) {
+                        return@snapshotLock RemoteLibrarySnapshotRefreshResult.Failure("source-changed")
+                    }
+                    val targetRead = readRemoteTargets(session)
+                    val targets = when (targetRead) {
+                        is RemoteTargetReadResult.Success -> targetRead.targets
+                        RemoteTargetReadResult.Unsupported -> library.remoteMirrorSnapshot(session.sourceId)
+                            ?.targets
+                            ?.map { RemoteTarget(it.targetId, it.displayName, it.parentId, it.kind) }
+                            .orEmpty()
+                        RemoteTargetReadResult.LoginRequired -> return@snapshotLock RemoteLibrarySnapshotRefreshResult.LoginRequired
+                        RemoteTargetReadResult.VerificationRequired -> return@snapshotLock RemoteLibrarySnapshotRefreshResult.VerificationRequired
+                        RemoteTargetReadResult.Cancelled -> return@snapshotLock RemoteLibrarySnapshotRefreshResult.Cancelled
+                        is RemoteTargetReadResult.Failure -> return@snapshotLock RemoteLibrarySnapshotRefreshResult.Failure(targetRead.safeCode)
+                    }
+                    if (!remoteClientLeaseStillValid(session)) {
+                        return@snapshotLock RemoteLibrarySnapshotRefreshResult.Failure("source-changed")
+                    }
+                    val savedBooks = persistRemoteMirrorSnapshot(session, pull.books, targets)
+                        ?: return@snapshotLock RemoteLibrarySnapshotRefreshResult.Failure("source-changed")
+                    RemoteLibrarySnapshotRefreshResult.Success(savedBooks, targets)
+                }
+            }
+        }
+    }
+
+    private suspend fun pullCaptured(
+        session: CapturedRemoteClient,
+        aggregateLimitBytes: Long,
+    ): RemoteLibraryPullResult {
+        if (session.packageInfo.manifest.capabilities.remoteLibrary.policies[RemoteOperation.READ] == null) {
+            return RemoteLibraryPullResult.Failure("remote-read-not-granted")
+        }
         val seenCursors = hashSetOf<String>()
         val summaries = linkedMapOf<BookIdentity, SourceBookSummary>()
         var cursor: String? = null
         var aggregateBytes = 0L
         while (true) {
+            if (!remoteClientLeaseStillValid(session)) return RemoteLibraryPullResult.Failure("source-changed")
             val page = try {
-                sessionOwner.requireClient().listRemoteLibrary(cursor)
+                session.client.listRemoteLibrary(cursor)
+            } catch (cancelled: CancellationException) {
+                throw cancelled
             } catch (error: SourceException) {
-                return when (error.code) {
-                    SourceErrorCode.SESSION_REQUIRED -> RemoteLibraryPullResult.LoginRequired
-                    SourceErrorCode.VERIFICATION_REQUIRED -> RemoteLibraryPullResult.VerificationRequired
-                    SourceErrorCode.EXTENSION_CANCELLED -> RemoteLibraryPullResult.Cancelled
-                    else -> RemoteLibraryPullResult.Failure(error.diagnostic.safeCode)
-                }
+                if (!remoteClientLeaseStillValid(session)) return RemoteLibraryPullResult.Failure("source-changed")
+                return error.toPullResult()
             }
+            if (!remoteClientLeaseStillValid(session)) return RemoteLibraryPullResult.Failure("source-changed")
             val known = summaries.size
             page.items.forEach { item ->
-                if (item.identity.sourceId != sourceId) return RemoteLibraryPullResult.Failure("source-identity-mismatch")
+                if (item.identity.sourceId != session.sourceId) return RemoteLibraryPullResult.Failure("source-identity-mismatch")
                 aggregateBytes += normalizedSize(item)
                 if (aggregateBytes > aggregateLimitBytes) {
                     return RemoteLibraryPullResult.Failure("aggregate-limit")
@@ -171,7 +213,6 @@ internal class SourceRemoteLibraryCoordinator(
             }
             if (page.complete) {
                 if (page.nextCursor != null) return RemoteLibraryPullResult.Failure("complete-with-cursor")
-                if (!leaseStillValid(sourceId, lease)) return RemoteLibraryPullResult.Failure("source-changed")
                 return RemoteLibraryPullResult.Success(summaries.values.toList())
             }
             if (summaries.size == known) return RemoteLibraryPullResult.Failure("no-progress")
@@ -179,6 +220,95 @@ internal class SourceRemoteLibraryCoordinator(
             if (!seenCursors.add(next)) return RemoteLibraryPullResult.Failure("duplicate-cursor")
             cursor = next
         }
+    }
+
+    private suspend fun captureRemoteClient(expectedPackage: VerifiedHxpPackage?): RemoteClientCapture {
+        val active = sessionOwner.active() ?: return RemoteClientCapture.Failure("source-not-open")
+        val packageInfo = active.packageInfo
+        if (expectedPackage != null && (
+                packageInfo.packageSha256 != expectedPackage.packageSha256 ||
+                    packageInfo.manifest.sourceId.value != expectedPackage.manifest.sourceId.value
+                )
+        ) return RemoteClientCapture.Failure("source-changed")
+        val client = sessionOwner.clientFor(active) ?: return RemoteClientCapture.Failure("source-changed")
+        val sourceId = packageInfo.manifest.sourceId.value
+        val availability = library.sourceAvailability(sourceId)
+            ?: return RemoteClientCapture.Failure("source-unavailable")
+        val policy = library.sourceRemotePolicy(sourceId)
+            ?: return RemoteClientCapture.Failure("remote-policy-missing")
+        if (!availability.available || availability.verifiedVersion != packageInfo.manifest.version.original) {
+            return RemoteClientCapture.Failure("source-unavailable")
+        }
+        val lease = RemoteExecutionLease(
+            packageInfo.packageSha256,
+            packageInfo.manifest.version.original,
+            policy.capabilitySetFingerprint,
+            availability.generation,
+            active.ownerGeneration,
+        )
+        val captured = CapturedRemoteClient(active, packageInfo, client, sourceId, lease)
+        if (!remoteClientLeaseStillValid(captured)) return RemoteClientCapture.Failure("source-changed")
+        return RemoteClientCapture.Ready(captured)
+    }
+
+    private suspend fun readRemoteTargets(session: CapturedRemoteClient): RemoteTargetReadResult {
+        if (session.packageInfo.manifest.capabilities.remoteLibrary.policies[RemoteOperation.TARGETS] == null) {
+            return if (remoteClientLeaseStillValid(session)) RemoteTargetReadResult.Unsupported
+            else RemoteTargetReadResult.Failure("source-changed")
+        }
+        if (!remoteClientLeaseStillValid(session)) return RemoteTargetReadResult.Failure("source-changed")
+        val targets = try {
+            session.client.listRemoteTargets()
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (error: SourceException) {
+            if (!remoteClientLeaseStillValid(session)) return RemoteTargetReadResult.Failure("source-changed")
+            return error.toTargetReadResult()
+        }
+        if (!remoteClientLeaseStillValid(session)) return RemoteTargetReadResult.Failure("source-changed")
+        if (targets.sourceId != session.sourceId) return RemoteTargetReadResult.Failure("source-identity-mismatch")
+        return RemoteTargetReadResult.Success(session.sourceId, targets.targets)
+    }
+
+    private suspend fun persistRemoteMirrorSnapshot(
+        session: CapturedRemoteClient,
+        books: List<SourceBookSummary>,
+        targets: List<RemoteTarget>,
+        updatedAt: Instant = Instant.now(),
+    ): List<SourceBookSummary>? {
+        if (!remoteClientLeaseStillValid(session)) return null
+        val normalizedBooks = normalizeRemoteTargetMembership(books, targets)
+        val enrichedBooks = normalizedBooks.map { summary ->
+            val existing = library.book(summary.identity)
+            summary.copy(
+                author = summary.author ?: existing?.author,
+                coverUrl = summary.coverUrl ?: existing?.coverUrl,
+                canonicalUrl = summary.canonicalUrl.takeIf(String::isNotBlank) ?: existing?.canonicalUrl.orEmpty(),
+            )
+        }
+        if (!remoteClientLeaseStillValid(session)) return null
+        val saved = library.saveRemoteMirrorSnapshotIfSourceCurrent(
+            RemoteMirrorReplaceRequest(
+                sourceId = session.sourceId,
+                sourceName = session.packageInfo.manifest.displayName,
+                books = enrichedBooks.map { RemoteMirrorBookSnapshot(it.toLibraryBook(updatedAt), it.remoteTargetId) },
+                targets = targets.map {
+                    RemoteMirrorTargetSnapshot(
+                        sourceId = session.sourceId,
+                        targetId = it.targetId,
+                        displayName = it.displayName,
+                        parentId = it.parentId,
+                        kind = it.kind,
+                        updatedAtEpochSecond = updatedAt.epochSecond,
+                    )
+                },
+                updatedAt = updatedAt,
+            ),
+            expectedVersion = session.lease.packageVersion,
+            expectedGeneration = session.lease.sourceGeneration,
+            expectedCapabilityFingerprint = session.lease.capabilitySetFingerprint,
+        )
+        return if (saved && remoteClientLeaseStillValid(session)) enrichedBooks else null
     }
 
     suspend fun copyToLocal(
@@ -238,28 +368,37 @@ internal class SourceRemoteLibraryCoordinator(
         remoteAddMutex.withLock {
             val selected = summary?.takeIf { selectedIdentity == it.identity }
                 ?: return@withLock RemoteAddUiResult.Failure("book-not-selected")
+            val session = when (val captured = captureRemoteClient(null)) {
+                is RemoteClientCapture.Failure -> return@withLock RemoteAddUiResult.Failure(captured.safeCode)
+                is RemoteClientCapture.Ready -> captured.session
+            }
             val existing = library.book(selected.identity)
                 ?: return@withLock RemoteAddUiResult.Failure("book-not-local")
-            retryRemoteAddLocked(selected, existing, importedAt)
+            retryRemoteAddLocked(selected, existing, importedAt, expectedSession = session)
         }
 
     suspend fun retryLocalBook(book: LibraryBook, importedAt: Instant = Instant.now()): RemoteAddUiResult =
         remoteAddMutex.withLock {
-            val activePackage = sessionOwner.active()?.packageInfo
-            if (activePackage?.manifest?.sourceId?.value != book.identity.sourceId) {
+            val identity = book.identity as? BookIdentity.Remote
+                ?: return@withLock RemoteAddUiResult.Failure("book-not-remote")
+            val session = when (val captured = captureRemoteClient(null)) {
+                is RemoteClientCapture.Failure -> return@withLock RemoteAddUiResult.Failure(captured.safeCode)
+                is RemoteClientCapture.Ready -> captured.session
+            }
+            if (session.sourceId != identity.sourceId) {
                 return@withLock RemoteAddUiResult.Failure("remote-add-source-not-open")
             }
             val currentEntry = library.libraryEntries().firstOrNull { it.book.identity == book.identity }
                 ?: return@withLock RemoteAddUiResult.Failure("book-not-local")
             val currentBook = currentEntry.book
             val summary = SourceBookSummary(
-                identity = currentBook.identity,
+                identity = identity,
                 title = currentBook.title,
                 author = currentBook.author,
                 coverUrl = currentBook.coverUrl,
                 canonicalUrl = currentBook.canonicalUrl.orEmpty(),
             )
-            retryRemoteAddLocked(summary, currentBook, importedAt)
+            retryRemoteAddLocked(summary, currentBook, importedAt, expectedSession = session)
         }
 
     suspend fun removeBook(summary: SourceBookSummary?): Boolean {
@@ -283,7 +422,7 @@ internal class SourceRemoteLibraryCoordinator(
                 val entry = library.libraryEntry(identity)
                 if (entry != null) {
                     val summary = SourceBookSummary(
-                        identity = entry.book.identity,
+                        identity = identity,
                         title = entry.book.title,
                         author = entry.book.author,
                         coverUrl = entry.book.coverUrl,
@@ -320,11 +459,14 @@ internal class SourceRemoteLibraryCoordinator(
     suspend fun removeBookFromWebsite(summary: SourceBookSummary?, importedAt: Instant = Instant.now()): RemoteMutationUiResult =
         remoteAddMutex.withLock {
             val selected = summary ?: return@withLock RemoteMutationUiResult.Failure("book-not-selected")
+            val session = when (val captured = captureRemoteClient(null)) {
+                is RemoteClientCapture.Failure -> return@withLock RemoteMutationUiResult.Failure(captured.safeCode)
+                is RemoteClientCapture.Ready -> captured.session
+            }
             if (remoteMutationBlocked(selected.identity)) {
                 return@withLock RemoteMutationUiResult.Failure("remote-mutation-blocked-unresolved")
             }
-            val packageInfo = sessionOwner.active()?.packageInfo
-                ?: return@withLock RemoteMutationUiResult.Failure("source-not-open")
+            val packageInfo = session.packageInfo
             if (packageInfo.manifest.sourceId.value != selected.identity.sourceId) {
                 return@withLock RemoteMutationUiResult.Failure("source-changed")
             }
@@ -337,7 +479,7 @@ internal class SourceRemoteLibraryCoordinator(
             ) {
                 return@withLock RemoteMutationUiResult.Failure("remote-remove-not-authorized")
             }
-            executeRemoteRemove(selected, packageInfo, policy, availability, removePolicy, importedAt).also { result ->
+            executeRemoteRemove(selected, packageInfo, policy, availability, removePolicy, importedAt, expectedSession = session).also { result ->
                 if (result is RemoteMutationUiResult.Confirmed) library.removeRemoteMirrorBook(selected.identity)
             }
         }
@@ -349,58 +491,19 @@ internal class SourceRemoteLibraryCoordinator(
         importedAt: Instant = Instant.now(),
     ): RemoteMutationUiResult = remoteAddMutex.withLock {
         val selected = summary ?: return@withLock RemoteMutationUiResult.Failure("book-not-selected")
+        val session = when (val captured = captureRemoteClient(null)) {
+            is RemoteClientCapture.Failure -> return@withLock RemoteMutationUiResult.Failure(captured.safeCode)
+            is RemoteClientCapture.Ready -> captured.session
+        }
         if (remoteMutationBlocked(selected.identity)) {
             return@withLock RemoteMutationUiResult.Failure("remote-mutation-blocked-unresolved")
         }
-        executeAuthorizedMoveLocked(selected, targetId, targetName, importedAt)
+        executeAuthorizedMoveLocked(selected, targetId, targetName, importedAt, expectedSession = session)
     }
 
-    suspend fun listRemoteTargets(): List<RemoteTarget> {
-        if (sessionOwner.active() == null) return emptyList()
-        return try {
-            sessionOwner.requireClient().listRemoteTargets().targets
-        } catch (cancelled: CancellationException) {
-            throw cancelled
-        } catch (_: SourceException) {
-            emptyList()
-        }
-    }
-
-    suspend fun saveRemoteMirrorSnapshot(
-        sourceName: String,
-        books: List<SourceBookSummary>,
-        targets: List<RemoteTarget>,
-        updatedAt: Instant = Instant.now(),
-    ): List<SourceBookSummary> {
-        val normalizedBooks = normalizeRemoteTargetMembership(books, targets)
-        val enrichedBooks = normalizedBooks.map { summary ->
-            val existing = library.book(summary.identity)
-            summary.copy(
-                author = summary.author ?: existing?.author,
-                coverUrl = summary.coverUrl ?: existing?.coverUrl,
-                canonicalUrl = summary.canonicalUrl.takeIf(String::isNotBlank) ?: existing?.canonicalUrl.orEmpty(),
-            )
-        }
-        val sourceId = sessionOwner.active()?.packageInfo?.manifest?.sourceId?.value ?: return enrichedBooks
-        library.saveRemoteMirrorSnapshot(
-            RemoteMirrorReplaceRequest(
-                sourceId = sourceId,
-                sourceName = sourceName,
-                books = enrichedBooks.map { RemoteMirrorBookSnapshot(it.toLibraryBook(updatedAt), it.remoteTargetId) },
-                targets = targets.map {
-                    RemoteMirrorTargetSnapshot(
-                        sourceId = sourceId,
-                        targetId = it.targetId,
-                        displayName = it.displayName,
-                        parentId = it.parentId,
-                        kind = it.kind,
-                        updatedAtEpochSecond = updatedAt.epochSecond,
-                    )
-                },
-                updatedAt = updatedAt,
-            ),
-        )
-        return enrichedBooks
+    suspend fun listRemoteTargets(): RemoteTargetReadResult = when (val captured = captureRemoteClient(null)) {
+        is RemoteClientCapture.Failure -> RemoteTargetReadResult.Failure(captured.safeCode)
+        is RemoteClientCapture.Ready -> readRemoteTargets(captured.session)
     }
 
     suspend fun remoteMirrorSnapshot(sourceId: String): RemoteMirrorSnapshot? = library.remoteMirrorSnapshot(sourceId)
@@ -411,34 +514,38 @@ internal class SourceRemoteLibraryCoordinator(
         targetName: String,
         defaultTargetId: String,
         importedAt: Instant = Instant.now(),
-    ): RemoteTargetedAddResult {
-        val continuationTargetId = targetId.takeIf { it != defaultTargetId }
-        val add = remoteAddMutex.withLock {
-            val current = library.bookReconciliation(summary.identity.sourceId, summary.identity.remoteBookId)
-            if (current?.operation.equals("ADD", ignoreCase = true) &&
-                current?.state == RemoteReconciliationState.CONFIRMED &&
-                current.targetId != null
-            ) {
-                if (current.targetId == continuationTargetId) RemoteAddUiResult.Confirmed
-                else RemoteAddUiResult.Failure("targeted-add-destination-mismatch")
-            } else {
-                addBookToWebsiteLocked(
-                    summary,
-                    importedAt,
-                    continuationTargetId,
-                    targetName.takeIf { continuationTargetId != null },
-                )
-            }
+    ): RemoteTargetedAddResult = remoteAddMutex.withLock {
+        val session = when (val captured = captureRemoteClient(null)) {
+            is RemoteClientCapture.Failure -> return@withLock RemoteTargetedAddResult.Failure(captured.safeCode)
+            is RemoteClientCapture.Ready -> captured.session
         }
-        return when (add) {
+        if (session.sourceId != summary.identity.sourceId) {
+            return@withLock RemoteTargetedAddResult.Failure("source-changed")
+        }
+        val continuationTargetId = targetId.takeIf { it != defaultTargetId }
+        val current = library.bookReconciliation(summary.identity.sourceId, summary.identity.remoteBookId)
+        val add = if (current?.operation.equals("ADD", ignoreCase = true) &&
+            current?.state == RemoteReconciliationState.CONFIRMED && current.targetId != null
+        ) {
+            if (current.targetId == continuationTargetId) RemoteAddUiResult.Confirmed
+            else RemoteAddUiResult.Failure("targeted-add-destination-mismatch")
+        } else {
+            addBookToWebsiteLocked(
+                summary,
+                importedAt,
+                continuationTargetId,
+                targetName.takeIf { continuationTargetId != null },
+                expectedSession = session,
+            )
+        }
+        when (add) {
             RemoteAddUiResult.Confirmed -> {
-                val sourceName = sessionOwner.active()?.packageInfo?.manifest?.displayName ?: summary.identity.sourceId
-                library.ensureRemoteMirrorBinding(summary.identity.sourceId, sourceName, importedAt)
+                library.ensureRemoteMirrorBinding(session.sourceId, session.packageInfo.manifest.displayName, importedAt)
                 library.upsertRemoteMirrorBook(summary.toLibraryBook(importedAt), defaultTargetId, importedAt)
                 if (continuationTargetId == null) {
                     RemoteTargetedAddResult.Confirmed
                 } else {
-                    when (val move = retryRemoteMutation(summary, importedAt, RemoteOperation.MOVE)) {
+                    when (val move = executeAuthorizedMoveLocked(summary, targetId, targetName, importedAt, expectedSession = session)) {
                         RemoteMutationUiResult.Confirmed -> RemoteTargetedAddResult.Confirmed
                         RemoteMutationUiResult.Unresolved,
                         RemoteMutationUiResult.Cancelled,
@@ -466,6 +573,13 @@ internal class SourceRemoteLibraryCoordinator(
     ): RemoteMutationUiResult =
         remoteAddMutex.withLock {
             val selected = summary ?: return@withLock RemoteMutationUiResult.Failure("book-not-selected")
+            val capturedSession = when (val captured = captureRemoteClient(null)) {
+                is RemoteClientCapture.Failure -> return@withLock RemoteMutationUiResult.Failure(captured.safeCode)
+                is RemoteClientCapture.Ready -> captured.session
+            }
+            if (capturedSession.sourceId != selected.identity.sourceId) {
+                return@withLock RemoteMutationUiResult.Failure("source-changed")
+            }
             val record = library.bookReconciliation(selected.identity.sourceId, selected.identity.remoteBookId)
                 ?: return@withLock RemoteMutationUiResult.Failure("no-reconciliation-record")
             val targetedAddContinuation = record.operation.equals("ADD", ignoreCase = true) &&
@@ -483,8 +597,7 @@ internal class SourceRemoteLibraryCoordinator(
             }
             when (record.operation.lowercase()) {
                 "remove" -> {
-                    val packageInfo = sessionOwner.active()?.packageInfo
-                        ?: return@withLock RemoteMutationUiResult.Failure("source-not-open")
+                    val packageInfo = capturedSession.packageInfo
                     val policy = library.sourceRemotePolicy(selected.identity.sourceId)
                     val availability = library.sourceAvailability(selected.identity.sourceId)
                     val removePolicy = packageInfo.manifest.capabilities.remoteLibrary.policies[RemoteOperation.REMOVE]
@@ -500,6 +613,7 @@ internal class SourceRemoteLibraryCoordinator(
                         removePolicy,
                         importedAt,
                         retryingUnresolvedId,
+                        expectedSession = capturedSession,
                     ).also { result ->
                         if (result is RemoteMutationUiResult.Confirmed) library.removeRemoteMirrorBook(selected.identity)
                     }
@@ -512,6 +626,7 @@ internal class SourceRemoteLibraryCoordinator(
                         record.targetName ?: targetId,
                         importedAt,
                         retryingUnresolvedId,
+                        expectedSession = capturedSession,
                     )
                 }
                 "add" -> {
@@ -522,11 +637,12 @@ internal class SourceRemoteLibraryCoordinator(
                             targetId,
                             record.targetName ?: targetId,
                             importedAt,
+                            expectedSession = capturedSession,
                         )
                     } else {
                         val existing = library.book(selected.identity)
                             ?: return@withLock RemoteMutationUiResult.Failure("book-not-local")
-                        when (val addResult = retryRemoteAddLocked(selected, existing, importedAt)) {
+                        when (val addResult = retryRemoteAddLocked(selected, existing, importedAt, expectedSession = capturedSession)) {
                             is RemoteAddUiResult.Confirmed -> if (targetId == null) {
                                 RemoteMutationUiResult.Confirmed
                             } else {
@@ -535,6 +651,7 @@ internal class SourceRemoteLibraryCoordinator(
                                     targetId,
                                     record.targetName ?: targetId,
                                     importedAt,
+                                    expectedSession = capturedSession,
                                 )
                             }
                             is RemoteAddUiResult.Unresolved -> RemoteMutationUiResult.Unresolved
@@ -548,7 +665,7 @@ internal class SourceRemoteLibraryCoordinator(
             }
         }
 
-    suspend fun acknowledgeUnresolved(identity: BookIdentity): Boolean = remoteAddMutex.withLock {
+    suspend fun acknowledgeUnresolved(identity: BookIdentity.Remote): Boolean = remoteAddMutex.withLock {
         val record = library.bookReconciliation(identity.sourceId, identity.remoteBookId) ?: return@withLock false
         if (record.state != RemoteReconciliationState.UNRESOLVED || record.operation.equals("ADD", ignoreCase = true)) {
             return@withLock false
@@ -567,12 +684,16 @@ internal class SourceRemoteLibraryCoordinator(
         targetName: String,
         importedAt: Instant,
         retryingUnresolvedId: String? = null,
+        expectedSession: CapturedRemoteClient? = null,
     ): RemoteMutationUiResult {
-        val packageInfo = sessionOwner.active()?.packageInfo
-            ?: return RemoteMutationUiResult.Failure("source-not-open")
-        if (packageInfo.manifest.sourceId.value != selected.identity.sourceId) {
+        val session = expectedSession ?: when (val captured = captureRemoteClient(null)) {
+            is RemoteClientCapture.Failure -> return RemoteMutationUiResult.Failure(captured.safeCode)
+            is RemoteClientCapture.Ready -> captured.session
+        }
+        if (session.sourceId != selected.identity.sourceId || !remoteClientLeaseStillValid(session)) {
             return RemoteMutationUiResult.Failure("source-changed")
         }
+        val packageInfo = session.packageInfo
         val policy = library.sourceRemotePolicy(selected.identity.sourceId)
         val availability = library.sourceAvailability(selected.identity.sourceId)
         val movePolicy = packageInfo.manifest.capabilities.remoteLibrary.policies[RemoteOperation.MOVE]
@@ -592,6 +713,7 @@ internal class SourceRemoteLibraryCoordinator(
             movePolicy,
             importedAt,
             retryingUnresolvedId,
+            session,
         ).also { result ->
             if (result is RemoteMutationUiResult.Confirmed &&
                 !library.updateRemoteMirrorBookTarget(selected.identity, targetId, importedAt)
@@ -610,8 +732,19 @@ internal class SourceRemoteLibraryCoordinator(
         removePolicy: HxpRemoteOperationPolicy,
         importedAt: Instant,
         retryingUnresolvedId: String? = null,
+        expectedSession: CapturedRemoteClient? = null,
     ): RemoteMutationUiResult {
-        val active = sessionOwner.active() ?: return RemoteMutationUiResult.Failure("source-not-open")
+        val session = expectedSession ?: when (val captured = captureRemoteClient(packageInfo)) {
+            is RemoteClientCapture.Failure -> return RemoteMutationUiResult.Failure(captured.safeCode)
+            is RemoteClientCapture.Ready -> captured.session
+        }
+        if (session.packageInfo.packageSha256 != packageInfo.packageSha256 || session.sourceId != summary.identity.sourceId) {
+            return RemoteMutationUiResult.Failure("source-changed")
+        }
+        val active = session.active
+        val client = session.client
+        val lease = session.lease
+        if (!remoteClientLeaseStillValid(session)) return RemoteMutationUiResult.Failure("source-changed")
         val reconciliationId = library.beginRemoteMutation(
             RemoteMutationRequest(
                 book = summary.toLibraryBook(importedAt),
@@ -628,13 +761,6 @@ internal class SourceRemoteLibraryCoordinator(
             selectedBookReconciliation = RemoteReconciliationState.PENDING_USER_ACTION
             selectedBookReconciliationOperation = "remove"
         }
-        val lease = RemoteExecutionLease(
-            packageInfo.packageSha256,
-            packageInfo.manifest.version.original,
-            policy.capabilitySetFingerprint,
-            availability.generation,
-            active.ownerGeneration,
-        )
         val token = sessionOwner.directActionTokens.mint(
             DirectActionBinding(
                 summary.identity.sourceId,
@@ -659,7 +785,16 @@ internal class SourceRemoteLibraryCoordinator(
             )
         }
         return try {
-            val result = sessionOwner.requireClient().removeRemoteLibrary(summary.identity.remoteBookId, token)
+            if (sessionOwner.clientFor(active) !== client || !leaseStillValid(summary.identity.sourceId, lease)) {
+                return settleFailedRemoteMutation(
+                    token,
+                    reconciliationId,
+                    summary.identity,
+                    null,
+                    retryingUnresolvedId != null,
+                )
+            }
+            val result = client.removeRemoteLibrary(summary.identity.remoteBookId, token)
             check(result.outcome == RemoteLibraryRemoveOutcome.APPLIED || result.outcome == RemoteLibraryRemoveOutcome.ALREADY_ABSENT)
             if (!leaseStillValid(summary.identity.sourceId, lease) ||
                 !library.confirmRemoteMutation(
@@ -714,8 +849,19 @@ internal class SourceRemoteLibraryCoordinator(
         movePolicy: HxpRemoteOperationPolicy,
         importedAt: Instant,
         retryingUnresolvedId: String? = null,
+        expectedSession: CapturedRemoteClient? = null,
     ): RemoteMutationUiResult {
-        val active = sessionOwner.active() ?: return RemoteMutationUiResult.Failure("source-not-open")
+        val session = expectedSession ?: when (val captured = captureRemoteClient(packageInfo)) {
+            is RemoteClientCapture.Failure -> return RemoteMutationUiResult.Failure(captured.safeCode)
+            is RemoteClientCapture.Ready -> captured.session
+        }
+        if (session.packageInfo.packageSha256 != packageInfo.packageSha256 || session.sourceId != summary.identity.sourceId) {
+            return RemoteMutationUiResult.Failure("source-changed")
+        }
+        val active = session.active
+        val client = session.client
+        val lease = session.lease
+        if (!remoteClientLeaseStillValid(session)) return RemoteMutationUiResult.Failure("source-changed")
         val reconciliationId = library.beginRemoteMutation(
             RemoteMutationRequest(
                 book = summary.toLibraryBook(importedAt),
@@ -734,13 +880,6 @@ internal class SourceRemoteLibraryCoordinator(
             selectedBookReconciliation = RemoteReconciliationState.PENDING_USER_ACTION
             selectedBookReconciliationOperation = "move"
         }
-        val lease = RemoteExecutionLease(
-            packageInfo.packageSha256,
-            packageInfo.manifest.version.original,
-            policy.capabilitySetFingerprint,
-            availability.generation,
-            active.ownerGeneration,
-        )
         val token = sessionOwner.directActionTokens.mint(
             DirectActionBinding(
                 summary.identity.sourceId,
@@ -765,7 +904,16 @@ internal class SourceRemoteLibraryCoordinator(
             )
         }
         return try {
-            val result = sessionOwner.requireClient().moveRemoteLibrary(summary.identity.remoteBookId, targetId, token)
+            if (sessionOwner.clientFor(active) !== client || !leaseStillValid(summary.identity.sourceId, lease)) {
+                return settleFailedRemoteMutation(
+                    token,
+                    reconciliationId,
+                    summary.identity,
+                    null,
+                    retryingUnresolvedId != null,
+                )
+            }
+            val result = client.moveRemoteLibrary(summary.identity.remoteBookId, targetId, token)
             check(result.outcome == RemoteLibraryMoveOutcome.APPLIED || result.outcome == RemoteLibraryMoveOutcome.ALREADY_AT_TARGET)
             if (!leaseStillValid(summary.identity.sourceId, lease) ||
                 !library.confirmRemoteMutation(
@@ -813,7 +961,7 @@ internal class SourceRemoteLibraryCoordinator(
     private suspend fun settleFailedRemoteMutation(
         token: String,
         reconciliationId: String,
-        identity: BookIdentity,
+        identity: BookIdentity.Remote,
         diagnosticId: String?,
         preservesPriorUnresolved: Boolean,
     ): RemoteMutationUiResult = withContext(NonCancellable) {
@@ -849,17 +997,21 @@ internal class SourceRemoteLibraryCoordinator(
         summary: SourceBookSummary,
         existing: LibraryBook,
         importedAt: Instant,
+        expectedSession: CapturedRemoteClient? = null,
     ): RemoteAddUiResult {
+        val session = expectedSession ?: when (val captured = captureRemoteClient(null)) {
+            is RemoteClientCapture.Failure -> return RemoteAddUiResult.Failure(captured.safeCode)
+            is RemoteClientCapture.Ready -> captured.session
+        }
         val reconciliation = library.bookReconciliation(summary.identity.sourceId, summary.identity.remoteBookId)
         if (reconciliation?.operation?.uppercase() != "ADD" ||
             reconciliation.state !in RETRYABLE_RECONCILIATION_STATES
         ) {
             return RemoteAddUiResult.Failure("remote-add-not-retryable")
         }
-        val packageInfo = sessionOwner.active()?.packageInfo
-            ?: return RemoteAddUiResult.Failure("source-not-open")
-        if (packageInfo.manifest.sourceId.value != summary.identity.sourceId) {
-            return RemoteAddUiResult.Failure("remote-add-source-not-open")
+        val packageInfo = session.packageInfo
+        if (session.sourceId != summary.identity.sourceId || !remoteClientLeaseStillValid(session)) {
+            return RemoteAddUiResult.Failure("source-changed")
         }
         val policy = library.sourceRemotePolicy(summary.identity.sourceId)
         val availability = library.sourceAvailability(summary.identity.sourceId)
@@ -887,6 +1039,7 @@ internal class SourceRemoteLibraryCoordinator(
             },
             continuationTargetId = reconciliation.targetId,
             continuationTargetName = reconciliation.targetName,
+            expectedSession = session,
         )
     }
 
@@ -895,7 +1048,12 @@ internal class SourceRemoteLibraryCoordinator(
         importedAt: Instant,
         continuationTargetId: String? = null,
         continuationTargetName: String? = null,
+        expectedSession: CapturedRemoteClient? = null,
     ): RemoteAddUiResult {
+        val session = expectedSession ?: when (val captured = captureRemoteClient(null)) {
+            is RemoteClientCapture.Failure -> return RemoteAddUiResult.Failure(captured.safeCode)
+            is RemoteClientCapture.Ready -> captured.session
+        }
         val reconciliation = library.bookReconciliation(summary.identity.sourceId, summary.identity.remoteBookId)
         if (reconciliation?.operation?.uppercase() == "ADD") {
             when (reconciliation.state) {
@@ -907,8 +1065,10 @@ internal class SourceRemoteLibraryCoordinator(
         if (reconciliation?.state in BLOCKING_RECONCILIATION_STATES) {
             return RemoteAddUiResult.Failure("remote-mutation-blocked-unresolved")
         }
-        val packageInfo = sessionOwner.active()?.packageInfo
-            ?: return RemoteAddUiResult.Failure("source-not-open")
+        val packageInfo = session.packageInfo
+        if (session.sourceId != summary.identity.sourceId || !remoteClientLeaseStillValid(session)) {
+            return RemoteAddUiResult.Failure("source-changed")
+        }
         val book = summary.toLibraryBook(importedAt)
         val policy = library.sourceRemotePolicy(summary.identity.sourceId)
         val availability = library.sourceAvailability(summary.identity.sourceId)
@@ -933,6 +1093,7 @@ internal class SourceRemoteLibraryCoordinator(
             importedAt,
             continuationTargetId = continuationTargetId,
             continuationTargetName = continuationTargetName,
+            expectedSession = session,
         )
     }
 
@@ -947,8 +1108,19 @@ internal class SourceRemoteLibraryCoordinator(
         retryingUnresolvedAddId: String? = null,
         continuationTargetId: String? = null,
         continuationTargetName: String? = null,
+        expectedSession: CapturedRemoteClient? = null,
     ): RemoteAddUiResult {
-        val active = sessionOwner.active() ?: return RemoteAddUiResult.Failure("source-not-open")
+        val session = expectedSession ?: when (val captured = captureRemoteClient(packageInfo)) {
+            is RemoteClientCapture.Failure -> return RemoteAddUiResult.Failure(captured.safeCode)
+            is RemoteClientCapture.Ready -> captured.session
+        }
+        if (session.packageInfo.packageSha256 != packageInfo.packageSha256 || session.sourceId != summary.identity.sourceId) {
+            return RemoteAddUiResult.Failure("source-changed")
+        }
+        val active = session.active
+        val client = session.client
+        val lease = session.lease
+        if (!remoteClientLeaseStillValid(session)) return RemoteAddUiResult.Failure("source-changed")
         val reconciliationId = library.beginRemoteAdd(
             RemoteAddRequest(
                 book = book,
@@ -961,19 +1133,6 @@ internal class SourceRemoteLibraryCoordinator(
                 startedAt = importedAt,
             ),
             retryingUnresolvedAddId,
-        )
-        if (selectedIdentity == summary.identity) {
-            selectedLibraryEntry = library.libraryEntry(summary.identity)
-            selectedBookInLibrary = true
-            selectedBookReconciliation = RemoteReconciliationState.PENDING_USER_ACTION
-            selectedBookReconciliationOperation = "add"
-        }
-        val lease = RemoteExecutionLease(
-            packageInfo.packageSha256,
-            packageInfo.manifest.version.original,
-            policy.capabilitySetFingerprint,
-            availability.generation,
-            active.ownerGeneration,
         )
         val token = sessionOwner.directActionTokens.mint(
             DirectActionBinding(
@@ -999,7 +1158,22 @@ internal class SourceRemoteLibraryCoordinator(
             )
         }
         return try {
-            val result = sessionOwner.requireClient().addRemoteLibrary(summary.identity.remoteBookId, token)
+            if (selectedIdentity == summary.identity) {
+                selectedLibraryEntry = library.libraryEntry(summary.identity)
+                selectedBookInLibrary = true
+                selectedBookReconciliation = RemoteReconciliationState.PENDING_USER_ACTION
+                selectedBookReconciliationOperation = "add"
+            }
+            if (sessionOwner.clientFor(active) !== client || !leaseStillValid(summary.identity.sourceId, lease)) {
+                return settleFailedRemoteAdd(
+                    token,
+                    reconciliationId,
+                    summary.identity,
+                    null,
+                    retryingUnresolvedAddId != null,
+                )
+            }
+            val result = client.addRemoteLibrary(summary.identity.remoteBookId, token)
             check(result.outcome == RemoteLibraryAddOutcome.APPLIED || result.outcome == RemoteLibraryAddOutcome.ALREADY_PRESENT)
             if (!leaseStillValid(summary.identity.sourceId, lease) ||
                 !library.confirmRemoteAdd(
@@ -1046,7 +1220,7 @@ internal class SourceRemoteLibraryCoordinator(
     private suspend fun settleFailedRemoteAdd(
         token: String,
         reconciliationId: String,
-        identity: BookIdentity,
+        identity: BookIdentity.Remote,
         diagnosticId: String?,
         preservesPriorUnresolved: Boolean,
     ): RemoteAddUiResult = withContext(NonCancellable) {
@@ -1078,24 +1252,49 @@ internal class SourceRemoteLibraryCoordinator(
         }
     }
 
-    private suspend fun remoteMutationBlocked(identity: BookIdentity): Boolean =
+    private suspend fun remoteMutationBlocked(identity: BookIdentity.Remote): Boolean =
         library.bookReconciliation(identity.sourceId, identity.remoteBookId)?.state in BLOCKING_RECONCILIATION_STATES
 
+    private suspend fun remoteClientLeaseStillValid(session: CapturedRemoteClient): Boolean =
+        sessionOwner.clientFor(session.active) === session.client &&
+            leaseStillValid(session.sourceId, session.lease)
+
     private suspend fun leaseStillValid(sourceId: String, lease: RemoteExecutionLease): Boolean {
-        val active = sessionOwner.active()
         val availability = library.sourceAvailability(sourceId)
         val policy = library.sourceRemotePolicy(sourceId)
-        return lease.matches(
-            active?.packageInfo?.packageSha256,
-            active?.packageInfo?.manifest?.version?.original,
+        val active = sessionOwner.active()
+        return active != null && active.packageInfo.manifest.sourceId.value == sourceId && lease.matches(
+            active.packageInfo.packageSha256,
+            active.packageInfo.manifest.version.original,
             availability?.verifiedVersion,
             policy?.capabilitySetFingerprint,
             availability?.generation,
-            active?.ownerGeneration ?: -1L,
+            active.ownerGeneration,
         ) && availability?.available == true
     }
+    private fun SourceException.toPullResult(): RemoteLibraryPullResult = when (code) {
+        SourceErrorCode.SESSION_REQUIRED -> RemoteLibraryPullResult.LoginRequired
+        SourceErrorCode.VERIFICATION_REQUIRED -> RemoteLibraryPullResult.VerificationRequired
+        SourceErrorCode.EXTENSION_CANCELLED -> RemoteLibraryPullResult.Cancelled
+        else -> RemoteLibraryPullResult.Failure(diagnostic.safeCode)
+    }
 
-    private fun updateReconciliation(identity: BookIdentity, state: RemoteReconciliationState) {
+    private fun SourceException.toTargetReadResult(): RemoteTargetReadResult = when (code) {
+        SourceErrorCode.SESSION_REQUIRED -> RemoteTargetReadResult.LoginRequired
+        SourceErrorCode.VERIFICATION_REQUIRED -> RemoteTargetReadResult.VerificationRequired
+        SourceErrorCode.EXTENSION_CANCELLED -> RemoteTargetReadResult.Cancelled
+        else -> RemoteTargetReadResult.Failure(diagnostic.safeCode)
+    }
+
+    private fun RemoteLibraryPullResult.toSnapshotRefreshResult(): RemoteLibrarySnapshotRefreshResult = when (this) {
+        is RemoteLibraryPullResult.Failure -> RemoteLibrarySnapshotRefreshResult.Failure(safeCode)
+        RemoteLibraryPullResult.LoginRequired -> RemoteLibrarySnapshotRefreshResult.LoginRequired
+        RemoteLibraryPullResult.VerificationRequired -> RemoteLibrarySnapshotRefreshResult.VerificationRequired
+        RemoteLibraryPullResult.Cancelled -> RemoteLibrarySnapshotRefreshResult.Cancelled
+        is RemoteLibraryPullResult.Success -> RemoteLibrarySnapshotRefreshResult.Failure("invalid-refresh-state")
+    }
+
+    private fun updateReconciliation(identity: BookIdentity.Remote, state: RemoteReconciliationState) {
         if (selectedIdentity == identity) selectedBookReconciliation = state
     }
 
@@ -1154,6 +1353,23 @@ sealed interface RemoteLibraryPullResult {
     data object LoginRequired : RemoteLibraryPullResult
     data object VerificationRequired : RemoteLibraryPullResult
     data object Cancelled : RemoteLibraryPullResult
+}
+
+internal sealed interface RemoteTargetReadResult {
+    data class Success(val sourceId: String, val targets: List<RemoteTarget>) : RemoteTargetReadResult
+    data object Unsupported : RemoteTargetReadResult
+    data class Failure(val safeCode: String) : RemoteTargetReadResult
+    data object LoginRequired : RemoteTargetReadResult
+    data object VerificationRequired : RemoteTargetReadResult
+    data object Cancelled : RemoteTargetReadResult
+}
+
+internal sealed interface RemoteLibrarySnapshotRefreshResult {
+    data class Success(val books: List<SourceBookSummary>, val targets: List<RemoteTarget>) : RemoteLibrarySnapshotRefreshResult
+    data class Failure(val safeCode: String) : RemoteLibrarySnapshotRefreshResult
+    data object LoginRequired : RemoteLibrarySnapshotRefreshResult
+    data object VerificationRequired : RemoteLibrarySnapshotRefreshResult
+    data object Cancelled : RemoteLibrarySnapshotRefreshResult
 }
 
 data class RemoteLibraryCopyResult(val total: Int, val added: Int)

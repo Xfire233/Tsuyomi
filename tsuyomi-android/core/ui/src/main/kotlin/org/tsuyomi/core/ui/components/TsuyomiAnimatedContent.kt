@@ -28,6 +28,10 @@ import org.tsuyomi.core.ui.theme.policyMotionSpec
 val TsuyomiInstantEnter = EnterTransition.None
 val TsuyomiInstantExit = ExitTransition.None
 
+/** Default root transitions owned by the shared motion policy. */
+val TsuyomiNavigationEnter = fadeIn(tween(TsuyomiMotion.SELECTION_DURATION_MS, easing = TsuyomiMotion.Easing))
+val TsuyomiNavigationExit = fadeOut(tween(TsuyomiMotion.SELECTION_DURATION_MS, easing = TsuyomiMotion.Easing))
+
 /** Content swap honoring the global and platform instant-motion policies. */
 @Composable
 fun <T> TsuyomiAnimatedContent(
@@ -36,6 +40,10 @@ fun <T> TsuyomiAnimatedContent(
     content: @Composable (T) -> Unit,
 ) {
     val staticMotion = LocalDisplayEnvironment.current.instantMotion || rememberSystemReducedMotion()
+    if (staticMotion) {
+        Box(modifier) { content(targetState) }
+        return
+    }
     val transition = if (staticMotion) {
         EnterTransition.None togetherWith ExitTransition.None
     } else {

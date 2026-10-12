@@ -36,7 +36,7 @@ internal fun progress(
 ): ReadingProgress = ReadingProgress(
     identity = identity,
     locator = ReaderLocator(
-        document = DocumentIdentity(identity.sourceId, identity.remoteBookId, contentId),
+        document = DocumentIdentity(identity, contentId),
         blockId = "block-1",
         characterOffset = offset,
         bookProgress = bookProgress,

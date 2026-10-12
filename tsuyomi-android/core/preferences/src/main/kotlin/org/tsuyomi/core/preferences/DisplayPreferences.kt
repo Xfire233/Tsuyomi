@@ -25,7 +25,7 @@ data class DisplayPreferences(
     val displayPreference: DisplayPreference = DisplayPreference.AUTO,
     val colorSchemePreference: ColorSchemePreference = ColorSchemePreference.SYSTEM,
     val dynamicColorEnabled: Boolean = false,
-    /** Shared Standard grid/card presentation; E-ink retains its frozen legacy geometry. */
+    /** Persisted Standard grid/card presentation; E-ink uses a fixed monochrome 5:7 card. */
     val coverCardPresentation: CoverCardPresentation = CoverCardPresentation.STANDARD,
     val coverCardPresentationReadOnly: Boolean = false,
 )

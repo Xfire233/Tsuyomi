@@ -12,7 +12,7 @@ import org.tsuyomi.shared.sourcecontract.SourceUpdateChapter
 import org.tsuyomi.shared.sourcecontract.SourceUpdateOutcome
 
 class SourceUpdateAdmissionTest {
-    private val identity = BookIdentity("org.tsuyomi.wenku8", "1234")
+    private val identity = BookIdentity.Remote("org.tsuyomi.wenku8", "1234")
     private val first = SourceUpdateChapter("10001", "第一章 雾中的灯塔")
     private val second = SourceUpdateChapter("10002", "第二章 旧船票")
     private val third = SourceUpdateChapter("10003", "第三章 潮汐信标")
@@ -65,7 +65,7 @@ class SourceUpdateAdmissionTest {
             expectedIdentity = identity,
             previousAnchor = null,
             parsed = ParsedSourceUpdateCheck(
-                identity = BookIdentity("org.tsuyomi.wenku8", "9999"),
+                identity = BookIdentity.Remote("org.tsuyomi.wenku8", "9999"),
                 chapters = listOf(first, second),
                 lastUpdatedDate = null,
             ),

@@ -5,15 +5,21 @@
 
 package org.tsuyomi.android
 
-import android.content.ContentResolver
 import android.content.Context
-import android.net.Uri
 import androidx.compose.runtime.Stable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import java.io.File
 import java.io.FileOutputStream
+import java.io.InputStream
+import kotlinx.coroutines.CancellationException
+import org.json.JSONArray
+import org.json.JSONObject
+import org.tsuyomi.shared.model.BookIdentity
+import org.tsuyomi.core.publication.OriginalCatalogState
+import org.tsuyomi.core.publication.PublicationArchiveOriginal
+import org.tsuyomi.core.publication.PublicationOriginalStore
 import java.time.Instant
 import java.util.UUID
 import kotlinx.coroutines.Dispatchers
@@ -46,6 +52,7 @@ internal class TransferImportSessionOwner(
     private val repository: RoomTransferRepository,
     private val applyPreferenceImport: suspend (PortableReaderPreferences?, Boolean, String) -> Unit,
     private val presentation: TransferPresentationState,
+    private val originals: () -> PublicationOriginalStore,
 ) {
     private val appContext = context.applicationContext
     private val planDirectory = File(appContext.noBackupFilesDir, "import-plans")
@@ -53,6 +60,13 @@ internal class TransferImportSessionOwner(
     private var pendingBasePlan: ImportPlan? = null
     private var pendingPlanBytes: ByteArray? = null
     private var pendingPlanDigest: String? = null
+    val reviewedOriginals: Map<String, PublicationArchiveOriginal>
+        get() = pendingBasePlan?.books.orEmpty().mapNotNull { book ->
+            val identity = book.identity as? BookIdentity.Local ?: return@mapNotNull null
+            val metadata = checkNotNull(book.localPublication)
+            identity.publicationId to PublicationArchiveOriginal(identity.publicationId, metadata.format,
+                metadata.originalSha256, metadata.originalSizeBytes)
+        }.toMap()
 
     suspend fun recoverPendingImport() {
         if (presentation.recoveryReady) return
@@ -61,6 +75,11 @@ internal class TransferImportSessionOwner(
 
     suspend fun retryRecovery() {
         recoverCurrentImport()
+    }
+
+    suspend fun pendingPreparedPublicationIds(): Set<String>? {
+        val session = repository.pending()?.takeIf { it.status == ImportSessionStatus.PREPARED } ?: return null
+        return restoredPublicationIds(session).mapTo(linkedSetOf()) { it.publicationId }
     }
 
     suspend fun abortRecovery() {
@@ -94,13 +113,15 @@ internal class TransferImportSessionOwner(
         }
     }
 
-    suspend fun readForReview(uri: Uri, resolver: ContentResolver) {
+    suspend fun readForReview(input: InputStream) {
         presentation.state = TransferUiState.Working(appContext.getString(R.string.transfer_reading_file))
         val parse = try {
             withContext(Dispatchers.IO) {
-                val bytes = readBounded(uri, resolver)
+                val bytes = readBounded(input)
                 TransferCodec.parse(bytes)
             }
+        } catch (cancelled: CancellationException) {
+            throw cancelled
         } catch (_: Throwable) {
             clearPendingPlan()
             presentation.state = TransferUiState.Failure(
@@ -119,9 +140,9 @@ internal class TransferImportSessionOwner(
         }
     }
 
-    suspend fun confirmImport() {
-        val basePlan = pendingBasePlan ?: return
-        val reviewedPlan = pendingPlan ?: return
+    suspend fun confirmImport(restoredPublications: Set<BookIdentity.Local> = emptySet()): Boolean {
+        val basePlan = pendingBasePlan ?: return false
+        val reviewedPlan = pendingPlan ?: return false
         val refreshedPlan = try {
             repository.withDatabaseConflicts(basePlan)
         } catch (_: Throwable) {
@@ -129,15 +150,15 @@ internal class TransferImportSessionOwner(
             presentation.state = TransferUiState.Failure(
                 appContext.getString(R.string.transfer_import_failed_code, "conflict-review-failed"),
             )
-            return
+            return false
         }
         if (refreshedPlan != reviewedPlan) {
             stageReview(refreshedPlan)
-            return
+            return false
         }
         val plan = reviewedPlan
-        val bytes = pendingPlanBytes ?: return
-        val digest = pendingPlanDigest ?: return
+        val bytes = pendingPlanBytes ?: return false
+        val digest = pendingPlanDigest ?: return false
         presentation.state = TransferUiState.Working(appContext.getString(R.string.transfer_applying_file))
         val sessionId = UUID.randomUUID().toString()
         val file = withContext(Dispatchers.IO) { writeNormalizedPlan(sessionId, bytes) }
@@ -147,13 +168,17 @@ internal class TransferImportSessionOwner(
                 plan = plan,
                 planDigest = digest,
                 normalizedPlanPath = file.absolutePath,
-                preferencePatchJson = preferencePatch(plan),
+                preferencePatchJson = preferencePatch(plan, restoredPublications),
                 startedAt = Instant.now(),
             )
             applyPrepared(sessionId, digest, plan, file)
+            return true
         } catch (_: Throwable) {
+            val status = repository.pending()?.takeIf { it.id == sessionId }?.status
+            val roomApplied = status == ImportSessionStatus.ROOM_APPLIED || status == ImportSessionStatus.PREFERENCES_APPLIED
             settleFailedConfirmation(sessionId, digest, file)
             clearPendingPlan()
+            return roomApplied
         }
     }
 
@@ -278,7 +303,22 @@ internal class TransferImportSessionOwner(
     }
 
     private suspend fun applyPrepared(sessionId: String, digest: String, plan: ImportPlan, file: File) {
-        repository.applyRoomPlan(sessionId, digest, plan)
+        val session = checkNotNull(repository.pending()?.takeIf { it.id == sessionId })
+        val restored = restoredPublicationIds(session)
+        val verifiedRestored = plan.books.mapNotNullTo(linkedSetOf()) { book ->
+            val identity = book.identity as? BookIdentity.Local ?: return@mapNotNullTo null
+            if (identity !in restored) return@mapNotNullTo null
+            val metadata = book.localPublication ?: return@mapNotNullTo null
+            val expected = OriginalCatalogState(
+                metadata.format,
+                metadata.originalSha256,
+                metadata.originalSizeBytes,
+                originalAvailable = false,
+            )
+            identity.takeIf { originals().verifyOriginalForTransferRecovery(identity.publicationId, expected) }
+        }
+        check(verifiedRestored == restored) { "Prepared transfer originals no longer match reviewed metadata" }
+        repository.applyRoomPlan(sessionId, digest, plan, verifiedRestored)
         applyPreferencesAndComplete(sessionId, digest, plan, file)
     }
 
@@ -332,14 +372,12 @@ internal class TransferImportSessionOwner(
         return target
     }
 
-    private fun readBounded(uri: Uri, resolver: ContentResolver): ByteArray {
-        val input = resolver.openInputStream(uri) ?: error("input-unavailable")
-        input.use {
+    private fun readBounded(input: InputStream): ByteArray {
             val output = java.io.ByteArrayOutputStream(minOf(64 * 1024, MAX_TRANSFER_BYTES))
             val buffer = ByteArray(DEFAULT_BUFFER_SIZE)
             var total = 0
             while (true) {
-                val count = it.read(buffer)
+                val count = input.read(buffer)
                 if (count < 0) break
                 total += count
                 if (total > MAX_TRANSFER_BYTES) return ByteArray(MAX_TRANSFER_BYTES + 1)
@@ -347,7 +385,6 @@ internal class TransferImportSessionOwner(
             }
             return output.toByteArray()
         }
-    }
 
     private fun clearPendingPlan() {
         pendingBasePlan = null
@@ -356,14 +393,22 @@ internal class TransferImportSessionOwner(
         pendingPlanDigest = null
     }
 
-    private fun preferencePatch(plan: ImportPlan): String =
-        "{\"reader\":${plan.readerPreferences != null},\"forceManualEInk\":${plan.forceManualEInk}}"
+    private fun restoredPublicationIds(session: ImportSession): Set<BookIdentity.Local> {
+        val ids = JSONObject(session.preferencePatchJson).optJSONArray("restoredPublications") ?: return emptySet()
+        return (0 until ids.length()).mapTo(linkedSetOf()) { BookIdentity.Local(ids.getString(it)) }
+    }
+
+    private fun preferencePatch(plan: ImportPlan, restoredPublications: Set<BookIdentity.Local>): String = JSONObject().apply {
+        put("reader", plan.readerPreferences != null)
+        put("forceManualEInk", plan.forceManualEInk)
+        put("restoredPublications", JSONArray(restoredPublications.map { it.publicationId }.sorted()))
+    }.toString()
 
     private fun ImportPlan.toReview(): TransferReview {
         fun ImportWarning.safeLabel(): String =
             listOfNotNull(safeCode, safeRecordRef, fieldName).joinToString(" · ")
         return TransferReview(
-            formatLabel = if (kind == ImportKind.HIKARI_BACKUP) "Hikari Novel" else "Tsuyomi transfer v1",
+            formatLabel = if (kind == ImportKind.HIKARI_BACKUP) "Hikari Novel" else "Tsuyomi JSON",
             bookCount = books.size,
             shelfCount = shelves.size,
             smartCollectionCount = smartCollections.size,

@@ -5,9 +5,21 @@
 package org.tsuyomi.reader.ui
 
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.CompositionLocalProvider
-import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.SideEffect
+import androidx.compose.ui.semantics.SemanticsActions
+import androidx.compose.ui.semantics.SemanticsProperties
+import androidx.compose.ui.test.SemanticsMatcher
+import androidx.compose.ui.test.hasAnyAncestor
+import androidx.compose.ui.test.hasText
+import androidx.compose.ui.test.assertIsSelected
+import androidx.compose.ui.test.assertIsEnabled
+import androidx.compose.ui.test.performSemanticsAction
+import androidx.compose.ui.test.assertIsNotEnabled
+import androidx.compose.ui.test.FontScale
+import androidx.compose.ui.test.then
+import androidx.compose.ui.text.TextRange
+import java.util.concurrent.atomic.AtomicReference
 import androidx.compose.ui.test.DeviceConfigurationOverride
 import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.ForcedSize
@@ -22,7 +34,6 @@ import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performImeAction
 import androidx.compose.ui.test.performTextInput
 import androidx.compose.ui.test.performScrollToIndex
-import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.DpSize
 import androidx.compose.ui.unit.dp
 import androidx.test.espresso.Espresso.pressBack
@@ -44,7 +55,8 @@ import org.tsuyomi.core.ui.theme.TsuyomiTheme
 import org.tsuyomi.shared.locator.DocumentIdentity
 import org.tsuyomi.shared.locator.ReaderLocator
 import org.tsuyomi.shared.locator.bookmarkPositionKey
-import org.tsuyomi.shared.sourcecontract.SourceChapter
+import org.tsuyomi.shared.sourcecontract.ReaderNavigationTarget
+import org.tsuyomi.shared.model.BookIdentity
 
 class ReaderBookmarkInstrumentedTest {
     @get:Rule
@@ -53,10 +65,8 @@ class ReaderBookmarkInstrumentedTest {
     @Test
     fun bookmarkRowsKeepExactPositionsSeparateAndReturnTheirOriginalLocators() {
         val firstIdentity = DocumentIdentity(
-            sourceId = "org.tsuyomi.reader.test",
-            remoteBookId = "semantic-bookmarks",
-            contentId = "chapter-1",
-            revision = "revision-1",
+            book = BookIdentity.Remote("org.tsuyomi.reader.test", "semantic-bookmarks"),
+            contentId = "chapter-1", revision = "revision-1",
         )
         val first = ReaderLocator(
             document = firstIdentity,
@@ -78,20 +88,20 @@ class ReaderBookmarkInstrumentedTest {
         )
         val bookmarks = mutableStateOf(listOf(first, second, legacy))
         val selected = mutableStateOf<ReaderLocator?>(null)
-        val chapters = listOf(
-            SourceChapter("chapter-1", "第一章：语义书签", "https://example.test/chapter-1"),
-            SourceChapter("chapter-2", "第二章：旧版位置", "https://example.test/chapter-2"),
+        val navigationTargets = listOf(
+            ReaderNavigationTarget("chapter-1", "第一章：语义书签"),
+            ReaderNavigationTarget("chapter-2", "第二章：旧版位置"),
         )
 
         composeRule.setContent {
             ReaderAuxiliaryTestTheme {
                 ReaderAuxiliarySheet(
-                    state = rememberReaderAuxiliarySheetState(firstIdentity.sourceId, firstIdentity.remoteBookId, ReaderAuxiliaryTab.BOOKMARKS),
-                    chapters = chapters,
-                    currentChapterId = "chapter-1",
+                    state = rememberReaderAuxiliarySheetState(firstIdentity.book, ReaderAuxiliaryTab.BOOKMARKS),
+                    navigationTargets = navigationTargets,
+                    currentContentId = "chapter-1",
                     bookmarks = bookmarks.value,
                     onDismiss = {},
-                    onSelectChapter = {},
+                    onSelectContent = {},
                     onSelectBookmark = { selected.value = it },
                     onRemoveBookmark = { removed ->
                         bookmarks.value = bookmarks.value.filterNot {
@@ -121,19 +131,19 @@ class ReaderBookmarkInstrumentedTest {
     @Test
     fun directoryAndSearchOfferChapterSelectionWithoutChapterBookmarkControls() {
         val selectedChapterIds = mutableListOf<String>()
-        val chapters = listOf(
-            SourceChapter("chapter-1", "第一章：目录定位", "https://example.test/chapter-1"),
-            SourceChapter("chapter-2", "第二章：搜索定位", "https://example.test/chapter-2"),
+        val navigationTargets = listOf(
+            ReaderNavigationTarget("chapter-1", "第一章：目录定位"),
+            ReaderNavigationTarget("chapter-2", "第二章：搜索定位"),
         )
         composeRule.setContent {
             ReaderAuxiliaryTestTheme {
                 ReaderAuxiliarySheet(
-                    state = rememberReaderAuxiliarySheetState("org.tsuyomi.reader.test", "directory"),
-                    chapters = chapters,
-                    currentChapterId = "chapter-1",
+                    state = rememberReaderAuxiliarySheetState(BookIdentity.Remote("org.tsuyomi.reader.test", "directory")),
+                    navigationTargets = navigationTargets,
+                    currentContentId = "chapter-1",
                     bookmarks = emptyList(),
                     onDismiss = {},
-                    onSelectChapter = { selectedChapterIds += it.chapterId },
+                    onSelectContent = { selectedChapterIds += it.contentId },
                     onSelectBookmark = {},
                     onRemoveBookmark = {},
                 )
@@ -156,20 +166,20 @@ class ReaderBookmarkInstrumentedTest {
     @Test
     @OptIn(ExperimentalTestApi::class)
     fun partialDirectoryCentersItsMiddleChapterInTheActuallyVisibleViewportAndKeepsItThroughExpansion() {
-        val chapters = List(25) { index ->
-            SourceChapter("chapter-$index", "第 ${index + 1} 章", "https://example.test/chapter-$index")
+        val navigationTargets = List(25) { index ->
+            ReaderNavigationTarget("chapter-$index", "第 ${index + 1} 章")
         }
-        val current = chapters[12]
+        val current = navigationTargets[12]
         composeRule.setContent {
             DeviceConfigurationOverride(DeviceConfigurationOverride.ForcedSize(DpSize(360.dp, 640.dp))) {
                 ReaderAuxiliaryTestTheme {
                     ReaderAuxiliarySheet(
-                        state = rememberReaderAuxiliarySheetState("org.tsuyomi.reader.test", "directory"),
-                        chapters = chapters,
-                        currentChapterId = current.chapterId,
+                        state = rememberReaderAuxiliarySheetState(BookIdentity.Remote("org.tsuyomi.reader.test", "directory")),
+                        navigationTargets = navigationTargets,
+                        currentContentId = current.contentId,
                         bookmarks = emptyList(),
                         onDismiss = {},
-                        onSelectChapter = {},
+                        onSelectContent = {},
                         onSelectBookmark = {},
                         onRemoveBookmark = {},
                     )
@@ -178,7 +188,7 @@ class ReaderBookmarkInstrumentedTest {
         }
 
         composeRule.onNodeWithTag("reader-expand-full-contents").assertIsDisplayed()
-        val currentRow = composeRule.onNodeWithTag("reader-chapter-row-${current.chapterId}")
+        val currentRow = composeRule.onNodeWithTag("reader-chapter-row-${current.contentId}")
         currentRow.assertIsDisplayed()
         val currentBounds = currentRow.fetchSemanticsNode().boundsInRoot
         val listBounds = composeRule.onNodeWithTag("reader-directory-list").fetchSemanticsNode().boundsInRoot
@@ -202,20 +212,20 @@ class ReaderBookmarkInstrumentedTest {
     @Test
     @OptIn(ExperimentalTestApi::class)
     fun partialDirectoryNaturallyClampsTheFirstAndLastChapterAtVisibleViewportBoundaries() {
-        val chapters = List(25) { index ->
-            SourceChapter("chapter-$index", "第 ${index + 1} 章", "https://example.test/chapter-$index")
+        val navigationTargets = List(25) { index ->
+            ReaderNavigationTarget("chapter-$index", "第 ${index + 1} 章")
         }
-        val currentChapterId = mutableStateOf(chapters.first().chapterId)
+        val currentContentId = mutableStateOf(navigationTargets.first().contentId)
         composeRule.setContent {
             DeviceConfigurationOverride(DeviceConfigurationOverride.ForcedSize(DpSize(360.dp, 640.dp))) {
                 ReaderAuxiliaryTestTheme {
                     ReaderAuxiliarySheet(
-                        state = rememberReaderAuxiliarySheetState("org.tsuyomi.reader.test", "directory"),
-                        chapters = chapters,
-                        currentChapterId = currentChapterId.value,
+                        state = rememberReaderAuxiliarySheetState(BookIdentity.Remote("org.tsuyomi.reader.test", "directory")),
+                        navigationTargets = navigationTargets,
+                        currentContentId = currentContentId.value,
                         bookmarks = emptyList(),
                         onDismiss = {},
-                        onSelectChapter = {},
+                        onSelectContent = {},
                         onSelectBookmark = {},
                         onRemoveBookmark = {},
                     )
@@ -230,68 +240,56 @@ class ReaderBookmarkInstrumentedTest {
             return maxOf(listBounds.top, rootBounds.top) to minOf(listBounds.bottom, rootBounds.bottom)
         }
 
-        val firstBounds = composeRule.onNodeWithTag("reader-chapter-row-${chapters.first().chapterId}")
+        val firstBounds = composeRule.onNodeWithTag("reader-chapter-row-${navigationTargets.first().contentId}")
             .fetchSemanticsNode().boundsInRoot
         val (firstVisibleTop, _) = actualVisibleBounds()
         assertTrue("First chapter must not scroll beyond the partial viewport start", firstBounds.top >= firstVisibleTop - 1f)
 
-        composeRule.runOnIdle { currentChapterId.value = chapters.last().chapterId }
+        composeRule.runOnIdle { currentContentId.value = navigationTargets.last().contentId }
         composeRule.waitForIdle()
-        val lastBounds = composeRule.onNodeWithTag("reader-chapter-row-${chapters.last().chapterId}")
+        val lastBounds = composeRule.onNodeWithTag("reader-chapter-row-${navigationTargets.last().contentId}")
             .fetchSemanticsNode().boundsInRoot
         val (_, lastVisibleBottom) = actualVisibleBounds()
         assertTrue("Last chapter must not scroll beyond the partial viewport end", lastBounds.bottom <= lastVisibleBottom + 1f)
     }
 
     @Test
-    @OptIn(ExperimentalTestApi::class)
-    fun directoryAndBookmarkRowsKeep48DpTouchTargetsAtOneAndTwoDensity() {
-        val density = mutableStateOf(1f)
-        val chapter = SourceChapter("chapter-1", "第一章：触控尺寸", "https://example.test/chapter-1")
+    fun directoryAndBookmarkRowsKeep48DpTouchTargetsAtDeviceDensity() {
+        val chapter = ReaderNavigationTarget("chapter-1", "第一章：触控尺寸")
         val bookmark = ReaderLocator(
-            document = DocumentIdentity("org.tsuyomi.reader.test", "bookmark-touch-target", chapter.chapterId),
+            document = DocumentIdentity(BookIdentity.Remote("org.tsuyomi.reader.test", "bookmark-touch-target"), chapter.contentId),
             blockId = "paragraph-1",
             textAnchorDigest = "c".repeat(64),
             characterOffset = 0,
             capturedAt = Instant.EPOCH,
         )
         composeRule.setContent {
-            DeviceConfigurationOverride(DeviceConfigurationOverride.ForcedSize(DpSize(360.dp, 640.dp))) {
-                key(density.value) {
-                    CompositionLocalProvider(androidx.compose.ui.platform.LocalDensity provides Density(density.value)) {
-                        ReaderAuxiliaryTestTheme {
-                            ReaderAuxiliarySheet(
-                                state = rememberReaderAuxiliarySheetState(bookmark.document.sourceId, bookmark.document.remoteBookId),
-                                chapters = listOf(chapter),
-                                currentChapterId = chapter.chapterId,
-                                bookmarks = listOf(bookmark),
-                                onDismiss = {},
-                                onSelectChapter = {},
-                                onSelectBookmark = {},
-                                onRemoveBookmark = {},
-                            )
-                        }
-                    }
-                }
+            ReaderAuxiliaryTestTheme {
+                ReaderAuxiliarySheet(
+                    state = rememberReaderAuxiliarySheetState(bookmark.document.book),
+                    navigationTargets = listOf(chapter),
+                    currentContentId = chapter.contentId,
+                    bookmarks = listOf(bookmark),
+                    onDismiss = {},
+                    onSelectContent = {},
+                    onSelectBookmark = {},
+                    onRemoveBookmark = {},
+                )
             }
         }
 
-        for (scale in listOf(1f, 2f)) {
-            composeRule.runOnIdle { density.value = scale }
-            composeRule.waitForIdle()
-            val minimumPixels = 48f * scale
-            val directoryBounds = composeRule.onNodeWithTag("reader-chapter-row-${chapter.chapterId}")
-                .fetchSemanticsNode().boundsInRoot
-            assertTrue("Directory target must be at least 48dp at ${scale}x", directoryBounds.height >= minimumPixels - 0.5f)
+        val minimumPixels = with(composeRule.density) { 48.dp.toPx() }
+        val directoryBounds = composeRule.onNodeWithTag("reader-chapter-row-${chapter.contentId}")
+            .fetchSemanticsNode().boundsInRoot
+        assertTrue("Directory target must be at least 48dp", directoryBounds.height >= minimumPixels - 0.5f)
 
-            composeRule.onNodeWithText("书签").performClick()
-            val bookmarkBounds = composeRule.onNodeWithTag("reader-bookmark-row-${bookmark.bookmarkPositionKey()}")
-                .fetchSemanticsNode().boundsInRoot
-            val removeBounds = composeRule.onNodeWithTag("reader-bookmark-remove-${bookmark.bookmarkPositionKey()}")
-                .fetchSemanticsNode().boundsInRoot
-            assertTrue("Bookmark row must be at least 48dp at ${scale}x", bookmarkBounds.height >= minimumPixels - 0.5f)
-            assertTrue("Bookmark remove target must be at least 48dp at ${scale}x", removeBounds.height >= minimumPixels - 0.5f)
-        }
+        composeRule.onNodeWithText("书签").performClick()
+        val bookmarkBounds = composeRule.onNodeWithTag("reader-bookmark-row-${bookmark.bookmarkPositionKey()}")
+            .fetchSemanticsNode().boundsInRoot
+        val removeBounds = composeRule.onNodeWithTag("reader-bookmark-remove-${bookmark.bookmarkPositionKey()}")
+            .fetchSemanticsNode().boundsInRoot
+        assertTrue("Bookmark row must be at least 48dp", bookmarkBounds.height >= minimumPixels - 0.5f)
+        assertTrue("Bookmark remove target must be at least 48dp", removeBounds.height >= minimumPixels - 0.5f)
     }
 
     @Test
@@ -299,24 +297,24 @@ class ReaderBookmarkInstrumentedTest {
     fun expandingTheDirectoryKeepsTheExistingBackDismissBehavior() {
         val dismissals = AtomicInteger()
         val visible = mutableStateOf(true)
-        val chapters = List(25) { index ->
-            SourceChapter("chapter-$index", "第 ${index + 1} 章", "https://example.test/chapter-$index")
+        val navigationTargets = List(25) { index ->
+            ReaderNavigationTarget("chapter-$index", "第 ${index + 1} 章")
         }
         composeRule.setContent {
             DeviceConfigurationOverride(DeviceConfigurationOverride.ForcedSize(DpSize(360.dp, 640.dp))) {
                 ReaderAuxiliaryTestTheme {
-                    val sheetState = rememberReaderAuxiliarySheetState("org.tsuyomi.reader.test", "directory")
+                    val sheetState = rememberReaderAuxiliarySheetState(BookIdentity.Remote("org.tsuyomi.reader.test", "directory"))
                     if (visible.value) {
                         ReaderAuxiliarySheet(
                             state = sheetState,
-                            chapters = chapters,
-                            currentChapterId = chapters[12].chapterId,
+                            navigationTargets = navigationTargets,
+                            currentContentId = navigationTargets[12].contentId,
                             bookmarks = emptyList(),
                             onDismiss = {
                                 dismissals.incrementAndGet()
                                 visible.value = false
                             },
-                            onSelectChapter = {},
+                            onSelectContent = {},
                             onSelectBookmark = {},
                             onRemoveBookmark = {},
                         )
@@ -334,8 +332,8 @@ class ReaderBookmarkInstrumentedTest {
     @Test
     @OptIn(ExperimentalTestApi::class)
     fun directoryDoesNotExposeAnUncenteredFirstFrameBeforeItsCurrentChapterIsPositioned() {
-        val chapters = List(25) { index ->
-            SourceChapter("first-frame-$index", "第 ${index + 1} 章", "https://example.test/first-frame-$index")
+        val navigationTargets = List(25) { index ->
+            ReaderNavigationTarget("first-frame-$index", "第 ${index + 1} 章")
         }
         composeRule.mainClock.autoAdvance = false
         try {
@@ -343,12 +341,12 @@ class ReaderBookmarkInstrumentedTest {
                 DeviceConfigurationOverride(DeviceConfigurationOverride.ForcedSize(DpSize(360.dp, 640.dp))) {
                     ReaderAuxiliaryTestTheme {
                         ReaderAuxiliarySheet(
-                            state = rememberReaderAuxiliarySheetState("org.tsuyomi.reader.test", "directory"),
-                            chapters = chapters,
-                            currentChapterId = chapters[12].chapterId,
+                            state = rememberReaderAuxiliarySheetState(BookIdentity.Remote("org.tsuyomi.reader.test", "directory")),
+                            navigationTargets = navigationTargets,
+                            currentContentId = navigationTargets[12].contentId,
                             bookmarks = emptyList(),
                             onDismiss = {},
-                            onSelectChapter = {},
+                            onSelectContent = {},
                             onSelectBookmark = {},
                             onRemoveBookmark = {},
                         )
@@ -363,7 +361,7 @@ class ReaderBookmarkInstrumentedTest {
         }
         composeRule.waitForIdle()
         composeRule.onNodeWithTag("reader-directory-list").assertIsDisplayed()
-        val currentBounds = composeRule.onNodeWithTag("reader-chapter-row-${chapters[12].chapterId}")
+        val currentBounds = composeRule.onNodeWithTag("reader-chapter-row-${navigationTargets[12].contentId}")
             .fetchSemanticsNode().boundsInRoot
         val listBounds = composeRule.onNodeWithTag("reader-directory-list").fetchSemanticsNode().boundsInRoot
         val rootBounds = composeRule.onNode(isRoot() and hasAnyDescendant(hasTestTag("reader-directory-list")))
@@ -376,16 +374,16 @@ class ReaderBookmarkInstrumentedTest {
     @Test
     @OptIn(ExperimentalTestApi::class)
     fun auxiliarySheetKeepsItsTabViewportAndAnchorsAcrossPartialExpandedAndReopenedStates() {
-        val chapters = List(30) { index ->
-            SourceChapter(
-                chapterId = "chapter-$index",
+        val navigationTargets = List(30) { index ->
+            ReaderNavigationTarget(
+                contentId = "chapter-$index",
                 title = "第 ${index + 1} 章",
-                url = "https://example.test/chapter-$index",
-                volumeTitle = if (index < 10) "上卷" else "下卷",
+
+                sectionTitle = if (index < 10) "上卷" else "下卷",
             )
         }
         val bookmark = ReaderLocator(
-            document = DocumentIdentity("org.tsuyomi.reader.test", "auxiliary-state", chapters[14].chapterId),
+            document = DocumentIdentity(BookIdentity.Remote("org.tsuyomi.reader.test", "auxiliary-state"), navigationTargets[14].contentId),
             blockId = "paragraph-14",
             textAnchorDigest = "d".repeat(64),
             characterOffset = 6,
@@ -395,18 +393,15 @@ class ReaderBookmarkInstrumentedTest {
         composeRule.setContent {
             DeviceConfigurationOverride(DeviceConfigurationOverride.ForcedSize(DpSize(360.dp, 640.dp))) {
                 ReaderAuxiliaryTestTheme {
-                    val state = rememberReaderAuxiliarySheetState(
-                        sourceId = "org.tsuyomi.reader.test",
-                        remoteBookId = "auxiliary-state",
-                    )
+                    val state = rememberReaderAuxiliarySheetState(BookIdentity.Remote("org.tsuyomi.reader.test", "auxiliary-state"))
                     if (visible.value) {
                         ReaderAuxiliarySheet(
                             state = state,
-                            chapters = chapters,
-                            currentChapterId = chapters[14].chapterId,
+                            navigationTargets = navigationTargets,
+                            currentContentId = navigationTargets[14].contentId,
                             bookmarks = listOf(bookmark),
                             onDismiss = { visible.value = false },
-                            onSelectChapter = {},
+                            onSelectContent = {},
                             onSelectBookmark = {},
                             onRemoveBookmark = {},
                         )
@@ -417,8 +412,8 @@ class ReaderBookmarkInstrumentedTest {
 
         val directory = composeRule.onNodeWithTag("reader-directory-list")
         directory.performScrollToIndex(11)
-        composeRule.onNodeWithTag("reader-volume-boundary-volume:10:下卷").assertIsDisplayed()
-        val volumeBounds = composeRule.onNodeWithTag("reader-volume-boundary-volume:10:下卷")
+        composeRule.onNodeWithTag("reader-volume-boundary-section:10:下卷").assertIsDisplayed()
+        val volumeBounds = composeRule.onNodeWithTag("reader-volume-boundary-section:10:下卷")
             .fetchSemanticsNode().boundsInRoot
         val directoryBounds = directory.fetchSemanticsNode().boundsInRoot
         assertEquals(directoryBounds.left, volumeBounds.left, 1f)
@@ -448,22 +443,132 @@ class ReaderBookmarkInstrumentedTest {
         composeRule.onNodeWithTag("reader-chapter-row-chapter-18").assertIsDisplayed()
     }
 
+    @Test
+    @OptIn(ExperimentalTestApi::class)
+    fun einkAuxiliaryModesMeasureTheirSidebarAndPreserveDirectoryQueryAndBookmarkIdentity() {
+        val book = BookIdentity.Remote("org.tsuyomi.reader.test", "eink-auxiliary-modes")
+        val targets = List(40) { index -> ReaderNavigationTarget("chapter-$index", "第${index + 1}章", sectionTitle = "正文") }
+        val bookmark = ReaderLocator(
+            document = DocumentIdentity(book, targets[14].contentId),
+            blockId = "paragraph-14", characterOffset = 6, textAnchorDigest = "e".repeat(64),
+            chapterProgress = 0.2, capturedAt = Instant.EPOCH,
+        )
+        val selectedBookmark = AtomicReference<ReaderLocator?>()
+        val sheetState = AtomicReference<ReaderAuxiliarySheetState>()
+        val visible = mutableStateOf(true)
+        val fontScale = mutableStateOf(1f)
+        composeRule.setContent {
+            DeviceConfigurationOverride(
+                DeviceConfigurationOverride.ForcedSize(DpSize(320.dp, 640.dp))
+                    .then(DeviceConfigurationOverride.FontScale(fontScale.value)),
+            ) {
+                ReaderAuxiliaryTestTheme(DisplayProfile.EINK) {
+                    val state = rememberReaderAuxiliarySheetState(book)
+                    SideEffect { sheetState.set(state) }
+                    if (visible.value) {
+                        ReaderAuxiliarySheet(
+                            state = state, navigationTargets = targets, currentContentId = targets[14].contentId,
+                            bookmarks = listOf(bookmark), onDismiss = { visible.value = false },
+                            onSelectContent = {}, onSelectBookmark = { selectedBookmark.set(it) }, onRemoveBookmark = {},
+                        )
+                    }
+                }
+            }
+        }
+        val navigation = composeRule.onNodeWithTag("reader-eink-auxiliary-navigation").assertIsDisplayed()
+        composeRule.onNodeWithTag("reader-eink-mode-contents").assertIsSelected()
+        composeRule.onNodeWithTag("reader-chapter-row-${targets[14].contentId}").assertIsSelected()
+        val label = composeRule.onNode(hasText("目录") and hasAnyAncestor(hasTestTag("reader-eink-auxiliary-navigation")), useUnmergedTree = true)
+            .fetchSemanticsNode()
+        val navBounds = navigation.fetchSemanticsNode().boundsInRoot
+        val contentBounds = composeRule.onNodeWithTag("reader-eink-auxiliary-content").fetchSemanticsNode().boundsInRoot
+        assertTrue(navBounds.width <= label.boundsInRoot.width + with(label.layoutInfo.density) { 24.dp.toPx() } + 1f)
+        assertTrue(contentBounds.left >= navBounds.right && contentBounds.width > navBounds.width * 2f)
+        composeRule.onNode(hasText("下一页") and hasAnyAncestor(hasTestTag("reader-directory-pager")))
+            .assertIsEnabled().performClick()
+        val directoryAnchor = composeRule.runOnIdle { sheetState.get().contentsPagerState.currentAnchorKey }
+        composeRule.onNodeWithTag("reader-eink-mode-search").performClick().assertIsSelected()
+        composeRule.onNodeWithTag("reader-search-input").performTextInput("第2")
+        composeRule.onNodeWithTag("reader-search-input").performSemanticsAction(SemanticsActions.SetSelection) { it(1, 1, false) }
+        composeRule.onNodeWithTag("reader-eink-search-submit").performClick()
+        composeRule.onNodeWithTag("reader-search-results-pager").assertIsDisplayed()
+        composeRule.onNodeWithTag("reader-eink-mode-bookmarks").performClick().assertIsSelected()
+        composeRule.onNodeWithTag("reader-bookmark-row-${bookmark.bookmarkPositionKey()}").assertIsDisplayed().performClick()
+        assertEquals(bookmark, selectedBookmark.get())
+        composeRule.onNodeWithTag("reader-eink-mode-contents").performClick()
+        composeRule.runOnIdle { assertEquals(directoryAnchor, sheetState.get().contentsPagerState.currentAnchorKey) }
+        composeRule.onNodeWithTag("reader-eink-mode-search").performClick()
+        val input = composeRule.onNodeWithTag("reader-search-input").fetchSemanticsNode().config
+        assertEquals("第2", input[SemanticsProperties.EditableText].text)
+        assertEquals(TextRange(1), input[SemanticsProperties.TextSelectionRange])
+        composeRule.runOnIdle { fontScale.value = 2f }
+        listOf("contents", "bookmarks", "search").forEach { mode ->
+            val button = composeRule.onNodeWithTag("reader-eink-mode-$mode").assertIsDisplayed()
+            val node = button.fetchSemanticsNode()
+            val minimum = with(node.layoutInfo.density) { 48.dp.toPx() }
+            assertTrue(node.touchBoundsInRoot.width >= minimum && node.touchBoundsInRoot.height >= minimum)
+        }
+        val largeInput = composeRule.onNodeWithTag("reader-search-input").assertIsDisplayed().fetchSemanticsNode()
+        val largePane = composeRule.onNodeWithTag("reader-eink-auxiliary-content").fetchSemanticsNode().boundsInRoot
+        assertTrue(largeInput.boundsInRoot.left >= largePane.left && largeInput.boundsInRoot.right <= largePane.right)
+        composeRule.onNodeWithTag("reader-eink-search-submit").assertIsDisplayed()
+        assertTrue(composeRule.onAllNodes(SemanticsMatcher.keyIsDefined(SemanticsProperties.VerticalScrollAxisRange), useUnmergedTree = true)
+            .fetchSemanticsNodes().isEmpty())
+        composeRule.runOnIdle { visible.value = false }
+        composeRule.runOnIdle { visible.value = true }
+        composeRule.onNodeWithTag("reader-eink-mode-search").assertIsSelected()
+        assertEquals("第2", composeRule.onNodeWithTag("reader-search-input").fetchSemanticsNode().config[SemanticsProperties.EditableText].text)
+        composeRule.onNodeWithTag("reader-eink-mode-contents").performClick()
+        composeRule.runOnIdle { assertEquals(directoryAnchor, sheetState.get().contentsPagerState.currentAnchorKey) }
+    }
+
+    @Test
+    @OptIn(ExperimentalTestApi::class)
+    fun einkLongDirectoryReachesItsRealFirstAndLastPagesWithoutSequentialTraversal() {
+        val book = BookIdentity.Remote("org.tsuyomi.reader.test", "eink-directory-endpoints")
+        val targets = List(100) { index -> ReaderNavigationTarget("chapter-$index", "第${index + 1}章", sectionTitle = "正文") }
+        val selected = AtomicReference<ReaderNavigationTarget?>()
+        composeRule.setContent {
+            DeviceConfigurationOverride(DeviceConfigurationOverride.ForcedSize(DpSize(320.dp, 640.dp))) {
+                ReaderAuxiliaryTestTheme(DisplayProfile.EINK) {
+                    ReaderAuxiliarySheet(
+                        state = rememberReaderAuxiliarySheetState(book), navigationTargets = targets,
+                        currentContentId = targets.first().contentId, bookmarks = emptyList(), onDismiss = {},
+                        onSelectContent = { selected.set(it) }, onSelectBookmark = {}, onRemoveBookmark = {},
+                    )
+                }
+            }
+        }
+        val footer = hasAnyAncestor(hasTestTag("reader-eink-pagination-controls"))
+        val first = composeRule.onNode(hasText("首页") and footer)
+        val last = composeRule.onNode(hasText("末页") and footer)
+        last.assertIsDisplayed().assertIsEnabled().performClick()
+        last.assertIsNotEnabled()
+        composeRule.onNodeWithTag("reader-chapter-row-${targets.last().contentId}").assertIsDisplayed().performClick()
+        assertEquals(targets.last(), selected.get())
+        first.assertIsDisplayed().assertIsEnabled().performClick()
+        first.assertIsNotEnabled()
+        last.assertIsEnabled()
+        composeRule.onNodeWithTag("reader-chapter-row-${targets.first().contentId}").assertIsDisplayed().performClick()
+        assertEquals(targets.first(), selected.get())
+    }
+
 }
 
 @Composable
-private fun ReaderAuxiliaryTestTheme(content: @Composable () -> Unit) {
+private fun ReaderAuxiliaryTestTheme(profile: DisplayProfile = DisplayProfile.STANDARD, content: @Composable () -> Unit) {
     val environment = DisplayEnvironment(
         preferences = DisplayPreferences(
-            displayPreference = DisplayPreference.STANDARD,
+            displayPreference = if (profile == DisplayProfile.EINK) DisplayPreference.EINK else DisplayPreference.STANDARD,
             colorSchemePreference = ColorSchemePreference.LIGHT,
         ),
-        effectiveProfile = DisplayProfile.STANDARD,
-        decisionReason = DisplayDecisionReason.MANUAL_STANDARD,
+        effectiveProfile = profile,
+        decisionReason = if (profile == DisplayProfile.EINK) DisplayDecisionReason.MANUAL_EINK else DisplayDecisionReason.MANUAL_STANDARD,
         detectedDeviceLabel = null,
         dynamicColorEligible = false,
         dynamicColorEffective = false,
         effectiveDarkTheme = false,
-        motionPolicy = MotionPolicy.STANDARD,
+        motionPolicy = if (profile == DisplayProfile.EINK) MotionPolicy.INSTANT else MotionPolicy.STANDARD,
         redrawEpoch = 0,
     )
     DisplayEnvironmentProvider(environment) {

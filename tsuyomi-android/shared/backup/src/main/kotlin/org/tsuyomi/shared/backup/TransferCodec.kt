@@ -8,6 +8,7 @@ import java.net.URI
 import java.nio.ByteBuffer
 import java.nio.charset.CodingErrorAction
 import java.nio.charset.StandardCharsets
+import kotlinx.serialization.json.longOrNull
 import java.security.MessageDigest
 import java.io.ByteArrayOutputStream
 import java.time.Instant
@@ -32,6 +33,9 @@ import org.tsuyomi.shared.locator.DocumentIdentity
 import org.tsuyomi.shared.locator.MAX_READER_BOOKMARKS_PER_BOOK
 import org.tsuyomi.shared.locator.ReaderLocator
 import org.tsuyomi.shared.locator.bookmarkPositionKey
+import org.tsuyomi.shared.librarydomain.LocalPublicationFormat
+import org.tsuyomi.shared.librarydomain.LocalTextHeading
+import org.tsuyomi.shared.librarydomain.LocalTextParseOptions
 
 object TransferCodec {
     private val json = Json { explicitNulls = false }
@@ -54,7 +58,7 @@ object TransferCodec {
     }
 
     fun encode(snapshot: TransferSnapshot): ByteArray {
-        val orderedBooks = snapshot.library.sortedWith(compareBy({ it.identity.sourceId }, { it.identity.remoteBookId }))
+        val orderedBooks = snapshot.library.sortedBy { it.identity }
         require(orderedBooks.map { it.identity }.distinct().size == orderedBooks.size) { "Duplicate book identity" }
         val orderedShelves = canonicalShelves(snapshot.shelves)
         val root = buildJsonObject {
@@ -94,7 +98,7 @@ object TransferCodec {
     fun encodeBounded(snapshot: TransferSnapshot, maximumBytes: Int = MAX_TRANSFER_BYTES): ByteArray? {
         require(maximumBytes >= 0)
         val sentinelLimit = maximumBytes.toLong() + 1L
-        val orderedBooks = snapshot.library.sortedWith(compareBy({ it.identity.sourceId }, { it.identity.remoteBookId }))
+        val orderedBooks = snapshot.library.sortedBy { it.identity }
         require(orderedBooks.map { it.identity }.distinct().size == orderedBooks.size) { "Duplicate book identity" }
         val orderedShelves = canonicalShelves(snapshot.shelves)
         val output = ByteArrayOutputStream(minOf(maximumBytes, 64 * 1024))
@@ -209,15 +213,20 @@ object TransferCodec {
             2 -> BOOK_FIELDS_V2
             3 -> BOOK_FIELDS_V3
             4 -> BOOK_FIELDS_V4
-            else -> BOOK_FIELDS_V5
+            5 -> BOOK_FIELDS_V5
+            else -> BOOK_FIELDS_V6
         } })
         val identityObject = requireNotNull(value.obj("identity"))
-        require(identityObject.keys == setOf("sourceId", "remoteBookId"))
-        val identity = BookIdentity(
-            sourceId = if (version == 5) requireNotNull(identityObject.strictString("sourceId")) else requireNotNull(identityObject.string("sourceId")),
-            remoteBookId = if (version == 5) requireNotNull(identityObject.strictString("remoteBookId")) else requireNotNull(identityObject.string("remoteBookId")),
-        )
-        require(identity.sourceId.matches(SOURCE_ID))
+        val identity = if (version == 6) {
+            parseIdentityV6(identityObject)
+        } else {
+            require(identityObject.keys == setOf("sourceId", "remoteBookId"))
+            BookIdentity.Remote(
+                sourceId = if (version == 5) requireNotNull(identityObject.strictString("sourceId")) else requireNotNull(identityObject.string("sourceId")),
+                remoteBookId = if (version == 5) requireNotNull(identityObject.strictString("remoteBookId")) else requireNotNull(identityObject.string("remoteBookId")),
+            )
+        }
+        if (identity is BookIdentity.Remote) require(identity.sourceId.matches(SOURCE_ID))
         val title = requireNotNull(value.string("title")); require(title.length in 1..4096)
         val updatedAt = requireNotNull(value.instant("updatedAt"))
         val authors = value.stringSet("authors", 32, 1024)
@@ -226,16 +235,41 @@ object TransferCodec {
         val shelfIds = value.stringSet("shelfIds", 512, 128)
         val completedChapterIds = if (version == 1) emptySet() else value.completedChapterIdSet("completedChapterIds")
         val bookmarks = when (version) {
-            5 -> value.readerLocatorList("bookmarks", identity)
+            6, 5 -> value.readerLocatorList("bookmarks", identity, version)
             4 -> value.legacyBookmarkedChapterIdSet("bookmarkedChapterIds").map { chapterId ->
-                legacyChapterStartBookmark(identity, chapterId)
+                legacyChapterStartBookmark(identity as BookIdentity.Remote, chapterId)
             }
             else -> emptyList()
+        }
+        val localPublication = if (version == 6 && identity is BookIdentity.Local) {
+            val publication = requireNotNull(value.obj("localPublication"))
+            val format = parsePublicationFormat(requireNotNull(publication.strictString("format")))
+            val expectedFields = if (format == LocalPublicationFormat.TXT) {
+                setOf("format", "originalSha256", "originalSizeBytes", "txtOptions")
+            } else {
+                setOf("format", "originalSha256", "originalSizeBytes")
+            }
+            require(publication.keys - "coverResourceId" == expectedFields)
+            TransferLocalPublicationMetadata(
+                format = format,
+                originalSha256 = requireNotNull(publication.strictString("originalSha256")),
+                originalSizeBytes = requireNotNull(publication.strictLong("originalSizeBytes")),
+                coverResourceId = publication["coverResourceId"]?.let {
+                    requireNotNull(publication.strictString("coverResourceId"))
+                },
+                txtOptions = if (format == LocalPublicationFormat.TXT) {
+                    parseLocalTextOptions(requireNotNull(publication.obj("txtOptions")))
+                } else null,
+            )
+        } else {
+            require(value["localPublication"] == null)
+            null
         }
         val status = value.string("status") ?: "unknown"; require(status in STATUSES)
         val rating = value.primitive("rating")?.doubleOrNull; require(rating == null || rating in 0.0..5.0)
         val canonicalUrl = value.string("canonicalUrl")?.also(::requireUri)
         val coverUrl = value.string("coverUrl")?.also(::requireUri)
+        require(identity !is BookIdentity.Local || ("canonicalUrl" !in value && "coverUrl" !in value))
         TransferBook(
             identity = identity,
             title = title,
@@ -255,26 +289,29 @@ object TransferCodec {
             }.also { localPin -> require(localPin || shelfIds.isEmpty()) },
             addedAt = value.instant("addedAt"),
             updatedAt = updatedAt,
-            progress = value.obj("progress")?.let(::parseProgress),
+            progress = value.obj("progress")?.let { parseProgress(it, version) },
             completedChapterIds = completedChapterIds,
             bookmarks = bookmarks,
+            localPublication = localPublication,
         )
     }.getOrNull()
 
-    private fun parseProgress(value: JsonObject): TransferProgress {
-        require(value.keys.all { it in PROGRESS_FIELDS })
+    private fun parseProgress(value: JsonObject, version: Int): TransferProgress {
+        require(value.keys.all { it in PROGRESS_FIELDS || version == 6 && it == "revision" })
         val chapterId = value.string("chapterId")
         val textAnchor = value.string("textAnchor")
         val offset = value.int("characterOffset")
         val chapterProgress = value.primitive("chapterProgress")?.doubleOrNull
         val bookProgress = value.primitive("bookProgress")?.doubleOrNull
+        val revision = if (version == 6) value.strictString("revision") else null
+        require(revision == null || revision.length in 1..256)
         require(textAnchor != null || offset != null || chapterProgress != null || bookProgress != null)
         require(chapterId == null || chapterId.length in 1..1024)
         require(textAnchor == null || SHA_256.matches(textAnchor))
         require(offset == null || offset >= 0)
         require(chapterProgress == null || chapterProgress.isFinite() && chapterProgress in 0.0..1.0)
         require(bookProgress == null || bookProgress.isFinite() && bookProgress in 0.0..1.0)
-        return TransferProgress(chapterId, textAnchor, offset, chapterProgress, bookProgress, requireNotNull(value.instant("updatedAt")))
+        return TransferProgress(chapterId, textAnchor, offset, chapterProgress, bookProgress, requireNotNull(value.instant("updatedAt")), revision)
     }
 
     private fun parseShelf(value: JsonObject): TransferShelf? = runCatching {
@@ -352,7 +389,16 @@ object TransferCodec {
         }
         require(bookmarkKeys.distinct().size == bookmarkKeys.size) { "Duplicate bookmark position" }
         return buildJsonObject {
-            put("identity", buildJsonObject { put("sourceId", book.identity.sourceId); put("remoteBookId", book.identity.remoteBookId) })
+            put("identity", identityJson(book.identity))
+            book.localPublication?.let { publication ->
+                put("localPublication", buildJsonObject {
+                    put("format", publication.format.protocolValue)
+                    put("originalSha256", publication.originalSha256)
+                    put("originalSizeBytes", publication.originalSizeBytes)
+                    publication.txtOptions?.let { put("txtOptions", it.toJson()) }
+                    publication.coverResourceId?.let { put("coverResourceId", it) }
+                })
+            }
             put("title", book.title)
             putStringSet("authors", book.authors)
             book.canonicalUrl?.let { put("canonicalUrl", it) }
@@ -376,6 +422,7 @@ object TransferCodec {
 
     private fun progressJson(progress: TransferProgress): JsonObject = buildJsonObject {
         progress.chapterId?.let { put("chapterId", it) }
+        progress.revision?.let { put("revision", it) }
         progress.textAnchor?.let { put("textAnchor", it) }
         progress.characterOffset?.let { put("characterOffset", it) }
         progress.chapterProgress?.let { put("chapterProgress", it) }
@@ -385,8 +432,7 @@ object TransferCodec {
 
     private fun readerLocatorJson(locator: ReaderLocator): JsonObject = buildJsonObject {
         put("document", buildJsonObject {
-            put("sourceId", locator.document.sourceId)
-            put("remoteBookId", locator.document.remoteBookId)
+            put("book", identityJson(locator.document.book))
             put("contentId", locator.document.contentId)
             locator.document.revision?.let { put("revision", it) }
         })
@@ -410,6 +456,76 @@ object TransferCodec {
         return shelves.sortedWith(compareBy({ it.parentId ?: "" }, { it.position }, { it.id }))
     }
 
+    private fun identityJson(identity: BookIdentity): JsonObject = buildJsonObject {
+        when (identity) {
+            is BookIdentity.Remote -> {
+                put("origin", "remote")
+                put("sourceId", identity.sourceId)
+                put("remoteBookId", identity.remoteBookId)
+            }
+            is BookIdentity.Local -> {
+                put("origin", "local")
+                put("publicationId", identity.publicationId)
+            }
+        }
+    }
+
+    private val LocalPublicationFormat.protocolValue: String
+        get() = when (this) {
+            LocalPublicationFormat.EPUB -> "epub"
+            LocalPublicationFormat.TXT -> "txt"
+            LocalPublicationFormat.MOBI -> "mobi"
+            LocalPublicationFormat.AZW3 -> "azw3"
+        }
+
+    private fun parsePublicationFormat(value: String): LocalPublicationFormat = when (value) {
+        "epub" -> LocalPublicationFormat.EPUB
+        "txt" -> LocalPublicationFormat.TXT
+        "mobi" -> LocalPublicationFormat.MOBI
+        "azw3" -> LocalPublicationFormat.AZW3
+        else -> error("Unsupported local publication format")
+    }
+
+    private fun parseIdentityV6(value: JsonObject): BookIdentity = parseIdentityV6Json(value)
+    private fun LocalTextParseOptions.toJson(): JsonObject = buildJsonObject {
+        put("charsetName", charsetName?.let(::JsonPrimitive) ?: JsonNull)
+        put("headingSelections", buildJsonArray {
+            headingSelections.forEach { heading ->
+                add(buildJsonObject {
+                    put("paragraphOrdinal", heading.paragraphOrdinal)
+                    put("title", heading.title)
+                })
+            }
+        })
+        put("paragraphsPerSection", paragraphsPerSection)
+    }
+
+    private fun parseLocalTextOptions(value: JsonObject): LocalTextParseOptions {
+        require(value.keys == setOf("charsetName", "headingSelections", "paragraphsPerSection"))
+        val charsetValue = requireNotNull(value["charsetName"])
+        val charsetName = when (charsetValue) {
+            JsonNull -> null
+            is JsonPrimitive -> {
+                require(charsetValue.isString)
+                charsetValue.content
+            }
+            else -> error("Invalid TXT charset")
+        }
+        val headings = requireNotNull(value.array("headingSelections")).map { element ->
+            val heading = element as? JsonObject ?: error("Invalid TXT heading")
+            require(heading.keys == setOf("paragraphOrdinal", "title"))
+            LocalTextHeading(
+                paragraphOrdinal = requireNotNull(heading.strictInt("paragraphOrdinal")),
+                title = requireNotNull(heading.strictString("title")),
+            )
+        }
+        return LocalTextParseOptions(
+            charsetName = charsetName,
+            headingSelections = headings,
+            paragraphsPerSection = requireNotNull(value.strictInt("paragraphsPerSection")),
+        )
+    }
+
     private fun requireUri(value: String) { require(runCatching { URI(value) }.getOrNull()?.isAbsolute == true) }
 
     private val SOURCE_ID = Regex("^[a-z0-9](?:[a-z0-9.-]{0,126}[a-z0-9])?$")
@@ -419,6 +535,7 @@ object TransferCodec {
     private val BOOK_FIELDS_V3 = BOOK_FIELDS_V2 + "localPin"
     private val BOOK_FIELDS_V4 = BOOK_FIELDS_V3 + "bookmarkedChapterIds"
     private val BOOK_FIELDS_V5 = BOOK_FIELDS_V3 + "bookmarks"
+    private val BOOK_FIELDS_V6 = BOOK_FIELDS_V5 + "localPublication"
     private val READER_FIELDS_V1 = setOf("flow", "fontScale", "lineHeight", "theme")
     private val READER_FIELDS_V2 = READER_FIELDS_V1 + setOf("horizontalMargin", "paragraphSpacing", "lockPortrait", "progressVisible", "immersive", "keepAwake", "volumePaging")
     private val READER_FIELDS_V4 = READER_FIELDS_V2 + setOf("fontFamily", "fontWeight", "letterSpacing", "firstLineIndent", "verticalMargin", "textAlignment", "foregroundColor", "backgroundColor")
@@ -428,10 +545,25 @@ object TransferCodec {
     private val FONT_FAMILIES = setOf("system", "sans", "serif", "monospace")
     private val TEXT_ALIGNMENTS = setOf("start", "justify", "center", "end")
     private val HEX_COLOR = Regex("^#[0-9A-F]{6}$")
-    private const val CURRENT_VERSION = 5
+    private const val CURRENT_VERSION = 6
     private val FONT_WEIGHTS = setOf(400, 500)
     internal const val MAX_COMPLETED_CHAPTERS_PER_BOOK = 20_000
     private val PROGRESS_FIELDS = setOf("chapterId", "textAnchor", "characterOffset", "chapterProgress", "bookProgress", "updatedAt")
+}
+
+private fun parseIdentityV6Json(value: JsonObject): BookIdentity = when (value.strictString("origin")) {
+    "remote" -> {
+        require(value.keys == setOf("origin", "sourceId", "remoteBookId"))
+        BookIdentity.Remote(
+            requireNotNull(value.strictString("sourceId")),
+            requireNotNull(value.strictString("remoteBookId")),
+        )
+    }
+    "local" -> {
+        require(value.keys == setOf("origin", "publicationId"))
+        BookIdentity.Local(requireNotNull(value.strictString("publicationId")))
+    }
+    else -> error("Invalid book origin")
 }
 
 internal fun hasShelfParentCycle(shelves: List<TransferShelf>): Boolean {
@@ -492,12 +624,12 @@ internal fun JsonObject.legacyBookmarkedChapterIdSet(name: String): Set<String> 
     return strings.toSortedSet()
 }
 
-internal fun JsonObject.readerLocatorList(name: String, identity: BookIdentity): List<ReaderLocator> {
+internal fun JsonObject.readerLocatorList(name: String, identity: BookIdentity, version: Int): List<ReaderLocator> {
     val values = requireNotNull(this[name]) { "Missing bookmarks" } as? JsonArray
         ?: error("Invalid bookmarks")
     require(values.size <= MAX_READER_BOOKMARKS_PER_BOOK)
     val locators = values.map { element ->
-        (element as? JsonObject ?: error("Invalid bookmark")).toReaderLocator(identity)
+        (element as? JsonObject ?: error("Invalid bookmark")).toReaderLocator(identity, version)
     }
     require(locators.map(ReaderLocator::bookmarkPositionKey).distinct().size == locators.size) {
         "Duplicate bookmark position"
@@ -505,16 +637,27 @@ internal fun JsonObject.readerLocatorList(name: String, identity: BookIdentity):
     return locators.sortedBy(ReaderLocator::bookmarkPositionKey)
 }
 
-private fun JsonObject.toReaderLocator(identity: BookIdentity): ReaderLocator {
+private fun JsonObject.toReaderLocator(identity: BookIdentity, version: Int): ReaderLocator {
     require(keys.all { it in READER_LOCATOR_FIELDS })
     val documentJson = requireNotNull(obj("document"))
-    require(documentJson.keys.all { it in READER_LOCATOR_DOCUMENT_FIELDS })
-    val document = DocumentIdentity(
-        sourceId = requireNotNull(documentJson.strictString("sourceId")),
-        remoteBookId = requireNotNull(documentJson.strictString("remoteBookId")),
-        contentId = requireNotNull(documentJson.strictString("contentId")),
-        revision = documentJson.strictString("revision"),
-    )
+    val document = if (version == 6) {
+        require(documentJson.keys.all { it in READER_LOCATOR_DOCUMENT_FIELDS_V6 })
+        DocumentIdentity(
+            book = parseIdentityV6Json(requireNotNull(documentJson.obj("book"))),
+            contentId = requireNotNull(documentJson.strictString("contentId")),
+            revision = documentJson.strictString("revision"),
+        )
+    } else {
+        require(documentJson.keys.all { it in READER_LOCATOR_DOCUMENT_FIELDS_LEGACY })
+        DocumentIdentity(
+            book = BookIdentity.Remote(
+                requireNotNull(documentJson.strictString("sourceId")),
+                requireNotNull(documentJson.strictString("remoteBookId")),
+            ),
+            contentId = requireNotNull(documentJson.strictString("contentId")),
+            revision = documentJson.strictString("revision"),
+        )
+    }
     require(document.book == identity) { "Bookmark document must belong to its book" }
     return ReaderLocator(
         document = document,
@@ -539,6 +682,12 @@ private fun JsonObject.strictInt(name: String): Int? {
     return requireNotNull(value.intOrNull)
 }
 
+private fun JsonObject.strictLong(name: String): Long? {
+    val value = this[name] ?: return null
+    require(value is JsonPrimitive && !value.isString)
+    return requireNotNull(value.longOrNull)
+}
+
 private fun JsonObject.strictDouble(name: String): Double? {
     val value = this[name] ?: return null
     require(value is JsonPrimitive && !value.isString)
@@ -549,16 +698,16 @@ private fun JsonObject.strictInstant(name: String): Instant? = strictString(name
     requireNotNull(runCatching { Instant.parse(value) }.getOrNull())
 }
 
-private fun legacyChapterStartBookmark(identity: BookIdentity, chapterId: String): ReaderLocator = ReaderLocator(
-    document = DocumentIdentity(identity.sourceId, identity.remoteBookId, chapterId),
+private fun legacyChapterStartBookmark(identity: BookIdentity.Remote, chapterId: String): ReaderLocator = ReaderLocator(
+    document = DocumentIdentity(identity, chapterId),
     chapterProgress = 0.0,
     capturedAt = Instant.EPOCH,
 )
-
 private val READER_LOCATOR_FIELDS = setOf(
     "document", "blockId", "textAnchorDigest", "characterOffset", "chapterProgress", "bookProgress", "capturedAt",
 )
-private val READER_LOCATOR_DOCUMENT_FIELDS = setOf("sourceId", "remoteBookId", "contentId", "revision")
+private val READER_LOCATOR_DOCUMENT_FIELDS_LEGACY = setOf("sourceId", "remoteBookId", "contentId", "revision")
+private val READER_LOCATOR_DOCUMENT_FIELDS_V6 = setOf("book", "contentId", "revision")
 internal fun kotlinx.serialization.json.JsonObjectBuilder.putStringSet(name: String, values: Set<String>) {
     if (values.isNotEmpty()) put(name, buildJsonArray { values.sorted().forEach { add(JsonPrimitive(it)) } })
 }

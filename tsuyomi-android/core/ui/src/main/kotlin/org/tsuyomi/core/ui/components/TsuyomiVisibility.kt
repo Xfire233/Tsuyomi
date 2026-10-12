@@ -13,6 +13,8 @@ import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
 import androidx.compose.animation.core.tween
 import androidx.compose.runtime.Composable
+import androidx.compose.foundation.layout.Box
+import org.tsuyomi.core.ui.theme.rememberSystemReducedMotion
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.IntOffset
 import org.tsuyomi.core.display.LocalDisplayEnvironment
@@ -34,9 +36,13 @@ fun TsuyomiVisibility(
     exitTo: TsuyomiVisibilityEdge = enterFrom,
     content: @Composable () -> Unit,
 ) {
-    val instant = LocalDisplayEnvironment.current.instantMotion
-    val enter = if (instant) EnterTransition.None else visibilityEnter(enterFrom)
-    val exit = if (instant) ExitTransition.None else visibilityExit(exitTo)
+    val instant = LocalDisplayEnvironment.current.instantMotion || rememberSystemReducedMotion()
+    if (instant) {
+        if (visible) Box(modifier) { content() }
+        return
+    }
+    val enter = visibilityEnter(enterFrom)
+    val exit = visibilityExit(exitTo)
     AnimatedVisibility(
         visible = visible,
         modifier = modifier,

@@ -6,17 +6,22 @@
 package org.tsuyomi.core.ui.components
 
 import androidx.compose.foundation.BorderStroke
+import org.tsuyomi.core.display.displayGrayscaleLayer
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.FlowRow
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.safeDrawing
+import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -27,9 +32,15 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.runtime.saveable.rememberSaveableStateHolder
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
@@ -97,11 +108,12 @@ fun TsuyomiDialog(
         }
     }
 
-    val effectiveDismissLabel = dismissLabel ?: if (confirmLabel == null) {
+    val effectiveDismissLabel = dismissLabel ?: if (confirmLabel == null || destructive) {
         stringResource(R.string.coreui_close)
     } else {
         null
     }
+    val dialogStateHolder = rememberSaveableStateHolder()
 
     if (eInk) {
         Popup(
@@ -114,19 +126,21 @@ fun TsuyomiDialog(
             ),
             onDismissRequest = onDismissRequest,
         ) {
-            TsuyomiDialogPane(
-                title = title,
-                modifier = modifier,
-                text = text,
-                body = body,
-                confirmLabel = confirmLabel,
-                onConfirm = onConfirm,
-                confirmEnabled = confirmEnabled,
-                dismissLabel = effectiveDismissLabel,
-                onDismiss = onDismissRequest,
-                destructive = destructive,
-                fullWindow = true,
-            )
+            dialogStateHolder.SaveableStateProvider("dialog-pane:EINK") {
+                TsuyomiDialogPane(
+                    title = title,
+                    modifier = modifier.displayGrayscaleLayer(),
+                    text = text,
+                    body = body,
+                    confirmLabel = confirmLabel,
+                    onConfirm = onConfirm,
+                    confirmEnabled = confirmEnabled,
+                    dismissLabel = effectiveDismissLabel,
+                    onDismiss = onDismissRequest,
+                    destructive = destructive,
+                    fullWindow = true,
+                )
+            }
         }
     } else {
         BasicAlertDialog(
@@ -138,18 +152,20 @@ fun TsuyomiDialog(
                 usePlatformDefaultWidth = false,
             ),
         ) {
-            TsuyomiDialogPane(
-                title = title,
-                text = text,
-                body = body,
-                confirmLabel = confirmLabel,
-                onConfirm = onConfirm,
-                confirmEnabled = confirmEnabled,
-                dismissLabel = effectiveDismissLabel,
-                onDismiss = onDismissRequest,
-                destructive = destructive,
-                fullWindow = false,
-            )
+            dialogStateHolder.SaveableStateProvider("dialog-pane:STANDARD") {
+                TsuyomiDialogPane(
+                    title = title,
+                    text = text,
+                    body = body,
+                    confirmLabel = confirmLabel,
+                    onConfirm = onConfirm,
+                    confirmEnabled = confirmEnabled,
+                    dismissLabel = effectiveDismissLabel,
+                    onDismiss = onDismissRequest,
+                    destructive = destructive,
+                    fullWindow = false,
+                )
+            }
         }
     }
 }
@@ -174,12 +190,13 @@ fun TsuyomiDialogPane(
 ) {
     val dismissActionFocus = remember { FocusRequester() }
     val confirmActionFocus = remember { FocusRequester() }
-    val shape = RoundedCornerShape(if (fullWindow) 0.dp else 16.dp)
 
     val containerModifier = if (fullWindow) {
         modifier
             .fillMaxSize()
             .background(TsuyomiEInkPalette.Paper)
+            .windowInsetsPadding(WindowInsets.safeDrawing)
+            .imePadding()
     } else {
         modifier
             .fillMaxWidth()
@@ -191,25 +208,145 @@ fun TsuyomiDialogPane(
     } else {
         MaterialTheme.colorScheme.surface
     }
+    if (fullWindow) {
+        var initialFocusRequested by remember { mutableStateOf(false) }
+        val textCount = if (text == null) 0 else 1
+        val bodyCount = if (body == null) 0 else 1
+        val hasDismiss = dismissLabel != null && onDismiss != null
+        val hasConfirm = confirmLabel != null && onConfirm != null
+        val pagerState = rememberTsuyomiMeasuredPagerState()
+        val paging = pagerState.canGoPrevious || pagerState.canGoNext || (pagerState.pageCount ?: 1) > 1
+        // A popup is a separate viewport, not a nested page of the route that opened it.
+        CompositionLocalProvider(
+            LocalTsuyomiPagerItemNavigation provides null,
+            LocalTsuyomiPagerMaxContentHeight provides null,
+        ) {
+            Surface(
+                modifier = containerModifier.semantics { paneTitle = title },
+                color = TsuyomiEInkPalette.Paper,
+                contentColor = TsuyomiEInkPalette.Ink,
+            ) {
+                Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                    TsuyomiMeasuredPager(
+                        itemCount = 1,
+                        itemKey = { "dialog-content" },
+                        itemContent = {
+                            // Measure one coherent group. The title and persistent footer consume
+                            // space before weighted caller bodies receive their finite viewport.
+                            Column(
+                                Modifier.fillMaxWidth().heightIn(
+                                    max = requireNotNull(LocalTsuyomiPagerMaxContentHeight.current),
+                                ),
+                            ) {
+                                TsuyomiMeasuredTextPager(
+                                    title,
+                                    style = MaterialTheme.typography.headlineMedium,
+                                    fillViewport = false,
+                                    alwaysShowPageControls = false,
+                                )
+                                if (textCount + bodyCount > 0) {
+                                    TsuyomiMeasuredPager(
+                                        itemCount = textCount + bodyCount,
+                                        itemKey = { index ->
+                                            if (textCount == 1 && index == 0) "dialog-text:$text" else "dialog-body"
+                                        },
+                                        itemContent = { index ->
+                                            if (textCount == 1 && index == 0) {
+                                                TsuyomiMeasuredTextPager(
+                                                    text.orEmpty(),
+                                                    fillViewport = false,
+                                                    alwaysShowPageControls = false,
+                                                )
+                                            } else {
+                                                Column(
+                                                    Modifier.fillMaxWidth().heightIn(
+                                                        max = requireNotNull(LocalTsuyomiPagerMaxContentHeight.current),
+                                                    ),
+                                                ) { body?.invoke(this) }
+                                            }
+                                        },
+                                        modifier = Modifier.fillMaxWidth().weight(1f, fill = false)
+                                            .padding(top = TsuyomiSpacing.Md),
+                                        fillViewport = false,
+                                        verticalSpacing = TsuyomiSpacing.Md,
+                                    )
+                                }
+                            }
+                        },
+                        modifier = Modifier.widthIn(max = 480.dp).fillMaxWidth().padding(TsuyomiSpacing.Lg),
+                        state = pagerState,
+                        fillViewport = paging,
+                        alwaysShowPageControls = hasDismiss || hasConfirm,
+                        pageControls = { page, previous, next, onPrevious, onNext, pageCount, onFirst, onLast ->
+                            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                if (previous || next || (pageCount ?: 1) > 1) {
+                                    PaginationBar(
+                                        page = page,
+                                        pageCount = pageCount,
+                                        onPrevious = onPrevious,
+                                        onNext = onNext,
+                                        hasPreviousPage = previous,
+                                        hasNextPage = next,
+                                        onFirst = onFirst,
+                                        onLast = onLast,
+                                        modifier = Modifier.padding(top = TsuyomiSpacing.Sm),
+                                    )
+                                }
+                                if (hasDismiss || hasConfirm) {
+                                    FlowRow(
+                                        modifier = Modifier.fillMaxWidth().padding(top = TsuyomiSpacing.Lg),
+                                        horizontalArrangement = Arrangement.spacedBy(TsuyomiSpacing.Lg, Alignment.CenterHorizontally),
+                                        verticalArrangement = Arrangement.spacedBy(TsuyomiSpacing.Sm),
+                                    ) {
+                                        if (hasDismiss) {
+                                            TsuyomiButton(
+                                                text = dismissLabel.orEmpty(),
+                                                onClick = requireNotNull(onDismiss),
+                                                style = TsuyomiButtonStyle.SECONDARY,
+                                                modifier = Modifier.focusRequester(dismissActionFocus).onGloballyPositioned {
+                                                    if (!initialFocusRequested) {
+                                                        dismissActionFocus.requestFocus()
+                                                        initialFocusRequested = true
+                                                    }
+                                                },
+                                            )
+                                        }
+                                        if (hasConfirm) {
+                                            TsuyomiButton(
+                                                text = confirmLabel.orEmpty(),
+                                                onClick = requireNotNull(onConfirm),
+                                                enabled = confirmEnabled,
+                                                modifier = Modifier.focusRequester(confirmActionFocus).onGloballyPositioned {
+                                                    if (!hasDismiss && !destructive && confirmEnabled && !initialFocusRequested) {
+                                                        confirmActionFocus.requestFocus()
+                                                        initialFocusRequested = true
+                                                    }
+                                                },
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+                        },
+                    )
+                }
+            }
+        }
+        return
+    }
 
     Surface(
         modifier = containerModifier.semantics { paneTitle = title },
-        shape = shape,
+        shape = RoundedCornerShape(16.dp),
         color = surfaceColor,
         contentColor = MaterialTheme.colorScheme.onSurface,
-        border = if (fullWindow) {
-            null
-        } else {
-            BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)
-        },
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
     ) {
         Box(
-            modifier = if (fullWindow) Modifier.fillMaxSize() else Modifier,
             contentAlignment = Alignment.Center,
         ) {
             Column(
                 modifier = Modifier
-                    .then(if (fullWindow) Modifier.fillMaxHeight() else Modifier)
                     .widthIn(max = 480.dp)
                     .fillMaxWidth()
                     .padding(TsuyomiSpacing.Lg),
@@ -222,14 +359,7 @@ fun TsuyomiDialogPane(
                 Column(
                     modifier = Modifier
                         .padding(top = TsuyomiSpacing.Md)
-                        .then(
-                            if (fullWindow) {
-                                Modifier.weight(1f, fill = false)
-                            } else {
-                                Modifier.heightIn(max = 440.dp)
-                            },
-                        )
-                        .verticalScroll(rememberScrollState()),
+                        .heightIn(max = 440.dp).verticalScroll(rememberScrollState()),
                 ) {
                     if (text != null) {
                         Text(
@@ -295,7 +425,7 @@ fun TsuyomiDialogPane(
 }
 
 /** Positions a popup at the window origin so its fill-size content covers the whole window. */
-private object FullWindowPopupPositionProvider : PopupPositionProvider {
+internal object FullWindowPopupPositionProvider : PopupPositionProvider {
     override fun calculatePosition(
         anchorBounds: IntRect,
         windowSize: IntSize,

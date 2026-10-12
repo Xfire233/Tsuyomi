@@ -5,10 +5,13 @@
 package org.tsuyomi.feature.book
 
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.BorderStroke
+import org.tsuyomi.core.ui.theme.TsuyomiEInkPalette
 import androidx.compose.foundation.border
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
@@ -29,13 +32,16 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.layout.Layout
+import androidx.compose.ui.layout.SubcomposeLayout
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.selected
@@ -61,6 +67,13 @@ import org.tsuyomi.core.ui.components.TsuyomiButton
 import org.tsuyomi.core.ui.components.TsuyomiButtonStyle
 import org.tsuyomi.core.ui.components.TsuyomiDialog
 import org.tsuyomi.core.ui.components.TsuyomiTextField
+import org.tsuyomi.core.ui.components.TsuyomiMeasuredPager
+import org.tsuyomi.core.ui.components.LocalTsuyomiPagerMaxContentHeight
+import org.tsuyomi.core.ui.components.LocalTsuyomiPagerItemVisible
+import org.tsuyomi.core.ui.components.TsuyomiMeasuredTextPager
+import org.tsuyomi.core.ui.components.rememberTsuyomiMeasuredPagerState
+import org.tsuyomi.core.ui.components.TsuyomiMeasuredTextLine
+import org.tsuyomi.core.ui.components.rememberTsuyomiMeasuredTextLines
 import org.tsuyomi.core.ui.components.TsuyomiIconButton
 import org.tsuyomi.core.ui.components.TsuyomiSplitButton
 import org.tsuyomi.core.ui.components.TsuyomiOverflowAction
@@ -69,8 +82,6 @@ import org.tsuyomi.core.ui.components.TsuyomiTopBarAction
 import org.tsuyomi.core.ui.icons.TsuyomiIcons
 import org.tsuyomi.core.ui.theme.TsuyomiSpacing
 import org.tsuyomi.core.ui.theme.link
-import org.tsuyomi.shared.sourcecontract.SourceBookDetail
-import org.tsuyomi.shared.sourcecontract.SourceErrorCode
 
 private const val DETAIL_INTRODUCTION_PREVIEW_LINES = 3
 private val DetailRatingTargetSize = 36.dp
@@ -138,162 +149,320 @@ fun BookDetailTopBar(
 
 @Composable
 internal fun DetailIdentityModule(
-    detail: SourceBookDetail,
+    detail: BookDetailContent,
     coverState: CoverUiState,
     localState: DetailLocalState,
     onSetRating: (Int?) -> Unit,
-    onSearchAuthor: (String) -> Unit,
+    onSearchAuthor: ((String) -> Unit)?,
     onAddToLibrary: () -> Unit,
     onRequestRemoveFromLibrary: () -> Unit,
     primaryActionEnabled: Boolean,
     onOpenDestinations: () -> Unit,
     destinationMenuExpanded: Boolean,
     onDestinationMenuExpandedChange: (Boolean) -> Unit,
-    destinationMenuContent: @Composable ColumnScope.(dismissMenu: () -> Unit) -> Unit,
+    destinationMenuItemCount: Int,
+    destinationMenuItemKey: (Int) -> String,
+    destinationMenuItemContent: @Composable ColumnScope.(Int, dismissMenu: () -> Unit) -> Unit,
 ) {
-    var titleExpanded by rememberSaveable(detail.summary.identity, detail.summary.title) { mutableStateOf(false) }
+    var titleExpanded by rememberSaveable(detail.identity, detail.title) { mutableStateOf(false) }
+    // Recompose the fit/continuation owner before a child can measure the expanded title.
+    val expandedTitle = titleExpanded
+    val eInk = LocalDisplayEnvironment.current.effectiveProfile == DisplayProfile.EINK
+    val viewportHeight = LocalTsuyomiPagerMaxContentHeight.current
+    val continuationState = if (eInk && viewportHeight != null) rememberTsuyomiMeasuredPagerState() else null
+    val toggleTitle: () -> Unit = {
+        titleExpanded = !titleExpanded
+        continuationState?.moveToAnchor(if (titleExpanded) "identity:title" else "identity:header")
+    }
+    val density = LocalDensity.current
     val showUnresolvedCoverBadge = localState.reconciliation == "UNRESOLVED" &&
         localState.reconciliationOperation?.uppercase() != "ADD"
-    Layout(
-        modifier = Modifier.fillMaxWidth()
-            .padding(start = TsuyomiSpacing.Md, top = TsuyomiSpacing.Md, end = TsuyomiSpacing.Md, bottom = TsuyomiSpacing.Xs)
-            .testTag("detail-identity-module"),
-        content = {
-            CoverImage(
-                state = coverState,
-                modifier = Modifier.testTag("detail-cover"),
-                unresolvedBadge = showUnresolvedCoverBadge,
-                unresolvedDescription = if (showUnresolvedCoverBadge) {
-                    stringResource(
-                        when (localState.reconciliationOperation?.uppercase()) {
-                            "ADD" -> R.string.book_unresolved_add_marker_description
-                            "MOVE" -> R.string.book_unresolved_move_marker_description
-                            "REMOVE" -> R.string.book_unresolved_remove_marker_description
-                            else -> R.string.book_unresolved_marker_description
-                        },
-                    )
-                } else null,
-            )
-            Box(Modifier.fillMaxWidth().testTag("detail-title-block")) {
-                DetailTitle(detail.summary.title, titleExpanded) { titleExpanded = !titleExpanded }
+    val identityModifier = Modifier.fillMaxWidth().padding(
+        start = TsuyomiSpacing.Md, top = TsuyomiSpacing.Md,
+        end = TsuyomiSpacing.Md, bottom = TsuyomiSpacing.Xs,
+    )
+    val coverContent: @Composable () -> Unit = {
+        CoverImage(
+            state = coverState,
+            modifier = Modifier.testTag("detail-cover"),
+            unresolvedBadge = showUnresolvedCoverBadge,
+            unresolvedDescription = if (showUnresolvedCoverBadge) {
+                stringResource(
+                    when (localState.reconciliationOperation?.uppercase()) {
+                        "ADD" -> R.string.book_unresolved_add_marker_description
+                        "MOVE" -> R.string.book_unresolved_move_marker_description
+                        "REMOVE" -> R.string.book_unresolved_remove_marker_description
+                        else -> R.string.book_unresolved_marker_description
+                    },
+                )
+            } else null,
+        )
+    }
+    val libraryAction: @Composable (Boolean) -> Unit = { showMenu ->
+        DetailLibraryStateButton(
+            inLibrary = localState.inLibrary,
+            onAddToLibrary = onAddToLibrary,
+            onRequestRemoveFromLibrary = onRequestRemoveFromLibrary,
+            primaryActionEnabled = primaryActionEnabled,
+            onOpenDestinations = onOpenDestinations,
+            destinationMenuExpanded = showMenu,
+            onDestinationMenuExpandedChange = onDestinationMenuExpandedChange,
+            destinationMenuItemCount = destinationMenuItemCount,
+            destinationMenuItemKey = destinationMenuItemKey,
+            destinationMenuItemContent = destinationMenuItemContent,
+        )
+    }
+    val identityLayout: @Composable (Boolean, Boolean, Modifier) -> Unit = { includeActions, showMenu, layoutModifier ->
+        Layout(
+            modifier = layoutModifier,
+            content = {
+                coverContent()
+                Box(Modifier.fillMaxWidth().testTag("detail-title-block")) {
+                    DetailTitle(detail.title, expandedTitle, onToggleExpanded = toggleTitle)
+                }
+                DetailAuthor(detail.author, onSearchAuthor)
+                DetailSourceMetadata(detail.status, detail.lastUpdatedDate)
+                if (includeActions) {
+                    DetailRatingControl(localState, onSetRating)
+                    libraryAction(showMenu)
+                }
+            },
+        ) { measurables, constraints ->
+            val width = constraints.maxWidth
+            val cover = measurables[0].measure(Constraints.fixed(135.dp.roundToPx(), 189.dp.roundToPx()))
+            val textX = cover.width + TsuyomiSpacing.Md.roundToPx()
+            val textWidth = (width - textX).coerceAtLeast(0)
+            val title = measurables[1].measure(Constraints.fixedWidth(textWidth))
+            val author = measurables[2].measure(Constraints.fixedWidth(textWidth))
+            val metadata = measurables[3].measure(Constraints.fixedWidth(textWidth))
+            if (!includeActions) {
+                return@Layout layout(width, maxOf(cover.height, title.height + author.height + metadata.height)) {
+                    cover.placeRelative(0, 0)
+                    title.placeRelative(textX, 0)
+                    author.placeRelative(textX, title.height)
+                    metadata.placeRelative(textX, title.height + author.height)
+                }
             }
-            DetailAuthor(detail.summary.author, onSearchAuthor)
-            DetailSourceMetadata(detail.status, detail.lastUpdatedDate)
-            DetailRatingControl(localState, onSetRating)
-            DetailLibraryStateButton(
-                inLibrary = localState.inLibrary,
-                onAddToLibrary = onAddToLibrary,
-                onRequestRemoveFromLibrary = onRequestRemoveFromLibrary,
-                primaryActionEnabled = primaryActionEnabled,
-                onOpenDestinations = onOpenDestinations,
-                destinationMenuExpanded = destinationMenuExpanded,
-                onDestinationMenuExpandedChange = onDestinationMenuExpandedChange,
-                destinationMenuContent = destinationMenuContent,
-            )
-        },
-    ) { measurables, constraints ->
-        val width = constraints.maxWidth
-        val cover = measurables[0].measure(Constraints.fixed(135.dp.roundToPx(), 189.dp.roundToPx()))
-        val textX = cover.width + TsuyomiSpacing.Md.roundToPx()
-        val textWidth = (width - textX).coerceAtLeast(0)
-        val title = measurables[1].measure(Constraints.fixedWidth(textWidth))
-        val author = measurables[2].measure(Constraints.fixedWidth(textWidth))
-        val metadata = measurables[3].measure(Constraints.fixedWidth(textWidth))
-        val horizontalGap = TsuyomiSpacing.Xs.roundToPx()
-        val fallbackGap = TsuyomiSpacing.Sm.roundToPx()
-        val ratingFrameHeight = DetailRatingTargetSize.roundToPx()
-        val splitHeight = DetailActionHeight.roundToPx()
-        val ratingMinimum = measurables[4].maxIntrinsicWidth(ratingFrameHeight)
-        val splitMinimum = measurables[5].maxIntrinsicWidth(splitHeight)
-        val sideContentHeight = title.height + author.height + metadata.height + ratingFrameHeight + splitHeight
-        val sidePlacement = textWidth >= maxOf(ratingMinimum, splitMinimum) &&
-            (sideContentHeight <= cover.height || (!titleExpanded && fontScale <= 1f))
-        val fallbackHorizontal = !sidePlacement && width >= ratingMinimum + horizontalGap + splitMinimum
-        val ratingWidth = if (sidePlacement || fallbackHorizontal) ratingMinimum else width
-        val splitWidth = splitMinimum.coerceAtMost(width)
-        val rating = measurables[4].measure(Constraints.fixed(ratingWidth, ratingFrameHeight))
-        val split = measurables[5].measure(Constraints.fixed(splitWidth, splitHeight))
+            val horizontalGap = TsuyomiSpacing.Xs.roundToPx()
+            val fallbackGap = TsuyomiSpacing.Sm.roundToPx()
+            val ratingFrameHeight = (if (eInk) 48.dp else DetailRatingTargetSize).roundToPx()
+            val splitHeight = DetailActionHeight.roundToPx()
+            val ratingMinimum = measurables[4].maxIntrinsicWidth(ratingFrameHeight)
+            val splitMinimum = measurables[5].maxIntrinsicWidth(splitHeight)
+            val sideContentHeight = title.height + author.height + metadata.height + ratingFrameHeight + splitHeight
+            val sidePlacement = textWidth >= maxOf(ratingMinimum, splitMinimum) &&
+                (sideContentHeight <= cover.height || (!expandedTitle && fontScale <= 1f))
+            val fallbackHorizontal = !sidePlacement && width >= ratingMinimum + horizontalGap + splitMinimum
+            val ratingWidth = if (sidePlacement || fallbackHorizontal) ratingMinimum else width
+            val splitWidth = splitMinimum.coerceAtMost(width)
+            val rating = measurables[4].measure(Constraints.fixed(ratingWidth, ratingFrameHeight))
+            val split = measurables[5].measure(Constraints.fixed(splitWidth, splitHeight))
 
-        if (sidePlacement) {
-            val columnHeight = maxOf(cover.height, sideContentHeight)
-            val blocks = listOf(1 to title, 2 to author, 3 to metadata, 4 to rating, 5 to split)
-                .filter { (_, placeable) -> placeable.height > 0 }
-            val remainingHeight = columnHeight - blocks.sumOf { (_, placeable) -> placeable.height }
-            val gapCount = (blocks.size - 1).coerceAtLeast(1)
-            val baseGap = remainingHeight / gapCount
-            val extraGapCount = remainingHeight % gapCount
-            val blockY = IntArray(6)
-            var y = 0
-            blocks.forEachIndexed { index, (slot, placeable) ->
-                blockY[slot] = y
-                y += placeable.height
-                if (index < blocks.lastIndex) y += baseGap + if (index < extraGapCount) 1 else 0
-            }
-            layout(width, columnHeight) {
-                cover.placeRelative(0, 0)
-                title.placeRelative(textX, blockY[1])
-                author.placeRelative(textX, blockY[2])
-                metadata.placeRelative(textX, blockY[3])
-                rating.placeRelative(textX, blockY[4])
-                split.placeRelative(textX, blockY[5])
-            }
-        } else {
-            val titleY = 0
-            val authorY = titleY + title.height
-            val metadataY = authorY + author.height
-            val identityBottom = metadataY + metadata.height
-            val actionY = maxOf(cover.height, identityBottom) + fallbackGap
-            val ratingX = 0
-            val splitX = if (fallbackHorizontal) rating.width + horizontalGap else 0
-            val ratingY = if (fallbackHorizontal) actionY + (split.height - rating.height) / 2 else actionY
-            val splitY = if (fallbackHorizontal) actionY else actionY + rating.height + fallbackGap
-            layout(width, maxOf(cover.height, identityBottom, ratingY + rating.height, splitY + split.height)) {
-                cover.placeRelative(0, 0)
-                title.placeRelative(textX, titleY)
-                author.placeRelative(textX, authorY)
-                metadata.placeRelative(textX, metadataY)
-                rating.placeRelative(ratingX, ratingY)
-                split.placeRelative(splitX, splitY)
+            if (sidePlacement) {
+                val columnHeight = maxOf(cover.height, sideContentHeight)
+                val blocks = listOf(1 to title, 2 to author, 3 to metadata, 4 to rating, 5 to split)
+                    .filter { (_, placeable) -> placeable.height > 0 }
+                val remainingHeight = columnHeight - blocks.sumOf { (_, placeable) -> placeable.height }
+                val gapCount = (blocks.size - 1).coerceAtLeast(1)
+                val baseGap = remainingHeight / gapCount
+                val extraGapCount = remainingHeight % gapCount
+                val blockY = IntArray(6)
+                var y = 0
+                blocks.forEachIndexed { index, (slot, placeable) ->
+                    blockY[slot] = y
+                    y += placeable.height
+                    if (index < blocks.lastIndex) y += baseGap + if (index < extraGapCount) 1 else 0
+                }
+                layout(width, columnHeight) {
+                    cover.placeRelative(0, 0)
+                    title.placeRelative(textX, blockY[1])
+                    author.placeRelative(textX, blockY[2])
+                    metadata.placeRelative(textX, blockY[3])
+                    rating.placeRelative(textX, blockY[4])
+                    split.placeRelative(textX, blockY[5])
+                }
+            } else {
+                val titleY = 0
+                val authorY = titleY + title.height
+                val metadataY = authorY + author.height
+                val identityBottom = metadataY + metadata.height
+                val actionY = maxOf(cover.height, identityBottom) + fallbackGap
+                val ratingX = 0
+                val splitX = if (fallbackHorizontal) rating.width + horizontalGap else 0
+                val ratingY = if (fallbackHorizontal) actionY + (split.height - rating.height) / 2 else actionY
+                val splitY = if (fallbackHorizontal) actionY else actionY + rating.height + fallbackGap
+                layout(width, maxOf(cover.height, identityBottom, ratingY + rating.height, splitY + split.height)) {
+                    cover.placeRelative(0, 0)
+                    title.placeRelative(textX, titleY)
+                    author.placeRelative(textX, authorY)
+                    metadata.placeRelative(textX, metadataY)
+                    rating.placeRelative(ratingX, ratingY)
+                    split.placeRelative(splitX, splitY)
+                }
             }
         }
+    }
+    if (!eInk || viewportHeight == null) {
+        identityLayout(true, destinationMenuExpanded, identityModifier.testTag("detail-identity-module"))
+        return
+    }
+    val viewportHeightPx = with(density) { viewportHeight.roundToPx() }
+    SubcomposeLayout(Modifier.fillMaxWidth().testTag("detail-identity-module")) { constraints ->
+        // CoverImage only renders the supplied state; these probes never acquire a cover.
+        // A probe must not open a destination popup, even while its real action is visible.
+        val whole = subcompose("identity:whole-probe") {
+            CompositionLocalProvider(LocalTsuyomiPagerItemVisible provides false) {
+                Box(Modifier.clearAndSetSemantics {}) {
+                    identityLayout(true, false, identityModifier)
+                }
+            }
+        }.single().measure(constraints.copy(minHeight = 0))
+        val visible = if (whole.height <= viewportHeightPx) {
+            subcompose("identity:whole") {
+                identityLayout(true, destinationMenuExpanded, identityModifier.testTag("detail-identity-visible"))
+            }.single().measure(constraints.copy(minHeight = 0))
+        } else {
+            val header = subcompose("identity:header-probe") {
+                CompositionLocalProvider(LocalTsuyomiPagerItemVisible provides false) {
+                    Box(Modifier.clearAndSetSemantics {}) {
+                        identityLayout(false, false, identityModifier)
+                    }
+                }
+            }.single().measure(constraints.copy(minHeight = 0))
+            val headerFits = header.height <= viewportHeightPx
+            subcompose("identity:continuation") {
+                TsuyomiMeasuredPager(
+                    itemCount = if (headerFits) 3 else 6,
+                    state = requireNotNull(continuationState),
+                    itemKey = { index -> if (headerFits) when (index) {
+                        0 -> "identity:header"
+                        1 -> "identity:rating"
+                        else -> "identity:library"
+                    } else when (index) {
+                        0 -> "identity:cover"
+                        1 -> "identity:title"
+                        2 -> "identity:author"
+                        3 -> "identity:metadata"
+                        4 -> "identity:rating"
+                        else -> "identity:library"
+                    } },
+                    modifier = identityModifier.testTag("detail-identity-visible"),
+                    fillViewport = false,
+                    verticalSpacing = TsuyomiSpacing.Sm,
+                    itemContent = { index ->
+                        if (headerFits) when (index) {
+                            0 -> identityLayout(false, false, Modifier.fillMaxWidth())
+                            1 -> Box(Modifier.heightIn(min = 48.dp)) { DetailRatingControl(localState, onSetRating) }
+                            else -> libraryAction(destinationMenuExpanded && LocalTsuyomiPagerItemVisible.current)
+                        } else when (index) {
+                            0 -> Box(Modifier.size(135.dp, 189.dp)) { coverContent() }
+                            1 -> Box(Modifier.fillMaxWidth().testTag("detail-title-block")) {
+                                DetailTitle(detail.title, expandedTitle, pageExpanded = true, onToggleExpanded = toggleTitle)
+                            }
+                            2 -> DetailAuthor(detail.author, onSearchAuthor, pageContent = true)
+                            3 -> DetailSourceMetadata(detail.status, detail.lastUpdatedDate, pageContent = true)
+                            4 -> Box(Modifier.heightIn(min = 48.dp)) { DetailRatingControl(localState, onSetRating) }
+                            else -> libraryAction(destinationMenuExpanded && LocalTsuyomiPagerItemVisible.current)
+                        }
+                    },
+                )
+            }.single().measure(constraints.copy(minHeight = 0))
+        }
+        layout(visible.width, visible.height) { visible.placeRelative(0, 0) }
     }
 }
 
 @Composable
-private fun DetailAuthor(author: String?, onSearchAuthor: (String) -> Unit) {
+private fun DetailAuthor(author: String?, onSearchAuthor: ((String) -> Unit)?, pageContent: Boolean = false) {
     val metadataStyle = MaterialTheme.typography.bodyMedium.copy(lineHeight = 21.sp)
     val metadataLineHeight = with(LocalDensity.current) { metadataStyle.lineHeight.toDp() }
     Box(Modifier.fillMaxWidth().testTag("detail-author-row")) {
         author?.takeIf(String::isNotBlank)?.let { value ->
-            val linkStyles = TextLinkStyles(
-                style = SpanStyle(
-                    color = MaterialTheme.colorScheme.link,
-                    textDecoration = if (LocalDisplayEnvironment.current.effectiveProfile == DisplayProfile.STANDARD) {
-                        TextDecoration.Underline
-                    } else {
-                        null
+            val modifier = Modifier.heightIn(min = metadataLineHeight).testTag("detail-author")
+            if (pageContent && onSearchAuthor == null) {
+                TsuyomiMeasuredTextPager(value, modifier = modifier, style = metadataStyle, fillViewport = false, alwaysShowPageControls = false)
+            } else if (pageContent) {
+                BoxWithConstraints(Modifier.fillMaxWidth()) {
+                    val lines = rememberTsuyomiMeasuredTextLines(
+                        value, (maxWidth - TsuyomiSpacing.Lg * 2).coerceAtLeast(1.dp), MaterialTheme.typography.labelLarge,
+                    )
+                    TsuyomiMeasuredPager(
+                        itemCount = lines.size,
+                        itemKey = { "author:line:$it" },
+                        fillViewport = false,
+                        itemContent = { index ->
+                            TsuyomiButton(
+                                text = lines[index].content,
+                                onClick = { onSearchAuthor?.invoke(value) },
+                                modifier = Modifier.testTag("detail-author"),
+                                style = TsuyomiButtonStyle.TEXT,
+                            )
+                        },
+                    )
+                }
+            } else if (onSearchAuthor == null) {
+                Text(value, modifier = modifier, style = metadataStyle)
+            } else if (LocalDisplayEnvironment.current.effectiveProfile == DisplayProfile.EINK) {
+                TsuyomiButton(
+                    text = value,
+                    onClick = { onSearchAuthor(value) },
+                    modifier = Modifier.testTag("detail-author"),
+                    style = TsuyomiButtonStyle.TEXT,
+                )
+            } else {
+                val linkStyles = TextLinkStyles(
+                    style = SpanStyle(
+                        color = MaterialTheme.colorScheme.link,
+                        textDecoration = if (LocalDisplayEnvironment.current.effectiveProfile == DisplayProfile.STANDARD) {
+                            TextDecoration.Underline
+                        } else {
+                            null
+                        },
+                    ),
+                )
+                val searchLabel = stringResource(R.string.book_search_author, value)
+                Text(
+                    text = buildAnnotatedString {
+                        withLink(LinkAnnotation.Clickable(searchLabel, linkStyles) { onSearchAuthor(value) }) {
+                            append(value)
+                        }
                     },
-                ),
-            )
-            val searchLabel = stringResource(R.string.book_search_author, value)
-            Text(
-                text = buildAnnotatedString {
-                    withLink(LinkAnnotation.Clickable(searchLabel, linkStyles) { onSearchAuthor(value) }) {
-                        append(value)
-                    }
-                },
-                modifier = Modifier.heightIn(min = metadataLineHeight).testTag("detail-author"),
-                style = metadataStyle,
-            )
+                    modifier = modifier,
+                    style = metadataStyle,
+                )
+            }
         }
     }
 }
 
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
-private fun DetailSourceMetadata(status: String?, lastUpdatedDate: String?) {
+private fun DetailSourceMetadata(status: String?, lastUpdatedDate: String?, pageContent: Boolean = false) {
     val metadataStyle = MaterialTheme.typography.bodyMedium.copy(lineHeight = 21.sp)
     val metadataLineHeight = with(LocalDensity.current) { metadataStyle.lineHeight.toDp() }
+    if (pageContent) {
+        val publicationStatus = status?.trim()?.takeIf(String::isNotEmpty)
+        val updatedLabel = lastUpdatedDate?.let { stringResource(R.string.book_last_updated, it) }
+        val count = (if (publicationStatus != null) 1 else 0) + (if (updatedLabel != null) 1 else 0)
+        TsuyomiMeasuredPager(
+            itemCount = count,
+            itemKey = { index -> if (publicationStatus != null && index == 0) "metadata:status" else "metadata:updated" },
+            modifier = Modifier.fillMaxWidth().testTag("detail-metadata-row"),
+            fillViewport = false,
+            verticalSpacing = TsuyomiSpacing.Xs,
+            itemContent = { index ->
+                val isStatus = publicationStatus != null && index == 0
+                TsuyomiMeasuredTextPager(
+                    text = if (isStatus) requireNotNull(publicationStatus) else requireNotNull(updatedLabel),
+                    modifier = Modifier.fillMaxWidth().testTag(if (isStatus) "detail-publication-status" else "detail-last-updated"),
+                    style = metadataStyle.copy(color = MaterialTheme.colorScheme.onSurfaceVariant),
+                    fillViewport = false,
+                    alwaysShowPageControls = false,
+                )
+            },
+        )
+        return
+    }
     FlowRow(
         modifier = Modifier.fillMaxWidth().testTag("detail-metadata-row"),
         horizontalArrangement = Arrangement.spacedBy(TsuyomiSpacing.Xs),
@@ -319,7 +488,7 @@ private fun DetailSourceMetadata(status: String?, lastUpdatedDate: String?) {
 }
 
 @Composable
-private fun DetailTitle(titleText: String, expanded: Boolean, onToggleExpanded: () -> Unit) {
+private fun DetailTitle(titleText: String, expanded: Boolean, pageExpanded: Boolean = false, onToggleExpanded: () -> Unit) {
     var collapsedOverflows by remember(titleText) { mutableStateOf(false) }
     val showToggle = collapsedOverflows || expanded
     val titleStyle = MaterialTheme.typography.titleLarge.copy(lineHeight = 27.sp)
@@ -327,18 +496,29 @@ private fun DetailTitle(titleText: String, expanded: Boolean, onToggleExpanded: 
     val expansionState = stringResource(if (expanded) R.string.book_title_expanded else R.string.book_title_collapsed)
     val iconSize = with(LocalDensity.current) { titleStyle.fontSize.toDp() }
     Box(Modifier.fillMaxWidth()) {
-        Text(
-            text = titleText,
-            modifier = Modifier.fillMaxWidth()
-                .padding(end = if (showToggle) DetailTitleToggleTarget else 0.dp)
-                .testTag("detail-title-flow"),
-            maxLines = if (expanded) Int.MAX_VALUE else 2,
-            overflow = TextOverflow.Ellipsis,
-            onTextLayout = { result ->
-                if (!expanded) collapsedOverflows = result.hasVisualOverflow
-            },
-            style = titleStyle,
-        )
+        if (expanded && pageExpanded) {
+            TsuyomiMeasuredTextPager(
+                text = titleText,
+                modifier = Modifier.fillMaxWidth().heightIn(min = DetailTitleToggleTarget)
+                    .padding(end = DetailTitleToggleTarget).testTag("detail-title-flow"),
+                style = titleStyle,
+                fillViewport = false,
+                alwaysShowPageControls = false,
+            )
+        } else {
+            Text(
+                text = titleText,
+                modifier = Modifier.fillMaxWidth()
+                    .padding(end = if (showToggle) DetailTitleToggleTarget else 0.dp)
+                    .testTag("detail-title-flow"),
+                maxLines = if (expanded) Int.MAX_VALUE else 2,
+                overflow = TextOverflow.Ellipsis,
+                onTextLayout = { result ->
+                    if (!expanded) collapsedOverflows = result.hasVisualOverflow
+                },
+                style = titleStyle,
+            )
+        }
         if (showToggle) {
             Box(
                 modifier = Modifier.align(Alignment.BottomEnd)
@@ -399,7 +579,9 @@ internal fun DetailLibraryStateButton(
     primaryActionEnabled: Boolean,
     destinationMenuExpanded: Boolean,
     onDestinationMenuExpandedChange: (Boolean) -> Unit,
-    destinationMenuContent: @Composable ColumnScope.(dismissMenu: () -> Unit) -> Unit,
+    destinationMenuItemCount: Int,
+    destinationMenuItemKey: (Int) -> String,
+    destinationMenuItemContent: @Composable ColumnScope.(Int, dismissMenu: () -> Unit) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val state = stringResource(if (inLibrary) R.string.book_in_library else R.string.book_not_in_library)
@@ -418,7 +600,9 @@ internal fun DetailLibraryStateButton(
                 stateDescription = state
             }
             .testTag("detail-library-action"),
-        menuContent = destinationMenuContent,
+        menuItemCount = destinationMenuItemCount,
+        menuItemKey = destinationMenuItemKey,
+        menuItemContent = destinationMenuItemContent,
     )
 }
 
@@ -624,7 +808,7 @@ private fun JustifiedTagFlow(
                     // A lone tag occupies its row alone, so there is no gap to place.
                     row.size <= 1 -> 0
                     rowIndex < rows.lastIndex -> fullRowGap
-                    trailingAdoptsJustified -> justifiedGap ?: minGapPx
+                    trailingAdoptsJustified -> justifiedGap
                     else -> minGapPx
                 }
                 var x = 0
@@ -640,6 +824,7 @@ private fun JustifiedTagFlow(
 
 @Composable
 internal fun DetailTagLabel(text: String) {
+    val eink = LocalDisplayEnvironment.current.effectiveProfile == DisplayProfile.EINK
     Box(
         modifier = Modifier.heightIn(min = 48.dp),
         contentAlignment = Alignment.Center,
@@ -647,8 +832,9 @@ internal fun DetailTagLabel(text: String) {
         Surface(
             modifier = Modifier.heightIn(min = 40.dp).testTag("detail-tag-label"),
             shape = MaterialTheme.shapes.small,
-            color = MaterialTheme.colorScheme.surfaceVariant,
-            contentColor = MaterialTheme.colorScheme.onSurfaceVariant,
+            color = if (eink) TsuyomiEInkPalette.Paper else MaterialTheme.colorScheme.surfaceVariant,
+            contentColor = if (eink) TsuyomiEInkPalette.Ink else MaterialTheme.colorScheme.onSurfaceVariant,
+            border = if (eink) BorderStroke(1.dp, TsuyomiEInkPalette.Ink) else null,
         ) {
             Box(
                 modifier = Modifier.padding(horizontal = TsuyomiSpacing.Sm),
@@ -664,6 +850,45 @@ internal fun DetailTagLabel(text: String) {
 internal fun DetailIntroductionModule(description: String) {
     var expanded by rememberSaveable(description) { mutableStateOf(false) }
     var overflows by remember(description) { mutableStateOf(false) }
+    if (expanded && LocalDisplayEnvironment.current.effectiveProfile == DisplayProfile.EINK) {
+        BoxWithConstraints(Modifier.fillMaxWidth().testTag("detail-introduction-module")) {
+            val textStart = TsuyomiSpacing.Md + 20.dp + TsuyomiSpacing.Sm
+            val textEnd = TsuyomiSpacing.Md
+            val lines = rememberTsuyomiMeasuredTextLines(
+                text = description,
+                maxWidth = (maxWidth - textStart - textEnd).coerceAtLeast(1.dp),
+                style = MaterialTheme.typography.bodyMedium,
+            )
+            TsuyomiMeasuredPager(
+                itemCount = lines.size + 2,
+                itemKey = { index -> when (index) {
+                    0 -> "introduction:header"
+                    lines.size + 1 -> "introduction:collapse"
+                    else -> "introduction:line:${index - 1}"
+                } },
+                fillViewport = false,
+                itemContent = { index ->
+                    when (index) {
+                        0 -> DetailModuleHeader(TsuyomiIcons.Info, stringResource(R.string.book_introduction))
+                        lines.size + 1 -> TsuyomiButton(
+                            text = stringResource(R.string.book_collapse_introduction),
+                            onClick = { expanded = false },
+                            modifier = Modifier.padding(
+                                start = TsuyomiSpacing.Md + 20.dp,
+                                bottom = TsuyomiSpacing.Xs,
+                            ).testTag("detail-introduction-collapse"),
+                            style = TsuyomiButtonStyle.TEXT,
+                        )
+                        else -> TsuyomiMeasuredTextLine(
+                            line = lines[index - 1],
+                            modifier = Modifier.padding(start = textStart, end = textEnd).testTag("detail-introduction-text"),
+                        )
+                    }
+                },
+            )
+        }
+        return
+    }
     Column(Modifier.fillMaxWidth().testTag("detail-introduction-module")) {
         DetailModuleHeader(TsuyomiIcons.Info, stringResource(R.string.book_introduction))
         if (description.isNotBlank()) {
@@ -698,7 +923,7 @@ internal fun DetailIntroductionModule(description: String) {
                         onTextLayout = { result -> overflows = result.didOverflowHeight },
                         style = MaterialTheme.typography.bodyMedium,
                     )
-                    if (overflows) {
+                    if (overflows && LocalDisplayEnvironment.current.effectiveProfile != DisplayProfile.EINK) {
                         Box(
                             modifier = Modifier
                                 .align(Alignment.BottomEnd)
@@ -719,6 +944,14 @@ internal fun DetailIntroductionModule(description: String) {
                         }
                     }
                 }
+                if (overflows && LocalDisplayEnvironment.current.effectiveProfile == DisplayProfile.EINK) {
+                    TsuyomiButton(
+                        text = stringResource(R.string.book_expand_introduction),
+                        onClick = { expanded = true },
+                        modifier = textModifier.testTag("detail-introduction-expand"),
+                        style = TsuyomiButtonStyle.TEXT,
+                    )
+                }
                 Spacer(Modifier.height(TsuyomiSpacing.Sm))
             }
         }
@@ -728,6 +961,10 @@ internal fun DetailIntroductionModule(description: String) {
 @Composable
 internal fun DetailMutationBanner(status: DetailMutationStatus) {
     val text = mutationMessage(status)
+    if (org.tsuyomi.core.display.LocalDisplayEnvironment.current.effectiveProfile == org.tsuyomi.core.display.DisplayProfile.EINK) {
+        org.tsuyomi.core.ui.components.TsuyomiMeasuredTextPager(text, fillViewport = false, alwaysShowPageControls = false)
+        return
+    }
     val color = when (status.phase) {
         DetailMutationPhase.WORKING -> MaterialTheme.colorScheme.secondaryContainer
         DetailMutationPhase.SUCCESS -> MaterialTheme.colorScheme.primaryContainer
@@ -760,31 +997,24 @@ internal fun mutationMessage(status: DetailMutationStatus): String {
 
 @Composable
 internal fun DetailFailure(
-    state: SourceBookState.Failure,
+    state: BookScreenState.Failure,
     onRetry: () -> Unit,
     onUseOfflineCache: () -> Unit,
     onOpenVerification: () -> Unit,
     modifier: Modifier,
 ) {
-    val canVerify = state.code == SourceErrorCode.SESSION_REQUIRED ||
-        state.code == SourceErrorCode.VERIFICATION_REQUIRED ||
-        (
-            state.code == SourceErrorCode.EXTENSION_RUNTIME_FAILURE &&
-                state.diagnostic.stage.endsWith("-network") &&
-                state.diagnostic.safeCode == "transport"
-        )
     Column(
         modifier = modifier.padding(TsuyomiSpacing.Lg),
         verticalArrangement = Arrangement.Center,
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
-        Text(stringResource(R.string.book_source_failure))
+        Text(state.message ?: stringResource(R.string.book_source_failure))
         TsuyomiButton(
-            text = stringResource(if (canVerify) R.string.book_open_verification else R.string.book_retry),
-            onClick = if (canVerify) onOpenVerification else onRetry,
+            text = state.retryLabel ?: stringResource(if (state.verificationRequired) R.string.book_open_verification else R.string.book_retry),
+            onClick = if (state.verificationRequired) onOpenVerification else onRetry,
             style = TsuyomiButtonStyle.TEXT,
         )
-        if (!canVerify) {
+        if (state.offlineCacheAvailable) {
             TsuyomiButton(
                 text = stringResource(R.string.book_offline),
                 onClick = onUseOfflineCache,

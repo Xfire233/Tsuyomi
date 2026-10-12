@@ -17,5 +17,9 @@
     <string name="coreui_switch_off">已关闭</string>
     <string name="coreui_pagination_previous">上一页</string>
     <string name="coreui_pagination_next">下一页</string>
+    <string name="coreui_pagination_first">首页</string>
+    <string name="coreui_pagination_last">末页</string>
     <string name="coreui_pagination_page_status">第 %1$d 页，共 %2$d 页</string>
+    <string name="coreui_pagination_current_page">第 %1$d 页</string>
+    <string name="coreui_pagination_page_fraction">%1$d / %2$d</string>
 </resources>

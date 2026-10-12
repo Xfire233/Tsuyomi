@@ -33,6 +33,8 @@ For assistant sessions, at each new request, material scope change or context re
 
 This versioned entry is the direct-file fallback for clients without Skill discovery. Supported clients discover `.agents/skills`; newly installed Skills require a fresh session/reload, and already-running conversations need an explicit instruction. No repository prompt can enforce compliance by clients that never load its instructions or guarantee identical judgment across models. Private memory and ignored handoff state are not required to discover the router.
 
+Within the optional assistant workflow, apply the matching [engineering Skill triggers](TOOLING.md#skills) without waiting for a slash command: unresolved material design choices, domain-model changes, reported bugs, final source review, agent-instruction edits, and explicit version closeout each have a bounded owner. Skip unmatched Skills and settled decisions; these procedures do not change product, verification or release authority.
+
 ## Governance object model
 
 One current fact has one owner. Other documents link to that owner instead of copying its value.

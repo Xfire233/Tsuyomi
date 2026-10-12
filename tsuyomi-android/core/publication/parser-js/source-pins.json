@@ -1,0 +1,44 @@
+{
+  "candidate": "@lingo-reader/mobi-parser@0.4.6",
+  "commit": "bc912542d9c09f144257205943c6bd3e421d8743",
+  "build": {
+    "rollup": "4.18.0",
+    "rollup-plugin-esbuild": "6.1.1",
+    "esbuild": "0.24.2",
+    "@rollup/plugin-node-resolve": "15.2.3",
+    "@rollup/plugin-commonjs": "25.0.8",
+    "@rollup/plugin-replace": "5.0.5"
+  },
+  "runtime": {
+    "fflate": "0.8.2",
+    "sax": "1.4.1",
+    "events": "3.3.0"
+  },
+  "files": {
+    "LICENSE": "995c6c256b13ced9b14de5bbc2b03d1d1648576c84cd2e96f995d7094c83d08e",
+    "packages/mobi-parser/package.json": "28ca185de63d8240121d798c35a9dbb680eb3602bffa99ad1a8fc2a05414eb03",
+    "packages/mobi-parser/src/index.ts": "bf530ebe5b174c79e582dfee04e63bac790d73413f4bb28349db212b3f205efc",
+    "packages/mobi-parser/src/book.ts": "69fe1c9e94e476b8e5ca19c26adab0c5eae5ec62cb414a23075c4085c056fba6",
+    "packages/mobi-parser/src/headers.ts": "135323c1cfd218b348cf40d6e41e3c36d207a0d4a17d173e691954c9349c2c9c",
+    "packages/mobi-parser/src/mobi.ts": "3e4e563a311c681981acd483a6d4c2978a549da3d5ba359cd4ec4b3fd7a6fc86",
+    "packages/mobi-parser/src/kf8.ts": "49bd111ec163e573e43b8113df1cf41c8ae57f8b7ccf107bd8d9a548d64e7154",
+    "packages/mobi-parser/src/mobiFile.ts": "e9e146a7a103c6d6dbb43bd01b5fa7f5380540b9ed74faa6fc19c720ffc976cb",
+    "packages/mobi-parser/src/utils.ts": "dd89b0a00d8f4b8ea68d65a8f3a4e370a52b507ef6fe78296f250a8588088bb2",
+    "packages/mobi-parser/src/types.d.ts": "3b22f417a3a6eebfd8b4e71d7a26f27be154fd668b7b346547e7896a93831d90",
+    "packages/shared/package.json": "3faf74672be5571c196d1adb57857050bc3dcf91fa46b9b7f2e6f51fa7fcb699",
+    "packages/shared/src/xml2js-parser.ts": "a003858d49bf9d838e7c7dcc3013fea47d3e6d2a0ba9bf896a23194f75c7d272",
+    "node_modules/.pnpm/fflate@0.8.2/node_modules/fflate/package.json": "1f39729fc15f568a3aef326e03b3a2b766ad3b6d43705a11bcb66b2979649c89",
+    "node_modules/.pnpm/fflate@0.8.2/node_modules/fflate/esm/browser.js": "8cc1f687e0159e977addb6b85e274dbd11e622cf151f4fcb7b85d49622ea43e7",
+    "node_modules/.pnpm/sax@1.4.1/node_modules/sax/package.json": "f78f8efd1a518cd6787c5c06806ee18ea559acf583cd80d2237641c4adcfb989",
+    "node_modules/.pnpm/sax@1.4.1/node_modules/sax/lib/sax.js": "e221d28f41ed2b3d7122cf5962772cffe43ae976d8c060cc116470d5cedf54c0",
+    "node_modules/.pnpm/events@3.3.0/node_modules/events/package.json": "878ad3687fef7efe3757c1872a3af998c95197129a7445d632486a9591ee542e",
+    "node_modules/.pnpm/events@3.3.0/node_modules/events/events.js": "b6d7d26a2395a94dd1b9dc0d06e699bb50b4ec664589fd477ce7cc344e20e172"
+  },
+  "licenseSources": {
+    "node-xml2js": {
+      "repository": "https://github.com/Leonidas-from-XIV/node-xml2js",
+      "commit": "7173c245aab4c2b417cd4c24f0b54e697a369864",
+      "file": "LICENSE"
+    }
+  }
+}

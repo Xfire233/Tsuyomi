@@ -6,6 +6,7 @@ plugins {
 }
 
 dependencies {
+    implementation(project(":shared:locator"))
     implementation(project(":shared:model"))
     testImplementation(libs.junit)
 }

@@ -666,7 +666,7 @@ internal class SourceHomeControllerInstrumentedTest {
     }
 
     private fun summary(id: String) = SourceBookSummary(
-        identity = BookIdentity("org.tsuyomi.wenku8", id),
+        identity = BookIdentity.Remote("org.tsuyomi.wenku8", id),
         title = "书目 $id",
         author = "作者",
         coverUrl = null,
@@ -701,7 +701,7 @@ internal class SourceHomeControllerInstrumentedTest {
                     title = "推荐 $recommendation",
                     items = listOf(
                         SourceBookSummary(
-                            identity = BookIdentity("org.tsuyomi.wenku8", recommendation),
+                            identity = BookIdentity.Remote("org.tsuyomi.wenku8", recommendation),
                             title = "书目 $recommendation",
                             author = "作者",
                             coverUrl = null,

@@ -4,11 +4,16 @@
  */
 package org.tsuyomi.core.ui.components
 
+import android.graphics.Bitmap
+import android.graphics.Color as AndroidColor
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.luminance
@@ -27,6 +32,7 @@ import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.text.TextLayoutResult
 import androidx.compose.ui.unit.dp
 import androidx.test.ext.junit.runners.AndroidJUnit4
+import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
@@ -36,9 +42,11 @@ import org.tsuyomi.core.display.DisplayEnvironment
 import org.tsuyomi.core.display.DisplayEnvironmentProvider
 import org.tsuyomi.core.display.DisplayProfile
 import org.tsuyomi.core.display.MotionPolicy
+import org.tsuyomi.core.media.api.CoverUiState
 import org.tsuyomi.core.preferences.DisplayPreference
 import org.tsuyomi.core.preferences.DisplayPreferences
 import org.tsuyomi.core.ui.theme.TsuyomiTheme
+import org.tsuyomi.core.ui.theme.TsuyomiSpacing
 import org.tsuyomi.shared.model.CoverCardPresentation
 
 
@@ -46,6 +54,41 @@ import org.tsuyomi.shared.model.CoverCardPresentation
 class TsuyomiCoverGridCardTest {
     @get:Rule
     val composeRule = createComposeRule()
+
+    @Test
+    fun einkSharedCoverBackingFitsOnlyActualTitleLinesAndPadding() {
+        val title = mutableStateOf("短标题")
+        val environment = standardEnvironment.copy(effectiveProfile = DisplayProfile.EINK, motionPolicy = MotionPolicy.INSTANT)
+        composeRule.setContent {
+            DisplayEnvironmentProvider(environment) {
+                TsuyomiTheme(environment) {
+                    Box(Modifier.width(140.dp)) {
+                        TsuyomiCoverCardContent(
+                            title = title.value,
+                            supportingText = null,
+                            cover = { Box(Modifier.fillMaxSize().background(Color.White)) },
+                            modifier = Modifier.testTag("eink-cover"),
+                            metadataModifier = Modifier.testTag("title-backing"),
+                        )
+                    }
+                }
+            }
+        }
+        for (value in listOf("短标题", "一个足够长而需要两行并且保留省略行为的封面标题")) {
+            composeRule.runOnIdle { title.value = value }
+            val backing = composeRule.onNodeWithTag("title-backing").fetchSemanticsNode().boundsInRoot
+            val text = composeRule.onNodeWithText(value).assertIsDisplayed().fetchSemanticsNode().boundsInRoot
+            val cover = composeRule.onNodeWithTag("eink-cover").fetchSemanticsNode().boundsInRoot
+            assertEquals(with(composeRule.density) { TsuyomiSpacing.Xs.toPx() }, text.top - backing.top, 1f)
+            assertEquals(with(composeRule.density) { 6.dp.toPx() }, backing.bottom - text.bottom, 1f)
+            assertEquals(5f / 7f, cover.width / cover.height, 0.02f)
+            assertTrue(backing.top >= cover.top && backing.bottom <= cover.bottom)
+            val layouts = mutableListOf<TextLayoutResult>()
+            composeRule.onNodeWithText(value).performSemanticsAction(SemanticsActions.GetTextLayoutResult) { it(layouts) }
+            assertTrue(layouts.single().lineCount <= 2)
+            assertEquals(if (value == "短标题") 1 else 2, layouts.single().lineCount)
+        }
+    }
 
     @OptIn(ExperimentalTestApi::class)
     @Test
@@ -273,6 +316,63 @@ class TsuyomiCoverGridCardTest {
             slack >= firstGlyphWidth && slack < firstGlyphWidth + closingPunctuationWidth)
     }
 
+    @Test
+    fun eInkArtworkIgnoresStoredWidePresentation() {
+        composeRule.setContent {
+            DisplayEnvironmentProvider(eInkEnvironment) {
+                CoverCardPresentationProvider(CoverCardPresentation.WIDE) {
+                    TsuyomiTheme(environment = eInkEnvironment) {
+                        Box(Modifier.width(140.dp)) {
+                            TsuyomiCoverGridCard(
+                                title = "E-ink cover",
+                                supportingText = null,
+                                onClick = {},
+                                cover = { Box(Modifier.fillMaxSize()) },
+                                modifier = Modifier.testTag("eink-cover-card"),
+                                titleInsideCover = true,
+                            )
+                        }
+                    }
+                }
+            }
+        }
+
+        val card = composeRule.onNodeWithTag("eink-cover-card").fetchSemanticsNode().boundsInRoot
+        assertTrue(kotlin.math.abs(card.width / card.height - 5f / 7f) < 0.02f)
+    }
+
+    @Test
+    fun eInkCoverAndMediaImagesRenderBitmapPixelsInGrayscale() {
+        val bitmap = Bitmap.createBitmap(4, 4, Bitmap.Config.ARGB_8888).apply {
+            eraseColor(AndroidColor.RED)
+        }
+        composeRule.setContent {
+            DisplayEnvironmentProvider(eInkEnvironment) {
+                TsuyomiTheme(environment = eInkEnvironment) {
+                    Row {
+                        CoverImage(
+                            state = CoverUiState.Ready(bitmap),
+                            modifier = Modifier.size(48.dp).testTag("eink-cover-image"),
+                        )
+                        HostMediaImage(
+                            state = CoverUiState.Ready(bitmap),
+                            altText = "Illustration",
+                            onRetry = {},
+                            modifier = Modifier.size(48.dp).testTag("eink-host-media-image"),
+                        )
+                    }
+                }
+            }
+        }
+
+        listOf("eink-cover-image", "eink-host-media-image").forEach { tag ->
+            val image = composeRule.onNodeWithTag(tag).captureToImage()
+            val pixel = image.toPixelMap()[image.width / 2, image.height / 2]
+            assertEquals("Red input must be rendered without chroma", pixel.red, pixel.green, 0.01f)
+            assertEquals("Red input must be rendered without chroma", pixel.green, pixel.blue, 0.01f)
+        }
+    }
+
     private companion object {
         val standardEnvironment = DisplayEnvironment(
             preferences = DisplayPreferences(displayPreference = DisplayPreference.STANDARD),
@@ -284,6 +384,15 @@ class TsuyomiCoverGridCardTest {
             effectiveDarkTheme = false,
             motionPolicy = MotionPolicy.STANDARD,
             redrawEpoch = 0L,
+        )
+        val eInkEnvironment = standardEnvironment.copy(
+            preferences = DisplayPreferences(
+                displayPreference = DisplayPreference.EINK,
+                coverCardPresentation = CoverCardPresentation.WIDE,
+            ),
+            effectiveProfile = DisplayProfile.EINK,
+            decisionReason = DisplayDecisionReason.MANUAL_EINK,
+            motionPolicy = MotionPolicy.INSTANT,
         )
     }
 }

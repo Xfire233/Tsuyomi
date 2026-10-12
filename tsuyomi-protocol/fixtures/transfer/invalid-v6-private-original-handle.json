@@ -1,0 +1,25 @@
+{
+  "format": "tsuyomi-transfer",
+  "version": 6,
+  "createdAt": "2026-10-07T00:00:00Z",
+  "library": [
+    {
+      "identity": {
+        "origin": "local",
+        "publicationId": "f2b8ef64-9375-4fc1-b7c9-274b4beafed1"
+      },
+      "localPublication": {
+        "format": "epub",
+        "originalSha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "originalSizeBytes": 1234,
+        "filePath": "/private/data/book.epub",
+        "originalAvailable": true
+      },
+      "title": "本地出版物",
+      "localPin": true,
+      "updatedAt": "2026-10-07T00:00:00Z",
+      "bookmarks": []
+    }
+  ],
+  "shelves": []
+}

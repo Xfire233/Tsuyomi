@@ -367,7 +367,7 @@ internal fun LibraryDragDestinationRail(
     coordinator: LibraryDragCoordinator,
     modifier: Modifier = Modifier,
 ) {
-    val sourceId = coordinator.activeBookIds.singleOrNull()?.sourceId
+    val sourceId = (coordinator.activeBookIds.singleOrNull() as? org.tsuyomi.shared.model.BookIdentity.Remote)?.sourceId
     val eligibleMirrors = mirrors.filter { it.targetId == null && sourceId != null && it.sourceId == sourceId && !it.frozen }
     Surface(
         modifier = modifier.fillMaxWidth().libraryShelfDropTarget(coordinator, allowsBookRoot = false)

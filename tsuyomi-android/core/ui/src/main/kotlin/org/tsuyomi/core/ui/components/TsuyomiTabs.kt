@@ -24,6 +24,9 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.res.stringResource
+import org.tsuyomi.core.ui.R
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.graphics.Color
@@ -65,6 +68,33 @@ fun TsuyomiTabRow(
     equalWidthWhenFits: Boolean = true,
 ) {
     if (options.isEmpty()) return
+    if (LocalDisplayEnvironment.current.effectiveProfile == DisplayProfile.EINK) {
+        val state = rememberTsuyomiMeasuredPagerState(selectedKey ?: options.first().key)
+        val selectedDescription = stringResource(R.string.coreui_state_selected)
+        val unselectedDescription = stringResource(R.string.coreui_state_not_selected)
+        TsuyomiMeasuredPager(
+            itemCount = options.size,
+            itemKey = { options[it].key },
+            itemContent = { index ->
+                val option = options[index]
+                TsuyomiToggleChip(
+                    text = option.label,
+                    selected = option.key == selectedKey,
+                    stateDescription = if (option.key == selectedKey) selectedDescription else unselectedDescription,
+                    onClick = { onSelect(option.key) },
+                    modifier = Modifier.testTag("tsuyomi-tab-${option.key}"),
+                    role = Role.Tab,
+                )
+            },
+            modifier = modifier.fillMaxWidth().selectableGroup(),
+            state = state,
+            horizontalSpacing = TsuyomiSpacing.Sm,
+            verticalSpacing = TsuyomiSpacing.Sm,
+            fillViewport = false,
+            wrapItems = true,
+        )
+        return
+    }
     val selectedIndex = options.indexOfFirst { it.key == selectedKey }.coerceAtLeast(0)
     val activeAccent = MaterialTheme.colorScheme.activeAccent
     val tabs: @Composable () -> Unit = {

@@ -11,6 +11,7 @@ import org.tsuyomi.shared.locator.ReaderLocator
 import org.tsuyomi.shared.sourcecontract.ReaderBlock
 import org.tsuyomi.shared.sourcecontract.ReaderDocument
 
+import org.tsuyomi.shared.model.BookIdentity
 class ReaderDocumentSessionTest {
     @Test
     fun presentations_share_one_semantic_locator() {
@@ -55,7 +56,7 @@ class ReaderDocumentSessionTest {
     @Test
     fun missing_anchor_uses_bounded_progress_and_reports_degraded_precision() {
         val locator = ReaderLocator(
-            document = DocumentIdentity("org.tsuyomi.wenku8", "1234", "10001"),
+            document = DocumentIdentity(BookIdentity.Remote("org.tsuyomi.wenku8", "1234"), "10001"),
             blockId = "removed-block",
             textAnchorDigest = "a".repeat(64),
             characterOffset = 900,
@@ -92,14 +93,61 @@ class ReaderDocumentSessionTest {
         cache.put(document("2"))
         cache.put(document("3"))
         assertEquals(2, cache.size())
-        assertEquals(null, cache.get("org.tsuyomi.wenku8", "1234", "1"))
+        assertEquals(null, cache.get(document("1").identity))
+    }
+
+    @Test
+    fun exactCodePointAnchorWinsOverConflictingProgressAndSurvivesRevisionChange() {
+        val local = ReaderDocument(
+            identity = DocumentIdentity(BookIdentity.Local("12345678-1234-1234-1234-123456789abc"), "section", "r2"),
+            title = "Unicode",
+            blocks = listOf(ReaderBlock.Paragraph("first", "甲😀乙"), ReaderBlock.Paragraph("last", "终点")),
+        )
+        val captured = ReaderDocumentSession(local, null, ReaderPresentation.PAGED)
+            .navigateToBlock(0, 2).locator.copy(
+                document = local.identity.copy(revision = "r1"), chapterProgress = 1.0,
+            )
+        val restored = ReaderDocumentSession(local, captured, ReaderPresentation.SCROLL)
+        assertEquals(0, restored.position.blockIndex)
+        assertEquals(2, restored.position.characterOffset)
+        assertEquals(LocatorPrecision.EXACT, restored.position.precision)
+    }
+
+    @Test
+    fun relocatedDigestBeatsAReusedBlockIdAndInvalidExactOffsetsAreDegraded() {
+        val old = document()
+        val captured = ReaderDocumentSession(old, null, ReaderPresentation.PAGED).navigateToBlock(0, 3).locator
+        val reordered = old.copy(blocks = listOf(
+            ReaderBlock.Paragraph("p-1", "different"), ReaderBlock.Paragraph("replacement", "first"),
+        ))
+        val restored = ReaderDocumentSession(reordered, captured, ReaderPresentation.PAGED)
+        assertEquals(1, restored.position.blockIndex)
+        assertEquals(3, restored.position.characterOffset)
+        assertEquals(LocatorPrecision.DEGRADED, restored.position.precision)
+        val invalid = ReaderDocumentSession(old, captured.copy(characterOffset = 99), ReaderPresentation.PAGED)
+        assertEquals(5, invalid.position.characterOffset)
+        assertEquals(LocatorPrecision.DEGRADED, invalid.position.precision)
+    }
+
+    @Test
+    fun identicalContentIdsFromDifferentOriginsNeverRestoreOrShareCacheEntries() {
+        val remote = document()
+        val local = remote.copy(identity = DocumentIdentity(
+            BookIdentity.Local("12345678-1234-1234-1234-123456789abc"), remote.identity.contentId,
+        ))
+        val remotePosition = ReaderDocumentSession(remote, null, ReaderPresentation.PAGED).navigateToBlock(2, 4).locator
+        val restored = ReaderDocumentSession(local, remotePosition, ReaderPresentation.PAGED)
+        assertEquals(0, restored.position.blockIndex)
+        assertEquals(LocatorPrecision.DEGRADED, restored.position.precision)
+        val cache = ReaderDocumentCache(2)
+        cache.put(remote)
+        cache.put(local)
+        assertEquals(remote, cache.get(remote.identity))
+        assertEquals(local, cache.get(local.identity))
     }
 
     private fun document(contentId: String = "10001") = ReaderDocument(
-        sourceId = "org.tsuyomi.wenku8",
-        remoteBookId = "1234",
-        contentId = contentId,
-        revision = null,
+        identity = DocumentIdentity(BookIdentity.Remote("org.tsuyomi.wenku8", "1234"), contentId),
         title = "Fixture",
         blocks = listOf(
             ReaderBlock.Paragraph("p-1", "first"),

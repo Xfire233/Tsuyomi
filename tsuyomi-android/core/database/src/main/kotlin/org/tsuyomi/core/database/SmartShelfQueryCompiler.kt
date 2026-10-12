@@ -24,12 +24,12 @@ internal object SmartShelfQueryCompiler {
         check(arguments.size <= MAX_SQL_ARGUMENTS)
         return SimpleSQLiteQuery(
             """
-            SELECT le.source_id, le.remote_book_id
+            SELECT b.identity_key, b.origin, b.source_id, b.remote_book_id
             FROM library_entries le
-            JOIN books b ON b.source_id = le.source_id AND b.remote_book_id = le.remote_book_id
+            JOIN books b ON b.identity_key = le.identity_key
             LEFT JOIN source_availability sa ON sa.source_id = le.source_id
             WHERE le.local_pin = 1 AND ($predicate)
-            ORDER BY b.title COLLATE NOCASE, le.source_id, le.remote_book_id
+            ORDER BY b.title COLLATE NOCASE, b.identity_key
             """.trimIndent(),
             arguments.toTypedArray(),
         )
@@ -65,16 +65,16 @@ internal object SmartShelfQueryCompiler {
     }
 
     private fun compilePredicate(predicate: SmartPredicate, arguments: MutableList<Any>, now: Long): String = when (predicate) {
-        is SmartPredicate.SourceIn -> inClause("le.source_id", predicate.sourceIds, arguments)
+        is SmartPredicate.SourceIn -> "(b.origin = 'remote' AND ${inClause("le.source_id", predicate.sourceIds, arguments)})"
         is SmartPredicate.InManualCollection -> {
             arguments.addAll(predicate.collectionIds)
-            "EXISTS (SELECT 1 FROM manual_collection_memberships m WHERE m.source_id = le.source_id AND m.remote_book_id = le.remote_book_id AND m.collection_id IN (${placeholders(predicate.collectionIds.size)}))"
+            "EXISTS (SELECT 1 FROM manual_collection_memberships m WHERE m.identity_key = le.identity_key AND m.collection_id IN (${placeholders(predicate.collectionIds.size)}))"
         }
         is SmartPredicate.TagContains -> combine(predicate.mode, predicate.tags) { tag -> tagClause(tag, arguments) }
         is SmartPredicate.FacetIn -> {
             arguments += predicate.sourceId
             val facets = predicate.facetIds.joinToString(" OR ", "(", ")") { facet -> remoteTagClause(facet, arguments) }
-            "(le.source_id = ? AND $facets)"
+            "(b.origin = 'remote' AND le.source_id = ? AND $facets)"
         }
         is SmartPredicate.TitleContains -> combine(MatchMode.ANY, predicate.terms) { term -> likeClause("b.title", term, arguments) }
         is SmartPredicate.AuthorContains -> combine(MatchMode.ANY, predicate.terms) { term -> jsonArrayValueClause("b.authors_json", term, arguments) }
@@ -88,21 +88,21 @@ internal object SmartShelfQueryCompiler {
         is SmartPredicate.AddedWithinDays -> withinDays("le.added_at_epoch_second", predicate.days, arguments, now)
         is SmartPredicate.LastReadWithinDays -> {
             arguments += now - predicate.days * 86_400L
-            "EXISTS (SELECT 1 FROM reading_progress p WHERE p.source_id = le.source_id AND p.remote_book_id = le.remote_book_id AND p.updated_at_epoch_second >= ?)"
+            "EXISTS (SELECT 1 FROM reading_progress p WHERE p.identity_key = le.identity_key AND p.updated_at_epoch_second >= ?)"
         }
         is SmartPredicate.MetadataUpdatedWithinDays -> withinDays("b.metadata_updated_at_epoch_second", predicate.days, arguments, now)
         is SmartPredicate.ProgressIn -> progressClause(predicate.states)
-        SmartPredicate.HasUnresolvedUpdate -> "EXISTS (SELECT 1 FROM unresolved_updates u WHERE u.source_id = le.source_id AND u.remote_book_id = le.remote_book_id)"
-        SmartPredicate.IsDormantSource -> "sa.available IS NOT 1"
+        SmartPredicate.HasUnresolvedUpdate -> "EXISTS (SELECT 1 FROM unresolved_updates u WHERE b.origin = 'remote' AND u.source_id = b.source_id AND u.remote_book_id = b.remote_book_id)"
+        SmartPredicate.IsDormantSource -> "le.source_id IS NOT NULL AND sa.available IS NOT 1"
     }
 
     private fun progressClause(states: Set<ProgressState>): String =
         states.joinToString(" OR ", "(", ")") { state ->
             val validProgress = validProgressClause("p")
             when (state) {
-                ProgressState.UNSTARTED -> "NOT EXISTS (SELECT 1 FROM reading_progress p WHERE p.source_id = le.source_id AND p.remote_book_id = le.remote_book_id AND $validProgress)"
-                ProgressState.READING -> "EXISTS (SELECT 1 FROM reading_progress p WHERE p.source_id = le.source_id AND p.remote_book_id = le.remote_book_id AND $validProgress AND COALESCE(p.book_progress, 0.0) < 1.0)"
-                ProgressState.FINISHED -> "EXISTS (SELECT 1 FROM reading_progress p WHERE p.source_id = le.source_id AND p.remote_book_id = le.remote_book_id AND $validProgress AND p.book_progress = 1.0)"
+                ProgressState.UNSTARTED -> "NOT EXISTS (SELECT 1 FROM reading_progress p WHERE p.identity_key = le.identity_key AND $validProgress)"
+                ProgressState.READING -> "EXISTS (SELECT 1 FROM reading_progress p WHERE p.identity_key = le.identity_key AND $validProgress AND COALESCE(p.book_progress, 0.0) < 1.0)"
+                ProgressState.FINISHED -> "EXISTS (SELECT 1 FROM reading_progress p WHERE p.identity_key = le.identity_key AND $validProgress AND p.book_progress = 1.0)"
             }
         }
 
@@ -135,7 +135,7 @@ internal object SmartShelfQueryCompiler {
 
     private fun tagClause(tag: String, arguments: MutableList<Any>): String {
         arguments += tag
-        return "(EXISTS (SELECT 1 FROM local_book_tags t WHERE t.source_id = le.source_id AND t.remote_book_id = le.remote_book_id AND t.display_tag = ?) OR ${remoteTagClause(tag, arguments)})"
+        return "(EXISTS (SELECT 1 FROM local_book_tags t WHERE t.identity_key = le.identity_key AND t.display_tag = ?) OR ${remoteTagClause(tag, arguments)})"
     }
 
     private fun remoteTagClause(tag: String, arguments: MutableList<Any>): String = jsonArrayValueClause("b.remote_tags_json", tag, arguments)

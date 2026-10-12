@@ -21,6 +21,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
 import kotlinx.coroutines.launch
 import org.tsuyomi.core.ui.icons.TsuyomiIcons
+import org.tsuyomi.core.display.DisplayProfile
+import org.tsuyomi.core.display.LocalDisplayEnvironment
 
 /**
  * The initial target follows the current boundary. Scrolling toward later items offers the end;
@@ -35,6 +37,7 @@ fun TsuyomiAdaptiveListFab(
     modifier: Modifier = Modifier,
     hideWhileScrolling: Boolean = false,
 ) {
+    if (LocalDisplayEnvironment.current.effectiveProfile == DisplayProfile.EINK) return
     val scope = rememberCoroutineScope()
     val show by remember(state, hideWhileScrolling) {
         derivedStateOf {
@@ -81,6 +84,7 @@ fun TsuyomiAdaptiveListFab(
     modifier: Modifier = Modifier,
     hideWhileScrolling: Boolean = false,
 ) {
+    if (LocalDisplayEnvironment.current.effectiveProfile == DisplayProfile.EINK) return
     val scope = rememberCoroutineScope()
     val show by remember(state, hideWhileScrolling) {
         derivedStateOf {

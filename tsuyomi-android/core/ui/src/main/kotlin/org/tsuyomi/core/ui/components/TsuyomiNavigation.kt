@@ -7,6 +7,7 @@ package org.tsuyomi.core.ui.components
 
 import androidx.compose.foundation.LocalIndication
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsFocusedAsState
@@ -241,8 +242,8 @@ private fun NavigationItemView(
 
     val indicatorShape: Shape = RoundedCornerShape(if (eInk) 4.dp else 16.dp)
     val indicatorTarget = when {
+        eInk -> if (selected) TsuyomiEInkPalette.Ink else TsuyomiEInkPalette.Paper
         !selected -> Color.Transparent
-        eInk -> TsuyomiEInkPalette.Ink
         else -> MaterialTheme.colorScheme.secondaryContainer
     }
     val indicatorColor = tsuyomiAnimateColorAsState(indicatorTarget, instant, "navIndicator")
@@ -252,16 +253,21 @@ private fun NavigationItemView(
         selected -> MaterialTheme.colorScheme.activeAccent
         else -> MaterialTheme.colorScheme.onSurfaceVariant
     }
-    val labelColor = if (selected) {
-        if (eInk) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.activeAccent
-    } else {
-        MaterialTheme.colorScheme.onSurfaceVariant
+    val labelColor = when {
+        eInk && selected -> TsuyomiEInkPalette.Paper
+        eInk -> TsuyomiEInkPalette.Ink
+        selected -> MaterialTheme.colorScheme.activeAccent
+        else -> MaterialTheme.colorScheme.onSurfaceVariant
     }
 
     Column(
         modifier = modifier
             .padding(horizontal = 4.dp, vertical = 2.dp)
-            .tsuyomiFocusRing(indicatorShape, focused, MaterialTheme.colorScheme.primary)
+            .heightIn(min = 48.dp)
+            .then(if (eInk) Modifier.background(if (selected) TsuyomiEInkPalette.Ink else TsuyomiEInkPalette.Paper, indicatorShape)
+                .border(1.5.dp, TsuyomiEInkPalette.Ink, indicatorShape) else Modifier)
+            .tsuyomiFocusRing(indicatorShape, focused, if (eInk && selected) TsuyomiEInkPalette.Paper else MaterialTheme.colorScheme.primary,
+                inset = if (eInk && selected) 3.dp else 0.dp)
             .semantics(mergeDescendants = true) {
                 this.selected = selected
                 stateDescription = if (selected) selectedDescription else unselectedDescription
@@ -269,7 +275,7 @@ private fun NavigationItemView(
             }
             .clickable(
                 interactionSource = interactionSource,
-                indication = LocalIndication.current,
+                indication = if (eInk) null else LocalIndication.current,
                 role = Role.Tab,
                 onClick = onClick,
             )
@@ -301,7 +307,7 @@ private fun NavigationItemView(
             },
             color = labelColor,
             textAlign = TextAlign.Center,
-            maxLines = 1,
+            maxLines = if (eInk) Int.MAX_VALUE else 1,
         )
     }
 }
